@@ -1,49 +1,54 @@
 //! X-ray (#1297): while a demo plays, every player behind a wall is drawn as
 //! a team-coloured glow through it, like CS:GO's GOTV `spec_show_xray`. Its
-//! own switch, `ds_spec_xray`, off by default (a big change to the picture).
-//! What CS:GO does and why this looks the way it does:
-//! `docs/goldsrc_xray.md`.
+//! own setting, `ds_spec_xray`, off by default (a big change to the
+//! picture): `1` glows players where walls hide them, as CS:GO does; `2`
+//! also outlines the players in plain view. What CS:GO does and what this
+//! looks like: `docs/goldsrc_xray.md`.
 //!
 //! ## How
 //!
 //! Before the renderer draws a player (`StudioDrawPlayer`, wrapped in
 //! `strafe_twitch`), [`before_player_drawn`] draws him once more as a glow
 //! shell: the game's own `kRenderFxGlowShell` (the model pushed out along its
-//! normals by `renderamt`, in `rendercolor`, added to the picture), with the
-//! depth test turned round (`GL_GREATER`) so the shell only lands where
-//! something already drawn is in front of it. A player in the open gets no
-//! glow, a player behind a wall glows through it, and a player half behind
-//! a crate glows only where the crate hides him, as in CS:GO. Drawing the
-//! shell first, before the player himself, keeps his own body from counting
-//! as a wall: his far arm behind his chest doesn't glow.
+//! normals by `renderamt` x 0.05 units, in `rendercolor`, added to the
+//! picture), with the depth test turned round (`GL_GREATER`) so the shell
+//! only lands where something already drawn is in front of it. A player in
+//! the open gets no glow, a player behind a wall glows through it, and one
+//! half behind a crate glows only where the crate hides him. Drawn first,
+//! before the player himself, his own body never counts as a wall. With `2`
+//! the shell is drawn whatever the depth; the player then draws over its
+//! middle, which leaves a ring round him: an outline.
 //!
 //! The renderer draws a glow-shell entity twice, the model and then the
 //! shell. During our pass the engine's `StudioDrawPoints` (wrapped through
 //! the `engine_studio_api_t` the client copies, [`install`]) skips the model
-//! and draws only the shell, so the player's skin never shows through walls.
+//! and draws only the shell, untextured, so the player's skin never shows
+//! through a wall.
 //!
 //! The stock shell shimmers: the engine lights it from a direction that
-//! turns with the clock (`r_glowshellfreq`, PRE `hw+0x8230c`). For an even
-//! glow that holds still frame to frame (#1297: movies at 300 fps) the pass
-//! sets `r_glowshellfreq` to 0 for its length and draws with texturing off:
-//! a flat team colour.
+//! turns with the clock (`r_glowshellfreq`, PRE `hw+0x8230c`). For a glow
+//! that holds still frame to frame (movies at 300 fps), `r_glowshellfreq`'s
+//! value is 0 for the length of the pass.
 //!
-//! Only players the engine draws at all can glow: it drops every entity
-//! outside the camera's PVS before the renderer sees it. In an HLTV demo that
-//! is the camera's PVS (the whole server is in the demo); a POV demo only
-//! has the players the recorder's own PVS held.
+//! An HLTV demo drops every entity outside the camera's PVS before the
+//! renderer sees it; [`after_add_entity`] lets the players through, so the
+//! whole map's players glow. A POV demo has only the players the recorder's
+//! server sent (his own PVS), so those are all it can show.
 
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEntityS, CvarSPartial, EngineStudioApiPartial};
+use crate::engine::{self, ClEntityS, CvarSPartial, EngineStudioApiPartial, Vec3};
 use crate::names::console_name;
 use crate::player_info;
 use crate::setting::Setting;
 
-/// The switch: 1 draws players behind walls as a team-coloured glow.
+mod gl;
+
+/// The setting: 0 off, 1 players behind walls glow, 2 and players in view
+/// get an outline too.
 pub const NAME: &str = console_name!("spec_xray");
 
 /// The cvar, or its default (off) when it could not be registered.
@@ -57,15 +62,18 @@ const RENDER_FX_GLOW_SHELL: i32 = 19;
 /// `StudioDrawPoints`' slot in `engine_studio_api_t` (`r_studioint.h`).
 const SLOT_STUDIO_DRAW_POINTS: usize = 25;
 
-/// The shell's thickness (`renderamt`): how far past the model the glow
-/// reaches.
-const SHELL_AMOUNT: i32 = 12;
+/// The shell's thickness per unit of distance from the camera
+/// ([`shell_amount`]): about 2.5 pixels of a 1280-wide picture at a 90
+/// degree field of view, whatever the distance.
+const UNITS_PER_DISTANCE: f32 = 0.004;
 
 /// The glow's colours, added to the picture: the hues of DoD's kill-feed
-/// team colours (`deathmsg::backdrop`), brighter, since a glow over a dark
-/// wall is only as bright as its colour.
-const ALLIES_GLOW: [u8; 3] = [90, 200, 90];
-const AXIS_GLOW: [u8; 3] = [220, 70, 70];
+/// team colours (`deathmsg::backdrop`'s (76, 102, 76) and (255, 63, 63)),
+/// at a strength that stays a colour rather than white once the engine has
+/// lit it (its brightness tables double a model's light on the movie
+/// installs' `brightness 2`).
+const ALLIES_GLOW: [u8; 3] = [50, 145, 50];
+const AXIS_GLOW: [u8; 3] = [160, 40, 40];
 
 /// `int StudioDrawPlayer(int flags, entity_state_t *pplayer)`.
 pub type DrawPlayerFn = unsafe extern "C" fn(i32, *mut c_void) -> i32;
@@ -86,25 +94,14 @@ static OVERVIEW_SET: AtomicBool = AtomicBool::new(false);
 /// Glow passes drawn so far, for `ds_debug_status`.
 static PASSES: AtomicU32 = AtomicU32::new(0);
 
-/// TEMP(dev): the shell thickness, to compare looks.
-pub const DEV_AMOUNT_NAME: &str = console_name!("debug_xray_amount");
-pub static DEV_AMOUNT: crate::setting::Cvar = crate::setting::Cvar::new();
-
-/// TEMP(dev): pause and play the demo for same-frame screenshots.
-pub const DEV_PAUSE_NAME: &str = console_name!("debug_xray_pause");
-pub const DEV_PLAY_NAME: &str = console_name!("debug_xray_play");
-pub unsafe extern "C" fn dev_pause() {
-    let r = crate::demo_seek::set_paused(true);
-    unsafe { crate::debug::report(&format!("xray dev pause: {r:?}")) };
-}
-pub unsafe extern "C" fn dev_play() {
-    let r = crate::demo_seek::set_paused(false);
-    unsafe { crate::debug::report(&format!("xray dev play: {r:?}")) };
-}
-
-/// Whether the switch is on: the cvar, or its default without one.
+/// Whether the setting is on (1 or 2).
 pub fn enabled() -> bool {
     XRAY.on()
+}
+
+/// Whether players in plain view get an outline too (`2`).
+fn outlines_in_view(value: Option<f32>) -> bool {
+    value.is_some_and(|v| v >= 2.0)
 }
 
 /// The glow colour for a `teamnumber`, or `None` for no team (spectators,
@@ -124,6 +121,19 @@ fn glows(index: i32, team: Option<i32>, dead: Option<bool>, in_eye: Option<i32>)
         && team.and_then(glow_colour).is_some()
         && dead == Some(false)
         && in_eye != Some(index)
+}
+
+/// The shell's `renderamt` for a player `distance` units from the camera: a
+/// thickness that grows with distance keeps the glow's edge about the same
+/// width on screen. Between 1.5 and 12.75 units (`renderamt` is a byte).
+fn shell_amount(distance: f32) -> i32 {
+    const MIN: i32 = 30;
+    const MAX: i32 = 255;
+    let amount = (distance.max(0.0) * UNITS_PER_DISTANCE / 0.05).round();
+    if amount.is_nan() {
+        return MIN;
+    }
+    (amount as i32).clamp(MIN, MAX)
 }
 
 /// Puts [`draw_points`] in `StudioDrawPoints`' slot of the engine's studio
@@ -153,9 +163,28 @@ pub unsafe fn install(pstudio: *mut EngineStudioApiPartial) {
     }
 }
 
-/// Draws the player the renderer is about to draw as a glow through walls,
-/// when he gets one. `real` is the renderer's own `StudioDrawPlayer`, called
-/// next by the caller for the player himself.
+/// Whether a demo is playing: x-ray never draws in a live game, where it
+/// would be a wallhack.
+fn playing_demo(e: &engine::ClEngineFuncsPartial) -> bool {
+    let api = e.p_demo_api;
+    // Safety: the engine's own demo API, called on its thread.
+    !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
+}
+
+/// The entity the renderer is drawing, or null.
+fn current_entity(studio: &EngineStudioApiPartial) -> *mut ClEntityS {
+    let slot = studio.slots_before_view_info()[0];
+    if slot.is_null() {
+        return std::ptr::null_mut();
+    }
+    // Safety: the engine's own accessor, called on its render thread.
+    let current: CurrentEntityFn = unsafe { std::mem::transmute(slot) };
+    unsafe { current() }
+}
+
+/// Draws the player the renderer is about to draw as a glow, when he gets
+/// one. `real` is the renderer's own `StudioDrawPlayer`, which the caller
+/// runs next for the player himself.
 ///
 /// Safety: on the engine's thread, inside the `StudioDrawPlayer` wrapper,
 /// with its arguments.
@@ -174,24 +203,15 @@ pub unsafe fn before_player_drawn(real: DrawPlayerFn, flags: i32, pplayer: *mut 
     ) else {
         return;
     };
-    // Demo playback only: in a live game this would be a wallhack.
-    let api = e.p_demo_api;
-    // Safety: the engine's own demo API, called on its thread.
-    if api.is_null() || unsafe { ((*api).is_playingback)() } == 0 {
+    if !playing_demo(e) {
         return;
     }
-    let current_slot = studio.slots_before_view_info()[0];
-    if current_slot.is_null() {
-        return;
-    }
-    // Safety: the engine's own accessor.
-    let current: CurrentEntityFn = unsafe { std::mem::transmute(current_slot) };
-    let ent = unsafe { current() };
+    let ent = current_entity(studio);
     if ent.is_null() {
         return;
     }
     // Safety: the entity being drawn, valid for this call.
-    let index = unsafe { (*ent).index };
+    let (index, origin) = unsafe { ((*ent).index, (*ent).origin) };
     let team = player_info::team(base, index);
     if !glows(
         index,
@@ -204,24 +224,25 @@ pub unsafe fn before_player_drawn(real: DrawPlayerFn, flags: i32, pplayer: *mut 
     let Some(colour) = team.and_then(glow_colour) else {
         return;
     };
-    let Some(gl) = gl::get() else {
-        return;
-    };
-    // TEMP(dev): 1 flat, 2 the chrome texture held still, 3 the stock shimmer.
-    let style = XRAY.value().unwrap_or(1.0) as i32;
-    let amount = DEV_AMOUNT.value().map_or(SHELL_AMOUNT, |v| v as i32);
-    let freq = if style >= 3 { std::ptr::null_mut() } else { glow_freq(e) };
-    // Safety: as above; restored below, before anything else reads it.
+    let everywhere = outlines_in_view(XRAY.value());
+    let freq = glow_freq(e);
+    // Safety: as above; put back below, before anything else reads it.
     let state = unsafe { &mut (*ent).curstate };
     let saved = (state.renderfx, state.renderamt, state.rendercolor);
     state.renderfx = RENDER_FX_GLOW_SHELL;
-    state.renderamt = if amount > 0 { amount } else { SHELL_AMOUNT };
+    state.renderamt = shell_amount(view_distance(studio, origin));
     state.rendercolor = colour;
     // Safety: `r_glowshellfreq`'s cvar_t, which the engine keeps for good.
-    let saved_freq = (!freq.is_null()).then(|| unsafe { std::mem::replace(&mut (*freq).value, 0.0) });
+    let saved_freq =
+        (!freq.is_null()).then(|| unsafe { std::mem::replace(&mut (*freq).value, 0.0) });
     IN_PASS.store(true, Ordering::Relaxed);
-    // Safety: the renderer's own function, drawing the same entity.
-    unsafe { gl.behind_walls(style == 1, || real(STUDIO_RENDER, pplayer)) };
+    // Safety: on the engine's thread, inside the renderer's draw; the
+    // renderer's own function, drawing the same entity.
+    let drawn = unsafe {
+        gl::shell_pass(everywhere, || {
+            real(STUDIO_RENDER, pplayer);
+        })
+    };
     IN_PASS.store(false, Ordering::Relaxed);
     if let Some(value) = saved_freq {
         unsafe { (*freq).value = value };
@@ -229,19 +250,38 @@ pub unsafe fn before_player_drawn(real: DrawPlayerFn, flags: i32, pplayer: *mut 
     // Safety: the same entity; still this call's.
     let state = unsafe { &mut (*ent).curstate };
     (state.renderfx, state.renderamt, state.rendercolor) = saved;
-    PASSES.fetch_add(1, Ordering::Relaxed);
+    if drawn {
+        PASSES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// How far `origin` is from the frame's camera.
+fn view_distance(studio: &EngineStudioApiPartial, origin: Vec3) -> f32 {
+    let mut eye = [0f32; 3];
+    let (mut up, mut right, mut forward) = ([0f32; 3], [0f32; 3], [0f32; 3]);
+    // Safety: the engine's own accessor, filling four vec3s.
+    unsafe {
+        (studio.get_view_info)(
+            eye.as_mut_ptr(),
+            up.as_mut_ptr(),
+            right.as_mut_ptr(),
+            forward.as_mut_ptr(),
+        )
+    };
+    let d = [origin.x - eye[0], origin.y - eye[1], origin.z - eye[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
 
 /// Called from `HUD_AddEntity`'s detour once the client has answered for
 /// `ent`, right before the engine's own PVS check in `CL_AddVisibleEntity`
 /// (PRE `hw+0xbb1b`, POST `hw+0x1969f6`): in an HLTV demo the engine drops
 /// every entity outside the camera's PVS there, unless `dev_overview` is set
-/// (`hw+0x20920` / `+0x1ad020`: `dev_overview` and, in an HLTV demo, no
-/// `sv_cheats` needed). So for a player who gets a glow, `dev_overview`'s
-/// value is 1 for that one check, and 0 again from the next entity on
-/// ([`before_calc_refdef`] at the latest, before anything is drawn). Only
-/// its value is touched, never its string, and only when it is 0: someone
-/// using the overview themselves keeps it.
+/// (the check's skip, PRE `hw+0x20920`, POST `+0x1ad020`: `dev_overview`
+/// and, in an HLTV demo, no `sv_cheats` needed). So for a player who gets a
+/// glow, `dev_overview`'s value is 1 for that one check, and 0 again from
+/// the next entity on ([`before_calc_refdef`] at the latest, before anything
+/// is drawn). Only its value is touched, never its string, and only when it
+/// is 0: someone using the overview themselves keeps it.
 ///
 /// Safety: on the engine's thread; `ent` is the engine's `cl_entity_t` for
 /// this call, or null.
@@ -258,8 +298,8 @@ pub unsafe fn after_add_entity(drawn: bool, ent: *const ClEntityS) {
         return;
     };
     // Safety: the entity being added, valid for this call.
-    let index = unsafe { (*ent).index };
-    if unsafe { (*ent).player } == 0
+    let (index, player) = unsafe { ((*ent).index, (*ent).player) };
+    if player == 0
         || !glows(
             index,
             player_info::team(base, index),
@@ -269,12 +309,8 @@ pub unsafe fn after_add_entity(drawn: bool, ent: *const ClEntityS) {
     {
         return;
     }
-    // Safety: the engine's own accessors, called on its thread.
-    let api = e.p_demo_api;
-    if api.is_null()
-        || unsafe { ((*api).is_playingback)() } == 0
-        || unsafe { (e.is_spectate_only)() } == 0
-    {
+    // Safety: the engine's own accessor, called on its thread.
+    if !playing_demo(e) || unsafe { (e.is_spectate_only)() } == 0 {
         return;
     }
     let cvar = if cvar.is_null() {
@@ -314,8 +350,8 @@ fn glow_freq(e: &engine::ClEngineFuncsPartial) -> *mut CvarSPartial {
     found
 }
 
-/// The engine's `StudioDrawPoints`, as the client calls it. During our pass,
-/// the model's own pass is skipped and only the shell is drawn.
+/// The engine's `StudioDrawPoints`, as the client calls it. During our pass
+/// the model's own draw is skipped and only the shell is drawn.
 unsafe extern "C" fn draw_points() {
     let real = REAL_DRAW_POINTS.load(Ordering::Acquire);
     if real == 0 {
@@ -329,13 +365,7 @@ unsafe extern "C" fn draw_points() {
     let Some(studio) = engine::engine_studio() else {
         return;
     };
-    let current_slot = studio.slots_before_view_info()[0];
-    if current_slot.is_null() {
-        return;
-    }
-    // Safety: the engine's own accessor.
-    let current: CurrentEntityFn = unsafe { std::mem::transmute(current_slot) };
-    let ent = unsafe { current() };
+    let ent = current_entity(studio);
     // Safety: the entity being drawn, valid for this call.
     if !ent.is_null() && unsafe { (*ent).curstate.renderfx } == RENDER_FX_GLOW_SHELL {
         unsafe { real() };
@@ -348,114 +378,9 @@ pub fn status() -> String {
         return "not installed (the studio API was never handed over)".to_string();
     }
     format!(
-        "{} glow pass(es) drawn so far",
+        "{} player glow(s) drawn so far",
         PASSES.load(Ordering::Relaxed)
     )
-}
-
-#[cfg(target_arch = "x86")]
-mod gl {
-    use std::sync::OnceLock;
-
-    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-
-    const GL_DEPTH_FUNC: u32 = 0x0b74;
-    const GL_DEPTH_WRITEMASK: u32 = 0x0b72;
-    const GL_TEXTURE_2D: u32 = 0x0de1;
-    const GL_LESS: u32 = 0x0201;
-    const GL_GREATER: u32 = 0x0204;
-    const GL_GEQUAL: u32 = 0x0206;
-
-    type GetIntegervFn = unsafe extern "system" fn(u32, *mut i32);
-    type GetBooleanvFn = unsafe extern "system" fn(u32, *mut u8);
-    type EnumFn = unsafe extern "system" fn(u32);
-    type DepthMaskFn = unsafe extern "system" fn(u8);
-    type IsEnabledFn = unsafe extern "system" fn(u32) -> u8;
-
-    pub(super) struct Gl {
-        get_integerv: GetIntegervFn,
-        get_booleanv: GetBooleanvFn,
-        depth_func: EnumFn,
-        depth_mask: DepthMaskFn,
-        enable: EnumFn,
-        disable: EnumFn,
-        is_enabled: IsEnabledFn,
-    }
-
-    impl Gl {
-        /// Runs `draw` with the depth test passing only behind what is
-        /// already drawn, no depth writes and no texture, then puts all of
-        /// it back.
-        ///
-        /// Safety: on the engine's thread, its GL context current.
-        pub(super) unsafe fn behind_walls(&self, flat: bool, draw: impl FnOnce() -> i32) {
-            unsafe {
-                let mut func = 0i32;
-                (self.get_integerv)(GL_DEPTH_FUNC, &mut func);
-                let mut mask = 1u8;
-                (self.get_booleanv)(GL_DEPTH_WRITEMASK, &mut mask);
-                let textured = flat && (self.is_enabled)(GL_TEXTURE_2D) != 0;
-                // A reversed depth range (`GL_GEQUAL`) turns "behind" round too.
-                let behind = if func as u32 == GL_GEQUAL || func as u32 == GL_GREATER {
-                    GL_LESS
-                } else {
-                    GL_GREATER
-                };
-                (self.depth_func)(behind);
-                (self.depth_mask)(0);
-                if textured {
-                    (self.disable)(GL_TEXTURE_2D);
-                }
-                draw();
-                if textured {
-                    (self.enable)(GL_TEXTURE_2D);
-                }
-                (self.depth_mask)(mask);
-                (self.depth_func)(func as u32);
-            }
-        }
-    }
-
-    static GL: OnceLock<Option<Gl>> = OnceLock::new();
-
-    fn load() -> Option<Gl> {
-        let module = unsafe { GetModuleHandleA(c"opengl32.dll".as_ptr() as *const u8) };
-        if module.is_null() {
-            return None;
-        }
-        let proc = |name: &std::ffi::CStr| -> Option<usize> {
-            unsafe { GetProcAddress(module, name.as_ptr() as *const u8) }.map(|p| p as usize)
-        };
-        // Safety: the exported functions' own signatures (stdcall).
-        unsafe {
-            Some(Gl {
-                get_integerv: std::mem::transmute::<usize, GetIntegervFn>(proc(c"glGetIntegerv")?),
-                get_booleanv: std::mem::transmute::<usize, GetBooleanvFn>(proc(c"glGetBooleanv")?),
-                depth_func: std::mem::transmute::<usize, EnumFn>(proc(c"glDepthFunc")?),
-                depth_mask: std::mem::transmute::<usize, DepthMaskFn>(proc(c"glDepthMask")?),
-                enable: std::mem::transmute::<usize, EnumFn>(proc(c"glEnable")?),
-                disable: std::mem::transmute::<usize, EnumFn>(proc(c"glDisable")?),
-                is_enabled: std::mem::transmute::<usize, IsEnabledFn>(proc(c"glIsEnabled")?),
-            })
-        }
-    }
-
-    pub(super) fn get() -> Option<&'static Gl> {
-        GL.get_or_init(load).as_ref()
-    }
-}
-
-#[cfg(not(target_arch = "x86"))]
-mod gl {
-    pub(super) struct Gl;
-
-    impl Gl {
-        pub(super) unsafe fn behind_walls(&self, _flat: bool, _draw: impl FnOnce() -> i32) {}
-    }
-
-    pub(super) fn get() -> Option<&'static Gl> {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -484,5 +409,23 @@ mod tests {
         assert!(!glows(5, None, Some(false), None));
         assert!(!glows(0, allies, Some(false), None), "not a player slot");
         assert!(!glows(33, allies, Some(false), None));
+    }
+
+    #[test]
+    fn two_outlines_the_players_in_view_too() {
+        assert!(!outlines_in_view(None));
+        assert!(!outlines_in_view(Some(0.0)));
+        assert!(!outlines_in_view(Some(1.0)));
+        assert!(outlines_in_view(Some(2.0)));
+    }
+
+    #[test]
+    fn the_shell_grows_with_distance_within_its_bounds() {
+        assert_eq!(shell_amount(0.0), 30, "close up: the minimum");
+        assert_eq!(shell_amount(1000.0), 80);
+        assert!(shell_amount(2000.0) > shell_amount(1000.0));
+        assert_eq!(shell_amount(1.0e9), 255, "far: renderamt's byte");
+        assert_eq!(shell_amount(f32::NAN), 30);
+        assert_eq!(shell_amount(-5.0), 30);
     }
 }

@@ -97,6 +97,33 @@
 		"textAlignment"		"west"
 		"helptext"		"ds_spec_hide_hltv_messages: hide the HLTV proxy's on-screen messages."
 	}
+	"label_ds_spec_xray"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"label_ds_spec_xray"
+		"xpos"		"266"
+		"ypos"		"94"
+		"wide"		"100"
+		"tall"		"22"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"X-ray"
+		"textAlignment"		"west"
+		"helptext"		"ds_spec_xray: players behind walls glow in their team's colour while a demo plays, like CS:GO's GOTV."
+	}
+	"cvar_ds_spec_xray"
+	{
+		"ControlName"		"ComboBox"
+		"fieldName"		"cvar_ds_spec_xray"
+		"xpos"		"366"
+		"ypos"		"95"
+		"wide"		"142"
+		"tall"		"20"
+		"visible"		"1"
+		"enabled"		"1"
+		"editable"		"0"
+		"helptext"		"ds_spec_xray: players behind walls glow in their team's colour while a demo plays, like CS:GO's GOTV."
+	}
 	"HeadingHud"
 	{
 		"ControlName"		"Label"

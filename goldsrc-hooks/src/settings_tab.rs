@@ -89,6 +89,7 @@ const OVERVIEW_PLAYERS: &[(&str, &str)] = &[
     ("3", "The watched player"),
     ("4", "Nobody"),
 ];
+const XRAY: &[(&str, &str)] = &[("0", "Off"), ("1", "Through walls"), ("2", "And outlines")];
 const OVERVIEW_MARKER: &[(&str, &str)] = &[
     ("0", "The game's own"),
     ("1", "HLTV: team icon"),
@@ -152,6 +153,12 @@ pub const AREAS: &[Area] = &[
                 console_name!("spec_hide_hltv_messages"),
                 "Hide HLTV messages",
                 "hide the HLTV proxy's on-screen messages.",
+            ),
+            choice(
+                console_name!("spec_xray"),
+                "X-ray",
+                "players behind walls glow in their team's colour while a demo plays, like CS:GO's GOTV.",
+                XRAY,
             ),
         ],
     },
