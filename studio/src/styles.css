@@ -4644,3 +4644,14 @@ button.setup-skip:hover:not(:disabled) {
 .output-row-status-ok { color: var(--ok-light); }
 .output-row-status-note { color: var(--text-muted); }
 .output-row-status-bad { color: var(--danger-light); }
+
+/* A field whose value cannot be used (#25): red border and the reason on a line under it. */
+input.field-invalid { border-color: var(--danger-light); }
+.field-error-line {
+  font-size: 0.85em;
+  color: var(--danger-light);
+  margin-top: 2px;
+}
+.field-error-line[hidden] { display: none; }
+.control-group:has(> .field-error-line) { flex-wrap: wrap; }
+.control-group > .field-error-line { flex-basis: 100%; }
