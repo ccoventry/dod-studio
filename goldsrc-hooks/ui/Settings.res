@@ -107,7 +107,7 @@
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Show names and health over players"
+		"labelText"		"Over players"
 		"textAlignment"		"west"
 		"helptext"		"ds_spec_show_player_info: what to show over each player's head in an HLTV demo."
 	}

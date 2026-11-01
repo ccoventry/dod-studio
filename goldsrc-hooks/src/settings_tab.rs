@@ -161,7 +161,7 @@ pub const AREAS: &[Area] = &[
             ),
             choice(
                 console_name!("spec_show_player_info"),
-                "Show names and health over players",
+                "Over players",
                 "what to show over each player's head in an HLTV demo.",
                 PLAYER_INFO,
             ),
