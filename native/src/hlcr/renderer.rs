@@ -568,8 +568,8 @@ impl OutputNaming {
     fn new(job: &RenderJob) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
+            // Only seeds a file-name hash; a clock before 1970 gives 0.
+            .map_or(0, |d| d.as_micros());
         let take_folder = &job.take_folder;
         Self {
             stream_type: if job.is_hud { "hud" } else { "all" },

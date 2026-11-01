@@ -2,9 +2,8 @@
 // The clip manifest (#429): a JSON file saved beside the VEGAS EDL (#110)
 // with the same clips plus whose highlight each one is and that player's
 // nameplate picture. `vegas/DoD Studio Nameplates.cs` reads it to put each
-// nameplate on its own track above its clip. The EDL itself is unchanged:
-// CMX 3600 has nowhere to put these fields that every editor would ignore,
-// so they live in a file of their own. Pure, so it can be tested on its own.
+// nameplate on its own track above its clip. They live in a file of their
+// own because VEGAS's EDL format has no column for them. Pure, so it can be tested on its own.
 //
 // The format only grows: a reader ignores fields it doesn't know, and a new
 // field never changes what an old one means. `version` goes up only when a
@@ -70,7 +69,8 @@ export function clipManifest(clips, { edlName = '', takeIndex = {}, demos = [], 
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
     edl: edlName,
-    clips: (clips || []).map((clip) => {
+    // A HUD-only render lies over its clip; the clip carries the nameplate.
+    clips: (clips || []).filter((clip) => !clip.hud).map((clip) => {
       const who = takePlayer(clip.take_key, takeIndex, byUid);
       const player = who ? {
         steam_id: who.steam_id,

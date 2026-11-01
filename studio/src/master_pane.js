@@ -65,6 +65,9 @@ let currentOnLocateDemo = null;
 let currentOnUseFoundCopy = null;
 // main.js's handler for a multi-map demo's Split button (#217).
 let currentOnSplitDemo = null;
+// demo_context_menu.js's handler for a row's right-click / Menu key (#1111).
+let currentOnRowMenu = null;
+let lastMenuKeyAt = -Infinity;
 let currentSearchTerm = '';
 // #174: the player picked in the header's player filter ('' = everyone), and
 // the recorders looked up for demos scanned before a scan stored one
@@ -81,6 +84,34 @@ const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false, trackedOnly: f
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
 const checkedPaths = new Set();
+
+/** Registers what a row's context menu opens (demo_context_menu.js). Called
+ *  with `{ demo, row, select, at, fromKeyboard }`. */
+export function setDemoRowMenuHandler(handler) {
+  currentOnRowMenu = handler;
+}
+
+/** Selects `demo` as a left click on its row would. A queue re-render while
+ *  the menu was open leaves `tr` detached with an index that may no longer be
+ *  the demo's, so the index is looked up again. False when the demo is gone. */
+function selectForMenu(demo, tr) {
+  const idx = currentDemos.indexOf(demo);
+  if (idx === -1) return false;
+  if (tr.isConnected) tr.click();
+  else if (currentOnSelectDemo) currentOnSelectDemo(demo, idx);
+  return true;
+}
+
+/** Opens the row's menu at the pointer, or for the keyboard beside the row. */
+function openRowMenu(demo, tr, e, fromKeyboard) {
+  if (!currentOnRowMenu) return;
+  let at = { x: e.clientX, y: e.clientY };
+  if (fromKeyboard) {
+    const box = tr.getBoundingClientRect();
+    at = { x: box.left + 32, y: box.bottom };
+  }
+  currentOnRowMenu({ demo, row: tr, select: () => selectForMenu(demo, tr), at, fromKeyboard });
+}
 
 /** Who recorded `demo` ({ id, name }), or null: HLTV, no resolvable owner,
  *  or an older demo whose lookup hasn't come back yet. */
@@ -610,6 +641,24 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       tr.classList.add('table-row-selected');
       quickFilters.keepPath = demo.path;
       if (currentOnSelectDemo) currentOnSelectDemo(demo, originalIdx);
+    });
+
+    // Right-click, or the Menu key / Shift+F10 on the focused row (#1111).
+    // A menu key press also raises a contextmenu event of its own, which the
+    // keydown has already answered.
+    // -1: a click focuses the row (so the Menu key works) but Tab still goes
+    // straight from checkbox to Remove instead of stopping on every row.
+    tr.tabIndex = -1;
+    tr.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (performance.now() - lastMenuKeyAt < 600) return;
+      openRowMenu(demo, tr, e, e.clientX === 0 && e.clientY === 0);
+    });
+    tr.addEventListener('keydown', (e) => {
+      if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+      e.preventDefault();
+      lastMenuKeyAt = performance.now();
+      openRowMenu(demo, tr, e, true);
     });
 
     tableBody.appendChild(tr);
