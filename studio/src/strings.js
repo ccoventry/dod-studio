@@ -988,6 +988,9 @@ export const STRINGS = {
     scanNewShort: (n) => `${n} new`,
     SCAN_NONE_NEW: 'none new',
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
+    // The line under the field that is wrong (#25), where a toast used to be the only word.
+    RENDER_DIR_FIELD_EMPTY: 'Add the folder your captures are written to, so Scan for Takes has somewhere to look.',
+    EXPORT_DIR_FIELD_EMPTY: 'Add an export folder: finished clips are written there, and Start Render Batch stays off until you do.',
     scanCompleteStatus: (count) => `Status: Scan complete — ${count} take(s) found`,
     // What a scan changed in the queue (#772); render_scan_summary.js joins them.
     scanNewTakes: (n) => (n === 1 ? '1 new take' : `${n} new takes`),

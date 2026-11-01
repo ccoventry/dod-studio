@@ -10,6 +10,7 @@ import {
 import { placeholderGroups, placeholderDescription } from './placeholder_catalogue.js';
 import { renderPlaceholderChips } from './placeholder_chips.js';
 import { STRINGS } from './strings.js';
+import { markFieldInvalid } from './field_error.js';
 import { onUseAsChange } from './player_alias.js';
 
 let getPreviewHighlight = () => null;
@@ -91,6 +92,8 @@ function renderChips(values) {
 export function refreshClipNamePreview() {
   const parsed = parseTemplate(getClipNameTemplate());
   showLines('#config-clip-name-errors', parsed.errors);
+  // The errors line is its own; the field just turns red alongside it (#25).
+  markFieldInvalid(templateInput(), parsed.errors.length > 0);
 
   const highlight = getPreviewHighlight();
   const projectTeams = getProjectTeams();
