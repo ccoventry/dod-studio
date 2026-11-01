@@ -1437,6 +1437,9 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
         return 0;
     }
     let real: GetStudioModelInterfaceFn = unsafe { std::mem::transmute(real) };
+    // Before the client copies the engine's studio API: x-ray's
+    // `StudioDrawPoints` has to be in the copy.
+    unsafe { crate::spec_xray::install(pstudio) };
     let result = unsafe { real(version, ppinterface, pstudio) };
     if result != 0 && !ppinterface.is_null() {
         // Safety: the client just filled it with its renderer interface,
@@ -1462,6 +1465,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     let main_view = unsafe { crate::spectator_chase_pvs::is_main_view(pparams) };
+    crate::spec_xray::before_calc_refdef();
     // Before: `V_GetInEyePos` reads the height inside `V_CalcRefdef`.
     unsafe { crate::spectator_eye::before_calc_refdef(pparams) };
     unsafe { real(pparams) };
@@ -1566,6 +1570,9 @@ unsafe extern "C" fn tramp_hud_add_entity(
         // answer counts: it drops the player an HLTV camera watches in-eye.
         unsafe { crate::nameplates::note_added(ent as *const ClEntityS) };
     }
+    // Safety: as above; lets a player x-ray glows for past the engine's PVS
+    // check, which runs next.
+    unsafe { crate::spec_xray::after_add_entity(drawn != 0, ent as *const ClEntityS) };
     drawn
 }
 

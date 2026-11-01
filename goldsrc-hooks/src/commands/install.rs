@@ -53,6 +53,8 @@ pub fn install() {
     add_command(OVERVIEWMAP_NAME, overview_map::command);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+    add_command(crate::spec_xray::DEV_PAUSE_NAME, crate::spec_xray::dev_pause);
+    add_command(crate::spec_xray::DEV_PLAY_NAME, crate::spec_xray::dev_play);
     add_command(crate::studio_panel::NAME, crate::studio_panel::command);
     add_command(crate::review::NAME, crate::review::command);
     add_command(crate::schedule::NAME, crate::schedule::command);
@@ -258,6 +260,14 @@ pub fn install() {
     }
     if let Some(health) = register(crate::nameplates::HEALTH_NAME, "0") {
         crate::nameplates::HEALTH_CVAR.set(health);
+    }
+    // Off by default: a glow through every wall changes the whole picture
+    // (#1297).
+    if let Some(xray) = register(crate::spec_xray::NAME, "0") {
+        crate::spec_xray::XRAY.set_cvar(xray);
+    }
+    if let Some(amount) = register(crate::spec_xray::DEV_AMOUNT_NAME, "0") {
+        crate::spec_xray::DEV_AMOUNT.set(amount);
     }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);

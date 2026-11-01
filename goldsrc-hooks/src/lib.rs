@@ -350,6 +350,7 @@ mod screen_effects;
 mod server_query;
 mod setting;
 mod settings_tab;
+mod spec_xray;
 mod spectator_bars;
 mod spectator_buttons;
 mod spectator_chase_pvs;
