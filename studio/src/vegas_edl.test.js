@@ -90,7 +90,7 @@ describe('vegasEdl', () => {
   // re-imported correctly; {DIR} stands for the clips' folder.
   it('matches VEGAS\'s own export for two clips and one HUD', () => {
     const golden = readFileSync(new URL('./vegas_export.fixture.txt', import.meta.url), 'utf8');
-    expect(vegasEdl([main1, hud1, main2])).toBe(golden.replaceAll('{DIR}', dir));
+    expect(vegasEdl([main1, hud1, main2])).toBe(golden.replace(/\r?\n/g, '\r\n').replaceAll('{DIR}', dir));
   });
 
   it('writes the header line and CRLF line ends', () => {
