@@ -8,6 +8,7 @@
 // AnalyzerState} report from `analyze_demo_full`.
 
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
+import { killDistanceLookup, playerDistanceSummaries } from './kill_distance.js';
 import { STRINGS } from './strings.js';
 import { clockFloor as formatMMSS, durationText } from './time_format.js';
 import { escapeHtml as esc } from './html.js';
@@ -367,6 +368,18 @@ function renderPlayerDetailsTab(container) {
   renderPlayerDetailsBody(container, players.find((p) => p.id === selectedId));
 }
 
+// ── Engagement distance (#448) ───────────────────────────────────────────────
+
+function distanceCell(units) {
+  if (typeof units !== 'number') return `<td class="text-muted" style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_UNKNOWN_TITLE)}"></td>`;
+  return `<td style="text-align:right;">${esc(STRINGS.ANALYZER.metres(unitsToMetres(units)))}</td>`;
+}
+
+function averageDistanceCell(summary) {
+  if (!summary || summary.average === null) return distanceCell(null);
+  return `<td style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}">${esc(STRINGS.ANALYZER.metres(unitsToMetres(summary.average)))} <span class="text-muted" style="font-size:0.85em;">(${esc(STRINGS.ANALYZER.distanceMeasured(summary.measured, summary.total))})</span></td>`;
+}
+
 function renderPlayerDetailsBody(tabContainer, p) {
   const body = tabContainer.querySelector('#player-details-body');
   if (!body) return;
@@ -384,6 +397,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
   const steamForms = steamIdForms(p.id);
 
   const weaponRows = Object.entries(p.weapon_breakdown || {}).sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
+  const distances = playerDistanceSummaries(report.state.kill_positions, p.id);
   const totalKills = weaponRows.reduce((s, [, v]) => s + v[0], 0) || 1;
 
   body.innerHTML = `
@@ -411,6 +425,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.KILLS_TITLE}</div><div class="stat-value">${p.stats[1]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.DEATHS_TITLE}</div><div class="stat-value">${p.stats[2]}</div><div class="stat-badge" style="color:${kd >= 1 ? '#22c55e' : '#ef4444'};">${kd.toFixed(2)} ${STRINGS.ANALYZER.KD_BADGE_LABEL}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${durationText(avgLife)}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(durationText(minLife), durationText(maxLife))}</div></div>
+      <div class="analyzer-stat-card" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}"><div class="stat-title">${STRINGS.ANALYZER.AVG_DISTANCE_TITLE}</div><div class="stat-value">${distances.all.average === null ? STRINGS.ANALYZER.EMPTY_DASH : esc(STRINGS.ANALYZER.metres(unitsToMetres(distances.all.average)))}</div><div class="stat-badge text-muted">${esc(STRINGS.ANALYZER.distanceMeasured(distances.all.measured, distances.all.total))}</div></div>
     </div>
 
     <div class="analyzer-stacked-sections">
@@ -418,7 +433,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
         <h4 class="analyzer-section-title">${STRINGS.ANALYZER.WEAPON_BREAKDOWN_TITLE}</h4>
         <div class="table-wrapper" style="max-height:320px;">
           <table class="analyzer-table">
-            <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_PCT_TOTAL}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_TEAM_KILLS}</th></tr></thead>
+            <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_PCT_TOTAL}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_TEAM_KILLS}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_AVG_DISTANCE}</th></tr></thead>
             <tbody>
               ${weaponRows.map(([w, [k, tk]]) => `
                 <tr>
@@ -426,7 +441,8 @@ function renderPlayerDetailsBody(tabContainer, p) {
                   <td style="text-align:right;">${k}</td>
                   <td><div class="analyzer-progress"><div class="analyzer-progress-fill" style="width:${(k / totalKills * 100).toFixed(1)}%;"></div></div><span class="analyzer-progress-label">${(k / totalKills * 100).toFixed(1)}%</span></td>
                   <td style="text-align:right;">${tk}</td>
-                </tr>`).join('') || `<tr><td colspan="4" class="table-empty">${STRINGS.ANALYZER.NO_WEAPON_DATA}</td></tr>`}
+                  ${averageDistanceCell(distances.byWeapon.get(w))}
+                </tr>`).join('') || `<tr><td colspan="5" class="table-empty">${STRINGS.ANALYZER.NO_WEAPON_DATA}</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -498,6 +514,7 @@ function renderKillStreaksTable(container, p) {
     return;
   }
 
+  const distanceOf = killDistanceLookup(report.state.kill_positions);
   const rows = streaks.map((s, idx) => {
     const kills = s.kills;
     const startSecs = durSecs(kills[0][0].viewdemo_offset);
@@ -510,7 +527,7 @@ function renderKillStreaksTable(container, p) {
       const victimName = victim ? victim.name : k[2];
       const victimColor = victim ? teamColor(victim.team) : '#7ec8e3';
       const delta = i === 0 ? STRINGS.ANALYZER.EMPTY_DASH : `+${formatMMSS(durSecs(k[0].viewdemo_offset) - durSecs(kills[i - 1][0].viewdemo_offset))}`;
-      return `<tr class="killstreak-subrow"><td></td><td class="text-muted">${esc(delta)}</td><td colspan="2" style="font-size:0.85em;">${esc(weaponName(k[1]))} &#9876; <span class="killstreak-victim" data-victim-id="${esc(k[2])}" style="color:${victimColor};cursor:pointer;">${esc(victimName)}</span></td></tr>`;
+      return `<tr class="killstreak-subrow"><td></td><td class="text-muted">${esc(delta)}</td><td colspan="2" style="font-size:0.85em;">${esc(weaponName(k[1]))} &#9876; <span class="killstreak-victim" data-victim-id="${esc(k[2])}" style="color:${victimColor};cursor:pointer;">${esc(victimName)}</span></td>${distanceCell(distanceOf(p.id, k[2], k[0]))}</tr>`;
     }).join('');
 
     return `
@@ -519,15 +536,16 @@ function renderKillStreaksTable(container, p) {
         <td>${kills.length}</td>
         <td>${formatGameTime(startSecs)}</td>
         <td>${durationText(durationSecs)}</td>
+        <td></td>
       </tr>
-      <tr><td></td><td colspan="3" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
+      <tr><td></td><td colspan="4" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
       ${sub}`;
   }).join('');
 
   container.innerHTML = `
     <div class="table-wrapper" style="max-height:320px;">
       <table class="analyzer-table">
-        <thead><tr><th>${STRINGS.ANALYZER.COL_WAVE}</th><th>${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_TIME}</th><th>${STRINGS.ANALYZER.COL_DURATION}</th></tr></thead>
+        <thead><tr><th>${STRINGS.ANALYZER.COL_WAVE}</th><th>${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_TIME}</th><th>${STRINGS.ANALYZER.COL_DURATION}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_DISTANCE}</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
