@@ -47,6 +47,13 @@ test('boots and wires settings into the folder pools', async ({ page }) => {
   expect(errors.filter((m) => /before initialization|is not defined|is not a function/.test(m))).toEqual([]);
 });
 
+test('a fresh install shows no red fields before anything is picked to capture (#25)', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  await expect(page.locator('#tab-path-routing .field-invalid')).toHaveCount(0);
+  await expect(page.locator('#hl-install-choice')).toHaveCount(1);
+});
+
 test('"Capture Output Free" reads the drives again after finished takes are deleted (#644)', async ({ page }) => {
   await page.goto('/index.html');
   await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
