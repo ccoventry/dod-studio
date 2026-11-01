@@ -242,15 +242,7 @@ impl CaptureRoom {
         can_hold: bool,
     ) -> Arc<Self> {
         app.state::<RenderManager>().set_while_capturing(true);
-        log_markdown(&format!(
-            "[render-while-capturing] on for {} clip(s): each take renders once recorded, one render at a time{}",
-            blocks.len(),
-            if can_hold {
-                ", and the batch holds between clips when the next one would not fit"
-            } else {
-                "; this batch is patched, so it can't hold for space"
-            }
-        ));
+        log_markdown(&crate::messages::capture::room_on(blocks.len(), can_hold));
         Arc::new(Self {
             app,
             blocks: room_blocks(blocks, planned_total),
@@ -383,12 +375,11 @@ impl CaptureRoom {
         if check.decision == RoomDecision::Continue {
             return;
         }
-        log_markdown(&format!(
-            "[render-while-capturing] Clip {} needs {} free with the one recording now (free {}): {:?}. Holding the batch after this clip.",
+        log_markdown(&crate::messages::capture::room_holding_after_clip(
             index + 2,
             format_gb(check.needed),
             format_gb(check.free),
-            check.decision
+            check.decision,
         ));
         self.hold.store(true, Ordering::Relaxed);
         self.lock().watching = true;
@@ -426,35 +417,31 @@ impl CaptureRoom {
                 // the finish step after the batch sees it, as without this
                 // setting. A take still being written is never rendered (and
                 // so never deleted) from here.
-                log_markdown(&format!(
-                    "[render-while-capturing] Clip {} at {} didn't settle into a take to render; left for after the batch",
+                log_markdown(&crate::messages::capture::room_clip_did_not_settle(
                     index + 1,
-                    block.folder.display()
+                    block.folder.display(),
                 ));
                 return;
             };
             if started_late {
-                log_markdown(&format!(
-                    "[render-while-capturing] Clip {} at {}: OBS started recording after the clip did; not rendering a take missing its opening",
+                log_markdown(&crate::messages::capture::room_clip_started_late(
                     index + 1,
-                    block.folder.display()
+                    block.folder.display(),
                 ));
                 return;
             }
             if let Some(short) = short {
-                log_markdown(&format!(
-                    "[render-while-capturing] Clip {} at {} stopped writing video early ({:.2} s of video, {:.2} s of audio); not rendering a partial take",
+                log_markdown(&crate::messages::capture::room_clip_stopped_early(
                     index + 1,
                     block.folder.display(),
                     short.video_secs,
-                    short.audio_secs
+                    short.audio_secs,
                 ));
                 return;
             }
-            log_markdown(&format!(
-                "[render-while-capturing] Clip {} recorded ({}); queueing its render",
+            log_markdown(&crate::messages::capture::room_clip_recorded(
                 index + 1,
-                format_gb(bytes)
+                format_gb(bytes),
             ));
             let _ = room.app.emit(
                 "capture_clip_ready",
@@ -485,7 +472,7 @@ impl CaptureRoom {
         let was = std::mem::replace(&mut self.lock().held, held);
         self.app.state::<RenderManager>().set_capture_held(held);
         if held && !was {
-            log_markdown("[render-while-capturing] The batch is holding between clips");
+            log_markdown(crate::messages::capture::ROOM_BATCH_HOLDING);
         }
     }
 
@@ -544,11 +531,10 @@ impl CaptureRoom {
             }
 
             if check.resume {
-                log_markdown(&format!(
-                    "[render-while-capturing] Room for clip {} ({} free); going on after {:.0} s",
+                log_markdown(&crate::messages::capture::room_going_on(
                     next + 1,
                     format_gb(free),
-                    started.elapsed().as_secs_f64()
+                    started.elapsed().as_secs_f64(),
                 ));
                 self.hold.store(false, Ordering::Relaxed);
                 break;
@@ -577,9 +563,9 @@ impl CaptureRoom {
                     ),
                 };
                 let why = why + &self.partial_on_drive(next);
-                log_markdown(&format!(
-                    "[render-while-capturing] Stopping the batch before clip {}: {why}. The clips recorded so far are kept.",
-                    next + 1
+                log_markdown(&crate::messages::capture::room_stopping_batch(
+                    next + 1,
+                    &why,
                 ));
                 let _ = self.app.emit(
                     "capture_room_stopped",
