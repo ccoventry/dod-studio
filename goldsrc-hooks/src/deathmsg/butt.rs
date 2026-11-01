@@ -2,20 +2,21 @@
 //!
 //! DoD's `DeathMsg` sends one weapon, 42 (`d_garandbutt`), for both rifles'
 //! butt strokes, the Garand's and the K43's, so the game draws one icon for
-//! both. `killfeed_icons.py --even` puts four variants in the atlas: the
-//! killer's rifle (Garand or K43) by the victim's head (Axis or US),
+//! both. `killfeed_icons.py --even` puts six variants in the atlas: the
+//! killer's rifle (Garand or K43) by the victim's head (Axis, US or British),
 //! [`VARIANT_NAMES`], all in one box size so any of them fits the line the
 //! game laid out for `d_garandbutt` (`killfeed_composites.py`).
 //!
 //! When a butt-stroke notice arrives, [`note`] works out its variant: the
 //! rifle from the model the killer holds (`entity_state_t::weaponmodel`,
 //! `p_k43.mdl` or `p_garand.mdl`), else from his team (Axis carry the K43),
-//! and the head from the victim's team (`g_PlayerExtraInfo[i].teamnumber`).
-//! British victims get the US head until #1089. It keeps that against the
-//! line it just went into, keyed by the line's own fields (the killer's and
-//! the victim's names, [`line_key`]), since `Draw` moves lines up the array
-//! as older ones expire. The icon draw then asks [`line_variant`] for the line it is
-//! drawing (the line-start stub stores `Draw`'s slot offset, `edi`).
+//! and the head from the victim's team (`g_PlayerExtraInfo[i].teamnumber`),
+//! an Allied head British on a British map (#1089, [`BRITISH_RVA`]). It
+//! keeps that against the line it just went into, keyed by the line's own
+//! fields (the killer's and the victim's names, [`line_key`]), since `Draw`
+//! moves lines up the array as older ones expire. The icon draw then asks
+//! [`line_variant`] for the line it is drawing (the line-start stub stores
+//! `Draw`'s slot offset, `edi`).
 //!
 //! The default layout draws from Valve's sheet, whose one rect holds the
 //! Garand on an Axis head; only the even layout tells them apart.
@@ -40,17 +41,32 @@ pub(super) enum Rifle {
 pub(super) enum Head {
     Axis,
     Us,
+    British,
 }
 
 /// The atlas names of the variants, as `killfeed_composites.BUTT_VARIANTS`
-/// writes them (a test there checks the same four). The first is
-/// `hud.txt`'s own, the one the game's line is laid out for.
-pub(super) const VARIANT_NAMES: [(&str, Rifle, Head); 4] = [
+/// writes them (a test there checks the same six). The first is
+/// `hud.txt`'s own, the one the game's line is laid out for. The British
+/// two came later (#1089): an atlas without them draws the US ones
+/// (`even::butt_boxes`).
+pub(super) const VARIANT_NAMES: [(&str, Rifle, Head); VARIANTS] = [
     ("d_garandbutt", Rifle::Garand, Head::Axis),
     ("d_garandbutt_us", Rifle::Garand, Head::Us),
     ("d_k43butt_axis", Rifle::K43, Head::Axis),
     ("d_k43butt_us", Rifle::K43, Head::Us),
+    ("d_garandbutt_brit", Rifle::Garand, Head::British),
+    ("d_k43butt_brit", Rifle::K43, Head::British),
 ];
+
+/// How many variants there are.
+pub(super) const VARIANTS: usize = 6;
+
+/// `gHUD.m_bBritish` in client.dll (one file on both engine builds): the
+/// `GameRules` message's first byte `& 4`, which `MsgFunc_GameRules`
+/// stores at `+0x2c69a` (`mov [+0x108226], cl`) and the overview reads to pick
+/// `brit_camera` over `allies_camera` on the overview (`+0x2f426`). Set when
+/// the map's Allies are British, the same for every Allied player on it.
+pub(super) const BRITISH_RVA: usize = 0x10_8226;
 
 /// `g_PlayerExtraInfo`'s team numbers.
 const ALLIES: i32 = 1;
@@ -80,13 +96,13 @@ pub(super) fn rifle_for(held_model: Option<&str>, killer_team: Option<i32>) -> R
     }
 }
 
-/// The victim's head: US for Allies (British too, until #1089), Axis for
+/// The victim's head: for Allies US, or British on a British map; Axis for
 /// Axis and for an unknown team (the icon the game draws).
-pub(super) fn head_for(victim_team: Option<i32>) -> Head {
-    if victim_team == Some(ALLIES) {
-        Head::Us
-    } else {
-        Head::Axis
+pub(super) fn head_for(victim_team: Option<i32>, british_map: bool) -> Head {
+    match victim_team {
+        Some(ALLIES) if british_map => Head::British,
+        Some(ALLIES) => Head::Us,
+        _ => Head::Axis,
     }
 }
 
@@ -169,6 +185,12 @@ mod live {
         Some(i32::from(unsafe { *(at as *const i16) }))
     }
 
+    /// Whether this map's Allies are British (`gHUD.m_bBritish`).
+    fn british_map(base: usize) -> bool {
+        // Safety: a `bool` in client.dll's mapped `.data`.
+        unsafe { *((base + BRITISH_RVA) as *const u8) != 0 }
+    }
+
     /// The model the player at `index` holds, if the engine knows it.
     fn held_model(index: i32) -> Option<String> {
         let engfuncs = engine::engfuncs()?;
@@ -228,7 +250,7 @@ mod live {
         let held = held_model(killer);
         let (killer_team, victim_team) = (team_of(base, killer), team_of(base, victim));
         let rifle = rifle_for(held.as_deref(), killer_team);
-        let head = head_for(victim_team);
+        let head = head_for(victim_team, british_map(base));
         let variant = variant_index(rifle, head);
         remember(key, variant);
         // Safety: the DLL's own log; one line per butt stroke.
@@ -278,10 +300,25 @@ mod tests {
 
     #[test]
     fn the_victims_team_picks_the_head() {
-        assert_eq!(head_for(Some(ALLIES)), Head::Us);
-        assert_eq!(head_for(Some(AXIS)), Head::Axis);
-        assert_eq!(head_for(None), Head::Axis, "the game's own icon");
-        assert_eq!(head_for(Some(3)), Head::Axis);
+        assert_eq!(head_for(Some(ALLIES), false), Head::Us);
+        assert_eq!(head_for(Some(AXIS), false), Head::Axis);
+        assert_eq!(head_for(None, false), Head::Axis, "the game's own icon");
+        assert_eq!(head_for(Some(3), false), Head::Axis);
+    }
+
+    #[test]
+    fn on_a_british_map_an_allied_victim_has_a_british_head() {
+        assert_eq!(head_for(Some(ALLIES), true), Head::British);
+        assert_eq!(head_for(Some(AXIS), true), Head::Axis);
+        assert_eq!(head_for(None, true), Head::Axis, "the game's own icon");
+        assert_eq!(
+            VARIANT_NAMES[variant_index(Rifle::K43, Head::British)].0,
+            "d_k43butt_brit"
+        );
+        assert_eq!(
+            VARIANT_NAMES[variant_index(Rifle::Garand, Head::British)].0,
+            "d_garandbutt_brit"
+        );
     }
 
     #[test]
@@ -293,7 +330,7 @@ mod tests {
         );
         let mut seen = std::collections::HashSet::new();
         for rifle in [Rifle::Garand, Rifle::K43] {
-            for head in [Head::Axis, Head::Us] {
+            for head in [Head::Axis, Head::Us, Head::British] {
                 let i = variant_index(rifle, head);
                 assert_eq!((VARIANT_NAMES[i].1, VARIANT_NAMES[i].2), (rifle, head));
                 assert!(seen.insert(i));

@@ -792,21 +792,25 @@ through `gEngfuncs`, so both engine builds take the same path.
 
 `DeathMsg` sends weapon 42 (`d_garandbutt`) for both rifles' butt strokes,
 the Garand's and the K43's, so the game draws one icon for both. The atlas
-carries four variants, the killer's rifle by the victim's head
+carries six variants, the killer's rifle by the victim's head
 (`d_garandbutt` Garand on an Axis head, `d_garandbutt_us`, `d_k43butt_axis`,
-`d_k43butt_us`), trimmed to one box so any of them fits the line the game
+`d_k43butt_us`, and the British heads `d_garandbutt_brit`, `d_k43butt_brit`,
+#1089), trimmed to one box so any of them fits the line the game
 laid out for `d_garandbutt`. While `layout even` is asked for, the hook's
 `DeathMsg` handler notes each butt stroke the game adds
 (`goldsrc-hooks/src/deathmsg/butt.rs`): the rifle from the killer's
 `entity_state_t::weaponmodel` (`p_k43.mdl` or `p_garand.mdl`), else his team
-(Axis: K43); the head from the victim's `g_PlayerExtraInfo` team (British
-victims get the US head until #1089). The note is keyed by the line's
+(Axis: K43); the head from the victim's `g_PlayerExtraInfo` team, an Allied
+head British when the map's Allies are (`gHUD.m_bBritish`, `client+0x108226`:
+the `GameRules` message's first byte `& 4`, stored at `+0x2c69a` and read
+for the overview's `brit_camera` at `+0x2f426`). The note is keyed by the line's
 killer's and victim's names, because `Draw` moves lines up the array as
 older ones expire. The line-start stub (§7) also stores `edi`, `Draw`'s slot
 offset into the array (`slot * 156`, `[edi + &list[0].iSuicide]` at
 `+0x2b037`), so the icon draw reads that line's fields and draws its
-variant's box. An atlas without all four variants in one size (one built
-before #1088) draws `d_garandbutt` for every butt stroke. The default layout
+variant's box. An atlas without the first four variants in one size (one
+built before #1088) draws `d_garandbutt` for every butt stroke; one without
+the British two (built before #1089) draws the US heads for them. The default layout
 draws Valve's sheet, whose one rect holds the Garand on an Axis head.
 
 ### The space between the names and the icon (`gap`)
