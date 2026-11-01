@@ -15,7 +15,9 @@
 //!   (`curstate.maxs[2]`, which follows crouch and prone), at the place the
 //!   engine draws him this frame (`cl_entity_t::origin`), through TriAPI's
 //!   `WorldToScreen`, the engine's own projection, so a FOV change
-//!   (`default_fov`, HLAE's `mirv_fov`) moves the plates with the view.
+//!   (`default_fov`, HLAE's `mirv_fov`) moves the plates with the view. A
+//!   player so close that the point over his head is above the screen gets
+//!   his plate at the top edge, over him.
 //! - **The name:** the one the scoreboard shows, so `ds_player_change_name`
 //!   applies, in the engine's console font, in a light tint of the kill
 //!   feed's team colour over a translucent box.
@@ -110,6 +112,27 @@ fn to_pixels(ndc: [f32; 2], width: i32, height: i32) -> Option<(i32, i32)> {
     Some((px as i32, py as i32))
 }
 
+/// Where a plate goes: its point over the head on the screen, or, when that
+/// point is above the top while the player himself is on screen (a player
+/// close to the camera), the top edge over him, so the nearest player keeps
+/// his plate instead of losing it (#1130). `None` when he's off screen.
+fn plate_anchor(
+    plate: [f32; 2],
+    player_on_screen: impl FnOnce() -> bool,
+    width: i32,
+    height: i32,
+) -> Option<(i32, i32)> {
+    to_pixels(plate, width, height).or_else(|| {
+        let [x, y] = plate;
+        let above_top = (-1.0..=1.0).contains(&x) && y > 1.0;
+        if above_top && player_on_screen() {
+            to_pixels([x, 1.0], width, height)
+        } else {
+            None
+        }
+    })
+}
+
 /// The height the plate sits at over the player's origin.
 fn plate_height(maxs_z: f32) -> f32 {
     let top = if maxs_z.is_finite() && maxs_z > 0.0 {
@@ -153,8 +176,11 @@ struct Layout {
 
 /// The plate over a head at `anchor`: the bar's bottom edge on it, the name
 /// over the bar, both centred. `name` is the text's size, `bar` the bar's.
+/// A plate whose top would leave the screen moves down until it fits (the
+/// bar's 1 px outline included).
 fn layout(anchor: (i32, i32), name: Option<(i32, i32)>, bar: Option<(i32, i32)>) -> Layout {
-    let (cx, mut bottom) = anchor;
+    let tall = bar.map_or(0, |(_, h)| h + PADDING) + name.map_or(0, |(_, h)| h + PADDING);
+    let (cx, mut bottom) = (anchor.0, anchor.1.max(tall + 1));
     let bar_box = bar.map(|(w, h)| {
         let r = [cx - w / 2, bottom - h, cx - w / 2 + w, bottom];
         bottom -= h + PADDING;
@@ -312,7 +338,19 @@ mod live {
             if unsafe { (tri.world_to_screen)(world.as_ptr(), ndc.as_mut_ptr()) } != 0 {
                 continue;
             }
-            let Some(anchor) = to_pixels([ndc[0], ndc[1]], screen.width, screen.height) else {
+            let player_on_screen = || {
+                let at = [origin.x, origin.y, origin.z];
+                let mut seen = [0f32; 3];
+                // Safety: as above.
+                let behind = unsafe { (tri.world_to_screen)(at.as_ptr(), seen.as_mut_ptr()) };
+                behind == 0 && to_pixels([seen[0], seen[1]], screen.width, screen.height).is_some()
+            };
+            let Some(anchor) = plate_anchor(
+                [ndc[0], ndc[1]],
+                player_on_screen,
+                screen.width,
+                screen.height,
+            ) else {
                 continue;
             };
             let name = if show.names {
@@ -410,6 +448,35 @@ mod tests {
         assert_eq!(to_pixels([0.0, 0.0], 1920, 1080), Some((960, 540)));
         // y is up in WorldToScreen's result, down on the screen.
         assert_eq!(to_pixels([-1.0, 1.0], 1920, 1080), Some((0, 0)));
+    }
+
+    #[test]
+    fn a_close_players_plate_sticks_to_the_top_edge() {
+        // Over the top, the player on screen: the top edge over him.
+        assert_eq!(
+            plate_anchor([0.0, 1.3], || true, 1920, 1080),
+            Some((960, 0))
+        );
+        // Over the top, the player off screen too: nothing.
+        assert_eq!(plate_anchor([0.0, 1.3], || false, 1920, 1080), None);
+        // Off a side or below: nothing, whoever is on screen.
+        assert_eq!(plate_anchor([1.3, 0.0], || true, 1920, 1080), None);
+        assert_eq!(plate_anchor([0.0, -1.3], || true, 1920, 1080), None);
+        // On screen: where it is, without asking about the player.
+        assert_eq!(
+            plate_anchor([0.0, 0.0], || unreachable!(), 1920, 1080),
+            Some((960, 540))
+        );
+    }
+
+    #[test]
+    fn a_plate_at_the_top_edge_moves_down_onto_the_screen() {
+        let at = layout((100, 0), Some((40, 12)), Some((49, 5)));
+        let (_, name_box) = at.name.unwrap();
+        assert!(name_box[1] >= 0, "{at:?}");
+        assert!(at.bar.unwrap()[1] >= 1, "{at:?}");
+        let at = layout((100, 0), None, Some((49, 5)));
+        assert!(at.bar.unwrap()[1] >= 1, "{at:?}");
     }
 
     #[test]
