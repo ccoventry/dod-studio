@@ -46,7 +46,7 @@ pub async fn movie_copy_plan(game_path: String) -> Result<MovieCopyPlan, String>
         let root = game_root(&game_path)?;
         let source = root.join(movie_copy::SOURCE_FOLDER);
         let plan = movie_copy::plan_movie_copy(&source, movie_copy::DEFAULT_COPY_NAME)
-            .map_err(|e| format!("Couldn't list {} to copy it: {e}", source.display()))?;
+            .map_err(|e| crate::messages::could_not_list_to_copy(source.display(), e))?;
         Ok(MovieCopyPlan {
             summary: plan.summary(),
             free_bytes: native::sys::disk::get_available_bytes(&root),
@@ -70,7 +70,7 @@ pub async fn start_movie_copy(
     include_demos: bool,
 ) -> Result<CopyOutcome, String> {
     if state.running.swap(true, Ordering::SeqCst) {
-        return Err("A movie copy is already running".to_string());
+        return Err(crate::messages::MOVIE_COPY_ALREADY_RUNNING.to_string());
     }
     let running = Arc::clone(&state.running);
     let cancel = Arc::clone(&state.cancel);

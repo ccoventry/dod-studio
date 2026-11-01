@@ -14,6 +14,14 @@
 // `native/examples/`, whose output is for the developer running them
 // (#237, D19). Issue #33.
 
+pub mod bsp;
+pub mod decal_probe;
+pub mod game_reuse;
+pub mod menu_scale;
+pub mod movie_copy;
+pub mod player_overrides;
+pub mod take_delete;
+
 use std::fmt::Display;
 
 // ── patch/map_fetch.rs ───────────────────────────────────────────────────
@@ -72,6 +80,21 @@ pub fn source_demo_changed(demo: impl Display) -> String {
          Scan it again before capturing, so the highlights match what is in it now.",
         demo
     )
+}
+
+pub fn scanner_alignment_lost(len: usize, pos: usize) -> String {
+    format!(
+        "Scanner alignment lost! Read impossible packet size: {} bytes at pos {}",
+        len, pos
+    )
+}
+
+pub fn scan_failed_to_parse_demo(err: impl Display) -> String {
+    format!("Failed to parse demo: {}", err)
+}
+
+pub fn scan_failed_to_read_file(err: impl Display) -> String {
+    format!("Failed to read file: {}", err)
 }
 
 // ── shared/hlae_ffmpeg.rs ────────────────────────────────────────────────
@@ -309,6 +332,26 @@ pub fn hook_copies_removed(count: usize, root: impl Display) -> String {
         ("copies", "use")
     };
     format!("goldsrc-hooks: removed {count} hook DLL {noun} no game {verb} from {root}")
+}
+
+pub fn could_not_read_hook_dll(path: impl Display, err: impl Display) -> String {
+    format!("could not read the hook DLL {}: {}", path, err)
+}
+
+pub fn hook_dll_names_no_file(path: impl Display) -> String {
+    format!("{} names no file", path)
+}
+
+pub fn could_not_make_hook_folder(dir: impl Display, err: impl Display) -> String {
+    format!("could not make the folder {}: {}", dir, err)
+}
+
+pub fn could_not_copy_hook_dll(copy: impl Display, err: impl Display) -> String {
+    format!("could not copy the hook DLL to {}: {}", copy, err)
+}
+
+pub fn could_not_write_hook_source(file: &str, dir: impl Display, err: impl Display) -> String {
+    format!("could not write {} in {}: {}", file, dir, err)
 }
 
 // ── patch/trimmed_copies.rs (#207) ────────────────────────────────────────
@@ -1751,6 +1794,42 @@ pub fn cleanup_scratch_file_failed(
     )
 }
 
+// ── demo_cache.rs: activity log (#237) ────────────────────────────────────
+
+/// Older cache entries upgraded in place; `parsing_rest` is the clause naming
+/// what must be parsed again, empty when nothing does.
+pub fn cache_entries_upgraded(upgraded: usize, total: usize, parsing_rest: &str) -> String {
+    format!("Cache demos: upgraded {upgraded} of {total} older cache entries{parsing_rest}")
+}
+
+/// The clause of [`cache_entries_upgraded`] for entries that need a new parse.
+pub fn cache_parsing_the_rest(reasons: &[String]) -> String {
+    format!("; parsing the rest ({})", reasons.join(", "))
+}
+
+pub fn cache_could_not_analyse(demo: impl Display, why: impl Display) -> String {
+    format!("Cache demos: could not analyse {demo}: {why}")
+}
+
+// ── patch/builder/mod.rs: activity log (#237) ──────────────────────────────
+
+pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Display) -> String {
+    format!(
+        "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{codec_args}`) instead of \
+         writing a BMP sequence, one `{video_file}` per stream folder. Render Studio reads these the \
+         same way it reads frame sequences."
+    )
+}
+
+pub fn agr_capture(fps: impl Display) -> String {
+    format!(
+        "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file \
+         (models and camera, for the Blender page) at {fps} fps, in its take folder, with the \
+         game's sound for the same stretch beside it as a `.wav` of the same name (HLAE's \
+         movie recorder, its picture sent to FFmpeg's null muxer)."
+    )
+}
+
 // ── vegas.rs ─────────────────────────────────────────────────────────────
 
 pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
@@ -1765,6 +1844,61 @@ pub const VEGAS_NO_DOCUMENTS: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_and_builder_lines_match_their_original_inline_text() {
+        assert_eq!(
+            cache_entries_upgraded(3, 5, ""),
+            "Cache demos: upgraded 3 of 5 older cache entries"
+        );
+        assert_eq!(
+            cache_entries_upgraded(
+                3,
+                5,
+                &cache_parsing_the_rest(&["2: a".into(), "1: b".into()])
+            ),
+            "Cache demos: upgraded 3 of 5 older cache entries; parsing the rest (2: a, 1: b)"
+        );
+        assert_eq!(
+            cache_could_not_analyse("a.dem", "bad"),
+            "Cache demos: could not analyse a.dem: bad"
+        );
+        assert_eq!(
+            direct_to_video_capture("-c:v x", "video.mkv"),
+            "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`-c:v x`) instead of writing a BMP sequence, one `video.mkv` per stream folder. Render Studio reads these the same way it reads frame sequences."
+        );
+        assert_eq!(
+            agr_capture(60),
+            "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file (models and camera, for the Blender page) at 60 fps, in its take folder, with the game's sound for the same stretch beside it as a `.wav` of the same name (HLAE's movie recorder, its picture sent to FFmpeg's null muxer)."
+        );
+    }
+
+    #[test]
+    fn scanner_and_hook_copy_errors_match_their_original_inline_text() {
+        assert_eq!(
+            scanner_alignment_lost(9, 4),
+            "Scanner alignment lost! Read impossible packet size: 9 bytes at pos 4"
+        );
+        assert_eq!(scan_failed_to_parse_demo("x"), "Failed to parse demo: x");
+        assert_eq!(scan_failed_to_read_file("x"), "Failed to read file: x");
+        assert_eq!(
+            could_not_read_hook_dll("a.dll", "x"),
+            "could not read the hook DLL a.dll: x"
+        );
+        assert_eq!(hook_dll_names_no_file("a"), "a names no file");
+        assert_eq!(
+            could_not_make_hook_folder("d", "x"),
+            "could not make the folder d: x"
+        );
+        assert_eq!(
+            could_not_copy_hook_dll("c", "x"),
+            "could not copy the hook DLL to c: x"
+        );
+        assert_eq!(
+            could_not_write_hook_source("src.txt", "d", "x"),
+            "could not write src.txt in d: x"
+        );
+    }
 
     #[test]
     fn no_killstreaks_names_the_player_the_ask_and_the_longest_streak() {

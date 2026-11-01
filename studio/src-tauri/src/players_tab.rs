@@ -65,7 +65,7 @@ pub fn crosshair_sprite_image(
     sprite: String,
 ) -> Result<SpriteImage, String> {
     if !player_overrides::is_sprite_name(&sprite) {
-        return Err(format!("{sprite:?} is not a sprite file name"));
+        return Err(crate::messages::not_a_sprite_file_name(&sprite));
     }
     let dir = game_dir(&game_path, &game_folder)
         .ok_or_else(|| "set the Half-Life executable and game folder first".to_string())?;

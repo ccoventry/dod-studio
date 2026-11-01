@@ -145,7 +145,7 @@ pub fn overview_reset_edits(map: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(rgba) = request.body() else {
-        return Err("the high-quality image did not arrive as raw bytes".to_string());
+        return Err(crate::messages::OVERVIEW_IMAGE_NOT_RAW_BYTES.to_string());
     };
     let header = request
         .headers()
