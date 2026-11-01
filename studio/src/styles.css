@@ -4664,6 +4664,68 @@ button.setup-skip:hover:not(:disabled) {
 .output-row-status-note { color: var(--text-muted); }
 .output-row-status-bad { color: var(--danger-light); }
 
+/* Right-click menu (#1111): same look as the File / Help dropdowns. */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--shade-40);
+  outline: none;
+}
+
+.context-menu-item {
+  padding: 6px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+
+.context-menu-item:hover,
+.context-menu-item.active {
+  background: var(--primary-accent);
+  color: var(--text-strong);
+}
+
+.context-menu-item.danger {
+  color: var(--danger-light);
+}
+
+.context-menu-item.danger:hover,
+.context-menu-item.danger.active {
+  color: var(--text-strong);
+}
+
+.context-menu-item.dimmed {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.context-menu-item.dimmed:hover {
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
+}
+
+/* The queue row a menu is open on, and the row the keyboard is on. */
+#master-demo-table-body tr.context-target,
+#master-demo-table-body tr:focus-visible {
+  outline: 1px solid var(--primary-accent);
+  outline-offset: -1px;
+}
+
 /* A field whose value cannot be used (#25): red border and the reason on a line under it. */
 input.field-invalid { border-color: var(--danger-light); }
 .field-error-line {

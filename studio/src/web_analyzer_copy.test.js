@@ -91,7 +91,7 @@ describe('the other copied modules match their desktop originals (#238)', () => 
   // Each copy adds one header line naming its original; nothing else differs.
   const body = (text) => text.split('\n').filter((l) => !/a copy of studio\/src\//i.test(l));
 
-  it.each(['analyzer_flags.js', 'steam_ids.js'])('%s', (file) => {
+  it.each(['analyzer_flags.js', 'steam_ids.js', 'kill_distance.js'])('%s', (file) => {
     const desk = body(read('studio', 'src', file)).filter((l) => l !== `// ${file}`);
     const web = body(read('web-analyzer', 'www', file));
     expect(web).toEqual(desk);

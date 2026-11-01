@@ -40,11 +40,13 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
+- [goldsrc_player_info.md](goldsrc_player_info.md) — `client.dll`'s per-player record `g_PlayerExtraInfo` (layout, who writes `health`), what POV and HLTV demos fill in it, and the name plates drawn from it (#1130).
 - [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — the HUD elements' vftable stub (`ds_hud_hide_teammate_info`), what each element draws, and where `ds_hud_hide_element`'s names went when #342 retired it.
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.
 - [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, the in-eye camera on a prone or crouching player (#329, #1144), the death cam when he dies, and the chase cameras drawing the players around them (#918).
+- [goldsrc_xray.md](goldsrc_xray.md) — X-ray (`ds_spec_xray_show`): what CS:GO's GOTV X-ray does, and how DoD Studio draws players through walls with the game's glow shell (#1297).
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.

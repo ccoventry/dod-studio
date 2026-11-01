@@ -74,6 +74,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use crate::engine::{self};
 use crate::names::console_name;
+use crate::player_info::{ALLIES, AXIS};
 use crate::scan;
 use crate::setting::Cvar;
 
@@ -115,15 +116,9 @@ static ICON_TEAM: AtomicI32 = AtomicI32::new(0);
 /// pointed at [`ICON_TEAM`]; 0 before a scan.
 static GAME_TEAM_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 
-/// `g_iUser1`, `g_iUser2`, and `g_PlayerExtraInfo[0].teamnumber`.
+/// `g_iUser1` and `g_iUser2`.
 const MODE_RVA: usize = 0xe8_8d4;
 const TARGET_RVA: usize = 0xe8_8d8;
-pub(crate) const EXTRA_TEAM_RVA: usize = 0xe9_120;
-/// `sizeof(extra_player_info_t)`.
-pub(crate) const EXTRA_STRIDE: usize = 48;
-/// Allies (British maps included) and Axis.
-const ALLIES: i32 = 1;
-const AXIS: i32 = 2;
 
 /// The pattern's start and the client.dll base it is in.
 fn pattern_address() -> Result<(usize, usize), String> {
@@ -173,8 +168,7 @@ fn watched_team_now(base: usize) -> Option<i32> {
     let mode = unsafe { *((base + MODE_RVA) as *const i32) };
     let target = unsafe { *((base + TARGET_RVA) as *const i32) };
     watched_team(mode, target, |index| {
-        let at = base + EXTRA_TEAM_RVA + EXTRA_STRIDE * index as usize;
-        i32::from(unsafe { *(at as *const i16) })
+        crate::player_info::team(base, index).unwrap_or(0)
     })
 }
 
