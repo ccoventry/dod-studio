@@ -48,18 +48,14 @@ pub fn for_launch(source: &Path) -> PathBuf {
                 .map(Path::to_path_buf)
                 .collect();
             remove_idle_copies(&root, own);
-            crate::log_markdown(&format!(
-                "goldsrc-hooks: launching from a copy, {} (of {})",
+            crate::log_markdown(&crate::messages::hooks_launching_from_copy(
                 copy.display(),
-                source.display()
+                source.display(),
             ));
             copy
         }
         Err(e) => {
-            crate::log_markdown(&format!(
-                "⚠️ goldsrc-hooks: {e}; launching from {} itself, which stays locked while the game runs",
-                source.display()
-            ));
+            crate::log_markdown(&crate::messages::hooks_copy_failed(e, source.display()));
             source.to_path_buf()
         }
     }

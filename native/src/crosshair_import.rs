@@ -73,7 +73,7 @@ pub fn sanitize_name(raw: &str) -> String {
 pub fn file_name_for(name: &str) -> Result<String, String> {
     let name = sanitize_name(name);
     if name.is_empty() {
-        return Err("type a name for the crosshair (letters or numbers)".into());
+        return Err(crate::messages::crosshair_name_missing());
     }
     Ok(format!("{PREFIX}{name}.spr"))
 }
@@ -83,9 +83,8 @@ pub fn file_name_for(name: &str) -> Result<String, String> {
 /// reads to the end (the same check the picker's preview makes).
 pub fn validate_sprite(bytes: &[u8]) -> Result<(), String> {
     if bytes.len() as u64 > MAX_SPRITE_BYTES {
-        return Err(format!(
-            "the sprite is {} KB, too big for a crosshair",
-            bytes.len() / 1024
+        return Err(crate::messages::crosshair_sprite_too_big(
+            bytes.len() / 1024,
         ));
     }
     decode_sprite(bytes).map(|_| ())
@@ -115,19 +114,18 @@ fn pick_entry(sprites: &[String]) -> Result<&str, String> {
         return Ok(e);
     }
     match sprites {
-        [] => Err("the ZIP holds no crosshair (.spr) file".into()),
+        [] => Err(crate::messages::crosshair_zip_empty()),
         [only] => Ok(only),
-        many => Err(format!(
-            "the ZIP holds {} sprites ({}): unzip it and add the one you want",
+        many => Err(crate::messages::crosshair_zip_many(
             many.len(),
-            many.join(", ")
+            many.join(", "),
         )),
     }
 }
 
 fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| format!("the ZIP can't be read: {e}"))?;
+        .map_err(crate::messages::crosshair_zip_unreadable)?;
     let sprites: Vec<String> = zip
         .file_names()
         .filter(|n| is_sprite_entry(n))
@@ -136,17 +134,17 @@ fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let name = pick_entry(&sprites)?.to_string();
     let entry = zip
         .by_name(&name)
-        .map_err(|e| format!("{name} in the ZIP can't be read: {e}"))?;
+        .map_err(|e| crate::messages::crosshair_zip_entry_unreadable(&name, e))?;
     if entry.size() > MAX_SPRITE_BYTES {
-        return Err(format!("{name} is too big for a crosshair"));
+        return Err(crate::messages::crosshair_entry_too_big(&name));
     }
     // The header's size can lie: never read past the limit whatever it says.
     let mut out = Vec::new();
     entry
         .take(MAX_SPRITE_BYTES + 1)
         .read_to_end(&mut out)
-        .map_err(|e| format!("{name} in the ZIP can't be read: {e}"))?;
-    validate_sprite(&out).map_err(|e| format!("{name} in the ZIP: {e}"))?;
+        .map_err(|e| crate::messages::crosshair_zip_entry_unreadable(&name, e))?;
+    validate_sprite(&out).map_err(|e| crate::messages::crosshair_zip_entry_invalid(&name, e))?;
     Ok(out)
 }
 
@@ -171,25 +169,26 @@ pub fn import_crosshair(game_dir: &Path, source: &Path, name: &str) -> Result<St
             .iter()
             .any(|n| n.eq_ignore_ascii_case(file))
     };
-    let already = || format!("there's already a crosshair called {file}: pick another name");
+    let already = || crate::messages::crosshair_name_taken(&file);
     if taken(&file) {
         return Err(already());
     }
     let size = std::fs::metadata(source)
-        .map_err(|e| format!("{}: {e}", source.display()))?
+        .map_err(|e| crate::messages::path_failed(source.display(), e))?
         .len();
     if size > MAX_SOURCE_BYTES {
-        return Err(format!(
-            "{} is {} MB, too big to be a crosshair file",
+        return Err(crate::messages::crosshair_source_too_big(
             source.display(),
-            size / (1024 * 1024)
+            size / (1024 * 1024),
         ));
     }
-    let bytes = std::fs::read(source).map_err(|e| format!("{}: {e}", source.display()))?;
-    let sprite = extract_sprite(&bytes).map_err(|e| format!("{}: {e}", source.display()))?;
+    let bytes =
+        std::fs::read(source).map_err(|e| crate::messages::path_failed(source.display(), e))?;
+    let sprite =
+        extract_sprite(&bytes).map_err(|e| crate::messages::path_failed(source.display(), e))?;
     let dir = addon_of(game_dir).join("sprites");
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+        .map_err(|e| crate::messages::could_not_create(dir.display(), e))?;
     let path = dir.join(&file);
     let mut out = match std::fs::OpenOptions::new()
         .write(true)
@@ -198,12 +197,12 @@ pub fn import_crosshair(game_dir: &Path, source: &Path, name: &str) -> Result<St
     {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(already()),
-        Err(e) => return Err(format!("could not create {}: {e}", path.display())),
+        Err(e) => return Err(crate::messages::could_not_create(path.display(), e)),
     };
     if let Err(e) = out.write_all(&sprite).and_then(|()| out.flush()) {
         drop(out);
         let _ = std::fs::remove_file(&path);
-        return Err(format!("could not write {}: {e}", path.display()));
+        return Err(crate::messages::could_not_write(path.display(), e));
     }
     Ok(file)
 }

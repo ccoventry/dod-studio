@@ -27,10 +27,9 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            crate::log_markdown(&format!(
-                "[cleanup] Failed to remove session_junction {}: {}",
+            crate::log_markdown(&crate::messages::cleanup_session_junction_failed(
                 self.session_junction.display(),
-                e
+                e,
             ));
         }
         // Unlink every dod_pool_N and _route_N junction. `remove_dir` unlinks a
@@ -44,10 +43,9 @@ impl Drop for WorkspaceGuard {
             if let Err(e) = std::fs::remove_dir(junction)
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                crate::log_markdown(&format!(
-                    "[cleanup] Failed to remove pool junction {}: {}",
+                crate::log_markdown(&crate::messages::cleanup_pool_junction_failed(
                     junction.display(),
-                    e
+                    e,
                 ));
             }
         }
@@ -56,10 +54,9 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            crate::log_markdown(&format!(
-                "[cleanup] Failed to remove exit_trigger {}: {}",
+            crate::log_markdown(&crate::messages::cleanup_exit_trigger_failed(
                 self.exit_trigger.display(),
-                e
+                e,
             ));
         }
         if let Some(game_root) = self.exit_trigger.parent() {
