@@ -28,6 +28,9 @@
 // caller before wrapping.
 
 pub mod capture;
+pub mod game_process;
+pub mod hd;
+pub mod take_cleanup;
 
 use std::fmt::Display;
 use std::path::Path;
