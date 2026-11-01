@@ -79,7 +79,9 @@ test('the player card and the weapon table average the known kills and say how m
 
   const rows = page.locator('.analyzer-table').first().locator('tbody tr');
   await expect(rows.filter({ hasText: 'K98' })).toContainText('25.4 m (1 of 2 kills)');
-  await expect(rows.filter({ hasText: 'Mp40' })).toContainText('15.2 m (1 of 1 kills)');
+  // Every Mp40 kill measured: no "n of m" note repeating the Kills column.
+  await expect(rows.filter({ hasText: 'Mp40' })).toContainText('15.2 m');
+  await expect(rows.filter({ hasText: 'Mp40' })).not.toContainText('of 1 kills');
   // A weapon with no kills has no distance, and says why on hover.
   const none = rows.filter({ hasText: 'Spade' }).locator('td').last();
   await expect(none).toHaveText('');

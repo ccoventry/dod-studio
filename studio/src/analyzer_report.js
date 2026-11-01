@@ -377,7 +377,12 @@ function distanceCell(units) {
 
 function averageDistanceCell(summary) {
   if (!summary || summary.average === null) return distanceCell(null);
-  return `<td style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}">${esc(STRINGS.ANALYZER.metres(unitsToMetres(summary.average)))} <span class="text-muted" style="font-size:0.85em;">(${esc(STRINGS.ANALYZER.distanceMeasured(summary.measured, summary.total))})</span></td>`;
+  // "n of m kills" only when some kills have no position: with every kill
+  // measured it just repeats the Kills column.
+  const note = summary.measured < summary.total
+    ? ` <span class="text-muted" style="font-size:0.85em;">(${esc(STRINGS.ANALYZER.distanceMeasured(summary.measured, summary.total))})</span>`
+    : '';
+  return `<td style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}">${esc(STRINGS.ANALYZER.metres(unitsToMetres(summary.average)))}${note}</td>`;
 }
 
 function renderPlayerDetailsBody(tabContainer, p) {
