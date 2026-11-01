@@ -16,7 +16,7 @@ Configuration > **Players**. Add each player (from the queue's demos, or by Stea
 
 Capture and render the highlights as usual. Then on the Render tab click **Export VEGAS EDL…** and save the EDL. Studio saves it as a `.txt` because VEGAS Pro's File > Import > EDL Text File dialog only lists `*.txt`. Studio writes writes two files:
 
-- `dod_highlights.txt`: the finished renders, one after another (#110).
+- `dod_highlights.txt`: the finished renders, one after another (#110), in VEGAS's own EDL text format: a HUD-only render goes on its own video track above its clip (#1251).
 - `dod_highlights.dodstudio.json`: the clip list. For each clip: its file, whose highlight it is (SteamID, the **Use as** name or else the in-game name) and that player's nameplate path.
 
 The save dialog opens in the clips' folder (the one holding most of them, if they span several). Save the EDL there or in the folder above it, and the script finds the clip list by itself. Saving anywhere else makes it ask for the list with an Open dialog.

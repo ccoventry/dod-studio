@@ -84,6 +84,28 @@ export const STRINGS = {
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────
+  // Right-click menus (#1111): the Master Demo Queue's row menu.
+  CONTEXT_MENU: {
+    label: (name) => `Actions for ${name}`,
+    LAUNCH_PREVIEW: 'Launch Preview',
+    REVIEW: 'Review this demo',
+    OPEN_IN_ANALYZER: 'Open in Demo Analyzer',
+    OPEN_FOLDER: 'Open Folder in Explorer',
+    SPLIT_MAPS: 'Split Maps',
+    USE_FOUND_COPY: 'Use found copy',
+    LOCATE: 'Locate demo...',
+    COPY_NAME: 'Copy Demo Name',
+    COPY_PATH: 'Copy Path',
+    REMOVE: 'Remove from Queue',
+    DEMO_MISSING: 'The demo file is missing. Use Locate demo first.',
+    WHAT_NAME: 'Demo name',
+    WHAT_PATH: 'Path',
+    copied: (what) => `${what} copied to clipboard.`,
+    COPY_FAILED: 'Failed to copy to the clipboard.',
+    copiedLog: (what, demo) => `Right-click menu: copied ${what.toLowerCase()} of ${demo}.`,
+    copyFailedLog: (what, err) => `Right-click menu: could not copy ${what.toLowerCase()}: ${err}`,
+    openFolderLog: (path) => `Right-click menu: opened the folder of ${path} in Explorer.`,
+  },
   WORKSPACE: {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
@@ -1509,6 +1531,14 @@ export const STRINGS = {
     COL_WAVE: 'Wave',
     COL_TIME: 'Time',
     COL_DURATION: 'Duration',
+    // #448: engagement distance in the kill list and the player's tables.
+    COL_DISTANCE: 'Distance',
+    COL_AVG_DISTANCE: 'Avg. distance',
+    AVG_DISTANCE_TITLE: 'Avg. Distance',
+    DISTANCE_UNKNOWN_TITLE: 'Position unknown',
+    DISTANCE_AVERAGE_NOTE: 'Averaged over the kills where the position of both players is known; team kills are left out.',
+    distanceMeasured: (measured, total) => `${measured} of ${total} kills`,
+    metres: (m) => `${m.toFixed(1)} m`,
     WEAPON_CATEGORY_GRENADES: 'Grenades',
     WEAPON_CATEGORY_MELEE: 'Melee',
     WEAPON_CATEGORY_ALLIED: 'Allied',
@@ -1550,7 +1580,6 @@ export const STRINGS = {
     COL_AVERAGE_DISTANCE: 'Average',
     COL_LONGEST_DISTANCE: 'Longest',
     ALL_WEAPONS_LABEL: 'All weapons',
-    metres: (m) => `${m.toFixed(1)} m`,
 
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
