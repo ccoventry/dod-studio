@@ -28,9 +28,13 @@
 // caller before wrapping.
 
 pub mod capture;
+pub mod catch_up;
 pub mod game_process;
 pub mod hd;
+pub mod open_with;
+pub mod preview;
 pub mod take_cleanup;
+pub mod update;
 
 use std::fmt::Display;
 use std::path::Path;
@@ -717,6 +721,28 @@ pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
     failed_to("discard the saved render queue", err)
 }
 
+// ── menu_scale_manager.rs, movie_copy_manager.rs, overview_manager.rs, players_tab.rs ──
+
+pub fn menu_size_check_stopped(err: impl Display) -> String {
+    format!("menu size check stopped: {err}")
+}
+
+pub fn menu_size_change_stopped(err: impl Display) -> String {
+    format!("menu size change stopped: {err}")
+}
+
+pub fn could_not_list_to_copy(source: impl Display, err: impl Display) -> String {
+    format!("Couldn't list {source} to copy it: {err}")
+}
+
+pub const MOVIE_COPY_ALREADY_RUNNING: &str = "A movie copy is already running";
+
+pub const OVERVIEW_IMAGE_NOT_RAW_BYTES: &str = "the high-quality image did not arrive as raw bytes";
+
+pub fn not_a_sprite_file_name(sprite: &str) -> String {
+    format!("{sprite:?} is not a sprite file name")
+}
+
 /// Pins every function/constant above against the exact `format!`/literal it
 /// replaced at its original call site (text copied verbatim from the pre-PR
 /// source, not re-derived), so this refactor can't have silently changed any
@@ -1054,6 +1080,28 @@ mod tests {
         assert!(
             err.starts_with("Background task crashed: "),
             "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn small_manager_messages_match_their_original_inline_text() {
+        assert_eq!(menu_size_check_stopped("x"), "menu size check stopped: x");
+        assert_eq!(menu_size_change_stopped("x"), "menu size change stopped: x");
+        assert_eq!(
+            could_not_list_to_copy("D:/dod", "denied"),
+            "Couldn't list D:/dod to copy it: denied"
+        );
+        assert_eq!(
+            MOVIE_COPY_ALREADY_RUNNING,
+            "A movie copy is already running"
+        );
+        assert_eq!(
+            OVERVIEW_IMAGE_NOT_RAW_BYTES,
+            "the high-quality image did not arrive as raw bytes"
+        );
+        assert_eq!(
+            not_a_sprite_file_name("a.spr"),
+            "\"a.spr\" is not a sprite file name"
         );
     }
 

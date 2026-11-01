@@ -102,14 +102,14 @@ fn remove_idle_copies(root: &Path, mut keep: Vec<PathBuf>) {
 /// earlier launch made) and returns the copy's path.
 pub fn launch_copy_in(root: &Path, source: &Path) -> Result<PathBuf, String> {
     let bytes = std::fs::read(source)
-        .map_err(|e| format!("could not read the hook DLL {}: {e}", source.display()))?;
+        .map_err(|e| crate::messages::could_not_read_hook_dll(source.display(), e))?;
     let name = source
         .file_name()
-        .ok_or_else(|| format!("{} names no file", source.display()))?;
+        .ok_or_else(|| crate::messages::hook_dll_names_no_file(source.display()))?;
     let dir = root.join(folder_name(&bytes));
     let copy = dir.join(name);
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("could not make the folder {}: {e}", dir.display()))?;
+        .map_err(|e| crate::messages::could_not_make_hook_folder(dir.display(), e))?;
     let up_to_date = std::fs::read(&copy).is_ok_and(|existing| existing == bytes);
     if !up_to_date {
         // Written beside it and renamed into place, so a copy cut short by a
@@ -117,10 +117,10 @@ pub fn launch_copy_in(root: &Path, source: &Path) -> Result<PathBuf, String> {
         let partial = dir.join(format!("{}.partial", name.to_string_lossy()));
         std::fs::write(&partial, &bytes)
             .and_then(|()| std::fs::rename(&partial, &copy))
-            .map_err(|e| format!("could not copy the hook DLL to {}: {e}", copy.display()))?;
+            .map_err(|e| crate::messages::could_not_copy_hook_dll(copy.display(), e))?;
     }
     std::fs::write(dir.join(SOURCE_FILE), source.to_string_lossy().as_bytes())
-        .map_err(|e| format!("could not write {} in {}: {e}", SOURCE_FILE, dir.display()))?;
+        .map_err(|e| crate::messages::could_not_write_hook_source(SOURCE_FILE, dir.display(), e))?;
     Ok(copy)
 }
 

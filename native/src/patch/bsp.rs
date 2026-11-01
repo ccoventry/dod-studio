@@ -110,7 +110,7 @@ pub struct Bsp {
 fn rd_i32(b: &[u8], at: usize) -> Result<i32, String> {
     b.get(at..at + 4)
         .map(|s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-        .ok_or_else(|| format!("truncated at byte {}", at))
+        .ok_or_else(|| crate::messages::bsp::truncated_at(at))
 }
 
 fn rd_u32(b: &[u8], at: usize) -> Result<u32, String> {
@@ -120,7 +120,7 @@ fn rd_u32(b: &[u8], at: usize) -> Result<u32, String> {
 fn rd_i16(b: &[u8], at: usize) -> Result<i16, String> {
     b.get(at..at + 2)
         .map(|s| i16::from_le_bytes([s[0], s[1]]))
-        .ok_or_else(|| format!("truncated at byte {}", at))
+        .ok_or_else(|| crate::messages::bsp::truncated_at(at))
 }
 
 fn rd_u16(b: &[u8], at: usize) -> Result<u16, String> {
@@ -143,7 +143,7 @@ fn lump(bytes: &[u8], index: usize) -> Result<&[u8], String> {
     let length = rd_i32(bytes, at + 4)? as usize;
     bytes
         .get(offset..offset + length)
-        .ok_or_else(|| format!("lump {} runs past the end of the file", index))
+        .ok_or_else(|| crate::messages::bsp::lump_past_end(index))
 }
 
 /// Reads a lump as a fixed-stride array.
@@ -163,13 +163,13 @@ fn entries<T>(
 impl Bsp {
     pub fn parse(bytes: &[u8]) -> Result<Bsp, String> {
         if bytes.len() < HEADER_SIZE {
-            return Err("file is shorter than a BSP header".to_string());
+            return Err(crate::messages::bsp::SHORTER_THAN_HEADER.to_string());
         }
         let version = rd_i32(bytes, 0)?;
         if version != BSP_VERSION {
-            return Err(format!(
-                "BSP version {} is not the GoldSrc version {}",
-                version, BSP_VERSION
+            return Err(crate::messages::bsp::not_goldsrc_version(
+                version,
+                BSP_VERSION,
             ));
         }
 
@@ -263,8 +263,8 @@ impl Bsp {
     }
 
     pub fn from_file(path: &std::path::Path) -> Result<Bsp, String> {
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("could not read {}: {}", path.display(), e))?;
+        let bytes = std::fs::read(path)
+            .map_err(|e| crate::messages::bsp::could_not_read(path.display(), e))?;
         Bsp::parse(&bytes)
     }
 
@@ -1018,7 +1018,7 @@ const LUMP_ENTITIES: usize = 0;
 /// Verified against 390 first-person demos: every one matches its own map.
 pub fn map_checksum(bytes: &[u8]) -> Result<u32, String> {
     if bytes.len() < HEADER_SIZE {
-        return Err("file is shorter than a BSP header".to_string());
+        return Err(crate::messages::bsp::SHORTER_THAN_HEADER.to_string());
     }
 
     let mut table = [0u32; 256];
@@ -1048,7 +1048,7 @@ pub fn map_checksum(bytes: &[u8]) -> Result<u32, String> {
 
 /// `map_checksum` for a map on disk.
 pub fn map_checksum_of_file(path: &std::path::Path) -> Result<u32, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+    let bytes = std::fs::read(path).map_err(|e| crate::messages::labeled(path.display(), e))?;
     map_checksum(&bytes)
 }
 
