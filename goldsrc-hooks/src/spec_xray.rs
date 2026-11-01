@@ -1,9 +1,10 @@
 //! X-ray (#1297): while a demo plays, every player behind a wall is drawn as
 //! a team-coloured glow through it, like CS:GO's GOTV `spec_show_xray`. Its
-//! own setting, `ds_spec_xray`, off by default (a big change to the
+//! own setting, `ds_spec_xray_show`, off by default (a big change to the
 //! picture): `1` glows players where walls hide them, as CS:GO does; `2`
 //! also outlines the players in plain view. What CS:GO does and what this
-//! looks like: `docs/goldsrc_xray.md`.
+//! looks like: `docs/goldsrc_xray.md`. The team colours are settings too
+//! (`colour.rs`).
 //!
 //! ## How
 //!
@@ -45,11 +46,12 @@ use crate::names::console_name;
 use crate::player_info;
 use crate::setting::Setting;
 
+pub mod colour;
 mod gl;
 
 /// The setting: 0 off, 1 players behind walls glow, 2 and players in view
 /// get an outline too.
-pub const NAME: &str = console_name!("spec_xray");
+pub const NAME: &str = console_name!("spec_xray_show");
 
 /// The cvar, or its default (off) when it could not be registered.
 pub static XRAY: Setting = Setting::new(NAME, false);
@@ -66,14 +68,6 @@ const SLOT_STUDIO_DRAW_POINTS: usize = 25;
 /// ([`shell_amount`]): about 2.5 pixels of a 1280-wide picture at a 90
 /// degree field of view, whatever the distance.
 const UNITS_PER_DISTANCE: f32 = 0.004;
-
-/// The glow's colours, added to the picture: the hues of DoD's kill-feed
-/// team colours (`deathmsg::backdrop`'s (76, 102, 76) and (255, 63, 63)),
-/// at a strength that stays a colour rather than white once the engine has
-/// lit it (its brightness tables double a model's light on the movie
-/// installs' `brightness 2`).
-const ALLIES_GLOW: [u8; 3] = [50, 145, 50];
-const AXIS_GLOW: [u8; 3] = [160, 40, 40];
 
 /// `int StudioDrawPlayer(int flags, entity_state_t *pplayer)`.
 pub type DrawPlayerFn = unsafe extern "C" fn(i32, *mut c_void) -> i32;
@@ -108,8 +102,8 @@ fn outlines_in_view(value: Option<f32>) -> bool {
 /// a slot not yet filled).
 fn glow_colour(team: i32) -> Option<[u8; 3]> {
     match team {
-        player_info::ALLIES => Some(ALLIES_GLOW),
-        player_info::AXIS => Some(AXIS_GLOW),
+        player_info::ALLIES => Some(colour::allies()),
+        player_info::AXIS => Some(colour::axis()),
         _ => None,
     }
 }

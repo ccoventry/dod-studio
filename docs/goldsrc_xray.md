@@ -1,6 +1,6 @@
 # X-ray: players through walls (#1297)
 
-`ds_spec_xray 1` draws every player behind a wall as a glow in his team's
+`ds_spec_xray_show 1` draws every player behind a wall as a glow in his team's
 colour while a demo plays, like the X-ray of CS:GO's and CS2's GOTV.
 
 ## What CS:GO and CS2 do
@@ -40,11 +40,13 @@ the Counter-Strike wiki's
 
 ## What DoD Studio does
 
-`ds_spec_xray` (off by default; the Settings tab of the DoD Studio window
+`ds_spec_xray_show` (off by default; the Settings tab of the DoD Studio window
 has it under Spectating):
 
 - `1`: every living player on a team glows in his team's colour wherever
-  something hides him: Allies green, Axis red (the kill feed's hues). A
+  something hides him: Allies green, Axis red (the kill feed's hues; set
+  your own with `ds_spec_xray_allies_color` / `ds_spec_xray_axis_color`,
+  "R G B" 0-255 like the game's `con_color`, console only). A
   player in plain view looks as he always does, one half behind a crate
   glows only where the crate hides him. As in CS:GO.
 - `2`: the same, and the players in view get an outline in their team's

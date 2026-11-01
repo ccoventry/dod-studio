@@ -155,7 +155,7 @@ pub const AREAS: &[Area] = &[
                 "hide the HLTV proxy's on-screen messages.",
             ),
             choice(
-                console_name!("spec_xray"),
+                console_name!("spec_xray_show"),
                 "X-ray",
                 "players behind walls glow in their team's colour while a demo plays, like CS:GO's GOTV.",
                 XRAY,
