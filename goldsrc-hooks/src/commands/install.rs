@@ -278,6 +278,10 @@ pub fn install() {
     if let Some(cvar) = register(crate::map_cfgs::NAME, "1") {
         crate::map_cfgs::SETTING.set_cvar(cvar);
     }
+    // On by default: a map without a light file is left alone (#1312).
+    if let Some(cvar) = register(crate::map_light::NAME, "1") {
+        crate::map_light::SETTING.set_cvar(cvar);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.cvar().set(mute);

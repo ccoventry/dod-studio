@@ -479,6 +479,8 @@ pub fn poll() {
     // A float compare unless ds_map_weather changed (#1129).
     crate::map_weather::poll();
     crate::map_sounds::poll();
+    // A level-name hash and a few byte compares once applied (#1312).
+    crate::map_light::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();

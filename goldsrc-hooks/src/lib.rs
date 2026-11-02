@@ -201,6 +201,9 @@
 //!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
 //!   demo's map loads, for per-map brightness and gamma, which a server's map
 //!   cfgs would set but demo playback never runs.
+//! - `map_light`: the `ds_map_apply_lighting` cvar -- multiply a map's baked
+//!   lighting inside the boxes `dodstudio_maps/<map>_light.txt` lists, in
+//!   the engine's copy, as the map loads (#1312).
 //! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
@@ -310,6 +313,7 @@ mod list_panel;
 mod lookahead;
 mod map_cfgs;
 mod map_file_leak;
+mod map_light;
 mod map_sounds;
 mod map_text;
 mod map_weather;
