@@ -2,14 +2,18 @@
 //! engine's own structs (`com_model.h`), mirrored here, and safe access to
 //! the memory they point at.
 //!
-//! The layout is the SDK's, the same in both engine builds: `R_BuildLightMap`
-//! (pre-Anniversary `hw.dll+0x47390`, 25th Anniversary `+0x247b50`) reads
-//! `extents` at +0x18/+0x1a, `samples` at +0x54, `styles` at +0x3c and
-//! `cached_light` at +0x40 of an `msurface_t`, and `R_AddDynamicLights` the
-//! plane at +0x04 and `texturemins` at +0x14; `GL_BuildLightmaps` walks
-//! `model_t.surfaces` (+0xb4, `numsurfaces` +0xb0) 0x5c bytes at a time.
-//! `tools/verify_map_light_offsets.py` checks every offset here against both
-//! `hw.dll`s.
+//! Every field read sits at the SDK's offset in both engine builds:
+//! `R_BuildLightMap` (pre-Anniversary `hw.dll+0x47390`, 25th Anniversary
+//! `+0x247b50`) reads `extents` at +0x18/+0x1a, `samples` at +0x54, `styles`
+//! at +0x3c and `cached_light` at +0x40 of an `msurface_t`, and
+//! `R_AddDynamicLights` the plane at +0x04 and `texturemins` at +0x14. The
+//! struct's size is not the same: `GL_BuildLightmaps` walks
+//! `model_t.surfaces` (+0xb4, `numsurfaces` +0xb0) 0x5c bytes at a time on
+//! the pre-Anniversary build, the SDK's size, and the Anniversary engine's
+//! rebuild of every lightmap (`+0x24b7f0`) 0x6c at a time. So the stride is
+//! per build ([`BUILDS`]), told apart by the loaded `hw.dll`'s headers; any
+//! other build is left alone. `tools/verify_map_light_offsets.py` checks
+//! every offset and stride here against both `hw.dll`s.
 
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
@@ -64,8 +68,45 @@ pub(crate) struct MSurface {
     pdecals: u32,
 }
 
+// The SDK's size; the 25th Anniversary engine's struct is longer (`BUILDS`),
+// with the same fields at the same offsets as far as this reads.
 const _: () = assert!(size_of::<MSurface>() == 0x5c);
-pub(crate) const SURFACE_SIZE: usize = size_of::<MSurface>();
+
+/// One `hw.dll` this was checked against.
+pub(crate) struct Build {
+    pub name: &'static str,
+    /// The PE header's `TimeDateStamp` and `SizeOfImage`: which compile.
+    time_date_stamp: u32,
+    size_of_image: u32,
+    /// `sizeof(msurface_t)`: the stride of `model_t.surfaces`.
+    surface_size: usize,
+}
+
+pub(crate) const BUILDS: [Build; 2] = [
+    Build {
+        name: "pre-Anniversary",
+        time_date_stamp: 0x5f3d_8dcc,
+        size_of_image: 0x0125_9000,
+        surface_size: 0x5c,
+    },
+    Build {
+        name: "25th Anniversary",
+        time_date_stamp: 0x6704_93da,
+        size_of_image: 0x014a_a000,
+        surface_size: 0x6c,
+    },
+];
+
+/// The loaded `hw.dll`'s entry in [`BUILDS`], or `None` for a build this
+/// wasn't checked against (or no `hw.dll` yet).
+pub(crate) fn loaded_build() -> Option<&'static Build> {
+    let base = crate::engine::engine_module_base()?;
+    // Safety: a module handle the loader gave us.
+    let identity = unsafe { crate::pe::image_identity(base as *mut u8) }?;
+    BUILDS
+        .iter()
+        .find(|b| identity == (b.time_date_stamp, b.size_of_image))
+}
 
 /// `mtexinfo_t`.
 #[repr(C)]
@@ -188,9 +229,13 @@ fn query(_at: usize) -> Option<Region> {
     None
 }
 
-/// The world model's surface array, `(numsurfaces, surfaces)`, or `None`
+/// The world model's surface array, laid out as `build` has it, or `None`
 /// when `model` isn't a readable brush model with surfaces.
-pub(crate) fn surface_array(model: usize, regions: &mut Regions) -> Option<(usize, usize)> {
+pub(crate) fn surface_array(
+    model: usize,
+    build: &Build,
+    regions: &mut Regions,
+) -> Option<SurfaceArray> {
     if !regions.readable(model, MODEL_READ_LEN) {
         return None;
     }
@@ -203,19 +248,34 @@ pub(crate) fn surface_array(model: usize, regions: &mut Regions) -> Option<(usiz
         )
     };
     let count = usize::try_from(count).ok().filter(|&n| n > 0)?;
-    (kind == 0 && regions.readable(surfaces, count.checked_mul(SURFACE_SIZE)?))
-        .then_some((count, surfaces))
+    let stride = build.surface_size;
+    (kind == 0 && regions.readable(surfaces, count.checked_mul(stride)?)).then_some(SurfaceArray {
+        count,
+        at: surfaces,
+        stride,
+    })
 }
 
-/// Surface `index` of the array at `surfaces`, if it has a lightmap and
-/// everything it points at is readable (its samples writable too).
+/// A world model's `msurface_t` array.
+pub(crate) struct SurfaceArray {
+    pub count: usize,
+    at: usize,
+    stride: usize,
+}
+
+/// Surface `index` of `surfaces`, if it has a lightmap and everything it
+/// points at is readable (its samples writable too).
 pub(crate) fn lit_surface(
-    surfaces: usize,
+    surfaces: &SurfaceArray,
     index: usize,
     regions: &mut Regions,
 ) -> Option<LitSurface> {
-    let at = surfaces + index * SURFACE_SIZE;
-    // Safety: inside the array `surface_array` checked readable.
+    if index >= surfaces.count {
+        return None;
+    }
+    let at = surfaces.at + index * surfaces.stride;
+    // Safety: inside the array `surface_array` checked readable, and the
+    // build's stride is at least the mirror's size.
     let raw: MSurface = unsafe { std::ptr::read_unaligned(at as *const MSurface) };
     if raw.flags & SURF_NO_LIGHTMAP != 0 || raw.samples == 0 || raw.styles[0] == 255 {
         return None;
@@ -283,6 +343,17 @@ mod tests {
         assert_eq!(offset_of!(MSurface, samples), 0x54);
         assert_eq!(offset_of!(MTexInfo, flags), 0x28);
         assert_eq!(offset_of!(MPlane, dist), 0x0c);
+    }
+
+    #[test]
+    fn every_builds_surface_holds_the_fields_read() {
+        for build in &BUILDS {
+            assert!(
+                build.surface_size >= size_of::<MSurface>(),
+                "{}",
+                build.name
+            );
+        }
     }
 
     #[test]

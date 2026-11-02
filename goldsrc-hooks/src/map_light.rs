@@ -226,19 +226,26 @@ fn apply(level: &Level) -> State {
         report(&format!("{NAME}: {map}: no boxes in {}", path.display()));
         return untouched;
     }
-    let Some(applied) = scale_world(level, &map, &file.boxes) else {
+    let Some(build) = world::loaded_build() else {
+        report(&format!(
+            "{NAME}: {map}: this hw.dll is a build the world model's layout wasn't checked against, so its lighting is unchanged"
+        ));
+        return untouched;
+    };
+    let Some(applied) = scale_world(level, build, &map, &file.boxes) else {
         report(&format!(
             "{NAME}: {map}: the world model's surfaces aren't readable, so its lighting is unchanged"
         ));
         return untouched;
     };
     report(&format!(
-        "{NAME}: {map}: {} box(es) from {}: {} luxels on {} surfaces changed in {} ms{}",
+        "{NAME}: {map}: {} box(es) from {}: {} luxels on {} surfaces changed in {} ms ({} engine){}",
         applied.boxes,
         path.display(),
         applied.luxels,
         applied.changed.len(),
         started.elapsed().as_millis(),
+        build.name,
         r_dynamic_note()
     ));
     if applied.changed.is_empty() {
@@ -260,9 +267,14 @@ fn light_file(map: &str) -> Option<PathBuf> {
 /// Multiplies the luxels in `light_boxes` across the world model, and marks
 /// each changed surface for a lightmap rebuild. `None` when the model's
 /// surface array isn't readable.
-fn scale_world(level: &Level, map: &str, light_boxes: &[boxes::LightBox]) -> Option<Applied> {
+fn scale_world(
+    level: &Level,
+    build: &world::Build,
+    map: &str,
+    light_boxes: &[boxes::LightBox],
+) -> Option<Applied> {
     let mut regions = world::Regions::default();
-    let (count, surfaces) = world::surface_array(level.model, &mut regions)?;
+    let surfaces = world::surface_array(level.model, build, &mut regions)?;
     let mut applied = Applied {
         level: level.hash,
         model: level.model,
@@ -272,8 +284,8 @@ fn scale_world(level: &Level, map: &str, light_boxes: &[boxes::LightBox]) -> Opt
         luxels: 0,
         boxes: light_boxes.len(),
     };
-    for index in 0..count {
-        let Some(lit) = world::lit_surface(surfaces, index, &mut regions) else {
+    for index in 0..surfaces.count {
+        let Some(lit) = world::lit_surface(&surfaces, index, &mut regions) else {
             continue;
         };
         let Some(grid) = lit.surface.grid() else {
