@@ -4,10 +4,10 @@
 //! `CaptureStreak.kills` is `(tick, time, weapon)`, which the patcher uses and
 //! which stays as it is. These facts ride beside it on the Studio side only.
 
-use analysis::{Analysis, Connection, Headshot, Team, headshot_of};
+use analysis::{Analysis, Connection, FlagTag, Headshot, Team, flag_tags_of, headshot_of};
 
 /// A highlight's facts beside its streak (the clip name, the headshot
-/// filter), one entry per kill.
+/// filter, the flag tags), one entry per kill.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreakFacts {
     /// "Allies", "British", "Axis", "Spectator" or "Unknown".
@@ -16,6 +16,8 @@ pub struct StreakFacts {
     pub victim_factions: Vec<String>,
     /// Whether each kill was a headshot (#1128).
     pub headshots: Vec<Headshot>,
+    /// What was going on at the flags at each kill (#1132).
+    pub flag_tags: Vec<Vec<FlagTag>>,
 }
 
 /// A side as a clip name spells it. `allies_are_british` covers a demo
@@ -67,6 +69,9 @@ pub fn streak_facts(
         facts
             .headshots
             .push(headshot_of(&analysis.state.kill_positions, time, victim_id));
+        facts
+            .flag_tags
+            .push(flag_tags_of(&analysis.state.kill_positions, time, victim_id));
         let victim = players.iter().find(|p| &p.id == victim_id);
         facts
             .victims
@@ -109,6 +114,7 @@ mod tests {
             let facts = streak_facts(&analysis, slot, first).unwrap();
             assert_eq!(facts.headshots.len(), highlight.kills.len());
             assert_eq!(facts.headshots.len(), facts.victims.len());
+            assert_eq!(facts.flag_tags.len(), facts.victims.len());
             headshots += facts
                 .headshots
                 .iter()

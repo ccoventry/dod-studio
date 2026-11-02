@@ -1,4 +1,6 @@
 mod british;
+/// Who stood in a capture area, and the kill tags it gives (#1132).
+mod capture_area;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cache;
@@ -44,6 +46,7 @@ mod wire_index;
 use crate::wire_index::wire_slot;
 use crate::{
     british::check_and_promote_british,
+    capture_area::use_capture_area_updates,
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
     finalization::use_general_finalization,
@@ -72,6 +75,9 @@ pub(crate) use crate::demo_info::{is_hltv_demo, is_hltv_message};
 pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
+    capture_area::{
+        AreaVisit, AttackerCount, CaptureAreas, Capping, FlagTag, KillAreaTags, flag_tags_of,
+    },
     chat::{ChatMessage, ChatType, translate_system_message},
     clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
     headshot::{Headshot, headshot_of},
@@ -158,6 +164,9 @@ pub struct AnalyzerState {
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
+    /// Who stood in the capture areas over the demo (#1132).
+    #[serde(default)]
+    pub capture_areas: CaptureAreas,
 }
 
 /// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
@@ -228,6 +237,8 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"StartProg"
             | b"StartProgF"
             | b"CancelProg"
+            | b"ClientAreas"
+            | b"PlayersIn"
     )
 }
 
@@ -252,6 +263,9 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     use_team_score_updates(state, event);
     use_rounds_updates(state, event);
     use_objective_updates(state, event);
+    // After positions (it tags the kill they pushed) and objectives (it
+    // reads the finished cap breaks).
+    use_capture_area_updates(state, event);
     use_chat_updates(state, event);
     use_clan_match_detection_updates(Duration::from_secs(30), state, event);
     use_pov_stats_updates(state, event);
