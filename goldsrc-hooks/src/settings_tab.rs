@@ -323,7 +323,7 @@ pub const AREAS: &[Area] = &[
             check(
                 console_name!("map_apply_lighting"),
                 "Apply map light files",
-                "brighten or darken the boxes dodstudio_maps\\<map>_light.txt lists.",
+                "relight the boxes and lamps dodstudio_maps\\<map>_light.txt lists.",
             ),
         ],
     },

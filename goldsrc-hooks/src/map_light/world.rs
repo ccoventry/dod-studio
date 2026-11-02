@@ -34,6 +34,9 @@ pub(crate) const MODEL_SURFACES_AT: usize = 0xb4;
 /// How far into `model_t` this module reads.
 const MODEL_READ_LEN: usize = MODEL_SURFACES_AT + 4;
 
+/// `SURF_PLANEBACK`: `Mod_LoadFaces` sets it for a face on its plane's back
+/// side (pre-Anniversary `hw.dll+0x41194`, 25th Anniversary `+0x24015a`).
+const SURF_PLANEBACK: i32 = 0x02;
 /// `SURF_DRAWSKY | SURF_DRAWTURB`: sky and water, which have no lightmap
 /// (`R_RenderDynamicLightmaps` skips them, both builds).
 const SURF_NO_LIGHTMAP: i32 = 0x04 | 0x10;
@@ -315,6 +318,7 @@ pub(crate) fn lit_surface(
         vecs: tex.vecs,
         normal: plane.normal,
         dist: plane.dist,
+        back: raw.flags & SURF_PLANEBACK != 0,
     };
     let sample_len = surface.sample_len()?;
     let samples = raw.samples as usize;

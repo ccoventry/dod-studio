@@ -1,19 +1,24 @@
 //! `ds_map_apply_lighting`: brighten (or darken) parts of a map's baked
-//! lighting during playback, from a per-map file of boxes (#1312).
+//! lighting during playback, from a per-map file of boxes (#1312) and point
+//! lights (#1310).
 //!
 //! ## The file
 //!
 //! `dodstudio_maps/<map>_light.txt`, in `dod_addon` (with `-addons`) or
 //! `dod`, the folder `ds_map_run_cfgs` reads its cfgs from (#1302); the first
-//! one found is read. One box per line, `x1 y1 z1 x2 y2 z2 scale [fade]`,
-//! `//` comments: [`boxes`] has the rules. Coordinates are the map's own, as
+//! one found is read. One box or light per line ([`file`]):
+//! `x1 y1 z1 x2 y2 z2 scale [fade]` multiplies the baked light inside a box
+//! ([`boxes`]), `light x y z r g b strength radius` adds a lamp's light around
+//! a point ([`lights`]); `//` comments. Coordinates are the map's own, as
 //! `ds_debug_position` or a BSP viewer gives them.
 //!
 //! ## What it does
 //!
 //! Once a map's world model has loaded, the per-frame poll walks its surfaces
-//! ([`world`]) and multiplies the baked light of every luxel in a box
-//! ([`luxels`]), in the engine's copy of the lighting (`msurface_t.samples`,
+//! ([`world`]) and changes the baked light of every luxel a box or a light
+//! reaches ([`luxels`]): the boxes' factor first, then the lights added on top,
+//! to the surface's first light style only, so a flickering style keeps its
+//! own range. All of it in the engine's copy of the lighting (`msurface_t.samples`,
 //! which `Mod_LoadLighting` keeps for the map's life). The `.bsp` on disk is
 //! never touched, so every demo's map check still passes. The engine built
 //! the map's lightmap textures from the old samples at load, so each changed
@@ -44,6 +49,8 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 mod boxes;
+mod file;
+mod lights;
 mod luxels;
 mod world;
 
@@ -96,6 +103,7 @@ struct Applied {
     marks: Vec<(usize, u8)>,
     luxels: usize,
     boxes: usize,
+    lights: usize,
 }
 
 /// Written only by [`poll`] on the engine thread; [`status_line`] reads it.
@@ -214,7 +222,7 @@ fn apply(level: &Level) -> State {
     };
     let started = std::time::Instant::now();
     let file = match std::fs::read_to_string(&path) {
-        Ok(text) => boxes::parse(&text),
+        Ok(text) => file::parse(&text),
         Err(e) => {
             report(&format!(
                 "{NAME}: {map}: couldn't read {}: {e}",
@@ -224,8 +232,11 @@ fn apply(level: &Level) -> State {
         }
     };
     report_problems(&map, &path, &file.problems);
-    if file.boxes.is_empty() {
-        report(&format!("{NAME}: {map}: no boxes in {}", path.display()));
+    if file.is_empty() {
+        report(&format!(
+            "{NAME}: {map}: no boxes or lights in {}",
+            path.display()
+        ));
         return untouched;
     }
     let Some(build) = world::loaded_build() else {
@@ -234,15 +245,16 @@ fn apply(level: &Level) -> State {
         ));
         return untouched;
     };
-    let Some(applied) = scale_world(level, build, &map, &file.boxes) else {
+    let Some(applied) = scale_world(level, build, &map, &file) else {
         report(&format!(
             "{NAME}: {map}: the world model's surfaces aren't readable, so its lighting is unchanged"
         ));
         return untouched;
     };
     report(&format!(
-        "{NAME}: {map}: {} box(es) from {}: {} luxels on {} surfaces changed in {} ms ({} engine){}",
+        "{NAME}: {map}: {} box(es) and {} light(s) from {}: {} luxels on {} surfaces changed in {} ms ({} engine){}",
         applied.boxes,
+        applied.lights,
         path.display(),
         applied.luxels,
         applied.changed.len(),
@@ -266,14 +278,14 @@ fn light_file(map: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// Multiplies the luxels in `light_boxes` across the world model, and marks
-/// each changed surface for a lightmap rebuild. `None` when the model's
-/// surface array isn't readable.
+/// Changes the luxels `edits` reach across the world model ([`relight`]),
+/// and marks each changed surface for a lightmap rebuild. `None` when the
+/// model's surface array isn't readable.
 fn scale_world(
     level: &Level,
     build: &world::Build,
     map: &str,
-    light_boxes: &[boxes::LightBox],
+    edits: &file::LightFile,
 ) -> Option<Applied> {
     let mut regions = world::Regions::default();
     let surfaces = world::surface_array(level.model, build, &mut regions)?;
@@ -284,7 +296,8 @@ fn scale_world(
         changed: Vec::new(),
         marks: Vec::new(),
         luxels: 0,
-        boxes: light_boxes.len(),
+        boxes: edits.boxes.len(),
+        lights: edits.lights.len(),
     };
     for index in 0..surfaces.count {
         let Some(lit) = world::lit_surface(&surfaces, index, &mut regions) else {
@@ -294,7 +307,7 @@ fn scale_world(
             continue;
         };
         let (min, max) = grid.bounds();
-        if !light_boxes.iter().any(|b| b.reaches(min, max)) {
+        if !reaches(edits, min, max) {
             continue;
         }
         // Safety: `lit_surface` checked the span is writable; only this
@@ -303,12 +316,9 @@ fn scale_world(
             unsafe { std::slice::from_raw_parts_mut(lit.samples as *mut u8, lit.sample_len) };
         let original = samples.to_vec();
         let styles = lit.surface.style_count();
-        let luxels = luxels::edit_luxels(&grid, styles, samples, |point, _style, rgb| {
-            let gain = boxes::gain(light_boxes, point);
-            let new = rgb.map(|c| boxes::scaled(c, gain));
-            let changed = new != *rgb;
-            *rgb = new;
-            changed
+        let facing = lit.surface.facing();
+        let luxels = luxels::edit_luxels(&grid, styles, samples, |point, style, rgb| {
+            relight(edits, facing, point, style, rgb)
         });
         if luxels == 0 {
             continue;
@@ -332,6 +342,33 @@ fn scale_world(
         });
     }
     Some(applied)
+}
+
+/// Whether any box or light reaches the axis-aligned box `min..max`.
+fn reaches(edits: &file::LightFile, min: [f32; 3], max: [f32; 3]) -> bool {
+    edits.boxes.iter().any(|b| b.reaches(min, max))
+        || edits.lights.iter().any(|l| l.reaches(min, max))
+}
+
+/// One luxel's colour in one style slot with `edits` applied: multiplied by
+/// the boxes' factor at `point`, then, in the first slot only, the lights'
+/// colour added for a surface facing `facing`. Returns whether it changed.
+fn relight(
+    edits: &file::LightFile,
+    facing: [f32; 3],
+    point: [f32; 3],
+    style: usize,
+    rgb: &mut [u8; 3],
+) -> bool {
+    let gain = boxes::gain(&edits.boxes, point);
+    let mut new = rgb.map(|c| boxes::scaled(c, gain));
+    if style == 0 && !edits.lights.is_empty() {
+        let added = lights::added(&edits.lights, point, facing);
+        new = std::array::from_fn(|i| lights::brightened(new[i], added[i]));
+    }
+    let changed = new != *rgb;
+    *rgb = new;
+    changed
 }
 
 /// Puts every changed surface's samples back and rebuilds its lightmap.
@@ -358,7 +395,7 @@ fn restore(applied: &Applied) {
     ));
 }
 
-fn report_problems(map: &str, path: &Path, problems: &[boxes::Problem]) {
+fn report_problems(map: &str, path: &Path, problems: &[file::Problem]) {
     if problems.is_empty() {
         return;
     }
@@ -401,9 +438,10 @@ fn r_dynamic_note() -> &'static str {
 pub fn status_line() -> String {
     let what = match STATE.try_read().as_deref() {
         Ok(State::Applied(applied)) => format!(
-            "{}: {} box(es), {} luxels on {} surfaces changed",
+            "{}: {} box(es) and {} light(s), {} luxels on {} surfaces changed",
             applied.map,
             applied.boxes,
+            applied.lights,
             applied.luxels,
             applied.changed.len()
         ),
@@ -435,18 +473,48 @@ mod tests {
     fn scaling_a_floor_in_a_box_brightens_only_the_luxels_inside() {
         let surface = luxels::tests::floor();
         let grid = surface.grid().expect("grid");
-        let light = boxes::parse("1600 100 -300 1632 132 -280 2");
+        let edits = file::parse("1600 100 -300 1632 132 -280 2");
         let mut samples = vec![40u8; surface.sample_len().expect("len")];
-        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, _, rgb| {
-            let new = rgb.map(|c| boxes::scaled(c, boxes::gain(&light.boxes, p)));
-            let changed = new != *rgb;
-            *rgb = new;
-            changed
+        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, style, rgb| {
+            relight(&edits, surface.facing(), p, style, rgb)
         });
         // Columns 0..=2 (x 1600, 1616, 1632) of 5, all 3 rows.
         assert_eq!(changed, 9);
         assert_eq!(samples.iter().filter(|&&b| b == 80).count(), 9 * 3);
         assert_eq!(samples.iter().filter(|&&b| b == 40).count(), 6 * 3);
+    }
+
+    #[test]
+    fn a_light_above_a_floor_adds_its_colour_most_under_it_and_only_in_style_0() {
+        let mut surface = luxels::tests::floor();
+        surface.styles = [0, 37, 255, 255];
+        let grid = surface.grid().expect("grid");
+        // Above the floor's first luxel (1600, 100, -288), reaching 64 units.
+        let edits = file::parse("light 1600 100 -272 255 128 0 0.5 64");
+        let mut samples = vec![40u8; surface.sample_len().expect("len")];
+        let changed = luxels::edit_luxels(&grid, 2, &mut samples, |p, style, rgb| {
+            relight(&edits, surface.facing(), p, style, rgb)
+        });
+        assert!(changed > 0 && changed < 15, "{changed}");
+        let first = &samples[0..3];
+        assert!(first[0] > first[1] && first[1] > first[2], "{first:?}");
+        assert_eq!(first[2], 40, "no blue in the light");
+        // Style 1's map (after style 0's 15 luxels) is untouched.
+        assert!(samples[15 * 3..].iter().all(|&b| b == 40));
+        // The far corner (1664, 132) is past the radius.
+        assert_eq!(&samples[14 * 3..15 * 3], &[40, 40, 40]);
+    }
+
+    #[test]
+    fn a_light_under_a_floor_leaves_it_alone() {
+        let surface = luxels::tests::floor();
+        let grid = surface.grid().expect("grid");
+        let edits = file::parse("light 1600 100 -300 255 255 255 1 64");
+        let mut samples = vec![40u8; surface.sample_len().expect("len")];
+        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, style, rgb| {
+            relight(&edits, surface.facing(), p, style, rgb)
+        });
+        assert_eq!(changed, 0);
     }
 
     #[test]

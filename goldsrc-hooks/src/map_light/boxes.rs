@@ -1,12 +1,10 @@
-//! The light boxes of a `<map>_light.txt`: reading the file, and how much a
-//! luxel at a given point is brightened.
+//! The light boxes of a `<map>_light.txt`: a box line, and how much a luxel
+//! at a given point is brightened.
 //!
-//! One box per line, `x1 y1 z1 x2 y2 z2 scale [fade]`: two opposite corners
-//! in world units (any order), the factor the baked light inside is
-//! multiplied by, and optionally how far outside the box, in world units,
-//! the change fades out (0, a hard edge, when left out). `//` starts a
-//! comment; blank lines are skipped. A line that isn't a box is reported
-//! with its number and skipped, so one typo doesn't drop the rest.
+//! `x1 y1 z1 x2 y2 z2 scale [fade]`: two opposite corners in world units
+//! (any order), the factor the baked light inside is multiplied by, and
+//! optionally how far outside the box, in world units, the change fades out
+//! (0, a hard edge, when left out).
 //!
 //! Where boxes overlap, they apply in the file's order, each pulling the
 //! factor towards its own by its weight there: a later box wins where it
@@ -29,51 +27,8 @@ pub(crate) struct LightBox {
     pub fade: f32,
 }
 
-/// A line of the file that isn't a box: its number (from 1) and why.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Problem {
-    pub line: usize,
-    pub why: String,
-}
-
-/// What a `<map>_light.txt` holds.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct LightFile {
-    pub boxes: Vec<LightBox>,
-    pub problems: Vec<Problem>,
-}
-
-/// Reads a light file's text; never fails, see [`LightFile::problems`].
-pub(crate) fn parse(text: &str) -> LightFile {
-    let mut file = LightFile::default();
-    // Notepad's "UTF-8 with BOM" puts one in front of the first box.
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    for (index, raw) in text.lines().enumerate() {
-        let line = raw.split("//").next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-        match parse_box(line) {
-            Ok(found) => file.boxes.push(found),
-            Err(why) => file.problems.push(Problem {
-                line: index + 1,
-                why,
-            }),
-        }
-    }
-    file
-}
-
-fn parse_box(line: &str) -> Result<LightBox, String> {
-    let numbers = line
-        .split_whitespace()
-        .map(|word| {
-            word.parse::<f32>()
-                .ok()
-                .filter(|n| n.is_finite())
-                .ok_or_else(|| format!("\"{word}\" is not a number"))
-        })
-        .collect::<Result<Vec<f32>, String>>()?;
+/// A box line's numbers as a box, or why they aren't one.
+pub(crate) fn parse_box(numbers: &[f32]) -> Result<LightBox, String> {
     if !(7..=8).contains(&numbers.len()) {
         return Err(format!(
             "{} numbers; a box is x1 y1 z1 x2 y2 z2 scale [fade]",
@@ -147,9 +102,11 @@ mod tests {
     use super::*;
 
     fn one(line: &str) -> LightBox {
-        let file = parse(line);
-        assert_eq!(file.problems, vec![], "{line}");
-        file.boxes[0]
+        let numbers: Vec<f32> = line
+            .split_whitespace()
+            .map(|w| w.parse().expect("a number"))
+            .collect();
+        parse_box(&numbers).expect("a box")
     }
 
     #[test]
@@ -167,38 +124,14 @@ mod tests {
     }
 
     #[test]
-    fn comments_and_blank_lines_are_skipped() {
-        let file = parse("// the underpass\n\n0 0 0 1 1 1 2 // brighter\n   \n");
-        assert_eq!(file.boxes.len(), 1);
-        assert_eq!(file.problems, vec![]);
-    }
-
-    #[test]
-    fn a_byte_order_mark_and_crlf_line_ends_are_read_past() {
-        let file = parse("\u{feff}0 0 0 1 1 1 2\r\n5 5 5 6 6 6 3 // two\r\n");
-        assert_eq!(file.problems, vec![]);
-        assert_eq!(file.boxes.len(), 2);
-    }
-
-    #[test]
-    fn a_bad_line_is_reported_by_number_and_the_rest_still_read() {
-        let file = parse(
-            "0 0 0 1 1 1 2\n0 0 0 1 1 x 2\n0 0 0 1 1\n0 0 0 1 1 1 0\n0 0 0 1 1 1 2 -4\n5 5 5 6 6 6 3",
-        );
-        assert_eq!(file.boxes.len(), 2);
-        let lines: Vec<usize> = file.problems.iter().map(|p| p.line).collect();
-        assert_eq!(lines, vec![2, 3, 4, 5]);
-        assert!(
-            file.problems[0].why.contains("\"x\""),
-            "{:?}",
-            file.problems[0]
-        );
-    }
-
-    #[test]
-    fn a_scale_above_the_limit_or_not_a_finite_number_is_refused() {
-        for line in ["0 0 0 1 1 1 17", "0 0 0 1 1 1 inf", "0 0 0 1 1 1 NaN"] {
-            assert_eq!(parse(line).boxes, vec![], "{line}");
+    fn a_scale_out_of_range_or_a_wrong_count_is_refused() {
+        for numbers in [
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 17.0][..],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, -4.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0],
+        ] {
+            assert!(parse_box(numbers).is_err(), "{numbers:?}");
         }
     }
 
