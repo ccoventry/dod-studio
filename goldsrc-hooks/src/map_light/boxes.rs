@@ -46,6 +46,8 @@ pub(crate) struct LightFile {
 /// Reads a light file's text; never fails, see [`LightFile::problems`].
 pub(crate) fn parse(text: &str) -> LightFile {
     let mut file = LightFile::default();
+    // Notepad's "UTF-8 with BOM" puts one in front of the first box.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     for (index, raw) in text.lines().enumerate() {
         let line = raw.split("//").next().unwrap_or("").trim();
         if line.is_empty() {
@@ -169,6 +171,13 @@ mod tests {
         let file = parse("// the underpass\n\n0 0 0 1 1 1 2 // brighter\n   \n");
         assert_eq!(file.boxes.len(), 1);
         assert_eq!(file.problems, vec![]);
+    }
+
+    #[test]
+    fn a_byte_order_mark_and_crlf_line_ends_are_read_past() {
+        let file = parse("\u{feff}0 0 0 1 1 1 2\r\n5 5 5 6 6 6 3 // two\r\n");
+        assert_eq!(file.problems, vec![]);
+        assert_eq!(file.boxes.len(), 2);
     }
 
     #[test]
