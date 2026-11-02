@@ -271,6 +271,18 @@ export const STRINGS = {
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
+    // #1132: chips in the Kills cell for what was going on at the flags (flag_tags.js).
+    FLAG_TAG_LABELS: {
+      while_capping: 'Capping',
+      flag_defence: 'Flag defence',
+      cleared_flag: 'Cleared the flag',
+    },
+    FLAG_TAG_TITLES: {
+      while_capping: 'The player was standing in a flag\'s capture area, capping it, at this kill. The demo only says this for the player who recorded it.',
+      flag_defence: 'The victim was standing in a flag\'s capture area, capping it, at this kill. The demo only says this when the victim recorded it.',
+      cleared_flag: 'This kill stopped a timed capture: one of the cappers died and the capture bar went away within about a second. Told from the timing, so once in a while a kill elsewhere gets it.',
+    },
+    flagTagCount: (label, count) => `${label} ×${count}`,
     COL_HEADSHOTS: 'HS',
     COL_HEADSHOTS_TITLE: 'Headshots among the kills in the Kill Range, from the helmet that flies off in the demo. A + ? means some kills could not be told: two kills on one frame, a British victim, whose helmet may not pop, or in an HLTV demo any kill with no helmet seen, since HLTV demos lose about half of them. A dash: scan the demo again.',
     // #247: an HLTV demo lists every player's highlights; a capture follows that player.

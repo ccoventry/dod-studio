@@ -206,33 +206,59 @@ pub fn cancel_cause(
     cancelled: &GameTime,
     kills: &[KillPosition],
 ) -> CancelCause {
+    let mut deaths = cancelling_deaths(attempt, cancelled, kills).peekable();
+    if deaths.peek().is_none() {
+        return CancelCause::Abandoned;
+    }
+    deaths
+        .find_map(|(_, k)| breaker_of(attempt, k))
+        .map_or(CancelCause::Unattributed, |breaker| CancelCause::Break {
+            breaker,
+        })
+}
+
+/// Where in `kills` the kill that broke `attempt` is: the one
+/// [cancel_cause] credits a [CancelCause::Break] to, `None` for any other
+/// cause. The capture-area tags mark it "cleared the flag" (#1132).
+pub(crate) fn breaking_kill(
+    attempt: &CaptureAttempt,
+    cancelled: &GameTime,
+    kills: &[KillPosition],
+) -> Option<usize> {
+    cancelling_deaths(attempt, cancelled, kills)
+        .find(|(_, k)| breaker_of(attempt, k).is_some())
+        .map(|(index, _)| index)
+}
+
+/// The deaths [cancel_cause] weighs, latest first, with their index in
+/// `kills`.
+fn cancelling_deaths<'a>(
+    attempt: &'a CaptureAttempt,
+    cancelled: &GameTime,
+    kills: &'a [KillPosition],
+) -> impl Iterator<Item = (usize, &'a KillPosition)> {
     let earliest = cancelled
         .viewdemo_offset
         .saturating_sub(BREAK_WINDOW)
         .max(attempt.started.viewdemo_offset);
-    let mut deaths = kills.iter().rev().filter(|k| {
+    let latest = cancelled.viewdemo_offset;
+    kills.iter().enumerate().rev().filter(move |(_, k)| {
         k.victim_team
             .as_ref()
             .is_some_and(|team| same_side(team, &attempt.team))
             && k.time.viewdemo_offset >= earliest
-            && k.time.viewdemo_offset <= cancelled.viewdemo_offset
-    });
-    let Some(latest) = deaths.next() else {
-        return CancelCause::Abandoned;
-    };
-    let by_defender = |k: &KillPosition| {
-        let defender = !k.teamkill
-            && k.killer_team
-                .as_ref()
-                .is_some_and(|team| opposes(team, &attempt.team));
-        defender.then(|| k.killer.clone()).flatten()
-    };
-    std::iter::once(latest)
-        .chain(deaths)
-        .find_map(by_defender)
-        .map_or(CancelCause::Unattributed, |breaker| CancelCause::Break {
-            breaker,
-        })
+            && k.time.viewdemo_offset <= latest
+    })
+}
+
+/// The defender who made `kill`, when a defender of `attempt`'s flag did.
+fn breaker_of(attempt: &CaptureAttempt, kill: &KillPosition) -> Option<PlayerGlobalId> {
+    let defender = !kill.teamkill
+        && kill
+            .killer_team
+            .as_ref()
+            .is_some_and(|team| opposes(team, &attempt.team));
+    defender.then(|| kill.killer.clone()).flatten()
 }
 
 /// The kills of `kills` (a finished analysis' `kill_positions`, in arrival
@@ -240,7 +266,6 @@ pub fn cancel_cause(
 /// to the end of the cancel's frame, as the cancel is resolved when the next
 /// frame starts. What `kill_positions` held at that moment, so
 /// [cancel_cause] gives the same answer on a cached analysis as it did live.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn kills_known_at<'a>(kills: &'a [KillPosition], at: &GameTime) -> &'a [KillPosition] {
     &kills[..kills.partition_point(|k| k.time.frame_index <= at.frame_index)]
 }
@@ -975,6 +1000,7 @@ mod tests {
             victim_origin: None,
             distance: None,
             headshot: Default::default(),
+            capture_area: Default::default(),
         };
         state.kill_positions.push(kill);
     }

@@ -330,6 +330,11 @@ pub struct SerializedStreak {
     /// before it existed: `scanIsCurrent` rescans it.
     #[serde(default)]
     pub headshots: Vec<::analysis::Headshot>,
+    /// What was going on at the flags at each kill (#1132): `while_capping`,
+    /// `flag_defence`, `cleared_flag`. Empty on a demo scanned before it
+    /// existed: `scanIsCurrent` rescans it.
+    #[serde(default)]
+    pub flag_tags: Vec<Vec<::analysis::FlagTag>>,
     /// The scanned file's size and start hash, checked against the file on
     /// disk before a batch or preview patches it (#196). Absent from
     /// projects saved before it existed.
