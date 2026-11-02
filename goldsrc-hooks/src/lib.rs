@@ -268,6 +268,7 @@ mod crosshair;
 mod crosshair_gap;
 mod deathmsg;
 mod debug;
+mod debug_texture;
 mod decals;
 mod demo_bar_progress;
 mod demo_console_keys;

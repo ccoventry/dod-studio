@@ -208,6 +208,7 @@ fn serialized_demo(
             serialized.victims = facts.victims;
             serialized.victim_factions = facts.victim_factions;
             serialized.headshots = facts.headshots;
+            serialized.flag_tags = facts.flag_tags;
             serialized
         })
         .collect();
@@ -262,6 +263,7 @@ impl From<CaptureStreak> for SerializedStreak {
             victims: Vec::new(),
             victim_factions: Vec::new(),
             headshots: Vec::new(),
+            flag_tags: Vec::new(),
             source_key: c.source_key,
             spectated: c.spectated,
             steam_id: c.steam_id,
