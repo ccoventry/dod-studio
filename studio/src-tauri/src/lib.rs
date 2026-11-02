@@ -125,6 +125,7 @@ async fn save_settings(
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
         players_tab::mirror_table(&settings);
