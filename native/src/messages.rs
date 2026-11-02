@@ -655,6 +655,23 @@ pub fn launch_through_wmi(pid: u32) -> String {
     format!("[launch] Started through WMI (PID {pid}), so the game outlives this dev Studio (#545)")
 }
 
+pub fn bring_forward_outcome(
+    outcome: crate::sys::bring_forward::Outcome,
+    took: std::time::Duration,
+) -> String {
+    use crate::sys::bring_forward::Outcome;
+    let what = match outcome {
+        Outcome::Brought => "brought the game's window to the front",
+        Outcome::AlreadyInFront => "the game's window opened in front",
+        Outcome::LeftBehind => "left the game's window behind: another window was in front",
+        Outcome::NoWindow => "no new game window showed",
+    };
+    format!(
+        "[launch] {what} ({:.1} s after the launch)",
+        took.as_secs_f64()
+    )
+}
+
 pub fn launch_cancelled_in_wmi(program: impl Display, started: Option<u32>) -> String {
     format!(
         "[launch] Cancelled while WMI was starting {program}; {}",

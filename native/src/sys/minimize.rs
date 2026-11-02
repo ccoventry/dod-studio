@@ -31,6 +31,18 @@ pub fn minimize_when_shown(_pid: u32, _timeout: Duration, _alive: impl Fn() -> b
     false
 }
 
+/// A visible top-level window of `pid`, if it has one yet
+/// (`sys::bring_forward` looks for the game's with it).
+#[cfg(windows)]
+pub fn visible_window(pid: u32) -> Option<isize> {
+    win::visible_window_of(pid)
+}
+
+#[cfg(not(windows))]
+pub fn visible_window(_pid: u32) -> Option<isize> {
+    None
+}
+
 #[cfg(windows)]
 mod win {
     type Hwnd = isize;

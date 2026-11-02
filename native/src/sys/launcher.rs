@@ -65,14 +65,23 @@ enum Kind {
 impl Launcher {
     /// Starts `cmd`, outside Studio's job when that job would end it when
     /// Studio closes. May set `cmd`'s creation flags, so callers set none.
+    /// For a game the user opened (Launch Game, Review, Launch Preview): one
+    /// started through WMI is brought to the front once its window shows, as
+    /// Studio's own child would come (`sys::bring_forward`).
     pub fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
-        Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))
+        let games_before = crate::sys::process::game_pids();
+        let launcher = Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))?;
+        if let Kind::Detached { pid, .. } = launcher.kind {
+            crate::sys::bring_forward::when_shown(pid, games_before);
+        }
+        Ok(launcher)
     }
 
     /// [`Launcher::spawn`] for a launch the user can cancel (a capture
     /// batch). A cancel while WMI is starting the launcher ends whatever it
     /// started and fails with [`std::io::ErrorKind::Interrupted`]; it never
-    /// falls back to starting another (follows #1198).
+    /// falls back to starting another (follows #1198). The game is left
+    /// where it opens: a batch keeps it behind (#434).
     pub fn spawn_unless_cancelled(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Self> {
         if !crate::sys::job::kills_children_on_close() {
             return cmd.spawn().map(Self::child);
