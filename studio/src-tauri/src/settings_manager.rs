@@ -635,18 +635,12 @@ pub fn settings_path() -> PathBuf {
 /// again at the next start (after each update). Once it has run in either,
 /// a save keeps it run.
 pub fn pinned_review_done_on_disk() -> bool {
-    fs::read_to_string(settings_path())
-        .ok()
-        .is_some_and(|text| pinned_review_done_in(&text))
+    pinned_review_done_in(&fs::read_to_string(settings_path()).unwrap_or_default())
 }
 
 fn pinned_review_done_in(text: &str) -> bool {
-    #[derive(Deserialize)]
-    struct Flag {
-        #[serde(default)]
-        pinned_folders_reviewed: bool,
-    }
-    serde_json::from_str::<Flag>(text).is_ok_and(|f| f.pinned_folders_reviewed)
+    serde_json::from_str::<serde_json::Value>(text)
+        .is_ok_and(|v| v["pinned_folders_reviewed"] == true)
 }
 
 /// How many one-time changes to saved values exist; `migrate` runs the ones
