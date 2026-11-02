@@ -17,8 +17,8 @@
 //! Once a map's world model has loaded, the per-frame poll walks its surfaces
 //! ([`world`]) and changes the baked light of every luxel a box or a light
 //! reaches ([`luxels`]): the boxes' factor first, then the lights added on top,
-//! to the surface's first light style only, so a flickering style keeps its
-//! own range. All of it in the engine's copy of the lighting (`msurface_t.samples`,
+//! to the surface's steady light (style 0) only, so a flickering or switched
+//! style keeps its own range and a lamp doesn't flicker with it. All of it in the engine's copy of the lighting (`msurface_t.samples`,
 //! which `Mod_LoadLighting` keeps for the map's life). The `.bsp` on disk is
 //! never touched, so every demo's map check still passes. The engine built
 //! the map's lightmap textures from the old samples at load, so each changed
@@ -71,6 +71,9 @@ pub static SETTING: Setting = Setting::new(NAME, true);
 const FILE_SUFFIX: &str = "_light.txt";
 /// Changed bytes remembered to tell a kept model from a fresh load.
 const MARKS: usize = 16;
+/// Light style 0, the map's steady light (`lightstyle 0`, "m"); the only
+/// style point lights add to.
+const STEADY_STYLE: u8 = 0;
 /// Problems in a light file the log lists line by line; more are counted.
 const PROBLEMS_LISTED: usize = 5;
 
@@ -317,8 +320,9 @@ fn scale_world(
         let original = samples.to_vec();
         let styles = lit.surface.style_count();
         let facing = lit.surface.facing();
-        let luxels = luxels::edit_luxels(&grid, styles, samples, |point, style, rgb| {
-            relight(edits, facing, point, style, rgb)
+        let style_ids = lit.surface.styles;
+        let luxels = luxels::edit_luxels(&grid, styles, samples, |point, slot, rgb| {
+            relight(edits, facing, point, style_ids[slot], rgb)
         });
         if luxels == 0 {
             continue;
@@ -350,19 +354,23 @@ fn reaches(edits: &file::LightFile, min: [f32; 3], max: [f32; 3]) -> bool {
         || edits.lights.iter().any(|l| l.reaches(min, max))
 }
 
-/// One luxel's colour in one style slot with `edits` applied: multiplied by
-/// the boxes' factor at `point`, then, in the first slot only, the lights'
-/// colour added for a surface facing `facing`. Returns whether it changed.
+/// One luxel's colour in the slot of light style `style` with `edits`
+/// applied: multiplied by the boxes' factor at `point`, then, in the steady
+/// style's slot only, the lights' colour added for a surface facing
+/// `facing`. Returns whether it changed.
 fn relight(
     edits: &file::LightFile,
     facing: [f32; 3],
     point: [f32; 3],
-    style: usize,
+    style: u8,
     rgb: &mut [u8; 3],
 ) -> bool {
     let gain = boxes::gain(&edits.boxes, point);
     let mut new = rgb.map(|c| boxes::scaled(c, gain));
-    if style == 0 && !edits.lights.is_empty() {
+    // Style 0, the steady light, wherever it sits: a surface lit only by a
+    // switched or flickering light has that style in slot 0, and a lamp
+    // added there would switch or flicker with it.
+    if style == STEADY_STYLE && !edits.lights.is_empty() {
         let added = lights::added(&edits.lights, point, facing);
         new = std::array::from_fn(|i| lights::brightened(new[i], added[i]));
     }
@@ -475,8 +483,8 @@ mod tests {
         let grid = surface.grid().expect("grid");
         let edits = file::parse("1600 100 -300 1632 132 -280 2");
         let mut samples = vec![40u8; surface.sample_len().expect("len")];
-        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, style, rgb| {
-            relight(&edits, surface.facing(), p, style, rgb)
+        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, slot, rgb| {
+            relight(&edits, surface.facing(), p, surface.styles[slot], rgb)
         });
         // Columns 0..=2 (x 1600, 1616, 1632) of 5, all 3 rows.
         assert_eq!(changed, 9);
@@ -492,8 +500,8 @@ mod tests {
         // Above the floor's first luxel (1600, 100, -288), reaching 64 units.
         let edits = file::parse("light 1600 100 -272 255 128 0 0.5 64");
         let mut samples = vec![40u8; surface.sample_len().expect("len")];
-        let changed = luxels::edit_luxels(&grid, 2, &mut samples, |p, style, rgb| {
-            relight(&edits, surface.facing(), p, style, rgb)
+        let changed = luxels::edit_luxels(&grid, 2, &mut samples, |p, slot, rgb| {
+            relight(&edits, surface.facing(), p, surface.styles[slot], rgb)
         });
         assert!(changed > 0 && changed < 15, "{changed}");
         let first = &samples[0..3];
@@ -506,13 +514,30 @@ mod tests {
     }
 
     #[test]
+    fn a_light_skips_a_switched_style_in_slot_0_and_lands_in_style_0s_slot() {
+        let mut surface = luxels::tests::floor();
+        surface.styles = [37, 0, 255, 255];
+        let grid = surface.grid().expect("grid");
+        let edits = file::parse("light 1600 100 -272 255 255 255 0.5 64");
+        let mut samples = vec![40u8; surface.sample_len().expect("len")];
+        luxels::edit_luxels(&grid, 2, &mut samples, |p, slot, rgb| {
+            relight(&edits, surface.facing(), p, surface.styles[slot], rgb)
+        });
+        assert!(
+            samples[..15 * 3].iter().all(|&b| b == 40),
+            "slot 0 is style 37"
+        );
+        assert!(samples[15 * 3] > 40, "slot 1 is style 0");
+    }
+
+    #[test]
     fn a_light_under_a_floor_leaves_it_alone() {
         let surface = luxels::tests::floor();
         let grid = surface.grid().expect("grid");
         let edits = file::parse("light 1600 100 -300 255 255 255 1 64");
         let mut samples = vec![40u8; surface.sample_len().expect("len")];
-        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, style, rgb| {
-            relight(&edits, surface.facing(), p, style, rgb)
+        let changed = luxels::edit_luxels(&grid, 1, &mut samples, |p, slot, rgb| {
+            relight(&edits, surface.facing(), p, surface.styles[slot], rgb)
         });
         assert_eq!(changed, 0);
     }
