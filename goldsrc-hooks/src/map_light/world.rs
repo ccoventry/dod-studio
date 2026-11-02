@@ -21,6 +21,11 @@ use std::mem::{offset_of, size_of};
 
 use super::luxels::{MAX_STYLES, Surface};
 
+/// `model_t.needload`: 0 (`NL_PRESENT`) or 3 (`NL_CLIENT`) once loaded, the
+/// two values `Mod_LoadModel` (pre-Anniversary `hw.dll+0x40030`, 25th
+/// Anniversary `+0x240290`) returns the model as it is for.
+pub(crate) const MODEL_NEEDLOAD_AT: usize = 0x40;
+const LOADED: [i32; 2] = [0, 3];
 /// `model_t.type`; 0 is `mod_brush`.
 pub(crate) const MODEL_TYPE_AT: usize = 0x44;
 /// `model_t.numsurfaces`, then `model_t.surfaces`.
@@ -227,6 +232,17 @@ fn query(at: usize) -> Option<Region> {
 #[cfg(not(windows))]
 fn query(_at: usize) -> Option<Region> {
     None
+}
+
+/// Whether `model` is loaded: between `Mod_ClearAll` at a map change and
+/// the reload, a model keeps its name and its pointers into hunk memory
+/// that the next map's data may already be filling.
+pub(crate) fn model_loaded(model: usize) -> bool {
+    crate::crash::readable(model, MODEL_NEEDLOAD_AT + 4)
+        // Safety: readable, checked just before.
+        && LOADED.contains(&unsafe {
+            std::ptr::read_unaligned((model + MODEL_NEEDLOAD_AT) as *const i32)
+        })
 }
 
 /// The world model's surface array, laid out as `build` has it, or `None`

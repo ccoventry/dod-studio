@@ -22,6 +22,9 @@ than where they are:
   5. `GL_BuildLightmaps` (or the Anniversary engine's rebuild of every
      model's lightmaps): a function that reads `model_t.numsurfaces` and
      `model_t.surfaces` and steps through the array by `sizeof(msurface_t)`.
+  6. `Mod_LoadModel` (the user of "Mod_NumForName: %s not found"): it
+     returns a model as it is when `needload` (+0x40) is 0 or 3, the values
+     `world::model_loaded` takes as loaded.
 
 `model_t.type` (+0x44) is the one `map_sounds.rs` uses, checked by
 `verify_map_entities_offsets.py`; this checks the two files agree.
@@ -51,13 +54,15 @@ WORLD = SRC / "map_light" / "world.rs"
 LUXELS = SRC / "map_light" / "luxels.rs"
 MAP_SOUNDS = SRC / "map_sounds.rs"
 MESSAGE = b"Error: lightmap for texture %s too large"
+# Mod_LoadModel's error when the file is missing (the name is Quake's).
+LOAD_MESSAGE = b"Mod_NumForName: %s not found"
 
 
 def layout():
     """{name: offset} from world.rs's consts and its layout test."""
     text = WORLD.read_text(encoding="utf-8")
     out = {}
-    for name in ("MODEL_TYPE_AT", "MODEL_NUMSURFACES_AT", "MODEL_SURFACES_AT"):
+    for name in ("MODEL_NEEDLOAD_AT", "MODEL_TYPE_AT", "MODEL_NUMSURFACES_AT", "MODEL_SURFACES_AT"):
         out[name] = int(re.search(rf"const {name}: usize = (0x[0-9a-fA-F]+);", text).group(1), 16)
     for struct, field, value in re.findall(
             r"offset_of!\((\w+), (\w+)\), (0x[0-9a-fA-F]+)\)", text):
@@ -210,6 +215,16 @@ def check(path, lay):
             walkers.append(caller)
     result(len(walkers) >= 1, f"lightmap builder(s) {', '.join(f'+{c:#x}' for c in walkers) or '(none)'} walk "
                               f"model_t.surfaces (+{arr:#x}, count +{num:#x}) {size:#x} bytes a surface")
+    need = lay["MODEL_NEEDLOAD_AT"]
+    at = hw.data.find(LOAD_MESSAGE)
+    refs = [r for r in hw.xrefs_to(at) if hw.sect(r) == ".text"] if at >= 0 else []
+    load = hw.func_start(refs[0], back=0x400) if refs else None
+    head = text_of(hw.disasm(load, load + 0x40)) if load is not None else []
+    result(has(head, rf"mov eax, dword ptr {field(lay['MODEL_TYPE_AT'])}") and
+           has(head, rf"mov eax, dword ptr {field(need)}") and has(head, r"test eax, eax") and
+           has(head, r"cmp eax, 3"),
+           f"Mod_LoadModel {f'+{load:#x}' if load is not None else '(none)'}: a model whose needload "
+           f"(+{need:#x}) is 0 or 3 is taken as loaded")
     result(lay["map_sounds.model_type_at"] == {lay["MODEL_TYPE_AT"]},
            f"model_t.type +{lay['MODEL_TYPE_AT']:#x} matches map_sounds.rs")
     return ok

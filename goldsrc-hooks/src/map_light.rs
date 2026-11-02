@@ -155,9 +155,10 @@ fn still_applied(applied: &Applied, level: &Level) -> bool {
             .all(|&(at, value)| unsafe { std::ptr::read_volatile(at as *const u8) } == value)
 }
 
-/// The loaded level, once its own world model is in place: until the new
-/// map's world replaces the old one, the old one's memory may already be
-/// the new map's.
+/// The loaded level, once its own world model is in place and loaded: until
+/// the new map's world replaces the old one, the old one's memory may
+/// already be the new map's. `None` changes no state, so a map that is
+/// still loading is looked at again once it has.
 fn current_level() -> Option<Level> {
     let engfuncs = crate::engine::engfuncs()?;
     // Safety: a pointer into the engine's client state, valid for the
@@ -177,10 +178,11 @@ fn current_level() -> Option<Level> {
     }
     // Safety: a cl_entity_t the engine owns; `model` is the SDK layout.
     let model = unsafe { (*entity).model } as usize;
-    if model == 0 || !crate::crash::readable(model, size_of::<crate::engine::ModelSPartial>()) {
+    if model == 0 || !world::model_loaded(model) {
         return None;
     }
-    // Safety: readable, checked above; `name` is a NUL-padded char[64].
+    // Safety: readable (`model_loaded` checked past it); `name` is a
+    // NUL-padded char[64].
     let name = unsafe { &(*(model as *const crate::engine::ModelSPartial)).name };
     let name_len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
     if !name[..name_len].eq_ignore_ascii_case(level) {
@@ -333,8 +335,11 @@ fn scale_world(
 }
 
 /// Puts every changed surface's samples back and rebuilds its lightmap.
+/// Last changed first: where two surfaces' samples overlap, the later copy
+/// was taken after the earlier surface's scaling, so only this order ends
+/// on the bytes the map loaded with.
 fn restore(applied: &Applied) {
-    for changed in &applied.changed {
+    for changed in applied.changed.iter().rev() {
         // Safety: `still_applied` just confirmed the model and samples are
         // the ones scaled, so these spans are the writable ones they were.
         unsafe {
