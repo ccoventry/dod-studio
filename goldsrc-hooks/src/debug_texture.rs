@@ -24,11 +24,14 @@
 //! The client's event API, the way DoD's own `client.dll` does it at
 //! `+0x4e45c`..`+0x4e4a6` (the same file on both engine builds): a point-hull
 //! `EV_PlayerTrace` finds which physent the line hits, then
-//! `EV_TraceTexture(ent, start, end)` names the texture of the surface it
-//! hits on that physent's model. Both are the engine's own functions, so
+//! `EV_TraceTexture(ent, ...)` names the texture of the surface there on
+//! that physent's model, asked over a few units around the hit ([`around`]
+//! says why not the whole line). Both are the engine's own functions, so
 //! there is no `hw.dll` offset to keep per build. The physents are the ones
 //! the engine set up for the frame, which demo playback does too: DoD's
-//! weather code makes the same two calls with no prediction set-up first.
+//! weather code makes the same two calls with no prediction set-up first, and
+//! probes on both builds hit the world in a POV demo and a brush entity (a
+//! box on lennon2) in an HLTV one.
 //!
 //! ## Which detail file
 //!
@@ -76,6 +79,8 @@ const POINT_HULL: i32 = 2;
 const PM_STUDIO_IGNORE: i32 = 1;
 /// Far enough to cross any map (GoldSrc's world is +-4096 on each axis).
 const REACH: f32 = 16384.0;
+/// See [`around`]: less than the 16-unit grid that texture extents snap to.
+const AROUND: f32 = 4.0;
 
 /// `pmtrace_t`'s `fraction`, `endpos` and `ent` (`pm_defs.h`; `ent` at
 /// `+0x30` is what `client.dll` reads at `+0x4e491`). The struct is 68 bytes;
@@ -254,6 +259,27 @@ unsafe fn slot<F: Copy>(api: *const u8, offset: usize) -> Option<F> {
     (!raw.is_null()).then(|| unsafe { std::mem::transmute_copy::<*const c_void, F>(&raw) })
 }
 
+/// The short line through the hit point that `EV_TraceTexture` is given,
+/// [`AROUND`] units each side along the view.
+///
+/// `EV_TraceTexture` doesn't take the surface the line stops on: it walks the
+/// BSP and takes the first surface on a crossed node plane whose texture
+/// extents (a rectangle in texture space, rounded out to 16 units) hold the
+/// crossing. Given the whole line from the eye, a plane crossed in mid-air
+/// can win: on lennon2, aiming down at the yellow step's riser
+/// (`xconcrete_c54_y`) named the floor (`concretefloor03`) whose plane the
+/// line crossed first, though the trace stopped on the riser (PRE, seen in
+/// a probe). A line only a few units long crosses no other plane.
+fn around(point: [f32; 3], forward: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let mut near = point;
+    let mut far = point;
+    for i in 0..3 {
+        near[i] -= forward[i] * AROUND;
+        far[i] += forward[i] * AROUND;
+    }
+    (near, far)
+}
+
 fn read_f32(buf: &[u8], at: usize) -> f32 {
     f32::from_le_bytes(buf[at..at + 4].try_into().unwrap_or_default())
 }
@@ -303,9 +329,10 @@ fn trace() -> Option<Hit> {
     ];
     let ent = i32::from_le_bytes(tr[TR_ENT..TR_ENT + 4].try_into().unwrap_or_default());
     let ent = ent.max(0);
+    let (mut near, mut far) = around(point, forward);
     // Safety: the engine returns a texture_t name or null.
     let texture = unsafe {
-        let raw = trace_texture(ent, start.as_mut_ptr(), end.as_mut_ptr());
+        let raw = trace_texture(ent, near.as_mut_ptr(), far.as_mut_ptr());
         (!raw.is_null()).then(|| CStr::from_ptr(raw).to_string_lossy().into_owned())
     };
     let entity =
@@ -395,6 +422,13 @@ mod tests {
         assert_eq!(detail_line(LENNON2, "avainwall1"), None);
         // A name that only starts another line's first word is not it.
         assert_eq!(detail_line(LENNON2, "in"), None);
+    }
+
+    #[test]
+    fn the_texture_is_asked_for_a_few_units_either_side_of_the_hit() {
+        let (near, far) = around([10.0, -1424.0, -166.0], [0.0, -1.0, 0.0]);
+        assert_eq!(near, [10.0, -1420.0, -166.0]);
+        assert_eq!(far, [10.0, -1428.0, -166.0]);
     }
 
     #[test]
