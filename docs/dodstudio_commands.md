@@ -442,6 +442,24 @@ the origin standing, 18 crouched or prone); and the map. For checking an
 overview's reach in the game (#581). The line also goes to the hook log.
 `goldsrc-hooks/src/position.rs`.
 
+### `ds_debug_texture`
+
+No arguments. Prints the map texture in the middle of the screen while a demo
+plays, for reviewing detail textures in the game (#1309): the texture's name,
+whether it is on the world or a brush entity (a box, a door) and how far away;
+its HD key, `<name>_<hash>`, which is the name of its file in
+`dodstudio_hd\world\<style>\` (and that file, when the active style has one);
+its line in the map's `<map>_detail.txt`, or that it has none; which file that
+came from; and the map. The detail file is the one the engine reads:
+`dod_addon\maps\` (only with `-addons`, which every Studio launch has), else
+`dod\maps\`, else `dod_downloads\maps\`. The first one found is read whole, so
+a line missing from it is missing even if another folder's copy has one. The
+view is the one on screen: the recording player's in a POV demo, the
+spectated one in an HLTV demo, HLAE's camera under `mirv_input camera`. The
+HD key needs the HD texture hook, which installs when the game starts with a
+`dodstudio_hd` folder; without it the line says the key is unknown. The lines
+also go to the hook log. `goldsrc-hooks/src/debug_texture.rs`.
+
 ### `ds_debug_msglog`
 
 `ds_debug_msglog <name>... | all | clear` dumps chosen DoD user messages and
