@@ -603,7 +603,7 @@
 		"enabled"		"1"
 		"labelText"		"Apply map light files"
 		"textAlignment"		"west"
-		"helptext"		"ds_map_apply_lighting: brighten or darken the boxes dodstudio_maps\<map>_light.txt lists."
+		"helptext"		"ds_map_apply_lighting: relight the boxes and lamps dodstudio_maps\<map>_light.txt lists."
 	}
 	"HeadingSound"
 	{

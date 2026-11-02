@@ -25,6 +25,10 @@ than where they are:
   6. `Mod_LoadModel` (the user of "Mod_NumForName: %s not found"): it
      returns a model as it is when `needload` (+0x40) is 0 or 3, the values
      `world::model_loaded` takes as loaded.
+  7. `Mod_LoadFaces`, the caller of `CalcSurfaceExtents` ("Bad surface
+     extents"): sets `SURF_PLANEBACK` in `flags` for a face on its plane's
+     back (point lights, #1310, light only the side a surface faces) and
+     steps through the array by the same size as (5).
 
 `model_t.type` (+0x44) is the one `map_sounds.rs` uses, checked by
 `verify_map_entities_offsets.py`; this checks the two files agree.
@@ -67,7 +71,8 @@ def layout():
     for struct, field, value in re.findall(
             r"offset_of!\((\w+), (\w+)\), (0x[0-9a-fA-F]+)\)", text):
         out[f"{struct}.{field}"] = int(value, 16)
-    out["mirror_size"] = int(re.search(r"size_of::<MSurface>\(\) == (0x[0-9a-fA-F]+)", text).group(1), 16)
+    out["SURF_PLANEBACK"] = int(re.search(r"const SURF_PLANEBACK: i32 = (0x[0-9a-fA-F]+);", text).group(1), 16)
+    out["mirror_size"] =int(re.search(r"size_of::<MSurface>\(\) == (0x[0-9a-fA-F]+)", text).group(1), 16)
     table = text.split("const BUILDS", 1)[1].split("\n];", 1)[0]
     out["builds"] = [
         (re.search(r'name: "([^"]+)"', b).group(1),
@@ -225,6 +230,22 @@ def check(path, lay):
            has(head, r"cmp eax, 3"),
            f"Mod_LoadModel {f'+{load:#x}' if load is not None else '(none)'}: a model whose needload "
            f"(+{need:#x}) is 0 or 3 is taken as loaded")
+    # Mod_LoadFaces: the one caller of CalcSurfaceExtents ("Bad surface
+    # extents"); sets SURF_PLANEBACK in flags and steps by sizeof(msurface_t).
+    at = hw.data.find(b"Bad surface extents")
+    refs = [r for r in hw.xrefs_to(at) if hw.sect(r) == ".text"] if at >= 0 else []
+    calc = hw.func_start(refs[0], back=0x400) if refs else None
+    loaders = sorted({hw.func_start(c, back=0x800) for c in hw.calls_to(calc)} - {None}) if calc else []
+    back = lay["SURF_PLANEBACK"]
+    faces = []
+    for loader in loaders:
+        b = text_of(disasm_function(hw, loader, limit=0x800))
+        sets_back = has(b, rf"or al, {back}$") or has(b, rf"or dword ptr \[\w+ [+-] \w+\], {back}$")
+        steps = has(b, rf"add \w+, {size:#x}$") or has(b, rf"imul \w+, \w+, {size:#x}$")
+        if sets_back and steps:
+            faces.append(loader)
+    result(len(faces) == 1, f"Mod_LoadFaces {', '.join(f'+{c:#x}' for c in faces) or '(none)'} sets "
+                            f"SURF_PLANEBACK ({back}) and steps {size:#x} bytes a surface")
     result(lay["map_sounds.model_type_at"] == {lay["MODEL_TYPE_AT"]},
            f"model_t.type +{lay['MODEL_TYPE_AT']:#x} matches map_sounds.rs")
     return ok

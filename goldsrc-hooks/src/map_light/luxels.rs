@@ -36,6 +36,9 @@ pub(crate) struct Surface {
     /// The plane the surface lies on (`mplane_t.normal`, `.dist`).
     pub normal: [f32; 3],
     pub dist: f32,
+    /// `SURF_PLANEBACK`: the surface faces away from its plane's normal
+    /// (the map's two sides of a wall share one plane).
+    pub back: bool,
 }
 
 impl Surface {
@@ -59,6 +62,16 @@ impl Surface {
     pub(crate) fn sample_len(&self) -> Option<usize> {
         let (smax, tmax) = self.size();
         (smax * tmax <= MAX_LUXELS).then(|| smax * tmax * self.style_count() * BYTES_PER_LUXEL)
+    }
+
+    /// The way the surface faces: its plane's normal, turned round for a
+    /// surface on the plane's back.
+    pub(crate) fn facing(&self) -> [f32; 3] {
+        if self.back {
+            self.normal.map(|n| -n)
+        } else {
+            self.normal
+        }
     }
 
     /// The world positions of the surface's luxels, or `None` when its
@@ -195,6 +208,7 @@ pub(crate) mod tests {
             vecs: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]],
             normal: [0.0, 0.0, 1.0],
             dist: -288.0,
+            back: false,
         }
     }
 
@@ -242,6 +256,7 @@ pub(crate) mod tests {
             vecs: [[0.0, 0.5, 0.0, 7.0], [0.0, 0.0, -1.0, 3.0]],
             normal: [-1.0, 0.0, 0.0],
             dist: -1584.0,
+            back: false,
         };
         let grid = wall.grid().expect("a wall has a grid");
         for (s, t) in [(0, 0), (2, 3), (1, 2)] {
@@ -252,6 +267,16 @@ pub(crate) mod tests {
             assert!((texel_s - (32.0 + 16.0 * s as f32)).abs() < 1e-3, "{p:?}");
             assert!((texel_t - (-128.0 + 16.0 * t as f32)).abs() < 1e-3, "{p:?}");
         }
+    }
+
+    #[test]
+    fn a_surface_on_its_planes_back_faces_the_other_way() {
+        let mut ceiling = floor();
+        assert_eq!(ceiling.facing(), [0.0, 0.0, 1.0]);
+        ceiling.back = true;
+        assert_eq!(ceiling.facing(), [0.0, 0.0, -1.0]);
+        // The same plane, so the same luxel positions.
+        assert_eq!(ceiling.grid(), floor().grid());
     }
 
     #[test]

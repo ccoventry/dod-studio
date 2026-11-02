@@ -92,7 +92,7 @@ MAP
   ds_map_run_cfgs 0/1
       Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
   ds_map_apply_lighting 0/1
-      As a map loads, multiply its baked lighting inside the boxes dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade]). 0 then 1 re-reads the file.
+      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius). 0 then 1 re-reads the file.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
