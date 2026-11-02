@@ -178,7 +178,9 @@ impl CaptureAreas {
             .tracker
             .open
             .iter()
-            .filter(|(_, (_, seen))| now.viewdemo_offset.saturating_sub(seen.viewdemo_offset) > STALE_AFTER)
+            .filter(|(_, (_, seen))| {
+                now.viewdemo_offset.saturating_sub(seen.viewdemo_offset) > STALE_AFTER
+            })
             .map(|(area, _)| *area)
             .collect();
         for area in stale {
@@ -215,7 +217,9 @@ impl CaptureAreas {
 
     /// The recorder died: their visits end now.
     fn recorder_died(&mut self, now: &GameTime) {
-        self.tracker.died_in.extend(self.tracker.open.keys().copied());
+        self.tracker
+            .died_in
+            .extend(self.tracker.open.keys().copied());
         self.close_all(now);
     }
 
@@ -320,9 +324,9 @@ pub fn flag_tags_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Player;
     use crate::objective::{CancelCause, CaptureAttempt};
     use crate::position::KillPosition;
-    use crate::Player;
     use dod::{ClientAreas, DeathMsg, PlayersIn, Weapon};
 
     fn at(secs: f32) -> GameTime {
@@ -433,7 +437,13 @@ mod tests {
         area(&mut state, 4.0, 1, 1);
         area(&mut state, 4.1, 0, 2);
         assert_eq!(kill(&mut state, 4.2, 1, 2).killer_capping, Capping::No);
-        assert!(state.capture_areas.recorder_visits.iter().all(|v| v.left.is_some()));
+        assert!(
+            state
+                .capture_areas
+                .recorder_visits
+                .iter()
+                .all(|v| v.left.is_some())
+        );
     }
 
     #[test]
@@ -548,5 +558,132 @@ mod tests {
             [FlagTag::WhileCapping]
         );
         assert!(flag_tags_of(&state.kill_positions, &at(7.0), &victim).is_empty());
+    }
+
+    /// How many kills get which tag, per demo and per demo type (#1132).
+    /// Demos from `DOD_ANALYSIS_DEMOS` (a folder), else the PRE install's
+    /// `dod` folder: an even spread of up to 80 of its match demos
+    /// (`solifotw-*`, `ktps*`, `wsod25_*`, `k4-*`, `bandits-*`, `week*`, and
+    /// every HLTV one). Fails when it finds none, when an HLTV demo tags
+    /// anyone capping, or when the cleared flags don't match the cap breaks.
+    /// `cargo test -p analysis --release -- --ignored --nocapture capture_area_tags`.
+    #[test]
+    #[ignore]
+    fn capture_area_tags_on_real_demos() {
+        let folder = std::env::var_os("DOD_ANALYSIS_DEMOS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+                )
+            });
+        let mut demos: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap_or_else(|e| panic!("{}: {e} (set DOD_ANALYSIS_DEMOS)", folder.display()))
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                name.ends_with(".dem")
+                    && ["solifotw-", "ktps", "wsod25_", "k4-", "bandits-", "week"]
+                        .iter()
+                        .any(|prefix| name.starts_with(prefix))
+                    || name.ends_with(".dem") && name.contains("hltv")
+            })
+            .collect();
+        demos.sort();
+        let step = demos.len().div_ceil(80).max(1);
+        let hltv_named: Vec<_> = demos
+            .iter()
+            .filter(|p| p.to_string_lossy().contains("hltv"))
+            .cloned()
+            .collect();
+        let mut picked: Vec<_> = demos.iter().step_by(step).cloned().collect();
+        for path in hltv_named {
+            if !picked.contains(&path) {
+                picked.push(path);
+            }
+        }
+        assert!(!picked.is_empty(), "no demos in {}", folder.display());
+
+        // Per type: demos, kills, recorder kills, while capping, recorder
+        // deaths, killed while capping, cleared flags, cap breaks, cleared
+        // flags by the recorder.
+        let mut totals: std::collections::BTreeMap<String, [usize; 9]> = Default::default();
+        let mut recorders = std::collections::BTreeSet::new();
+        for path in &picked {
+            let bytes = std::fs::read(path).unwrap();
+            let Ok(analysis) = crate::Analysis::try_from_bytes(&bytes) else {
+                continue;
+            };
+            let kind = analysis.demo_info.demo_type.clone();
+            let kills = &analysis.state.kill_positions;
+            let count = |f: &dyn Fn(&KillAreaTags) -> bool| {
+                kills.iter().filter(|k| f(&k.capture_area)).count()
+            };
+            let breaks = analysis
+                .state
+                .objectives
+                .attempts
+                .iter()
+                .filter(|a| matches!(a.cancel_cause, Some(CancelCause::Break { .. })))
+                .count();
+            let row = [
+                1,
+                kills.len(),
+                count(&|t| t.killer_capping != Capping::Unknown),
+                count(&|t| t.killer_capping == Capping::Yes),
+                count(&|t| t.victim_capping != Capping::Unknown),
+                count(&|t| t.victim_capping == Capping::Yes),
+                count(&|t| t.cleared_flag),
+                breaks,
+                count(&|t| t.cleared_flag && t.killer_capping != Capping::Unknown),
+            ];
+            let recorder = crate::highlights::highlights(&analysis).recorder;
+            println!(
+                "{}\t{kind}\t{}\t{}\tkills {} | recorder kills {} capping {} | recorder deaths {} capping {} | cleared {} of {} breaks, {} by the recorder",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                analysis.demo_info.map_name,
+                recorder.as_deref().unwrap_or("-"),
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[7],
+                row[8],
+            );
+            if kind == "HLTV" {
+                assert_eq!(
+                    row[2] + row[4],
+                    0,
+                    "{}: HLTV knows no one's area",
+                    path.display()
+                );
+            } else if let Some(name) = recorder {
+                recorders.insert(name);
+            }
+            // A kill can break two captures at once, never fewer than one.
+            assert!(
+                row[6] <= row[7] && (row[7] == 0) == (row[6] == 0),
+                "{}",
+                path.display()
+            );
+            let total = totals.entry(kind).or_default();
+            for (t, r) in total.iter_mut().zip(row) {
+                *t += r;
+            }
+        }
+        for (kind, t) in &totals {
+            println!(
+                "{kind}: {} demos, {} kills; recorder kills {} of which capping {}; recorder deaths {} of which capping {}; cleared the flag {} (cap breaks {}), {} by the recorder",
+                t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]
+            );
+        }
+        println!("POV recorders: {}", recorders.len());
+        assert!(
+            totals.get("POV").is_some_and(|t| t[3] > 0),
+            "no POV kill while capping"
+        );
     }
 }

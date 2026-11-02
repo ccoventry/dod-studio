@@ -1,11 +1,11 @@
 mod british;
-/// Who stood in a capture area, and the kill tags it gives (#1132).
-mod capture_area;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cache;
 /// Whether a demo carries a camera to play back (#920).
 pub mod camera_data;
+/// Who stood in a capture area, and the kill tags it gives (#1132).
+mod capture_area;
 mod chat;
 mod clan_match;
 /// The clock offset between two recordings of one half (#708).
@@ -76,7 +76,7 @@ pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
     capture_area::{
-        AreaVisit, AttackerCount, CaptureAreas, Capping, FlagTag, KillAreaTags, flag_tags_of,
+        AreaVisit, AttackerCount, Capping, CaptureAreas, FlagTag, KillAreaTags, flag_tags_of,
     },
     chat::{ChatMessage, ChatType, translate_system_message},
     clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},

@@ -616,12 +616,7 @@ fn client_areas_without_icon() {
 #[test]
 fn client_areas_keeps_the_status() {
     use crate::ClientAreaStatus::*;
-    for (flag, status) in [
-        (0u8, Left),
-        (1, Inside),
-        (2, ClearAll),
-        (254, Other(254)),
-    ] {
+    for (flag, status) in [(0u8, Left), (1, Inside), (2, ClearAll), (254, Other(254))] {
         let m = parse_as!("ClientAreas", [4u8, flag], ClientAreas);
         assert_eq!(m.status, status);
     }

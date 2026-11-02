@@ -69,9 +69,11 @@ pub fn streak_facts(
         facts
             .headshots
             .push(headshot_of(&analysis.state.kill_positions, time, victim_id));
-        facts
-            .flag_tags
-            .push(flag_tags_of(&analysis.state.kill_positions, time, victim_id));
+        facts.flag_tags.push(flag_tags_of(
+            &analysis.state.kill_positions,
+            time,
+            victim_id,
+        ));
         let victim = players.iter().find(|p| &p.id == victim_id);
         facts
             .victims
@@ -99,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn a_streaks_facts_say_which_of_its_kills_were_headshots() {
+    fn a_streaks_facts_carry_each_kills_headshot_and_flag_tags() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../test-fixtures/ci_fixture.dem"
@@ -108,6 +110,7 @@ mod tests {
         let analysis = Analysis::try_from_bytes(&bytes).unwrap();
         let highlights = analysis::highlights::highlights(&analysis);
         let mut headshots = 0;
+        let mut while_capping = 0;
         for highlight in highlights.shown() {
             let first = highlight.kills[0].frame_index as i32;
             let slot = usize::from(highlight.slot.unwrap());
@@ -115,6 +118,17 @@ mod tests {
             assert_eq!(facts.headshots.len(), highlight.kills.len());
             assert_eq!(facts.headshots.len(), facts.victims.len());
             assert_eq!(facts.flag_tags.len(), facts.victims.len());
+            let shown: Vec<_> = highlight
+                .kills
+                .iter()
+                .map(|k| k.flag_tags.clone())
+                .collect();
+            assert_eq!(facts.flag_tags, shown);
+            while_capping += facts
+                .flag_tags
+                .iter()
+                .filter(|tags| tags.contains(&FlagTag::WhileCapping))
+                .count();
             headshots += facts
                 .headshots
                 .iter()
@@ -129,5 +143,7 @@ mod tests {
                 .sum::<usize>()
         );
         assert!(headshots > 0);
+        // The recorder scored three kills on a flag (#1132).
+        assert_eq!(while_capping, 3);
     }
 }
