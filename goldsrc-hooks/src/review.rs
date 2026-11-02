@@ -12,7 +12,8 @@
 //! the answer keys (`review_keys`, #660), or with `ds_ui_review_keys 0` on
 //! the DoD Studio window's Review tab, which it opens. The keys answer while
 //! the highlight plays too, ending it early (#1141), but not for [`LOCKOUT`]
-//! after it starts.
+//! after it starts. Once each seek has landed, `stopsound` ends whatever was
+//! still playing from before it ([`hush_once_landed`]).
 //!
 //! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
@@ -504,6 +505,9 @@ struct Review {
     loaded: Option<String>,
     /// When the answer keys come on for the highlight playing ([`LOCKOUT`]).
     keys_from: Instant,
+    /// Whether the sound left over from before the highlight's seek has been
+    /// stopped ([`hush_once_landed`]).
+    hushed: bool,
 }
 
 static REVIEW: Mutex<Option<Review>> = Mutex::new(None);
@@ -860,6 +864,7 @@ fn play(review: &mut Review) {
                 fast: false,
             };
             review.keys_from = Instant::now() + LOCKOUT;
+            review.hushed = false;
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -1027,20 +1032,23 @@ fn panel_view(
         live: mode == KeyMode::Live,
         can_go_back: review.at > 0,
         kills: Vec::new(),
+        xray: crate::spec_xray::XRAY.on(),
     };
     let h = &review.queue[review.at];
+    // The clock beside the kills' times, so the next kill's says how soon.
+    let now = clock.map_or_else(String::new, now_text);
     let shown = match review.phase {
         // With the keys off, the Review tab is open for the answer.
         Phase::Waiting => keys.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, KillClock::Ended),
-            ..panel("")
+            ..panel(&now)
         }),
         // The Review tab is open for why this one failed.
         Phase::Failed(_) => None,
         Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
         Phase::Playing { .. } => info.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, clock.map_or(KillClock::Unknown, KillClock::At)),
-            ..panel("")
+            ..panel(&now)
         }),
     };
     (shown, mode)
@@ -1061,6 +1069,11 @@ enum KillClock {
 fn clock_text(seconds: f64) -> String {
     let whole = seconds.max(0.0) as u64;
     format!("{}:{:02}", whole / 60, whole % 60)
+}
+
+/// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
+fn now_text(seconds: f64) -> String {
+    format!("Now {}", clock_text(seconds))
 }
 
 /// The box's kill list (#1140): each kill's number, time, victim and weapon,
@@ -1117,6 +1130,31 @@ fn key_action(action: crate::review_keys::Action) {
         Action::Back => back(),
         Action::Next => next(),
         Action::Stop => stop(),
+        Action::Xray => toggle_xray(),
+    }
+}
+
+/// The `ds_spec_xray_show` value X last turned off: X turns it back on at
+/// that value, so a user's `2` stays `2`.
+static XRAY_WAS: AtomicU32 = AtomicU32::new(1);
+
+/// X: X-ray off when on, else back on as it last was.
+fn toggle_xray() {
+    let now = crate::spec_xray::XRAY.value().unwrap_or(0.0);
+    let (value, was) = xray_toggled(now, XRAY_WAS.load(Ordering::Relaxed));
+    XRAY_WAS.store(was, Ordering::Relaxed);
+    if !run(&format!("{} {value}\n", crate::spec_xray::NAME)) {
+        trace("X-ray: the engine's command buffer is not available");
+    }
+}
+
+/// The value X sets X-ray to when it is at `now`, and the value to remember
+/// for the next press.
+fn xray_toggled(now: f32, was: u32) -> (u32, u32) {
+    if now != 0.0 {
+        (0, (now as u32).max(1))
+    } else {
+        (was.max(1), was.max(1))
     }
 }
 
@@ -1147,6 +1185,24 @@ fn watch_menu(mode: KeyMode) {
     }
 }
 
+/// Stops every sound once a highlight's seek has landed: a sound from before
+/// the seek (the last round's win music, a stepped seek's gunfire) would
+/// otherwise play on over the clip. Once per highlight played, so the clip's
+/// own sounds are left alone. `stopsound` also ends the map's looping
+/// ambience until the next demo load, which a review can do without.
+fn hush_once_landed(review: &mut Review) {
+    if review.hushed
+        || !matches!(review.phase, Phase::Playing { .. })
+        || crate::demo_seek::seeking()
+    {
+        return;
+    }
+    review.hushed = true;
+    if !run("stopsound\n") {
+        trace("stopsound: the engine's command buffer is not available");
+    }
+}
+
 /// The review's step for this frame.
 fn step(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
@@ -1155,6 +1211,7 @@ fn step(guard: &mut Option<Review>) {
     if matches!(review.phase, Phase::Playing { .. }) && crate::demo_seek::seeking() {
         review.keys_from = Instant::now() + LOCKOUT;
     }
+    hush_once_landed(review);
     match review.phase.clone() {
         Phase::Loading {
             since,
@@ -1494,6 +1551,7 @@ fn start(path: &str) {
         phase: Phase::Waiting,
         loaded: None,
         keys_from: Instant::now(),
+        hushed: false,
     });
     go_to(review, at);
 }
@@ -1610,6 +1668,27 @@ mod tests {
             seen_loading: false,
         };
         assert!(kills(&review, None).is_empty());
+    }
+
+    #[test]
+    fn the_box_shows_the_clock_beside_the_kills() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let status = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").status;
+        assert_eq!(status(&review, Some(341.6)), "Now 5:41");
+        assert_eq!(status(&review, None), "");
+        review.phase = Phase::Waiting;
+        assert_eq!(status(&review, Some(370.0)), "Now 6:10");
+    }
+
+    #[test]
+    fn x_turns_xray_off_and_back_on_as_it_was() {
+        // On at 2: off, remembering 2; then back on at 2.
+        assert_eq!(xray_toggled(2.0, 1), (0, 2));
+        assert_eq!(xray_toggled(0.0, 2), (2, 2));
+        // Never on before: on at 1.
+        assert_eq!(xray_toggled(0.0, 1), (1, 1));
+        assert_eq!(xray_toggled(0.0, 0), (1, 1));
     }
 
     #[test]
@@ -1980,6 +2059,7 @@ mod tests {
             phase,
             loaded: Some("a".to_string()),
             keys_from: Instant::now(),
+            hushed: true,
         }
     }
 
