@@ -7,6 +7,7 @@
 // settings file says the look ran.
 
 import { STRINGS } from './strings.js';
+import { logFrontendEvent } from './ipc_bridge.js';
 
 let reviewed = false;
 
@@ -36,8 +37,7 @@ export function foldersToUnpin(pinned, kept) {
   return pinned.filter((f) => !keep.has(f));
 }
 
-// The list as a modal; resolves to the folders left ticked, or null when
-// the user picked Keep all.
+// The list as a modal; resolves to the folders left ticked.
 function showList(pinned) {
   const S = STRINGS.PINNED_REVIEW;
   const modal = document.createElement('div');
@@ -68,13 +68,13 @@ function showList(pinned) {
   });
   const buttons = document.createElement('div');
   buttons.style.cssText = 'display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;';
-  const save = document.createElement('button');
-  save.id = 'pinned-review-save-btn';
-  save.textContent = S.SAVE_BUTTON;
-  const keepAll = document.createElement('button');
-  keepAll.id = 'pinned-review-keep-all-btn';
-  keepAll.textContent = S.KEEP_ALL_BUTTON;
-  buttons.append(save, keepAll);
+  // One button: a second "Keep all" beside Save read as unclear, and every
+  // box starts ticked, so Done with nothing unticked keeps them all.
+  const done = document.createElement('button');
+  done.id = 'pinned-review-done-btn';
+  done.textContent = S.DONE_BUTTON;
+  done.title = S.DONE_TITLE;
+  buttons.append(done);
   content.append(title, message, list, buttons);
   modal.append(content);
   document.body.append(modal);
@@ -84,8 +84,7 @@ function showList(pinned) {
       modal.remove();
       resolve(result);
     };
-    save.addEventListener('click', () => close(boxes.filter((b) => b.checked).map((b) => b.dataset.folder)));
-    keepAll.addEventListener('click', () => close(null));
+    done.addEventListener('click', () => close(boxes.filter((b) => b.checked).map((b) => b.dataset.folder)));
   });
 }
 
@@ -105,7 +104,8 @@ export async function offerPinnedReview({ getPinned, unpin, isSetupOpen = () => 
   }
   const kept = await showList(pinned);
   reviewed = true;
-  const drop = kept ? foldersToUnpin(pinned, kept) : [];
+  const drop = foldersToUnpin(pinned, kept);
+  logFrontendEvent(STRINGS.PINNED_REVIEW.answeredLog(pinned.length - drop.length, drop.length));
   if (drop.length > 0) await unpin(drop);
   else await persist();
 }

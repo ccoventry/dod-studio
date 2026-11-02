@@ -3406,10 +3406,11 @@ export const STRINGS = {
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {
     TITLE: 'Pinned folders',
-    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned, then press Done.",
     KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
-    SAVE_BUTTON: 'Save',
-    KEEP_ALL_BUTTON: 'Keep all',
+    DONE_BUTTON: 'Done',
+    DONE_TITLE: 'Unpins the unticked folders and keeps the ticked ones. This list doesn\'t come up again.',
+    answeredLog: (kept, unpinned) => `[pinned folders] the one-time look: kept ${kept}, unpinned ${unpinned}`,
   },
   SETUP: {
     MENU_ITEM: 'Setup…',
