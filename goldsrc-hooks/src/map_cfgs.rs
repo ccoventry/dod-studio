@@ -136,7 +136,7 @@ pub(crate) fn map_in_header(header: &[u8]) -> Option<String> {
 /// Whether `name` can go into an `exec` line and a file name as it is:
 /// letters, digits, `_`, `-` and `.`, not empty and not `.`-only. Rules out
 /// a path, a quote or a `;` that would start a second command.
-fn is_plain_map_name(name: &str) -> bool {
+pub(crate) fn is_plain_map_name(name: &str) -> bool {
     !name.is_empty()
         && !name.chars().all(|c| c == '.')
         && name
@@ -146,7 +146,7 @@ fn is_plain_map_name(name: &str) -> bool {
 
 /// The folders `exec` reads from, first match wins: `dod_addon` (only with
 /// `-addons`), then `dod`.
-fn search_folders(game_dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn search_folders(game_dir: &Path) -> Vec<PathBuf> {
     let mut folders = Vec::with_capacity(2);
     if crate::texture_hires::addons_on() {
         folders.push(crate::game_folder::game_root().join(crate::game_folder::addon_name()));
