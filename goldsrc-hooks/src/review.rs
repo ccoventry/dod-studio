@@ -77,7 +77,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
-use crate::review_keys::KeyMode;
+use crate::review_keys::{KeyMode, KillClock, kill_lines, now_text};
 
 pub const NAME: &str = console_name!("demo_review");
 
@@ -1054,61 +1054,6 @@ fn panel_view(
     (shown, mode)
 }
 
-/// Where the highlight is, for which of its kills is next.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum KillClock {
-    /// The demo player's clock, while the highlight plays.
-    At(f64),
-    /// Played to its end.
-    Ended,
-    /// No clock to read.
-    Unknown,
-}
-
-/// A time on the demo player's clock as its VCR bar shows it: `5:56`.
-fn clock_text(seconds: f64) -> String {
-    let whole = seconds.max(0.0) as u64;
-    format!("{}:{:02}", whole / 60, whole % 60)
-}
-
-/// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
-fn now_text(seconds: f64) -> String {
-    format!("Now {}", clock_text(seconds))
-}
-
-/// The box's kill list (#1140): each kill's number, time, victim and weapon,
-/// with the next one still to come stood out. A kill counts as come once
-/// the clock reaches it.
-fn kill_lines(h: &Highlight, clock: KillClock) -> Vec<crate::review_keys::KillLine> {
-    use crate::review_keys::{KillLine, KillState};
-    let next = match clock {
-        KillClock::At(now) => h.kills.iter().position(|&t| t > now),
-        KillClock::Ended | KillClock::Unknown => None,
-    };
-    h.kills
-        .iter()
-        .enumerate()
-        .map(|(i, &t)| {
-            let mut text = format!("{}  {}", i + 1, clock_text(t));
-            if let Some(d) = h.details.get(i) {
-                for part in [&d.victim, &d.weapon] {
-                    if !part.is_empty() {
-                        text.push_str("  ");
-                        text.push_str(part);
-                    }
-                }
-            }
-            let state = match (clock, next) {
-                (KillClock::Unknown, _) => KillState::Later,
-                (_, Some(n)) if i == n => KillState::Next,
-                (_, Some(n)) if i > n => KillState::Later,
-                _ => KillState::Past,
-            };
-            KillLine { text, state }
-        })
-        .collect()
-}
-
 /// What an answer key asks for, if the keys still answer: the key may have
 /// come in after the Review tab's buttons moved the review on.
 fn key_action(action: crate::review_keys::Action) {
@@ -1130,31 +1075,11 @@ fn key_action(action: crate::review_keys::Action) {
         Action::Back => back(),
         Action::Next => next(),
         Action::Stop => stop(),
-        Action::Xray => toggle_xray(),
-    }
-}
-
-/// The `ds_spec_xray_show` value X last turned off: X turns it back on at
-/// that value, so a user's `2` stays `2`.
-static XRAY_WAS: AtomicU32 = AtomicU32::new(1);
-
-/// X: X-ray off when on, else back on as it last was.
-fn toggle_xray() {
-    let now = crate::spec_xray::XRAY.value().unwrap_or(0.0);
-    let (value, was) = xray_toggled(now, XRAY_WAS.load(Ordering::Relaxed));
-    XRAY_WAS.store(was, Ordering::Relaxed);
-    if !run(&format!("{} {value}\n", crate::spec_xray::NAME)) {
-        trace("X-ray: the engine's command buffer is not available");
-    }
-}
-
-/// The value X sets X-ray to when it is at `now`, and the value to remember
-/// for the next press.
-fn xray_toggled(now: f32, was: u32) -> (u32, u32) {
-    if now != 0.0 {
-        (0, (now as u32).max(1))
-    } else {
-        (was.max(1), was.max(1))
+        Action::Xray => {
+            if !crate::spec_xray::toggle() {
+                trace("X-ray: the engine's command buffer is not available");
+            }
+        }
     }
 }
 
@@ -1559,6 +1484,7 @@ fn start(path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::review_keys::clock_text;
 
     fn queue_text(lines: &[&str]) -> String {
         std::iter::once(QUEUE_HEADER)
@@ -1679,16 +1605,6 @@ mod tests {
         assert_eq!(status(&review, None), "");
         review.phase = Phase::Waiting;
         assert_eq!(status(&review, Some(370.0)), "Now 6:10");
-    }
-
-    #[test]
-    fn x_turns_xray_off_and_back_on_as_it_was() {
-        // On at 2: off, remembering 2; then back on at 2.
-        assert_eq!(xray_toggled(2.0, 1), (0, 2));
-        assert_eq!(xray_toggled(0.0, 2), (2, 2));
-        // Never on before: on at 1.
-        assert_eq!(xray_toggled(0.0, 1), (1, 1));
-        assert_eq!(xray_toggled(0.0, 0), (1, 1));
     }
 
     #[test]

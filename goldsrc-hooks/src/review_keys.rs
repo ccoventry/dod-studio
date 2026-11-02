@@ -489,6 +489,60 @@ mod draw {
     }
 }
 
+/// Where the highlight is, for which of its kills is next.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum KillClock {
+    /// The demo player's clock, while the highlight plays.
+    At(f64),
+    /// Played to its end.
+    Ended,
+    /// No clock to read.
+    Unknown,
+}
+
+/// A time on the demo player's clock as its VCR bar shows it: `5:56`.
+pub(crate) fn clock_text(seconds: f64) -> String {
+    let whole = seconds.max(0.0) as u64;
+    format!("{}:{:02}", whole / 60, whole % 60)
+}
+
+/// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
+pub(crate) fn now_text(seconds: f64) -> String {
+    format!("Now {}", clock_text(seconds))
+}
+
+/// The box's kill list (#1140): each kill's number, time, victim and weapon,
+/// with the next one still to come stood out. A kill counts as come once
+/// the clock reaches it.
+pub(crate) fn kill_lines(h: &crate::review::Highlight, clock: KillClock) -> Vec<KillLine> {
+    let next = match clock {
+        KillClock::At(now) => h.kills.iter().position(|&t| t > now),
+        KillClock::Ended | KillClock::Unknown => None,
+    };
+    h.kills
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| {
+            let mut text = format!("{}  {}", i + 1, clock_text(t));
+            if let Some(d) = h.details.get(i) {
+                for part in [&d.victim, &d.weapon] {
+                    if !part.is_empty() {
+                        text.push_str("  ");
+                        text.push_str(part);
+                    }
+                }
+            }
+            let state = match (clock, next) {
+                (KillClock::Unknown, _) => KillState::Later,
+                (_, Some(n)) if i == n => KillState::Next,
+                (_, Some(n)) if i > n => KillState::Later,
+                _ => KillState::Past,
+            };
+            KillLine { text, state }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

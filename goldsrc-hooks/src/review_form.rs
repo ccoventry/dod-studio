@@ -195,10 +195,12 @@ pub(crate) fn kill_count_text(kills: usize) -> String {
     }
 }
 
-/// The screen height the layout file's sizes are drawn for: the height at
-/// which a GameUI that scales its font with the screen draws it as the
-/// pre-Anniversary one does (22 px list rows there, 44 px at 1440, #781).
-const LAYOUT_SCREEN_TALL: i32 = 720;
+/// The screen height the layout file's sizes are drawn for. A GameUI that
+/// scales its font with the screen draws it as the pre-Anniversary one does
+/// at 720 lines (22 px list rows there, 44 px at 1440, #781); the form's
+/// controls use the smaller `DefaultSmall` font (13 px against `Default`'s
+/// 16 in the scheme), so its boxes grow by 13/16 of that.
+const LAYOUT_SCREEN_TALL: i32 = 720 * 16 / 13;
 
 /// How much bigger to make the form than its layout file says, as a
 /// fraction: on a build whose font grows with the screen, by as much as the
@@ -286,10 +288,10 @@ mod tests {
     #[test]
     fn the_form_grows_with_a_font_that_grows_with_the_screen() {
         let at_1440 = layout_scale(1440, true);
-        assert_eq!(scaled_rect((10, 34, 36, 24), at_1440), (20, 68, 72, 48));
+        assert_eq!(scaled_rect((10, 34, 36, 24), at_1440), (16, 55, 58, 39));
         assert_eq!(
             scaled_rect((0, 0, 520, 130), layout_scale(1080, true)),
-            (0, 0, 780, 195)
+            (0, 0, 633, 158)
         );
         // The pre-Anniversary font keeps its size: so does the form.
         assert_eq!(layout_scale(1440, false), (1, 1));
