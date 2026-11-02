@@ -16,7 +16,6 @@
 	"FormTitle"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormTitle"
 		"xpos"		"10"
 		"ypos"		"8"
@@ -30,7 +29,6 @@
 	"KillsLabel"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"KillsLabel"
 		"xpos"		"10"
 		"ypos"		"34"
@@ -44,7 +42,6 @@
 	"FormFrom"
 	{
 		"ControlName"		"TextEntry"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormFrom"
 		"xpos"		"58"
 		"ypos"		"34"
@@ -59,7 +56,6 @@
 	"ToLabel"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"ToLabel"
 		"xpos"		"98"
 		"ypos"		"34"
@@ -73,7 +69,6 @@
 	"FormTo"
 	{
 		"ControlName"		"TextEntry"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormTo"
 		"xpos"		"122"
 		"ypos"		"34"
@@ -88,7 +83,6 @@
 	"FormKillCount"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormKillCount"
 		"xpos"		"164"
 		"ypos"		"34"
@@ -102,7 +96,6 @@
 	"NoteLabel"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"NoteLabel"
 		"xpos"		"10"
 		"ypos"		"64"
@@ -116,7 +109,6 @@
 	"FormNote"
 	{
 		"ControlName"		"TextEntry"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormNote"
 		"xpos"		"58"
 		"ypos"		"64"
@@ -130,7 +122,6 @@
 	"FormHint"
 	{
 		"ControlName"		"Label"
-		"font"		"DefaultSmall"
 		"fieldName"		"FormHint"
 		"xpos"		"10"
 		"ypos"		"96"
@@ -144,7 +135,6 @@
 	"SaveButton"
 	{
 		"ControlName"		"Button"
-		"font"		"DefaultSmall"
 		"fieldName"		"SaveButton"
 		"xpos"		"360"
 		"ypos"		"96"
@@ -159,7 +149,6 @@
 	"CancelButton"
 	{
 		"ControlName"		"Button"
-		"font"		"DefaultSmall"
 		"fieldName"		"CancelButton"
 		"xpos"		"440"
 		"ypos"		"96"
