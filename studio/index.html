@@ -138,6 +138,17 @@
                     <option value="type" data-str="WORKSPACE.GROUP_BY_TYPE">Demo type</option>
                   </select>
                 </label>
+                <!-- The order of the demos, inside each group when grouped; queue_sort_by.js. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.SORT_BY_TITLE">
+                  <span data-str="WORKSPACE.SORT_BY_LABEL">Sort by:</span>
+                  <select id="master-sort-by-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
+                    <option value="added" data-str="WORKSPACE.SORT_BY_ADDED">Order added</option>
+                    <option value="name" data-str="WORKSPACE.SORT_BY_NAME">Name</option>
+                    <option value="newest" data-str="WORKSPACE.SORT_BY_NEWEST">Newest first</option>
+                    <option value="oldest" data-str="WORKSPACE.SORT_BY_OLDEST">Oldest first</option>
+                    <option value="highlights" data-str="WORKSPACE.SORT_BY_HIGHLIGHTS">Most highlights</option>
+                  </select>
+                </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <!-- #661: which Review marks a review plays. -->
                 <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">

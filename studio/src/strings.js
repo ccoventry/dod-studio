@@ -149,6 +149,16 @@ export const STRINGS = {
     GROUP_BY_FOLDER: 'Folder',
     GROUP_BY_DATE: 'Date',
     GROUP_BY_TYPE: 'Demo type',
+    // The queue's Sort by dropdown (queue_sort_by.js).
+    SORT_BY_LABEL: 'Sort by:',
+    SORT_BY_TITLE: 'The order of the demos in the queue, inside each group when Group by is on. Only the order changes: '
+      + 'the same demos stay shown, and Review highlights and the bulk actions use them as before.\n'
+      + 'Order added is the order the demos went into the queue. Newest and Oldest go by the day the demo file was last changed.',
+    SORT_BY_ADDED: 'Order added',
+    SORT_BY_NAME: 'Name',
+    SORT_BY_NEWEST: 'Newest first',
+    SORT_BY_OLDEST: 'Oldest first',
+    SORT_BY_HIGHLIGHTS: 'Most highlights',
     groupHeader: (label, demos, highlights) =>
       `${label} · ${demos} demo${demos === 1 ? '' : 's'}, ${highlights} highlight${highlights === 1 ? '' : 's'}`,
     GROUP_HLTV: 'HLTV demos',
