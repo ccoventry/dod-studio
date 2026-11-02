@@ -172,6 +172,8 @@ DEBUG
       Print everything DoD Studio's hook is doing to the console.
   ds_debug_position
       Print where the view and the watched player are.
+  ds_debug_texture
+      Print the map texture in the middle of the screen: its name, its HD file name and its line in the map's _detail.txt.
   ds_debug_msglog <name>...
       Log chosen game messages to the hook log.
   ds_debug_hd_misses
