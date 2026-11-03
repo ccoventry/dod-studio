@@ -111,7 +111,9 @@ fn try_wrap() -> bool {
 }
 
 unsafe extern "C" fn wrapped_playdemo() {
-    remember("playdemo");
+    if let Some(name) = remember("playdemo") {
+        crate::map_cfgs::before_demo(&name);
+    }
     let named = !crate::cmd_list::args().is_empty();
     unsafe { call_real(&REAL_PLAYDEMO) };
     if named {
@@ -129,7 +131,9 @@ unsafe extern "C" fn wrapped_viewdemo() {
         crate::studio_panel::bare_viewdemo();
         return;
     }
-    remember("viewdemo");
+    if let Some(name) = remember("viewdemo") {
+        crate::map_cfgs::before_demo(&name);
+    }
     unsafe { call_real(&REAL_VIEWDEMO) };
     // A seek later on this command line waits for this demo to load (#928).
     crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Viewdemo);
@@ -137,25 +141,24 @@ unsafe extern "C" fn wrapped_viewdemo() {
     crate::studio_panel::after_viewdemo();
 }
 
-/// Notes the name the command was given. A bare `playdemo` (it prints its
-/// usage) changes nothing.
-fn remember(command: &'static str) {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return;
-    };
+/// Notes the name the command was given and returns it. A bare `playdemo`
+/// (it prints its usage), or a name that can't be replayed, changes nothing
+/// and returns `None`.
+fn remember(command: &'static str) -> Option<String> {
+    let engfuncs = engine::engfuncs()?;
     let name = unsafe {
         if (engfuncs.cmd_argc)() < 2 {
-            return;
+            return None;
         }
         let arg = (engfuncs.cmd_argv)(1);
         if arg.is_null() {
-            return;
+            return None;
         }
         CStr::from_ptr(arg).to_string_lossy().trim().to_string()
     };
-    if replay_line(command, &name).is_some() {
-        LAST.with(|last| *last.borrow_mut() = Some((command, name)));
-    }
+    replay_line(command, &name)?;
+    LAST.with(|last| *last.borrow_mut() = Some((command, name.clone())));
+    Some(name)
 }
 
 /// The console line that plays `name` again with `command`, or `None` for a

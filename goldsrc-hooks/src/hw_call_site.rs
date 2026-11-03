@@ -193,7 +193,10 @@ pub(crate) fn check_builds(builds: &[Build]) {
             build.name
         );
     }
-    assert_ne!(builds[0].pattern, builds[1].pattern);
+    // A table may hold one build when the other needs no patch (#662).
+    for pair in builds.windows(2) {
+        assert_ne!(pair[0].pattern, pair[1].pattern);
+    }
 }
 
 #[cfg(test)]

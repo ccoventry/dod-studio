@@ -195,6 +195,32 @@ pub(crate) fn kill_count_text(kills: usize) -> String {
     }
 }
 
+/// The screen height the layout file's sizes are drawn for: the height at
+/// which a GameUI that scales its font with the screen draws it as the
+/// pre-Anniversary one does (22 px list rows there, 44 px at 1440, #781).
+const LAYOUT_SCREEN_TALL: i32 = 720;
+
+/// How much bigger to make the form than its layout file says, as a
+/// fraction: on a build whose font grows with the screen, by as much as the
+/// font, so the text fits its boxes (the form drew its text past them at
+/// 1440 lines); never smaller, and as laid out everywhere else.
+pub(crate) fn layout_scale(screen_tall: i32, font_scales: bool) -> (i32, i32) {
+    if font_scales && screen_tall > LAYOUT_SCREEN_TALL {
+        (screen_tall, LAYOUT_SCREEN_TALL)
+    } else {
+        (1, 1)
+    }
+}
+
+/// A panel's place and size, `(x, y, wide, tall)`, at `scale`.
+pub(crate) fn scaled_rect(
+    rect: (i32, i32, i32, i32),
+    (num, den): (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let s = |v: i32| v.saturating_mul(num) / den.max(1);
+    (s(rect.0), s(rect.1), s(rect.2), s(rect.3))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +281,20 @@ mod tests {
         assert!(!demo_load_ended(true));
         assert!(demo_load_ended(false));
         assert!(!demo_load_ended(false), "said once");
+    }
+
+    #[test]
+    fn the_form_grows_with_a_font_that_grows_with_the_screen() {
+        let at_1440 = layout_scale(1440, true);
+        assert_eq!(scaled_rect((10, 34, 36, 24), at_1440), (20, 68, 72, 48));
+        assert_eq!(
+            scaled_rect((0, 0, 520, 130), layout_scale(1080, true)),
+            (0, 0, 780, 195)
+        );
+        // The pre-Anniversary font keeps its size: so does the form.
+        assert_eq!(layout_scale(1440, false), (1, 1));
+        // Never smaller than laid out.
+        assert_eq!(layout_scale(600, true), (1, 1));
     }
 
     #[test]

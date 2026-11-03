@@ -1527,6 +1527,56 @@ fn fnv1a32(parts: &[&[u8]]) -> u32 {
     hash
 }
 
+/// The HD key of a texture: its replacement's file name without `.tga`,
+/// `<name>_<hash>`, as every miss message and `ds_debug_texture` spell it.
+pub(crate) fn hd_key(name: &str, hash: u32) -> String {
+    format!("{}_{hash:08x}", file_stem_name(name))
+}
+
+/// The pixel hash of the last world texture uploaded under each name
+/// (lowercased), noted by [`decide`]: what [`world_hd`] answers with. The
+/// latest upload of a name wins, so after a map change it is that map's.
+static WORLD_KEYS: Mutex<std::collections::BTreeMap<String, u32>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn note_world_key(name: &str, hash: u32) {
+    if let Ok(mut keys) = WORLD_KEYS.lock() {
+        keys.insert(name.to_ascii_lowercase(), hash);
+    }
+}
+
+/// What the HD swap knows of the world texture `name`, for
+/// `ds_debug_texture` (#1309).
+pub(crate) enum WorldHd {
+    /// The swap hook isn't installed, so no upload was hashed.
+    NoHook,
+    /// No world texture of that name has been uploaded since the hook went in.
+    NotUploaded,
+    /// Its key, and the HD file the active style has for it, if any (`None`
+    /// also while HD is off and no folder has been indexed).
+    Known { key: String, file: Option<PathBuf> },
+}
+
+pub(crate) fn world_hd(name: &str) -> WorldHd {
+    if !HOOK_ACTIVE.load(Ordering::Acquire) {
+        return WorldHd::NoHook;
+    }
+    let Some(hash) = WORLD_KEYS
+        .lock()
+        .ok()
+        .and_then(|keys| keys.get(&name.to_ascii_lowercase()).copied())
+    else {
+        return WorldHd::NotUploaded;
+    };
+    let file = INDEX
+        .peek()
+        .and_then(|index| index.files.get(&(file_stem_name(name), hash)).cloned());
+    WorldHd::Known {
+        key: hd_key(name, hash),
+        file,
+    }
+}
+
 /// A texture name as it appears in a replacement's filename: lowercased, with
 /// the characters Windows refuses in a filename replaced by `_`.
 fn file_stem_name(name: &str) -> String {
@@ -2482,14 +2532,21 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let palette = arg(0x24) as *const u8;
 
     // What this world texture's record holds, for `keep_cached` to compare
-    // the next map's same-named texture against. Every world upload, whether
-    // or not it's replaced.
+    // the next map's same-named texture against, and its key by name for
+    // `ds_debug_texture`. Every world upload, whether or not it's replaced.
     if texture_type == GLT_WORLD
-        && !record.is_null()
         && let Some(hash) = unsafe { upload_hash(data, palette, width, height) }
-        && let Ok(mut hashes) = RECORD_HASH.lock()
     {
-        hashes.insert(record as usize, hash);
+        if !record.is_null()
+            && let Ok(mut hashes) = RECORD_HASH.lock()
+        {
+            hashes.insert(record as usize, hash);
+        }
+        if !name_ptr.is_null() {
+            // Safety: the identifier every caller passes is a NUL-terminated name.
+            let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+            note_world_key(&name, hash);
+        }
     }
     if !enabled() {
         return std::ptr::null();
@@ -2642,14 +2699,15 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
                 return skip(
                     Miss::WrongVersion,
                     &format!(
-                        "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
+                        "replacement(s) named {stem:?} exist, none for this content (needs {}.tga)",
+                        hd_key(&stem, hash)
                     ),
                 );
             }
             None => {
                 return skip(
                     Miss::NoFile,
-                    &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
+                    &format!("no replacement (would be {}.tga)", hd_key(&stem, hash)),
                 );
             }
         },
@@ -4506,6 +4564,12 @@ mod tests {
             Some(("under_score".to_string(), 0xdead_beef))
         );
         assert_eq!(parse_file_name("nohash.tga"), None);
+        // The key a miss message and ds_debug_texture print is the file's stem.
+        assert_eq!(hd_key("+0Lambda", 0x1a2b_3c4d), "+0lambda_1a2b3c4d");
+        assert_eq!(
+            parse_file_name(&format!("{}.tga", hd_key("XCONCRETE_C54_Y", 7))),
+            Some(("xconcrete_c54_y".to_string(), 7))
+        );
         assert_eq!(parse_file_name("x_123.tga"), None);
         assert_eq!(parse_file_name("x_1a2b3c4d.png"), None);
     }
