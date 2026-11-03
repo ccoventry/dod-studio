@@ -28,8 +28,9 @@
 //! the path a flickering light takes every frame. That needs `r_dynamic 1`
 //! (the default), which a line in the log checks. The same scaled samples
 //! light the player models standing there (`R_LightPoint` reads them too),
-//! and a later rebuild of every lightmap (the 25th Anniversary engine does
-//! one on a gamma change) keeps them.
+//! and a later rebuild of every lightmap (on a gamma change: the 25th
+//! Anniversary engine does one, and `lightmap_rebuild` makes the
+//! pre-Anniversary one do it too) keeps them.
 //!
 //! ## Once per load
 //!
