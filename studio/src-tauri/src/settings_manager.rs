@@ -628,6 +628,21 @@ pub fn settings_path() -> PathBuf {
     native::shared::paths::get_appdata_dir().join("settings.json")
 }
 
+/// Whether the settings file says the one-time look at the pinned folders
+/// (#533) has run. An installed Studio and a dev one open at once share the
+/// file, and each saves its whole copy: one that loaded the file before the
+/// look was answered in the other wrote `false` back, and the look came up
+/// again at the next start (after each update). Once it has run in either,
+/// a save keeps it run.
+pub fn pinned_review_done_on_disk() -> bool {
+    pinned_review_done_in(&fs::read_to_string(settings_path()).unwrap_or_default())
+}
+
+fn pinned_review_done_in(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .is_ok_and(|v| v["pinned_folders_reviewed"] == true)
+}
+
 /// How many one-time changes to saved values exist; `migrate` runs the ones
 /// past a file's `settings_migrations`. The frontend saves settings without
 /// this field, so `save_settings` keeps the loaded value.
@@ -842,6 +857,19 @@ mod tests {
         assert!(!settings.pinned_folders_reviewed);
         // Settings saved before #531 keep walking into subfolders.
         assert!(settings.scan_include_subfolders);
+    }
+
+    #[test]
+    fn the_pinned_folder_look_reads_as_run_only_when_the_file_says_so() {
+        assert!(pinned_review_done_in(
+            r#"{"pinned_folders_reviewed": true, "hl_path": "x"}"#
+        ));
+        assert!(!pinned_review_done_in(
+            r#"{"pinned_folders_reviewed": false}"#
+        ));
+        // A file from before #533, or one that doesn't parse, hasn't had it.
+        assert!(!pinned_review_done_in(r#"{"hl_path": "x"}"#));
+        assert!(!pinned_review_done_in("not json"));
     }
 
     #[test]
