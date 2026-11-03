@@ -12,7 +12,8 @@
 //! Studio's own commands for a demo can't stand in for them either: a
 //! batch runs a demo's init commands once its map has loaded, and `gamma`
 //! set after the load reaches the map only in part. The 25th Anniversary
-//! engine rebuilds the lightmaps on a gamma change (`lightmap_gamma.rs`), but
+//! engine rebuilds the lightmaps on a gamma change (`lightmap_gamma.rs`), as
+//! the pre-Anniversary one does with `lightmap_rebuild.rs` (#662), but
 //! the textures were uploaded through the old table, so a map came out 4 to
 //! 16 luma darker than with the same values set before it loaded (measured
 //! on POST, `local/review-images/map-lighting`).
@@ -136,7 +137,7 @@ pub(crate) fn map_in_header(header: &[u8]) -> Option<String> {
 /// Whether `name` can go into an `exec` line and a file name as it is:
 /// letters, digits, `_`, `-` and `.`, not empty and not `.`-only. Rules out
 /// a path, a quote or a `;` that would start a second command.
-fn is_plain_map_name(name: &str) -> bool {
+pub(crate) fn is_plain_map_name(name: &str) -> bool {
     !name.is_empty()
         && !name.chars().all(|c| c == '.')
         && name
@@ -146,7 +147,7 @@ fn is_plain_map_name(name: &str) -> bool {
 
 /// The folders `exec` reads from, first match wins: `dod_addon` (only with
 /// `-addons`), then `dod`.
-fn search_folders(game_dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn search_folders(game_dir: &Path) -> Vec<PathBuf> {
     let mut folders = Vec::with_capacity(2);
     if crate::texture_hires::addons_on() {
         folders.push(crate::game_folder::game_root().join(crate::game_folder::addon_name()));

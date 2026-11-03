@@ -607,7 +607,7 @@ impl RenderManager {
                 *self.recovery_gap.lock().unwrap() = None;
             }
             Err(gap) => {
-                log_markdown(&format!("[render] recover_render_batch: {}", gap));
+                log_markdown(&crate::messages::render::recover_gap(&gap));
                 *self.last_config.lock().unwrap() = None;
                 *self.recovery_gap.lock().unwrap() = Some(gap);
             }
@@ -787,16 +787,19 @@ fn apply_render_update(
                     error,
                 )
             {
-                log_markdown(&format!(
-                    "[render-history] couldn't record how a render of {} ended: {}",
-                    take_folder, e
+                log_markdown(&crate::messages::render::history_end_not_recorded(
+                    &take_folder,
+                    &e,
                 ));
             }
             if let Some((take_folder, base_name, clip_type, _)) = &just_finished {
                 let key = take_key(std::path::Path::new(take_folder));
-                log_markdown(&format!(
-                    "[render-take-finished] job {} take_key={:?} take_folder={} base_name={} clip_type={}",
-                    id, key, take_folder, base_name, clip_type
+                log_markdown(&crate::messages::render::take_finished(
+                    &id,
+                    &key,
+                    take_folder,
+                    base_name,
+                    clip_type,
                 ));
                 let _ = app.emit(
                     "render_take_finished",
@@ -811,11 +814,10 @@ fn apply_render_update(
                 );
             }
             if let Some((base_name, err_log)) = &just_failed {
-                log_markdown(&format!(
-                    "[render-take-failed] job {} base_name={} error={}",
-                    id,
+                log_markdown(&crate::messages::render::take_failed(
+                    &id,
                     base_name,
-                    err_log.as_deref().unwrap_or("(no error log)")
+                    err_log.as_deref().unwrap_or("(no error log)"),
                 ));
             }
             // Autosave only tracks success — matches dev's ui.rs exactly.
@@ -989,9 +991,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     std::path::Path::new(&take_folder),
                     &attempt,
                 ) {
-                    log_markdown(&format!(
-                        "[render-history] couldn't record the start of a render of {}: {}",
-                        take_folder, e
+                    log_markdown(&crate::messages::render::history_start_not_recorded(
+                        &take_folder,
+                        &e,
                     ));
                 }
             }
@@ -1017,9 +1019,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // render has stopped by now, so the whole list can go.
                     if handles.clear_on_finish.swap(false, Ordering::SeqCst) {
                         guard.clear();
-                        log_markdown(
-                            "[render] clear_render_queue: list emptied once the batch stopped",
-                        );
+                        log_markdown(crate::messages::render::CLEAR_QUEUE_EMPTIED);
                     }
                     handles.global_cancel.store(false, Ordering::SeqCst);
                     handles.is_rendering.store(false, Ordering::SeqCst);
@@ -1033,7 +1033,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
 
-        log_markdown("[render] scheduler loop exiting: nothing left Rendering or Queued");
+        log_markdown(crate::messages::render::SCHEDULER_EXITING);
         emit_jobs_snapshot(&app, &handles.jobs);
         let _ = app.emit("render_batch_finished", serde_json::json!({}));
         // After the batch's own end, so its summary and the finish step
@@ -1105,12 +1105,11 @@ async fn scan_and_merge(
     state: &RenderManager,
     payload: RenderBatchPayload,
 ) -> Result<ScanMergeSummary, String> {
-    log_markdown(&format!(
-        "[render] queue_render_batch starting: {} source dir(s), codec={}, fps={}, max_concurrent={}",
+    log_markdown(&crate::messages::render::queue_batch_starting(
         payload.render_directories.len(),
-        payload.codec,
+        &payload.codec,
         payload.fps,
-        payload.max_concurrent_renders
+        payload.max_concurrent_renders,
     ));
 
     // The folders of the rows already listed, to tell a take that is gone
@@ -1247,14 +1246,13 @@ async fn scan_and_merge(
         }
         (summary, guard.is_empty())
     };
-    log_markdown(&format!(
-        "[render] queue_render_batch: {} take(s) found; {} new, {} refreshed, {} kept, {} gone ({} of them queued)",
+    log_markdown(&crate::messages::render::queue_batch_found(
         summary.total,
         summary.added,
         summary.refreshed,
         summary.kept,
         summary.gone,
-        summary.gone_queued
+        summary.gone_queued,
     ));
 
     if empty {
@@ -1285,7 +1283,7 @@ pub async fn start_queued_render(
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
     if state.is_rendering.swap(true, Ordering::SeqCst) {
-        log_markdown("[render] start_queued_render rejected: a batch is already in progress");
+        log_markdown(crate::messages::render::START_REJECTED);
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
     let (config, starting) = match state.start_config() {
@@ -1317,10 +1315,7 @@ pub async fn start_queued_render(
         .await;
     }
 
-    log_markdown(&format!(
-        "[render] start_queued_render: starting scheduler on {} job(s)",
-        starting
-    ));
+    log_markdown(&crate::messages::render::scheduler_starting(starting));
     state.global_cancel.store(false, Ordering::SeqCst);
     *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
     spawn_scheduler(app, state.handles(), config);
@@ -1333,7 +1328,7 @@ pub async fn cancel_render_batch(
     app: AppHandle,
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
-    log_markdown("[render] cancel_render_batch requested");
+    log_markdown(crate::messages::render::CANCEL_BATCH_REQUESTED);
     if state.is_rendering.load(Ordering::SeqCst) {
         state.global_cancel.store(true, Ordering::SeqCst);
     } else {
@@ -1388,10 +1383,9 @@ pub async fn set_render_job_codec(
     // the frontend always sends the value that belongs with `codec` (empty
     // for every built-in codec), so there is nothing to special-case here.
     job.custom_codec_args = custom_codec_args.unwrap_or_default();
-    log_markdown(&format!(
-        "[render] set_render_job_codec {} -> {}",
-        job_id,
-        requested.to_str_id()
+    log_markdown(&crate::messages::render::job_codec_set(
+        &job_id,
+        requested.to_str_id(),
     ));
     // Into the autosave too, so a crash before this job renders recovers it
     // with the codec it was given, not the batch's (#85).
@@ -1413,10 +1407,7 @@ pub async fn cancel_render_job(
     state: tauri::State<'_, RenderManager>,
     job_id: String,
 ) -> Result<(), String> {
-    log_markdown(&format!(
-        "[render] cancel_render_job requested for {}",
-        job_id
-    ));
+    log_markdown(&crate::messages::render::cancel_job_requested(&job_id));
     let mut jobs = state.jobs.lock().unwrap();
     let mutated = if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
         job.cancel_flag.store(true, Ordering::Relaxed);
@@ -1474,7 +1465,7 @@ pub async fn remove_render_job(
     }
     jobs.remove(idx);
     drop(jobs);
-    log_markdown(&format!("[render] remove_render_job {} removed", job_id));
+    log_markdown(&crate::messages::render::job_removed(&job_id));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
@@ -1495,9 +1486,8 @@ pub async fn remove_non_rendering_render_jobs(
     if removed_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] remove_non_rendering_render_jobs removed {} job(s)",
-        removed_count
+    log_markdown(&crate::messages::render::non_rendering_removed(
+        removed_count,
     ));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
@@ -1515,15 +1505,11 @@ pub async fn remove_non_rendering_render_jobs(
 /// whatever the panel currently shows.
 fn log_requeued(state: &RenderManager, context: &str) {
     if state.is_rendering.load(Ordering::SeqCst) {
-        log_markdown(&format!(
-            "[render] {} queued; the running batch picks it up",
-            context
+        log_markdown(&crate::messages::render::requeued_into_running_batch(
+            context,
         ));
     } else {
-        log_markdown(&format!(
-            "[render] {} queued; waits for Start Render Batch",
-            context
-        ));
+        log_markdown(&crate::messages::render::requeued_waits_for_start(context));
     }
 }
 
@@ -1541,9 +1527,9 @@ pub async fn reset_render_job(
             requeue(job);
         }
     }
-    log_markdown(&format!(
-        "[render] reset_render_job {} (was {:?}) -> Queued",
-        job_id, previous_status
+    log_markdown(&crate::messages::render::job_reset(
+        &job_id,
+        &previous_status,
     ));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, &format!("reset_render_job {}", job_id));
@@ -1572,10 +1558,7 @@ pub async fn reset_all_render_jobs(
     if reset_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] reset_all_render_jobs: {} job(s) -> Queued",
-        reset_count
-    ));
+    log_markdown(&crate::messages::render::all_jobs_reset(reset_count));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, "reset_all_render_jobs");
     Ok(())
@@ -1612,10 +1595,9 @@ pub async fn cancel_render_jobs(
             }
         }
     }
-    log_markdown(&format!(
-        "[render] cancel_render_jobs: {} of {} ticked job(s) cancelled",
+    log_markdown(&crate::messages::render::ticked_jobs_cancelled(
         cancelled,
-        job_ids.len()
+        job_ids.len(),
     ));
     // A Queued job changed status outside the scheduler loop, which may not
     // be running at all; the loop handles a Rendering one's own update.
@@ -1646,10 +1628,9 @@ pub async fn reset_render_jobs(
     if reset_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] reset_render_jobs: {} of {} ticked job(s) -> Queued",
+    log_markdown(&crate::messages::render::ticked_jobs_reset(
         reset_count,
-        job_ids.len()
+        job_ids.len(),
     ));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, "reset_render_jobs");
@@ -1673,10 +1654,9 @@ pub async fn remove_render_jobs(
     if removed_count == 0 {
         return Ok(0);
     }
-    log_markdown(&format!(
-        "[render] remove_render_jobs: {} of {} ticked job(s) removed",
+    log_markdown(&crate::messages::render::ticked_jobs_removed(
         removed_count,
-        job_ids.len()
+        job_ids.len(),
     ));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
@@ -1692,7 +1672,7 @@ pub async fn clear_render_queue(
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
     if state.is_rendering.load(Ordering::SeqCst) {
-        log_markdown("[render] clear_render_queue: cancelling the running batch first");
+        log_markdown(crate::messages::render::CLEAR_QUEUE_CANCELLING);
         state.clear_on_finish.store(true, Ordering::SeqCst);
         state.global_cancel.store(true, Ordering::SeqCst);
         return Ok(());
@@ -1703,10 +1683,7 @@ pub async fn clear_render_queue(
         jobs.clear();
         count
     };
-    log_markdown(&format!(
-        "[render] clear_render_queue: {} row(s) removed",
-        count
-    ));
+    log_markdown(&crate::messages::render::queue_cleared(count));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())

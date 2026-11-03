@@ -15,6 +15,7 @@ import { multiMapSplitButton } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { matchesInQueue } from './queue_match_groups.js';
 import { groupDemos, currentGroupBy } from './queue_group_by.js';
+import { sortDemos, currentSortBy } from './queue_sort_by.js';
 import { makeClearable } from './clearable_input.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
@@ -420,12 +421,13 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   Array.from(checkedPaths).forEach(p => { if (!allPaths.has(p)) checkedPaths.delete(p); });
   syncClearSelectedButtonState();
 
-  // Group by (#685, #823): the visible demos in groups, a header line before
-  // each group; otherwise the queue's own order. Either way the same demos.
-  const groups = groupDemos(filteredDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
+  // Sort by, then Group by (#685, #823): the visible demos in groups, a header
+  // line before each group, sorted inside each. Either way the same demos.
+  const sortedDemos = sortDemos(filteredDemos, currentSortBy());
+  const groups = groupDemos(sortedDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
   const rows = groups
     ? groups.flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
-    : filteredDemos.map((demo) => ({ demo }));
+    : sortedDemos.map((demo) => ({ demo }));
 
   rows.forEach(({ header, demo }) => {
     if (header) {

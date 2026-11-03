@@ -410,6 +410,7 @@ pub fn poll() {
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::lightmap_gamma::poll();
+    crate::lightmap_rebuild::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
@@ -479,6 +480,8 @@ pub fn poll() {
     // A float compare unless ds_map_weather changed (#1129).
     crate::map_weather::poll();
     crate::map_sounds::poll();
+    // A level-name hash and a few byte compares once applied (#1312).
+    crate::map_light::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
