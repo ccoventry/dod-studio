@@ -215,6 +215,10 @@ pub struct Build {
     pub frame_ctor: usize,
     /// Whether `frame_ctor` takes the Anniversary build's fourth argument.
     pub frame_ctor_fourth_arg: bool,
+    /// Whether the build scales its font with the screen's height, and not
+    /// the sizes in a layout file: the 25th Anniversary GameUI's is twice as
+    /// tall at 1440 lines (#781).
+    pub font_scales_with_screen: bool,
     /// `EditablePanel::LoadControlSettings(const char *path, const char
     /// *pathID)`, thiscall.
     pub load_control_settings: usize,
@@ -287,6 +291,7 @@ pub const BUILDS: [Build; 2] = [
         operator_new: 0x7_a483,
         frame_ctor: 0x4_a610,
         frame_ctor_fourth_arg: false,
+        font_scales_with_screen: false,
         load_control_settings: 0x4_d6b0,
         frame_size: 0x110,
         sheet_ctor: 0x7_74f0,
@@ -315,6 +320,7 @@ pub const BUILDS: [Build; 2] = [
         operator_new: 0x8_8104,
         frame_ctor: 0x5_2950,
         frame_ctor_fourth_arg: true,
+        font_scales_with_screen: true,
         load_control_settings: 0x5_4620,
         frame_size: 0x118,
         sheet_ctor: 0x8_54f0,

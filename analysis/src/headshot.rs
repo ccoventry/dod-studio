@@ -264,6 +264,7 @@ mod tests {
             victim_origin,
             distance: None,
             headshot: Headshot::Unknown,
+            capture_area: Default::default(),
         }
     }
 

@@ -70,6 +70,7 @@ pub fn install() {
         crate::spectator_follow::target_command,
     );
     add_command(crate::position::NAME, crate::position::command);
+    add_command(crate::debug_texture::NAME, crate::debug_texture::command);
 
     // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll.
@@ -272,6 +273,14 @@ pub fn install() {
     }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);
+    }
+    // Standalone: read by demo_reload's playdemo/viewdemo wrappers.
+    if let Some(cvar) = register(crate::map_cfgs::NAME, "1") {
+        crate::map_cfgs::SETTING.set_cvar(cvar);
+    }
+    // On by default: a map without a light file is left alone (#1312).
+    if let Some(cvar) = register(crate::map_light::NAME, "1") {
+        crate::map_light::SETTING.set_cvar(cvar);
     }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {

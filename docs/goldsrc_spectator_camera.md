@@ -86,6 +86,18 @@ when the review ends, so a stray click or jump can't move a highlight's
 camera. `goldsrc-hooks/tools/verify_spectator_buttons_offsets.py` checks the
 function and its nine callers.
 
+The function also ignores a press until the client clock passes
+`m_flNextObserverInput` (`[this+0x1b18]`, set to the clock + 0.2 by every
+press it takes), which only `Init`/`InitHUDData` clear. While `viewdemo`
+loads, the client runs ahead through the demo, then playback starts again
+from the beginning, so a click or Space during the load left that time far
+ahead of the restarted clock, and every spectator button did nothing until
+playback caught up (#1296, both builds; a seek back restarts the demo and
+clears it). `spectator_input_gate.rs` sets it back to 0 whenever
+it is more than a second ahead of the clock;
+`goldsrc-hooks/tools/verify_spectator_input_gate_offsets.py` checks its two
+patterns.
+
 ### The target
 
 `ds_spec_target <player>` writes `g_iUser2`. The in-eye camera, the
