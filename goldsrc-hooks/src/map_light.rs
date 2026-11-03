@@ -52,7 +52,8 @@ mod boxes;
 mod file;
 mod lights;
 mod luxels;
-mod world;
+// `lightmap_rebuild` asks it whether a map is loaded.
+pub(crate) mod world;
 
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
