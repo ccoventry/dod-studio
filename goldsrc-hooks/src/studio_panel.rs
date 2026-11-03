@@ -219,6 +219,15 @@ pub struct Build {
     /// the sizes in a layout file: the 25th Anniversary GameUI's is twice as
     /// tall at 1440 lines (#781).
     pub font_scales_with_screen: bool,
+    /// Whether a window shown over the playing demo can take clicks. The
+    /// Anniversary build's can't: its mouse is raw input, and a click on a
+    /// text box there trips GameUI's own asserts, two dialogs per click
+    /// (`UtlVector.h` 184 `IsValidIndex`, `UtlMemory.h` 155 `IsIdxValid`):
+    /// `TextEntry::PixelToCursorSpace` (GameUI+0x65900) reads
+    /// `m_LineBreaks[0]` while the box's line-break list is still empty.
+    /// Stacks read from the dialog's thread: the click comes in through
+    /// `Panel::OnMessage` (+0x4a7a0) and `TextEntry::OnMousePressed`.
+    pub clicks_over_demo: bool,
     /// `EditablePanel::LoadControlSettings(const char *path, const char
     /// *pathID)`, thiscall.
     pub load_control_settings: usize,
@@ -292,6 +301,7 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor: 0x4_a610,
         frame_ctor_fourth_arg: false,
         font_scales_with_screen: false,
+        clicks_over_demo: true,
         load_control_settings: 0x4_d6b0,
         frame_size: 0x110,
         sheet_ctor: 0x7_74f0,
@@ -321,6 +331,7 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor: 0x5_2950,
         frame_ctor_fourth_arg: true,
         font_scales_with_screen: true,
+        clicks_over_demo: false,
         load_control_settings: 0x5_4620,
         frame_size: 0x118,
         sheet_ctor: 0x8_54f0,

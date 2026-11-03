@@ -16,8 +16,10 @@
 //! keeps the keys a box has focus for; `HUD_Key_Event` never sees them).
 //! Hidden, the keys are the game's again. A click on its buttons worked on
 //! the pre-Anniversary build only (the Anniversary build's mouse is raw
-//! input), so everything works from the keyboard: Tab moves between the
-//! boxes (`tabPosition` in the layout), Enter saves, Esc cancels.
+//! input, and a click on a box there trips GameUI's asserts, so the form
+//! takes no mouse there: `Build::clicks_over_demo`), so everything works
+//! from the keyboard: Tab moves between the boxes (`tabPosition` in the
+//! layout), Enter saves, Esc cancels.
 //!
 //! ## Keys and buttons
 //!
@@ -303,8 +305,12 @@ unsafe fn open(vgui: &Vgui) -> Result<String, String> {
         front(vgui.panel, vp);
         let keyboard: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
         keyboard(vgui.panel, vp, 1);
+        // No clicks where they trip GameUI's asserts (`Build::clicks_over_demo`):
+        // vgui2 routes no click to a panel, or its children, that takes no
+        // mouse input, so the form is keyboard-only there, as its hint says.
+        let clicks = gameui().is_ok_and(|(_, build)| build.clicks_over_demo);
         let mouse: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_MOUSE_INPUT_ENABLED);
-        mouse(vgui.panel, vp, 1);
+        mouse(vgui.panel, vp, clicks as u32);
         if let Some(from) = vgui.child_named(vp, FROM) {
             let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
             focus(vgui.panel, from, 0);
