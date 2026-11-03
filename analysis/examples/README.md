@@ -27,6 +27,7 @@ documented in its own `//!` header.
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `capture_area_probe` | Which capture-area messages (`ClientAreas`, `PlayersIn`, `CurMarker`) does a demo carry, and about whom? (#1132) |
+| `capture_area_timing_probe` | How often does `ClientAreas` repeat while the recorder stands in an area, and do `PlayersIn` drops line up with deaths well enough to tag kills? (#1132) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |

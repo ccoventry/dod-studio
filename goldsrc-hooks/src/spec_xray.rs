@@ -56,6 +56,29 @@ pub const NAME: &str = console_name!("spec_xray_show");
 /// The cvar, or its default (off) when it could not be registered.
 pub static XRAY: Setting = Setting::new(NAME, false);
 
+/// The value [`toggle`] last turned off: it turns X-ray back on at that
+/// value, so a user's `2` stays `2`.
+static TOGGLED_OFF: AtomicU32 = AtomicU32::new(1);
+
+/// X-ray off when on, else back on as it last was (the review's X key).
+/// `false` when the engine's command buffer isn't there.
+pub(crate) fn toggle() -> bool {
+    let now = XRAY.value().unwrap_or(0.0);
+    let (value, was) = toggled(now, TOGGLED_OFF.load(Ordering::Relaxed));
+    TOGGLED_OFF.store(was, Ordering::Relaxed);
+    std::ffi::CString::new(format!("{NAME} {value}\n")).is_ok_and(|line| engine::client_cmd(&line))
+}
+
+/// The value [`toggle`] sets X-ray to when it is at `now`, and the value to
+/// remember for the next press.
+fn toggled(now: f32, was: u32) -> (u32, u32) {
+    if now != 0.0 {
+        (0, (now as u32).max(1))
+    } else {
+        (was.max(1), was.max(1))
+    }
+}
+
 /// `STUDIO_RENDER`: draw, without `STUDIO_EVENTS` (sounds, muzzle flashes),
 /// which the player's own draw runs.
 const STUDIO_RENDER: i32 = 1;
@@ -403,6 +426,16 @@ mod tests {
         assert!(!glows(5, None, Some(false), None));
         assert!(!glows(0, allies, Some(false), None), "not a player slot");
         assert!(!glows(33, allies, Some(false), None));
+    }
+
+    #[test]
+    fn toggling_turns_xray_off_and_back_on_as_it_was() {
+        // On at 2: off, remembering 2; then back on at 2.
+        assert_eq!(toggled(2.0, 1), (0, 2));
+        assert_eq!(toggled(0.0, 2), (2, 2));
+        // Never on before: on at 1.
+        assert_eq!(toggled(0.0, 1), (1, 1));
+        assert_eq!(toggled(0.0, 0), (1, 1));
     }
 
     #[test]

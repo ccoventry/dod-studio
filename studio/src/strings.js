@@ -149,6 +149,16 @@ export const STRINGS = {
     GROUP_BY_FOLDER: 'Folder',
     GROUP_BY_DATE: 'Date',
     GROUP_BY_TYPE: 'Demo type',
+    // The queue's Sort by dropdown (queue_sort_by.js).
+    SORT_BY_LABEL: 'Sort by:',
+    SORT_BY_TITLE: 'The order of the demos in the queue, inside each group when Group by is on. Only the order changes: '
+      + 'the same demos stay shown, and Review highlights and the bulk actions use them as before.\n'
+      + 'Order added is the order the demos went into the queue. Newest and Oldest go by the day the demo file was last changed.',
+    SORT_BY_ADDED: 'Order added',
+    SORT_BY_NAME: 'Name',
+    SORT_BY_NEWEST: 'Newest first',
+    SORT_BY_OLDEST: 'Oldest first',
+    SORT_BY_HIGHLIGHTS: 'Most highlights',
     groupHeader: (label, demos, highlights) =>
       `${label} · ${demos} demo${demos === 1 ? '' : 's'}, ${highlights} highlight${highlights === 1 ? '' : 's'}`,
     GROUP_HLTV: 'HLTV demos',
@@ -261,6 +271,18 @@ export const STRINGS = {
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
+    // #1132: chips in the Kills cell for what was going on at the flags (flag_tags.js).
+    FLAG_TAG_LABELS: {
+      while_capping: 'Capping',
+      flag_defence: 'Flag defence',
+      cleared_flag: 'Cleared the flag',
+    },
+    FLAG_TAG_TITLES: {
+      while_capping: 'The player was standing in a flag\'s capture area, capping it, at this kill. The demo only says this for the player who recorded it.',
+      flag_defence: 'The victim was standing in a flag\'s capture area, capping it, at this kill. The demo only says this when the victim recorded it.',
+      cleared_flag: 'This kill stopped a timed capture: one of the cappers died and the capture bar went away within about a second. Told from the timing, so once in a while a kill elsewhere gets it.',
+    },
+    flagTagCount: (label, count) => `${label} ×${count}`,
     COL_HEADSHOTS: 'HS',
     COL_HEADSHOTS_TITLE: 'Headshots among the kills in the Kill Range, from the helmet that flies off in the demo. A + ? means some kills could not be told: two kills on one frame, a British victim, whose helmet may not pop, or in an HLTV demo any kill with no helmet seen, since HLTV demos lose about half of them. A dash: scan the demo again.',
     // #247: an HLTV demo lists every player's highlights; a capture follows that player.
@@ -3358,7 +3380,7 @@ export const STRINGS = {
     FALLBACK_PNG: 'One fallback spray',
     FALLBACK_NONE: 'No spray',
     CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
-    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the recorder's in a POV demo, and the watched player's in an HLTV demo's in-eye view.",
+    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the watched player's in a first-person spectator view (an HLTV demo, or a POV demo while the recorder is dead and watching a teammate), and otherwise the recorder's in a POV demo.",
     CROSSHAIR_GAME: "Game's own",
     CROSSHAIR_ONE: 'One fallback crosshair',
     HD_NOTE: "Every spray from a PNG is drawn at the spray size in every demo, whether or not the demo saved one, with or without HD textures (with them on, it's sharper). A spray change shows from the next demo you play. A crosshair changes on the next frame, and in a POV demo needs your cl_xhair_style at 1-16 (0 is DoD's classic crosshair, which has no tile to swap).",
@@ -3409,10 +3431,11 @@ export const STRINGS = {
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {
     TITLE: 'Pinned folders',
-    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned, then press Done.",
     KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
-    SAVE_BUTTON: 'Save',
-    KEEP_ALL_BUTTON: 'Keep all',
+    DONE_BUTTON: 'Done',
+    DONE_TITLE: 'Unpins the unticked folders and keeps the ticked ones. This list doesn\'t come up again.',
+    answeredLog: (kept, unpinned) => `[pinned folders] the one-time look: kept ${kept}, unpinned ${unpinned}`,
   },
   SETUP: {
     MENU_ITEM: 'Setup…',

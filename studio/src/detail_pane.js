@@ -17,6 +17,7 @@ import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
 import { playersOf, matchesPlayer } from './detail_player_filter.js';
 import { headshotsCell } from './headshots.js';
+import { flagTagChips } from './flag_tags.js';
 import { fileNameOf } from './path_display.js';
 import { createCaptureHistory } from './capture_history.js';
 
@@ -522,7 +523,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid var(--border-accent);border-radius:2px;color:var(--text-subtle);cursor:pointer;">↺</button>` : ''}
         </div>
       </td>
-      <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      <td class="streak-kills" style="padding: 8px;"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
       <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
       ${showPlayer ? `<td class="streak-player col-wide" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td class="col-wide" style="padding: 8px;">${timeStr}</td>

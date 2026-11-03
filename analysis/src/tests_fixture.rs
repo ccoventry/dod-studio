@@ -449,3 +449,34 @@ fn a_kill_by_another_player_carries_a_plausible_distance() {
         assert!(k.killer_origin.is_some() && k.victim_origin.is_some());
     }
 }
+
+#[test]
+fn capture_areas() {
+    // #1132: the recorder's own kills and deaths say whether they were
+    // capping (the demo has ClientAreas for them), nobody else's do, and with
+    // no cancelled capture nothing cleared a flag.
+    let state = &analysis().state;
+    let recorder = &player("CI_FIXTURE DEMO TESTER").id;
+    let mut capping = (0, 0);
+    for kill in &state.kill_positions {
+        let tags = kill.capture_area;
+        let by_recorder = kill.killer.as_ref() == Some(recorder);
+        let of_recorder = kill.victim.as_ref() == Some(recorder);
+        assert_eq!(tags.killer_capping != Capping::Unknown, by_recorder);
+        assert_eq!(tags.victim_capping != Capping::Unknown, of_recorder);
+        assert!(!tags.cleared_flag);
+        capping.0 += usize::from(tags.killer_capping == Capping::Yes);
+        capping.1 += usize::from(tags.victim_capping == Capping::Yes);
+    }
+    let visits: Vec<_> = state
+        .capture_areas
+        .recorder_visits
+        .iter()
+        .map(|v| (v.area, v.left.is_some()))
+        .collect();
+    // Three of the recorder's eight kills came while on a flag.
+    assert_eq!(capping, (3, 0));
+    assert_eq!(visits.len(), 8);
+    assert!(visits.iter().all(|(area, left)| *area <= 1 && *left));
+    assert_eq!(state.capture_areas.attackers.len(), 21);
+}

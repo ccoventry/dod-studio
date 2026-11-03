@@ -89,6 +89,10 @@ MAP
       25th Anniversary only: allow the engine's map-surface shaders during playback.
   ds_map_weather 0-3
       Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
+  ds_map_run_cfgs 0/1
+      Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
+  ds_map_apply_lighting 0/1
+      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius). 0 then 1 re-reads the file.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
@@ -155,9 +159,9 @@ DOD STUDIO WINDOW
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
   ds_ui_review_keys 0/1
-      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; ESC opens the Review tab. 0: the Review tab opens at each end.
+      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) and the answer keys.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
@@ -170,6 +174,8 @@ DEBUG
       Print everything DoD Studio's hook is doing to the console.
   ds_debug_position
       Print where the view and the watched player are.
+  ds_debug_texture
+      Print the map texture in the middle of the screen: its name, its HD file name and its line in the map's _detail.txt.
   ds_debug_msglog <name>...
       Log chosen game messages to the hook log.
   ds_debug_hd_misses

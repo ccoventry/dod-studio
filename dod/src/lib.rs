@@ -410,10 +410,43 @@ pub struct ClCorpse {
 ///     CObjectCapture::area_SendStatus = {m_iAreaIndex, -1, sz_HudIcon}
 ///     CObjectCapture::area_SetIndex = {m_iAreaIndex, -1, sz_HudIcon}
 /// ```
+///
+/// What the status byte means, from `dod.so` and `client.so` (#1132): the
+/// message goes to one player (`MSG_ONE`), so a POV demo carries it for its
+/// recorder alone and an HLTV demo only the icons and the reset.
 #[derive(Debug)]
 pub struct ClientAreas {
     pub icon_index: u8,
+    pub status: ClientAreaStatus,
     pub hud_icon: Option<String>,
+}
+
+/// The second byte of [ClientAreas].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientAreaStatus {
+    /// 0: the player left the area (`HandleSignals`).
+    Left,
+    /// 1: the player is touching an area their team can capture, sent on
+    /// every touch while they stand in it (`SetClientAreaIcon`).
+    Inside,
+    /// 2: every area is cleared, at a round reset (`LevelChangeResets`).
+    ClearAll,
+    /// 255 (-1 as a byte): the area's HUD icon name follows.
+    Icon,
+    /// Any other value.
+    Other(u8),
+}
+
+impl From<u8> for ClientAreaStatus {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::Left,
+            1 => Self::Inside,
+            2 => Self::ClearAll,
+            255 => Self::Icon,
+            other => Self::Other(other),
+        }
+    }
 }
 
 /// - Length: 1
@@ -1202,6 +1235,7 @@ fn client_areas(i: &[u8]) -> IResult<&[u8], ClientAreas> {
         i,
         ClientAreas {
             icon_index,
+            status: ClientAreaStatus::from(flags),
             hud_icon,
         },
     ))

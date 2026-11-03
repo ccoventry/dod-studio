@@ -55,7 +55,9 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// Whether a failure to apply has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-fn address() -> Result<usize, String> {
+/// `HandleButtonsDown`'s address; `spectator_input_gate` checks its own
+/// patterns against it.
+pub(crate) fn address() -> Result<usize, String> {
     let Some(base) = engine::client_module_base() else {
         return Err("client.dll is not loaded yet".to_string());
     };
