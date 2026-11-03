@@ -1901,7 +1901,7 @@ EVEN_HEIGHT = 26
 EVEN_BARREL_ROW = 8
 # Bump when the even atlas's look or rule changes: a style's atlas built by
 # an older one is built again.
-EVEN_VERSION = 3  # 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
+EVEN_VERSION = 4  # 4: British heads in the butt stroke (#1089); 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
 ATLAS_NAME = "dodstudio_killfeed"
 ATLAS_TABLE_VERSION = 1
 ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs

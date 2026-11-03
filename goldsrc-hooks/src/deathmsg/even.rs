@@ -476,7 +476,7 @@ static MAP_TABLE: AtomicU32 = AtomicU32::new(0);
 /// How many indices got a box, for `status`.
 static MATCHED: AtomicUsize = AtomicUsize::new(0);
 /// The butt stroke's variants (#1088): the sprite index of `d_garandbutt`
-/// (`usize::MAX`: none) and a leaked `[AtlasBox; 4]` in
+/// (`usize::MAX`: none) and a leaked `[AtlasBox; VARIANTS]` in
 /// [`super::butt::VARIANT_NAMES`]' order (0: the table has no full set).
 static BUTT_INDEX: AtomicUsize = AtomicUsize::new(usize::MAX);
 static BUTT_BOXES: AtomicUsize = AtomicUsize::new(0);
@@ -533,17 +533,21 @@ pub(super) fn line_box(index: usize, slot_offset: i32) -> Option<AtlasBox> {
     }
     #[cfg(target_arch = "x86")]
     if let Some(v) = super::butt::line_variant(slot_offset) {
-        // Safety: a leaked `[AtlasBox; 4]`, never freed; `v` < 4.
-        return Some(unsafe { *(boxes as *const AtlasBox).add(v.min(3)) });
+        // Safety: a leaked `[AtlasBox; VARIANTS]`, never freed; `v` is
+        // kept below VARIANTS.
+        return Some(unsafe { *(boxes as *const AtlasBox).add(v.min(super::butt::VARIANTS - 1)) });
     }
     let _ = slot_offset;
     Some(own)
 }
 
-/// The butt stroke's four variant boxes, in [`super::butt::VARIANT_NAMES`]'
-/// order, when the table has all four in one size; else `None`, and every
-/// butt stroke draws `d_garandbutt`'s own box.
-pub(super) fn butt_boxes(table: &Table) -> Option<[AtlasBox; 4]> {
+/// The butt stroke's variant boxes, in [`super::butt::VARIANT_NAMES`]'
+/// order, when the table has them all in one size; else `None`, and every
+/// butt stroke draws `d_garandbutt`'s own box. An atlas built before the
+/// British heads (#1089) lacks those two: their lines draw the US head, as
+/// before.
+pub(super) fn butt_boxes(table: &Table) -> Option<[AtlasBox; super::butt::VARIANTS]> {
+    use super::butt::{Head, VARIANT_NAMES, variant_index};
     let find = |name: &str| {
         table
             .boxes
@@ -551,13 +555,14 @@ pub(super) fn butt_boxes(table: &Table) -> Option<[AtlasBox; 4]> {
             .find(|(n, _)| n.eq_ignore_ascii_case(name))
             .map(|(_, b)| *b)
     };
-    let names = super::butt::VARIANT_NAMES;
-    let boxes = [
-        find(names[0].0)?,
-        find(names[1].0)?,
-        find(names[2].0)?,
-        find(names[3].0)?,
-    ];
+    let mut boxes = [find(VARIANT_NAMES[0].0)?; super::butt::VARIANTS];
+    for (slot, &(name, rifle, head)) in boxes.iter_mut().zip(VARIANT_NAMES.iter()) {
+        *slot = match (find(name), head) {
+            (Some(b), _) => b,
+            (None, Head::British) => find(VARIANT_NAMES[variant_index(rifle, Head::Us)].0)?,
+            (None, _) => return None,
+        };
+    }
     let size = |b: &AtlasBox| (b.rect.right - b.rect.left, b.rect.bottom - b.rect.top);
     boxes
         .iter()
@@ -865,7 +870,7 @@ fn map_indices() {
     report(&format!(
         "{matched} of the HUD's {count} sprites draw from the atlas{}",
         if butt.is_some() {
-            ", the butt stroke per line (four variants)"
+            ", the butt stroke per line (rifle and head)"
         } else {
             ""
         }
@@ -1073,6 +1078,33 @@ mod tests {
         let boxes = butt_boxes(&full).unwrap();
         assert_eq!(boxes[0], full.boxes[0].1, "hud.txt's own first");
         assert_eq!(boxes[3], full.boxes[3].1);
+        // An atlas from before #1089: the British lines draw the US heads.
+        assert_eq!(boxes[4], boxes[1], "Garand, British -> Garand, US");
+        assert_eq!(boxes[5], boxes[3], "K43, British -> K43, US");
+        let british = parse_table(
+            "dodstudio_killfeed 1 2\n\
+             d_garandbutt 1 2 2 53 26\n\
+             d_garandbutt_us 1 57 2 53 26\n\
+             d_k43butt_axis 1 112 2 53 26\n\
+             d_k43butt_us 1 167 2 53 26\n\
+             d_garandbutt_brit 1 2 30 53 26\n\
+             d_k43butt_brit 1 57 30 53 26\n",
+        )
+        .unwrap();
+        let boxes = butt_boxes(&british).unwrap();
+        assert_eq!(boxes[4], british.boxes[4].1);
+        assert_eq!(boxes[5], british.boxes[5].1);
+        let narrow_british = parse_table(
+            "dodstudio_killfeed 1 2\n\
+             d_garandbutt 1 2 2 53 26\n\
+             d_garandbutt_us 1 57 2 53 26\n\
+             d_k43butt_axis 1 112 2 53 26\n\
+             d_k43butt_us 1 167 2 53 26\n\
+             d_garandbutt_brit 1 2 30 50 26\n\
+             d_k43butt_brit 1 57 30 53 26\n",
+        )
+        .unwrap();
+        assert_eq!(butt_boxes(&narrow_british), None);
         // An atlas from before #1088: only d_garandbutt.
         assert_eq!(butt_boxes(&parse_table(TABLE_TEXT).unwrap()), None);
         let uneven = parse_table(
