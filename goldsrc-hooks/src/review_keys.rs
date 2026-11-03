@@ -3,7 +3,9 @@
 //! which one it is and lists the keys that answer it, so an answer doesn't
 //! need the ESC menu, nor waiting for the highlight to end (#1141). Under
 //! its title the box lists the highlight's kills, time, victim and weapon,
-//! with the next one to come in the key colour behind a `>` (#1140).
+//! with the next one to come in the key colour behind a `>` (#1140), under
+//! a line with the demo player's clock now, so a kill's time says how soon
+//! it comes.
 //!
 //! ## The keys
 //!
@@ -13,7 +15,8 @@
 //! on" key, which only skips: B brings the highlight back. E opens a small
 //! form for the kill range and the note over the demo ([`FORM_KEY`],
 //! `review_form`, #1139); while it shows, its boxes take every key, and the
-//! answer keys do nothing. ESC brings up the
+//! answer keys do nothing. X turns X-ray on and off ([`XRAY_KEY`]): back to
+//! the `ds_spec_xray_show` value it last had on, or `1`. ESC brings up the
 //! menu as always, and the review opens the DoD Studio window on its Review
 //! tab with it, whose boxes hold the same two: vgui2 takes ESC before any
 //! client hook sees it (seen live on PRE), so the review watches the menu
@@ -45,6 +48,16 @@
 //! on, so holding Y a moment too long doesn't open chat on the next
 //! highlight ([`HELD`]).
 //!
+//! That release doesn't always come here: a press that moves the review to
+//! another demo runs `viewdemo`, which brings up the menu and the DoD Studio
+//! window, and the last answer opens the Review tab, so a key let go a moment
+//! later goes to vgui2. Its bit then swallowed the key's next press, the
+//! first one on the next highlight, as the rest of the old one (#1320). So
+//! a bit is dropped once two polls in a row find its key up on the keyboard
+//! ([`forget_released`]): one frame is left for a release already on its way
+//! to clear it as usual. A release later still then reaches the bind
+//! (`-jump` for Space), which does nothing.
+//!
 //! ## Threads
 //!
 //! `HUD_Key_Event` and `HUD_Redraw` run on the engine's thread, every key
@@ -64,7 +77,7 @@ use crate::setting::Setting;
 
 /// `ds_ui_review_keys 1` (default): while a highlight plays and at its end,
 /// Y, M, N, R, B, Space or S answer it on the game screen, E opens the kill
-/// range and note form (#1139), and at its end the
+/// range and note form (#1139), X turns X-ray on or off, and at its end the
 /// review waits there instead of opening the Review tab, which ESC opens.
 /// `0` opens the tab at each end, as before #660.
 pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
@@ -87,6 +100,8 @@ pub(crate) enum Action {
     Stop,
     /// Opens the kill range and note form (#1139).
     Form,
+    /// Turns X-ray on or off.
+    Xray,
 }
 
 impl Action {
@@ -134,10 +149,14 @@ const fn key(code: u8, label: &'static str, word: &'static str, action: Action) 
 /// has the boxes themselves), so not in [`KEYS_LIST`]; E is `+use`, which
 /// does nothing in a demo.
 pub(crate) const FORM_KEY: Key = key(b'e', "E", "kill range and note", Action::Form);
+/// X: X-ray on or off. Not a Review tab button either; the box says whether
+/// it is on.
+pub(crate) const XRAY_KEY: Key = key(b'x', "X", "X-ray", Action::Xray);
 
-/// Every key the review takes: the buttons' in order, then [`FORM_KEY`].
+/// Every key the review takes: the buttons' in order, then [`FORM_KEY`] and
+/// [`XRAY_KEY`].
 fn all_keys() -> impl Iterator<Item = &'static Key> {
-    KEYS_LIST.iter().chain(std::iter::once(&FORM_KEY))
+    KEYS_LIST.iter().chain([&FORM_KEY, &XRAY_KEY])
 }
 
 /// The action a key stands for, and its place in [`all_keys`], which is its
@@ -227,6 +246,79 @@ pub(crate) fn forget_held() {
     HELD.store(0, Ordering::Relaxed);
 }
 
+/// The Windows virtual-key code of an engine key number: a letter's is its
+/// upper-case ASCII code, Space's 0x20.
+fn virtual_key(key: i32) -> Option<i32> {
+    match u8::try_from(key).ok()? {
+        c @ b'a'..=b'z' => Some(i32::from(c.to_ascii_uppercase())),
+        b' ' => Some(0x20),
+        _ => None,
+    }
+}
+
+/// The bits of `held` whose key `is_down` says is up.
+fn up_now(held: u32, is_down: impl Fn(i32) -> bool) -> u32 {
+    all_keys()
+        .enumerate()
+        .filter(|(i, k)| held & (1 << i) != 0 && !is_down(k.code))
+        .fold(0, |up, (i, _)| up | 1 << i)
+}
+
+/// One poll's look at the held keys: the bits to drop, up now and at the
+/// last poll too, and the bits up for the first time, for the next poll.
+fn released(held: u32, up_before: u32, is_down: impl Fn(i32) -> bool) -> (u32, u32) {
+    let up = up_now(held, is_down);
+    let drop = up & up_before;
+    (drop, up & !drop)
+}
+
+/// The held keys found up at the last poll, whose release may still be on
+/// its way.
+static UP_ONCE: AtomicU32 = AtomicU32::new(0);
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetAsyncKeyState(key: i32) -> i16;
+}
+
+/// Whether the key is down on the keyboard now, whichever window has it. A
+/// key with no virtual-key code counts as down, so its bit waits for its
+/// release as before.
+fn key_is_down(key: i32) -> bool {
+    // Safety: a plain query; the high bit is set while the key is down.
+    virtual_key(key).is_none_or(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
+}
+
+/// Drops the [`HELD`] bit of every taken key found up at two polls in a row
+/// (#1320), whose release went to the menu or a loading demo instead of
+/// here. Called every frame by the review's poll; one atomic load while no
+/// taken key is down. The drop clears only its own bits, so a press taken
+/// meanwhile (from the fallback timer thread's poll) keeps its bit.
+pub(crate) fn forget_released() {
+    let held = HELD.load(Ordering::Relaxed);
+    if held == 0 {
+        UP_ONCE.store(0, Ordering::Relaxed);
+        return;
+    }
+    let (drop, up) = released(held, UP_ONCE.load(Ordering::Relaxed), key_is_down);
+    UP_ONCE.store(up, Ordering::Relaxed);
+    if drop == 0 {
+        return;
+    }
+    HELD.fetch_and(!drop, Ordering::Relaxed);
+    let names: Vec<&str> = all_keys()
+        .enumerate()
+        .filter(|(i, _)| drop & (1 << i) != 0)
+        .map(|(_, k)| k.label)
+        .collect();
+    unsafe {
+        crate::debug::report(&format!(
+            "review_keys: {} is up but its release hasn't reached the game; its next press counts (#1320)",
+            names.join(", ")
+        ))
+    };
+}
+
 /// The action a key asked for since the last poll.
 pub(crate) fn take_pending() -> Option<Action> {
     Action::from_code(PENDING.swap(0, Ordering::AcqRel))
@@ -249,6 +341,8 @@ pub(crate) struct Panel {
     pub can_go_back: bool,
     /// The highlight's kills, one line each (#1140); empty lists none.
     pub kills: Vec<KillLine>,
+    /// Whether X-ray is on, said beside its key.
+    pub xray: bool,
 }
 
 /// Where a kill is against the demo clock, which sets how its line is drawn.
@@ -293,10 +387,19 @@ pub(crate) fn publish(panel: Option<Panel>, mode: KeyMode) {
 }
 
 /// The line under the keys, each key in the key colour, then what it does:
-/// E opens the kill range and note form (#1139), ESC the menu on the Review
-/// tab, as before.
-pub(crate) const LAST_LINE: [(&str, &str); 2] =
-    [(FORM_KEY.label, FORM_KEY.word), ("ESC", "Review tab")];
+/// E opens the kill range and note form (#1139), X turns X-ray on or off,
+/// ESC opens the menu on the Review tab, as before. The action is `None` for
+/// ESC, which always works.
+pub(crate) const LAST_LINE: [(&str, &str, Option<Action>); 3] = [
+    (FORM_KEY.label, FORM_KEY.word, Some(Action::Form)),
+    (XRAY_KEY.label, XRAY_KEY.word, Some(Action::Xray)),
+    ("ESC", "Review tab", None),
+];
+
+/// X-ray's word on the box: whether it is on.
+pub(crate) fn xray_word(on: bool) -> String {
+    format!("{} {}", XRAY_KEY.word, if on { "on" } else { "off" })
+}
 
 /// Draws the box. Runs after `client.dll`'s own `HUD_Redraw`, every frame.
 ///
@@ -379,14 +482,20 @@ mod draw {
                 keys.extend(run(&format!(" {}", k.word), word));
             }
             lines.push(keys);
-            // E is greyed with the rest during the lockout; ESC always works.
+            // E and X are greyed with the rest during the lockout; ESC always
+            // works.
             let mut last = Vec::new();
-            for (i, (key, word)) in LAST_LINE.iter().enumerate() {
+            for (i, (key, word, action)) in LAST_LINE.iter().enumerate() {
                 let gap = if i == 0 { "" } else { "    " };
-                let (key_colour, word_colour) = if i > 0 || panel.key_live(Action::Form) {
+                let (key_colour, word_colour) = if action.is_none_or(|a| panel.key_live(a)) {
                     (KEY, WHITE)
                 } else {
                     (DIM, DIM)
+                };
+                let word = if *action == Some(Action::Xray) {
+                    super::xray_word(panel.xray)
+                } else {
+                    word.to_string()
                 };
                 last.extend(run(&format!("{gap}{key}"), key_colour));
                 last.extend(run(&format!(" {word}"), word_colour));
@@ -463,6 +572,60 @@ mod draw {
     }
 }
 
+/// Where the highlight is, for which of its kills is next.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum KillClock {
+    /// The demo player's clock, while the highlight plays.
+    At(f64),
+    /// Played to its end.
+    Ended,
+    /// No clock to read.
+    Unknown,
+}
+
+/// A time on the demo player's clock as its VCR bar shows it: `5:56`.
+pub(crate) fn clock_text(seconds: f64) -> String {
+    let whole = seconds.max(0.0) as u64;
+    format!("{}:{:02}", whole / 60, whole % 60)
+}
+
+/// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
+pub(crate) fn now_text(seconds: f64) -> String {
+    format!("Now {}", clock_text(seconds))
+}
+
+/// The box's kill list (#1140): each kill's number, time, victim and weapon,
+/// with the next one still to come stood out. A kill counts as come once
+/// the clock reaches it.
+pub(crate) fn kill_lines(h: &crate::review::Highlight, clock: KillClock) -> Vec<KillLine> {
+    let next = match clock {
+        KillClock::At(now) => h.kills.iter().position(|&t| t > now),
+        KillClock::Ended | KillClock::Unknown => None,
+    };
+    h.kills
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| {
+            let mut text = format!("{}  {}", i + 1, clock_text(t));
+            if let Some(d) = h.details.get(i) {
+                for part in [&d.victim, &d.weapon] {
+                    if !part.is_empty() {
+                        text.push_str("  ");
+                        text.push_str(part);
+                    }
+                }
+            }
+            let state = match (clock, next) {
+                (KillClock::Unknown, _) => KillState::Later,
+                (_, Some(n)) if i == n => KillState::Next,
+                (_, Some(n)) if i > n => KillState::Later,
+                _ => KillState::Past,
+            };
+            KillLine { text, state }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +665,20 @@ mod tests {
             decide(true, e, KeyMode::Locked, 0),
             (true, None, 1 << KEYS_LIST.len())
         );
+    }
+
+    #[test]
+    fn x_toggles_xray_only_while_the_keys_are_live() {
+        let x = b'x' as i32;
+        let bit = 1 << (KEYS_LIST.len() + 1);
+        assert_eq!(
+            decide(true, x, KeyMode::Live, 0),
+            (true, Some(Action::Xray), bit)
+        );
+        assert_eq!(decide(true, x, KeyMode::Off, 0), (false, None, 0));
+        assert_eq!(decide(true, x, KeyMode::Locked, 0), (true, None, bit));
+        assert_eq!(xray_word(true), "X-ray on");
+        assert_eq!(xray_word(false), "X-ray off");
     }
 
     #[test]
@@ -555,6 +732,65 @@ mod tests {
         for k in &KEYS_LIST {
             assert!(!panel.key_live(k.action));
         }
+    }
+
+    #[test]
+    fn a_key_let_go_elsewhere_is_forgotten() {
+        // #1320: Space moved the review to another demo, whose load brought
+        // the menu up before Space was let go: its release never came.
+        let space = b' ' as i32;
+        let (_, _, held) = decide(true, space, KeyMode::Live, 0);
+        // While it is still down, the bit stays: autorepeat stays taken.
+        assert_eq!(released(held, 0, |k| k == space), (0, 0));
+        // Up at one poll: kept for a frame, for a release on its way.
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!((drop, up), (0, held));
+        // Up at the next poll too: dropped.
+        let (drop, up) = released(held, up, |_| false);
+        assert_eq!((drop, up), (held, 0));
+        let held = held & !drop;
+        // So the first press on the next highlight answers.
+        assert_eq!(
+            decide(true, space, KeyMode::Live, held),
+            (true, Some(Action::Next), 1 << 5)
+        );
+        // Each bit follows its own key.
+        let both = (1 << 0) | (1 << 5);
+        assert_eq!(up_now(both, |k| k == Y), 1 << 5);
+        assert_eq!(released(both, both, |k| k == Y), (1 << 5, 0));
+    }
+
+    #[test]
+    fn a_release_in_time_clears_its_bit_as_usual() {
+        // An ordinary tap: up at one poll, its release arrives before the
+        // next, which then has nothing to drop.
+        let (_, _, held) = decide(true, Y, KeyMode::Live, 0);
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!(drop, 0);
+        let (_, _, held) = decide(false, Y, KeyMode::Live, held);
+        assert_eq!(held, 0);
+        assert_eq!(released(held, up, |_| false), (0, 0));
+        // Down again by the next poll (a new press): nothing is dropped.
+        assert_eq!(released(1, 1, |k| k == Y), (0, 0));
+    }
+
+    #[test]
+    fn a_key_with_no_virtual_key_counts_as_down() {
+        assert!(key_is_down(27));
+    }
+
+    #[test]
+    fn every_key_has_a_virtual_key() {
+        for k in all_keys() {
+            let vk = virtual_key(k.code).unwrap_or_else(|| panic!("{}", k.label));
+            // Windows names a letter by its upper-case ASCII code.
+            if k.label.len() == 1 {
+                assert_eq!(vk, k.label.as_bytes()[0] as i32);
+            }
+        }
+        assert_eq!(virtual_key(b' ' as i32), Some(0x20));
+        assert_eq!(virtual_key(27), None);
+        assert_eq!(virtual_key(-1), None);
     }
 
     #[test]

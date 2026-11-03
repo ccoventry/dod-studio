@@ -3473,6 +3473,20 @@ input[type="checkbox"].hd-box-pattern {
   white-space: nowrap;
 }
 
+/* What was going on at the flags at the highlight's kills (#1132,
+   flag_tags.js): small chips after the kill count. */
+.flag-tag-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 0.75em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  cursor: help;
+}
+
 .streak-notes-input {
   display: block;
   box-sizing: border-box;

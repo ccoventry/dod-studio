@@ -8,8 +8,9 @@ import { readFileSync } from 'node:fs';
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
 // +3: the row context menu's import and one start call (#1111); +6: the
-// Auditor's relocateMoved wiring into project_demos (#872).
-const BUDGET = 524;
+// Auditor's relocateMoved wiring into project_demos (#872); +2: the queue's
+// Sort by import and one create call.
+const BUDGET = 526;
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {
