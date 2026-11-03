@@ -42,7 +42,9 @@
 //!
 //! Setting the cvar to 0 puts every changed luxel back (and rebuilds the
 //! lightmaps); setting it to 1 again, on a later frame, reads the file again.
-//! That is how to try a new scale without reloading the demo.
+//! `ds_map_reload_lighting` does both in one step, the way to try a new scale
+//! without reloading the demo: `0; 1` on one console line runs both in the
+//! same frame, so the poll never sees the cvar off.
 
 // Only the 32-bit build has a world model to read; a host build compiles the
 // rules for the tests alone.
@@ -57,11 +59,19 @@ mod world;
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::commands::console_print;
 use crate::names::console_name;
 use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("map_apply_lighting");
+pub const RELOAD_NAME: &str = console_name!("map_reload_lighting");
+
+/// Set by `ds_map_reload_lighting`, taken by the next [`poll`] that has a
+/// loaded map: the command can't touch the samples itself without racing the
+/// poll for [`STATE`].
+static RELOAD: AtomicBool = AtomicBool::new(false);
 
 /// `ds_map_apply_lighting`, or its default when the cvar could not be
 /// registered. On by default: a map with no light file is left alone.
@@ -142,6 +152,16 @@ pub fn poll() {
     let Some(level) = level else {
         return;
     };
+    if RELOAD.swap(false, Ordering::AcqRel) {
+        if let State::Applied(applied) = &*state
+            && still_applied(applied, &level)
+        {
+            put_back(applied);
+        }
+        *state = apply(&level);
+        console_print(&format!("{}\n", reload_result(&state)));
+        return;
+    }
     let done = match &*state {
         State::Idle => false,
         State::Untouched { level: hash, model } => *hash == level.hash && *model == level.model,
@@ -384,6 +404,17 @@ fn relight(
 /// was taken after the earlier surface's scaling, so only this order ends
 /// on the bytes the map loaded with.
 fn restore(applied: &Applied) {
+    put_back(applied);
+    report(&format!(
+        "{NAME}: {}: off, {} surfaces' light put back",
+        applied.map,
+        applied.changed.len()
+    ));
+}
+
+/// [`restore`]'s work without its log line, which would read "off" when a
+/// reload puts the light back only to change it again.
+fn put_back(applied: &Applied) {
     for changed in applied.changed.iter().rev() {
         // Safety: `still_applied` just confirmed the model and samples are
         // the ones scaled, so these spans are the writable ones they were.
@@ -396,11 +427,38 @@ fn restore(applied: &Applied) {
             world::mark_stale(changed.surface, changed.styles);
         }
     }
-    report(&format!(
-        "{NAME}: {}: off, {} surfaces' light put back",
-        applied.map,
-        applied.changed.len()
-    ));
+}
+
+/// `ds_map_reload_lighting`. Runs from the console between frames, on the
+/// engine thread; the next poll does the work.
+pub unsafe extern "C" fn reload_command() {
+    if !SETTING.on() {
+        console_print(&format!("{}\n", reload_off_line()));
+        return;
+    }
+    RELOAD.store(true, Ordering::Release);
+}
+
+fn reload_off_line() -> String {
+    format!("{RELOAD_NAME}: {NAME} is 0, so no light file is read; set it to 1")
+}
+
+/// The console line after a reload: what the file changed, or why nothing.
+/// The hook log has the details (the file's path, skipped lines).
+fn reload_result(state: &State) -> String {
+    match state {
+        State::Applied(applied) => format!(
+            "{RELOAD_NAME}: {}: {} box(es) and {} light(s), {} luxels on {} surfaces changed",
+            applied.map,
+            applied.boxes,
+            applied.lights,
+            applied.luxels,
+            applied.changed.len()
+        ),
+        _ => format!(
+            "{RELOAD_NAME}: nothing changed: this map has no dodstudio_maps <map>{FILE_SUFFIX}, or nothing in it reached a surface (the hook log lists any lines it skipped)"
+        ),
+    }
 }
 
 fn report_problems(map: &str, path: &Path, problems: &[file::Problem]) {
@@ -468,6 +526,27 @@ fn report(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reload_says_what_it_changed_or_why_nothing() {
+        let applied = State::Applied(Applied {
+            level: 1,
+            model: 2,
+            map: "dod_railroad2_test".to_string(),
+            changed: Vec::new(),
+            marks: Vec::new(),
+            luxels: 11960,
+            boxes: 1,
+            lights: 0,
+        });
+        assert_eq!(
+            reload_result(&applied),
+            "ds_map_reload_lighting: dod_railroad2_test: 1 box(es) and 0 light(s), 11960 luxels on 0 surfaces changed"
+        );
+        let untouched = State::Untouched { level: 1, model: 2 };
+        assert!(reload_result(&untouched).contains("nothing changed"));
+        assert!(reload_off_line().contains("ds_map_apply_lighting is 0"));
+    }
 
     #[test]
     fn the_light_file_is_named_after_the_map() {
