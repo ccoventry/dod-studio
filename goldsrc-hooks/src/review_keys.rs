@@ -53,9 +53,10 @@
 //! window, and the last answer opens the Review tab, so a key let go a moment
 //! later goes to vgui2. Its bit then swallowed the key's next press, the
 //! first one on the next highlight, as the rest of the old one (#1320). So
-//! every frame a bit is dropped once its key is no longer down on the
-//! keyboard ([`forget_released`]); a release still on its way then reaches
-//! the bind (`-jump` for Space), which does nothing.
+//! a bit is dropped once two polls in a row find its key up on the keyboard
+//! ([`forget_released`]): one frame is left for a release already on its way
+//! to clear it as usual. A release later still then reaches the bind
+//! (`-jump` for Space), which does nothing.
 //!
 //! ## Threads
 //!
@@ -255,42 +256,59 @@ fn virtual_key(key: i32) -> Option<i32> {
     }
 }
 
-/// The bits of `held` whose key `is_down` still says is down.
-fn still_down(held: u32, is_down: impl Fn(i32) -> bool) -> u32 {
+/// The bits of `held` whose key `is_down` says is up.
+fn up_now(held: u32, is_down: impl Fn(i32) -> bool) -> u32 {
     all_keys()
         .enumerate()
-        .filter(|(i, k)| held & (1 << i) != 0 && is_down(k.code))
-        .fold(0, |kept, (i, _)| kept | 1 << i)
+        .filter(|(i, k)| held & (1 << i) != 0 && !is_down(k.code))
+        .fold(0, |up, (i, _)| up | 1 << i)
 }
+
+/// One poll's look at the held keys: the bits to drop, up now and at the
+/// last poll too, and the bits up for the first time, for the next poll.
+fn released(held: u32, up_before: u32, is_down: impl Fn(i32) -> bool) -> (u32, u32) {
+    let up = up_now(held, is_down);
+    let drop = up & up_before;
+    (drop, up & !drop)
+}
+
+/// The held keys found up at the last poll, whose release may still be on
+/// its way.
+static UP_ONCE: AtomicU32 = AtomicU32::new(0);
 
 #[link(name = "user32")]
 unsafe extern "system" {
     fn GetAsyncKeyState(key: i32) -> i16;
 }
 
-/// Whether the key is down on the keyboard now, whichever window has it.
+/// Whether the key is down on the keyboard now, whichever window has it. A
+/// key with no virtual-key code counts as down, so its bit waits for its
+/// release as before.
 fn key_is_down(key: i32) -> bool {
     // Safety: a plain query; the high bit is set while the key is down.
-    virtual_key(key).is_some_and(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
+    virtual_key(key).is_none_or(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
 }
 
-/// Drops the [`HELD`] bit of every taken key that is no longer down (#1320),
-/// whose release went to the menu or a loading demo instead of here. Called
-/// every frame by the review's poll, on the engine's thread, the one
-/// [`key_event`] runs on; one atomic load while no taken key is down.
+/// Drops the [`HELD`] bit of every taken key found up at two polls in a row
+/// (#1320), whose release went to the menu or a loading demo instead of
+/// here. Called every frame by the review's poll; one atomic load while no
+/// taken key is down. The drop clears only its own bits, so a press taken
+/// meanwhile (from the fallback timer thread's poll) keeps its bit.
 pub(crate) fn forget_released() {
     let held = HELD.load(Ordering::Relaxed);
     if held == 0 {
+        UP_ONCE.store(0, Ordering::Relaxed);
         return;
     }
-    let kept = still_down(held, key_is_down);
-    if kept == held {
+    let (drop, up) = released(held, UP_ONCE.load(Ordering::Relaxed), key_is_down);
+    UP_ONCE.store(up, Ordering::Relaxed);
+    if drop == 0 {
         return;
     }
-    HELD.store(kept, Ordering::Relaxed);
+    HELD.fetch_and(!drop, Ordering::Relaxed);
     let names: Vec<&str> = all_keys()
         .enumerate()
-        .filter(|(i, _)| (held & !kept) & (1 << i) != 0)
+        .filter(|(i, _)| drop & (1 << i) != 0)
         .map(|(_, k)| k.label)
         .collect();
     unsafe {
@@ -723,9 +741,14 @@ mod tests {
         let space = b' ' as i32;
         let (_, _, held) = decide(true, space, KeyMode::Live, 0);
         // While it is still down, the bit stays: autorepeat stays taken.
-        assert_eq!(still_down(held, |k| k == space), held);
-        let held = still_down(held, |_| false);
-        assert_eq!(held, 0);
+        assert_eq!(released(held, 0, |k| k == space), (0, 0));
+        // Up at one poll: kept for a frame, for a release on its way.
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!((drop, up), (0, held));
+        // Up at the next poll too: dropped.
+        let (drop, up) = released(held, up, |_| false);
+        assert_eq!((drop, up), (held, 0));
+        let held = held & !drop;
         // So the first press on the next highlight answers.
         assert_eq!(
             decide(true, space, KeyMode::Live, held),
@@ -733,7 +756,27 @@ mod tests {
         );
         // Each bit follows its own key.
         let both = (1 << 0) | (1 << 5);
-        assert_eq!(still_down(both, |k| k == Y), 1 << 0);
+        assert_eq!(up_now(both, |k| k == Y), 1 << 5);
+        assert_eq!(released(both, both, |k| k == Y), (1 << 5, 0));
+    }
+
+    #[test]
+    fn a_release_in_time_clears_its_bit_as_usual() {
+        // An ordinary tap: up at one poll, its release arrives before the
+        // next, which then has nothing to drop.
+        let (_, _, held) = decide(true, Y, KeyMode::Live, 0);
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!(drop, 0);
+        let (_, _, held) = decide(false, Y, KeyMode::Live, held);
+        assert_eq!(held, 0);
+        assert_eq!(released(held, up, |_| false), (0, 0));
+        // Down again by the next poll (a new press): nothing is dropped.
+        assert_eq!(released(1, 1, |k| k == Y), (0, 0));
+    }
+
+    #[test]
+    fn a_key_with_no_virtual_key_counts_as_down() {
+        assert!(key_is_down(27));
     }
 
     #[test]
