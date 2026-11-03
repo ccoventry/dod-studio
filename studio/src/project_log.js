@@ -46,3 +46,13 @@ export function rendersPickedUpLine(takes, added, elapsedMs) {
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
 }
+
+/** The whole-project VEGAS export began (#1264). */
+export function projectEdlStartLine(total, chosen, scope) {
+  return `[project] exporting VEGAS EDL: ${chosen} of ${total} recorded video(s) (${scope})`;
+}
+
+/** The whole-project VEGAS export finished. */
+export function projectEdlExportedLine(count, scope, missing, skipped, ms) {
+  return `[project] exported VEGAS EDL of ${count} video(s) (${scope}): ${missing} missing, ${skipped} left out, ${ms} ms`;
+}
