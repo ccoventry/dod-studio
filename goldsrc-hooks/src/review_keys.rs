@@ -48,6 +48,15 @@
 //! on, so holding Y a moment too long doesn't open chat on the next
 //! highlight ([`HELD`]).
 //!
+//! That release doesn't always come here: a press that moves the review to
+//! another demo runs `viewdemo`, which brings up the menu and the DoD Studio
+//! window, and the last answer opens the Review tab, so a key let go a moment
+//! later goes to vgui2. Its bit then swallowed the key's next press, the
+//! first one on the next highlight, as the rest of the old one (#1320). So
+//! every frame a bit is dropped once its key is no longer down on the
+//! keyboard ([`forget_released`]); a release still on its way then reaches
+//! the bind (`-jump` for Space), which does nothing.
+//!
 //! ## Threads
 //!
 //! `HUD_Key_Event` and `HUD_Redraw` run on the engine's thread, every key
@@ -234,6 +243,62 @@ pub fn key_event(down: i32, key: i32) -> bool {
 /// never here, so a kept bit would swallow that key's next press.
 pub(crate) fn forget_held() {
     HELD.store(0, Ordering::Relaxed);
+}
+
+/// The Windows virtual-key code of an engine key number: a letter's is its
+/// upper-case ASCII code, Space's 0x20.
+fn virtual_key(key: i32) -> Option<i32> {
+    match u8::try_from(key).ok()? {
+        c @ b'a'..=b'z' => Some(i32::from(c.to_ascii_uppercase())),
+        b' ' => Some(0x20),
+        _ => None,
+    }
+}
+
+/// The bits of `held` whose key `is_down` still says is down.
+fn still_down(held: u32, is_down: impl Fn(i32) -> bool) -> u32 {
+    all_keys()
+        .enumerate()
+        .filter(|(i, k)| held & (1 << i) != 0 && is_down(k.code))
+        .fold(0, |kept, (i, _)| kept | 1 << i)
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetAsyncKeyState(key: i32) -> i16;
+}
+
+/// Whether the key is down on the keyboard now, whichever window has it.
+fn key_is_down(key: i32) -> bool {
+    // Safety: a plain query; the high bit is set while the key is down.
+    virtual_key(key).is_some_and(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
+}
+
+/// Drops the [`HELD`] bit of every taken key that is no longer down (#1320),
+/// whose release went to the menu or a loading demo instead of here. Called
+/// every frame by the review's poll, on the engine's thread, the one
+/// [`key_event`] runs on; one atomic load while no taken key is down.
+pub(crate) fn forget_released() {
+    let held = HELD.load(Ordering::Relaxed);
+    if held == 0 {
+        return;
+    }
+    let kept = still_down(held, key_is_down);
+    if kept == held {
+        return;
+    }
+    HELD.store(kept, Ordering::Relaxed);
+    let names: Vec<&str> = all_keys()
+        .enumerate()
+        .filter(|(i, _)| (held & !kept) & (1 << i) != 0)
+        .map(|(_, k)| k.label)
+        .collect();
+    unsafe {
+        crate::debug::report(&format!(
+            "review_keys: {} is up but its release hasn't reached the game; its next press counts (#1320)",
+            names.join(", ")
+        ))
+    };
 }
 
 /// The action a key asked for since the last poll.
@@ -649,6 +714,40 @@ mod tests {
         for k in &KEYS_LIST {
             assert!(!panel.key_live(k.action));
         }
+    }
+
+    #[test]
+    fn a_key_let_go_elsewhere_is_forgotten() {
+        // #1320: Space moved the review to another demo, whose load brought
+        // the menu up before Space was let go: its release never came.
+        let space = b' ' as i32;
+        let (_, _, held) = decide(true, space, KeyMode::Live, 0);
+        // While it is still down, the bit stays: autorepeat stays taken.
+        assert_eq!(still_down(held, |k| k == space), held);
+        let held = still_down(held, |_| false);
+        assert_eq!(held, 0);
+        // So the first press on the next highlight answers.
+        assert_eq!(
+            decide(true, space, KeyMode::Live, held),
+            (true, Some(Action::Next), 1 << 5)
+        );
+        // Each bit follows its own key.
+        let both = (1 << 0) | (1 << 5);
+        assert_eq!(still_down(both, |k| k == Y), 1 << 0);
+    }
+
+    #[test]
+    fn every_key_has_a_virtual_key() {
+        for k in all_keys() {
+            let vk = virtual_key(k.code).unwrap_or_else(|| panic!("{}", k.label));
+            // Windows names a letter by its upper-case ASCII code.
+            if k.label.len() == 1 {
+                assert_eq!(vk, k.label.as_bytes()[0] as i32);
+            }
+        }
+        assert_eq!(virtual_key(b' ' as i32), Some(0x20));
+        assert_eq!(virtual_key(27), None);
+        assert_eq!(virtual_key(-1), None);
     }
 
     #[test]

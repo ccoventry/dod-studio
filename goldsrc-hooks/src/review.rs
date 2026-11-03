@@ -943,6 +943,8 @@ fn advance(guard: &mut Option<Review>) {
 /// Runs every frame: an answer key pressed since the last frame, the
 /// review's own step, then what the on-screen panel shows (#660).
 pub fn poll() {
+    // A key let go while the menu or a load had the keyboard (#1320).
+    crate::review_keys::forget_released();
     if let Some(action) = crate::review_keys::take_pending() {
         key_action(action);
     }
