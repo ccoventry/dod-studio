@@ -21,6 +21,7 @@ pub mod hook_dll;
 pub mod menu_scale;
 pub mod movie_copy;
 pub mod player_overrides;
+pub mod render;
 pub mod schedule;
 pub mod take_delete;
 

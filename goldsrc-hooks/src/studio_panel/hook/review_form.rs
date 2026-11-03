@@ -242,7 +242,50 @@ unsafe fn ensure_form(vgui: &Vgui) -> Result<(*mut c_void, Vpanel), String> {
         ensure_res(false)?;
         let object = build(vgui)?;
         FORM.store(object as usize, Ordering::Release);
-        form(vgui).ok_or_else(|| "the new form has no panel".to_string())
+        let found = form(vgui).ok_or_else(|| "the new form has no panel".to_string())?;
+        scale_layout(vgui, found.1);
+        Ok(found)
+    }
+}
+
+/// The controls `ReviewForm.res` lays out, by name: the ones to scale. The
+/// window's own title bar and grips are the frame's to lay out.
+fn laid_out_controls() -> impl Iterator<Item = &'static str> {
+    FORM_RES
+        .2
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("\"fieldName\""))
+        .map(|v| v.trim().trim_matches('"'))
+        .filter(|name| FORM_NAME.to_str() != Ok(*name))
+}
+
+/// Grows the new form and its controls with the font on a GameUI that
+/// scales its font with the screen (`review_form::layout_scale`): the layout
+/// file's sizes are the pre-Anniversary font's.
+unsafe fn scale_layout(vgui: &Vgui, vp: Vpanel) {
+    unsafe {
+        let Ok((_, build)) = gameui() else { return };
+        let Ok(root) = root(vgui) else { return };
+        let (_, _, _, screen_tall) = vgui.rect(root);
+        let scale = crate::review_form::layout_scale(screen_tall, build.font_scales_with_screen);
+        if scale == (1, 1) {
+            return;
+        }
+        let (x, y, wide, tall) = vgui.rect(vp);
+        let (_, _, wide, tall) = crate::review_form::scaled_rect((0, 0, wide, tall), scale);
+        vgui.place(vp, (x, y, wide, tall));
+        let mut scaled = 0;
+        for name in laid_out_controls() {
+            if let Some(child) = vgui.child_named(vp, name) {
+                let rect = crate::review_form::scaled_rect(vgui.rect(child), scale);
+                vgui.place(child, rect);
+                scaled += 1;
+            }
+        }
+        trace(&format!(
+            "scaled by {}/{} for a font that grows with the screen: {wide}x{tall}, {scaled} control(s)",
+            scale.0, scale.1
+        ));
     }
 }
 
