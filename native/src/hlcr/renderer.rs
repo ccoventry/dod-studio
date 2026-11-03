@@ -228,12 +228,11 @@ impl Drop for ReservationGuard {
             *reserved = reserved.saturating_sub(self.amount);
         }
         let remaining = ledger.get(&self.dir).copied().unwrap_or(0);
-        crate::log_markdown(&format!(
-            "[render-reservation] job {} released {:.2} GB on {:?} ({:.2} GB still reserved by other jobs)",
-            self.job_id,
-            self.amount as f64 / (1024.0 * 1024.0 * 1024.0),
-            self.dir,
-            remaining as f64 / (1024.0 * 1024.0 * 1024.0),
+        crate::log_markdown(&crate::messages::render::reservation_released(
+            &self.job_id,
+            self.amount,
+            &self.dir,
+            remaining,
         ));
     }
 }
@@ -469,18 +468,15 @@ fn check_inputs(job: &RenderJob) -> Result<(), String> {
 /// itself shows the rate through the job's settings summary.
 fn log_render_fps(job: &RenderJob, fps_used: u32, fps_from_take: bool) {
     if !job.is_source_copy && job.clip.video_file.is_none() {
-        crate::log_markdown(&format!(
-            "[render-fps] job {} — reading the frames at {} fps, {}",
-            job.job_id,
+        let source = if fps_from_take {
+            crate::messages::render::FPS_FROM_TAKE.to_string()
+        } else {
+            crate::messages::render::fps_from_render_settings(job.take_folder.display())
+        };
+        crate::log_markdown(&crate::messages::render::render_fps(
+            &job.job_id,
             fps_used,
-            if fps_from_take {
-                "the rate the take was captured at".to_string()
-            } else {
-                format!(
-                    "Render Settings' Source FPS (the take doesn't say what it was captured at; {})",
-                    job.take_folder.display()
-                )
-            }
+            source,
         ));
     }
 }
@@ -534,12 +530,11 @@ fn reserve_export_dir(
     let live_free_text = live_free.map_or("unknown".to_string(), |free| {
         format!("{:.2} GB", free as f64 / (1024.0 * 1024.0 * 1024.0))
     });
-    crate::log_markdown(&format!(
-        "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {} live free)",
-        job.job_id,
-        reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
-        dir,
-        already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
+    crate::log_markdown(&crate::messages::render::reservation_made(
+        &job.job_id,
+        reservation_estimate,
+        &dir,
+        already_reserved,
         live_free_text,
     ));
     drop(ledger);
