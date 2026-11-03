@@ -37,24 +37,43 @@
 //!
 //! ## Cost on the draw path
 //!
-//! [`poll`] decides once a frame, from `commands::poll`: the player, their
-//! row, and the sprite's handle (loaded with the engine's own `SPR_Load` the
-//! first time it is needed after each level load). The draw hooks then read
-//! three atomics ([`swap`]); no lock is taken there.
+//! [`poll`] works out, once a frame from `commands::poll`, each player's
+//! row and the sprite's handle (loaded with the engine's own `SPR_Load` the
+//! first time it is needed after each level load) into one slot per player:
+//! the player on screen every frame, the others one a frame in turn. The
+//! draw hooks ([`swap`]) read the camera's mode and target from client.dll
+//! as they draw, and that player's slot: atomics and two reads, no lock.
+//!
+//! Who is on screen is read at the draw, not taken from [`poll`], because the
+//! spectator mode can change after `HUD_Frame` in the same frame: the first
+//! frame of an in-eye view then drew the game's spectator "+" (#1321).
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 
 use crate::hud_sprites::Wrect;
 use crate::player_table::Crosshair;
 
-/// The sprite handle to draw the crosshair with, 0 for the game's own.
+/// Entity numbers 1..=32, and 0 unused.
+const SLOTS: usize = 33;
+/// The sprite handle each player's crosshair is drawn with, 0 for the
+/// game's own; by entity number.
+static SLOT_HANDLE: [AtomicI32; SLOTS] = [const { AtomicI32::new(0) }; SLOTS];
+/// The tile, 1..=16, while the slot's handle is set.
+static SLOT_TILE: [AtomicI32; SLOTS] = [const { AtomicI32::new(0) }; SLOTS];
+/// The [`GENERATION`] the slot's handle was loaded in: a handle from before
+/// a level load may name another sprite now, so it isn't drawn.
+static SLOT_GEN: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+/// The slot [`poll`] looks at next, besides the player on screen.
+static SWEEP: AtomicUsize = AtomicUsize::new(0);
+/// Whether the table gives crosshairs at all: `ds_player_overrides` on, a
+/// demo playing, and a crosshair row or fallback in the table.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// The recorder's entity number in a POV demo; 0 in an HLTV demo.
+static RECORDER: AtomicI32 = AtomicI32::new(0);
+/// The handle for the player on screen as [`poll`] last saw it, for
+/// [`overriding`]; 0 for the game's own.
 static HANDLE: AtomicI32 = AtomicI32::new(0);
-/// The tile, 1..=16, while [`HANDLE`] is set.
-static TILE: AtomicI32 = AtomicI32::new(0);
-/// Whether the in-eye spectator camera is up, so `crosshairs.spr`'s 24x24
-/// rect is the spectator crosshair.
-static IN_EYE: AtomicBool = AtomicBool::new(false);
 /// Draws swapped this session, for the status line.
 static SWAPPED: AtomicU32 = AtomicU32::new(0);
 
@@ -165,15 +184,21 @@ pub unsafe fn swap(
     x: i32,
     y: i32,
 ) -> Option<(i32, Wrect, i32, i32)> {
-    let handle = HANDLE.load(Ordering::Relaxed);
-    if handle == 0 || sheet == Sheet::Other || prc.is_null() {
+    if !ACTIVE.load(Ordering::Relaxed) || sheet == Sheet::Other || prc.is_null() {
+        return None;
+    }
+    let mode = crate::spectator_target::mode();
+    let target = crate::spectator_target::in_eye_target();
+    let slot = on_screen(mode, target, RECORDER.load(Ordering::Relaxed))?;
+    let handle = SLOT_HANDLE[slot].load(Ordering::Relaxed);
+    if handle == 0 || SLOT_GEN[slot].load(Ordering::Relaxed) != GENERATION.load(Ordering::Relaxed) {
         return None;
     }
     let old = unsafe { *prc };
-    if !is_crosshair_draw(sheet, &old, IN_EYE.load(Ordering::Relaxed)) {
+    if !is_crosshair_draw(sheet, &old, mode == Some(4)) {
         return None;
     }
-    let new = tile_wrect(TILE.load(Ordering::Relaxed))?;
+    let new = tile_wrect(SLOT_TILE[slot].load(Ordering::Relaxed))?;
     let (x, y) = recentre(&old, &new, x, y);
     SWAPPED.fetch_add(1, Ordering::Relaxed);
     Some((handle, new, x, y))
@@ -245,21 +270,27 @@ fn handle_for(file: &str) -> i32 {
     handle
 }
 
-/// The entity whose view is on screen in the demo playing: the in-eye
-/// target whenever the in-eye camera is up, else the recorder in POV.
+/// The entity whose view is on screen: the in-eye target whenever the
+/// in-eye camera is up (`mode` 4), else the recorder (0 in an HLTV demo,
+/// where no other camera draws a crosshair).
 ///
 /// The in-eye camera comes first in POV too: a dead recorder watching a
 /// teammate in first person has the teammate's view on screen, and the
 /// recorder's own crosshair over it was the wrong one (#1321).
 /// `g_iUser1`/`g_iUser2` follow the recorder's observer mode and target in
 /// POV playback, as the server sent them.
-fn viewed_player() -> Option<i32> {
-    if let Some(target) = crate::spectator_target::in_eye_target() {
-        return Some(target);
-    }
-    if crate::spray_hltv::hltv() {
-        return None;
-    }
+fn on_screen(mode: Option<i32>, in_eye_target: Option<i32>, recorder: i32) -> Option<usize> {
+    let entity = match in_eye_target {
+        Some(target) if mode == Some(4) => target,
+        _ => recorder,
+    };
+    usize::try_from(entity)
+        .ok()
+        .filter(|e| (1..SLOTS).contains(e))
+}
+
+/// The local player's entity number: the recorder in a POV demo.
+fn local_player() -> Option<i32> {
     let engfuncs = crate::engine::engfuncs()?;
     // Safety: the engine's own call; the result is the local player's
     // `cl_entity_t`, `index` first, or null with no level loaded.
@@ -267,46 +298,74 @@ fn viewed_player() -> Option<i32> {
     if local.is_null() || !crate::crash::readable(local as usize, 4) {
         return None;
     }
-    Some(unsafe { *local }).filter(|i| (1..=32).contains(i))
+    Some(unsafe { *local }).filter(|i| (1..SLOTS as i32).contains(i))
 }
 
-/// This frame's crosshair: the player on screen and what the table gives
-/// them, or `None` for the game's own.
-fn decide() -> Option<(String, Crosshair)> {
-    if !crate::player_overrides::on() || !crate::spray_hltv::playing_demo() {
-        return None;
-    }
-    let table = crate::spray_hltv::current_table()?;
-    if !table.crosshair_active() {
-        return None;
-    }
-    let entity = viewed_player()?;
-    let (name, steam_id) = crate::spray_hltv::player(entity as usize - 1)?;
-    let choice = table.choose_crosshair(&name, steam_id);
-    Some((name, choice))
+/// Works out one player's crosshair into their slot; returns the status
+/// text for them (empty with nobody in the slot).
+fn refresh(table: &crate::player_table::Table, slot: usize) -> String {
+    let generation = GENERATION.load(Ordering::Relaxed);
+    let (handle, tile, text) = match crate::spray_hltv::player(slot - 1) {
+        None => (0, 0, String::new()),
+        Some((name, steam_id)) => match table.choose_crosshair(&name, steam_id) {
+            Crosshair::Tile { sprite, tile } => {
+                let handle = handle_for(&sprite);
+                let text = if handle == 0 {
+                    format!("{name}: tile {tile} of {sprite}, which did not load; the game's own")
+                } else {
+                    format!("{name}: tile {tile} of {sprite}")
+                };
+                (handle, i32::from(tile), text)
+            }
+            Crosshair::Game => (0, 0, format!("{name}: the game's own")),
+        },
+    };
+    SLOT_TILE[slot].store(tile, Ordering::Relaxed);
+    SLOT_GEN[slot].store(generation, Ordering::Relaxed);
+    SLOT_HANDLE[slot].store(handle, Ordering::Relaxed);
+    text
 }
 
-/// Once a frame, from `commands::poll`, on the game's thread.
+/// Once a frame, from `commands::poll`, on the game's thread: the player on
+/// screen, and one other slot in turn, so a camera switch finds the next
+/// player's crosshair ready (within 32 frames of a table change or a player
+/// joining).
 pub fn poll() {
-    IN_EYE.store(
-        crate::spectator_target::mode() == Some(4),
+    let table = crate::spray_hltv::current_table().filter(|t| t.crosshair_active());
+    let table = match table {
+        Some(t) if crate::player_overrides::on() && crate::spray_hltv::playing_demo() => t,
+        _ => {
+            ACTIVE.store(false, Ordering::Relaxed);
+            HANDLE.store(0, Ordering::Relaxed);
+            set_last(String::new());
+            return;
+        }
+    };
+    let recorder = if crate::spray_hltv::hltv() {
+        0
+    } else {
+        local_player().unwrap_or(0)
+    };
+    RECORDER.store(recorder, Ordering::Relaxed);
+    let next = SWEEP.fetch_add(1, Ordering::Relaxed) % (SLOTS - 1) + 1;
+    let shown = on_screen(
+        crate::spectator_target::mode(),
+        crate::spectator_target::in_eye_target(),
+        recorder,
+    );
+    if shown != Some(next) {
+        refresh(&table, next);
+    }
+    let text = shown.map_or_else(String::new, |slot| refresh(&table, slot));
+    HANDLE.store(
+        shown.map_or(0, |slot| SLOT_HANDLE[slot].load(Ordering::Relaxed)),
         Ordering::Relaxed,
     );
-    let (handle, tile, text) = match decide() {
-        Some((name, Crosshair::Tile { sprite, tile })) => {
-            let handle = handle_for(&sprite);
-            let text = if handle == 0 {
-                format!("{name}: tile {tile} of {sprite}, which did not load; the game's own")
-            } else {
-                format!("{name}: tile {tile} of {sprite}")
-            };
-            (handle, i32::from(tile), text)
-        }
-        Some((name, Crosshair::Game)) => (0, 0, format!("{name}: the game's own")),
-        None => (0, 0, String::new()),
-    };
-    TILE.store(tile, Ordering::Relaxed);
-    HANDLE.store(handle, Ordering::Relaxed);
+    ACTIVE.store(true, Ordering::Relaxed);
+    set_last(text);
+}
+
+fn set_last(text: String) {
     if let Ok(mut last) = LAST.lock()
         && *last != text
     {
@@ -385,8 +444,25 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_swapped_without_a_handle() {
-        HANDLE.store(0, Ordering::Relaxed);
+    fn the_player_on_screen_is_the_in_eye_target_first() {
+        // A POV recorder (13) alive, or in a free or chase camera: theirs.
+        assert_eq!(on_screen(Some(0), None, 13), Some(13));
+        assert_eq!(on_screen(Some(3), None, 13), Some(13));
+        assert_eq!(on_screen(Some(2), None, 13), Some(13));
+        // Dead and watching teammate 6 in first person: the teammate's (#1321).
+        assert_eq!(on_screen(Some(4), Some(6), 13), Some(6));
+        // HLTV: the in-eye target, and nobody in any other camera.
+        assert_eq!(on_screen(Some(4), Some(6), 0), Some(6));
+        assert_eq!(on_screen(Some(3), None, 0), None);
+        assert_eq!(on_screen(None, None, 0), None);
+        // A target out of range is nobody known: the game's own, never the
+        // recorder's over someone else's view.
+        assert_eq!(on_screen(Some(4), Some(40), 13), None);
+    }
+
+    #[test]
+    fn nothing_is_swapped_while_inactive() {
+        ACTIVE.store(false, Ordering::Relaxed);
         let r = rect(0, 0, 64, 64);
         assert_eq!(unsafe { swap(Sheet::Custom, &r, 0, 0) }, None);
         assert_eq!(unsafe { swap(Sheet::Custom, std::ptr::null(), 0, 0) }, None);
