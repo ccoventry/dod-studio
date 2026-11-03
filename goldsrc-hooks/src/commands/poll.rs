@@ -410,6 +410,7 @@ pub fn poll() {
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::lightmap_gamma::poll();
+    crate::lightmap_rebuild::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs

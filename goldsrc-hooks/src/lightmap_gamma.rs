@@ -14,8 +14,11 @@
 //!   defaults (brightness 0, lightgamma 2.5).
 //! - `config.cfg` and `movie.cfg` change the cvars later. The table only
 //!   follows in `V_CheckGamma` (+0xc19b0), which runs at the start of every
-//!   `SCR_UpdateScreen`, and it never rebuilds lightmaps when it does: the
-//!   call it makes for that (+0x4703e) is an empty `ret`.
+//!   `SCR_UpdateScreen`, and the stock engine never rebuilds lightmaps when
+//!   it does: the call it makes for that (+0x4703e) is an empty `ret`.
+//!   `lightmap_rebuild` (#662) points that call at `GL_BuildLightmaps`
+//!   while a map is loaded; this detour is still what makes a map load
+//!   build from the current table in the first place.
 //! - A demo named on the command line loads its map before the first screen
 //!   update. So the first map's lightmaps come from the default-cvar table:
 //!   with the movie install's brightness 10 (clamped to 2 in multiplayer) and
@@ -68,7 +71,8 @@ use crate::scan;
 
 /// `GL_BuildLightmaps`' entry: the prologue the stub reproduces, then the
 /// `memset` of the lightmap allocation blocks (0x8000 bytes). Unique.
-const BUILD_PATTERN: &str = "55 8B EC 51 53 56 57 68 00 80 00 00 6A 00 68 ?? ?? ?? ?? \
+/// `lightmap_rebuild` finds the function with it too, before the detour.
+pub(crate) const BUILD_PATTERN: &str = "55 8B EC 51 53 56 57 68 00 80 00 00 6A 00 68 ?? ?? ?? ?? \
                              E8 ?? ?? ?? ?? A1 ?? ?? ?? ?? 83 C4 0C BF 01 00 00 00 85 C0 89 3D";
 
 /// `push ebp; mov ebp, esp; push ecx; push ebx`: the five bytes the jump
