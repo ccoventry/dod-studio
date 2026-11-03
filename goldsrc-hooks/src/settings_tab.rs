@@ -320,6 +320,11 @@ pub const AREAS: &[Area] = &[
                 "Run per-map cfgs",
                 "before a demo's map loads, run dodstudio_maps\\all_maps.cfg and dodstudio_maps\\<map>.cfg.",
             ),
+            check(
+                console_name!("map_apply_lighting"),
+                "Apply map light files",
+                "relight the boxes and lamps dodstudio_maps\\<map>_light.txt lists.",
+            ),
         ],
     },
     Area {

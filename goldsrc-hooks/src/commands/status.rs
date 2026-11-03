@@ -153,6 +153,9 @@ fn status_text() -> String {
     if let Some(lighting) = crate::lightmap_gamma::status_line() {
         lines.push(lighting);
     }
+    if let Some(rebuild) = crate::lightmap_rebuild::status_line() {
+        lines.push(rebuild);
+    }
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
     }
@@ -171,6 +174,7 @@ fn status_text() -> String {
     if let Some(weather) = crate::map_weather::status_line() {
         lines.push(weather);
     }
+    lines.push(crate::map_light::status_line());
     lines.push(crate::player_overrides::status());
     if let Some(renames) = crate::player_names::status_line() {
         lines.push(renames);

@@ -56,6 +56,7 @@ import { createProjectRescan } from './project_rescan.js';
 import { createRescanRecent } from './rescan_recent.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
+import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
@@ -305,6 +306,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     renderQueue: () => queue.renderQueue(),
     regroupMatches: (opts) => regroupMatches(opts),
   });
+  createQueueSortBy({ renderQueue: () => queue.renderQueue() });
 
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
