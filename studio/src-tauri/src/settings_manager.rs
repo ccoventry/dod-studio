@@ -78,6 +78,18 @@ pub struct AppSettings {
     /// `None` = the default layout.
     #[serde(default)]
     pub analyzer_demos_height_px: Option<i32>,
+    /// Overviews page's draggable side panels (#46): the Maps and Edit panels'
+    /// widths in pixels. `None` = the default 250 px.
+    #[serde(default)]
+    pub overviews_maps_width_px: Option<i32>,
+    #[serde(default)]
+    pub overviews_edit_width_px: Option<i32>,
+    /// Render tab's queue table and the Demo Auditor's results table: their
+    /// draggable heights in pixels. `None` = the default, which follows the window.
+    #[serde(default)]
+    pub render_table_height_px: Option<i32>,
+    #[serde(default)]
+    pub auditor_table_height_px: Option<i32>,
     pub language: String,
     #[serde(default = "default_capture_fps")]
     pub capture_fps: i32,
@@ -530,6 +542,10 @@ impl Default for AppSettings {
             analyzer_explorer_width: default_analyzer_explorer_width(),
             capture_split_left_permille: None,
             analyzer_demos_height_px: None,
+            overviews_maps_width_px: None,
+            overviews_edit_width_px: None,
+            render_table_height_px: None,
+            auditor_table_height_px: None,
             language: "en".to_string(),
             capture_fps: default_capture_fps(),
             obs_capture_fps: default_obs_capture_fps(),

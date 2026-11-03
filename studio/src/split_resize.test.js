@@ -46,4 +46,29 @@ describe('split_resize', () => {
     expect(docHandlers.mousemove).toBeUndefined();
     vi.unstubAllGlobals();
   });
+
+  it('shrinks a pane after the handle when the handle is dragged toward it', () => {
+    const docHandlers = {};
+    vi.stubGlobal('document', {
+      addEventListener: (t, f) => { docHandlers[t] = f; },
+      removeEventListener: (t) => { delete docHandlers[t]; },
+    });
+    const handleHandlers = {};
+    const handle = {
+      classList: { add() {}, remove() {} },
+      addEventListener: (t, f) => { handleHandlers[t] = f; },
+    };
+    const commit = vi.fn();
+    attachSplitResize({
+      handle, axis: 'x', invert: true, measure: () => 250, limits: () => ({ min: 180, max: 400 }),
+      apply() {}, commit, reset() {},
+    });
+    handleHandlers.mousedown({ preventDefault() {}, clientX: 500 });
+    docHandlers.mousemove({ clientX: 540, buttons: 1 });
+    docHandlers.mousemove({ clientX: 100, buttons: 1 });
+    docHandlers.mouseup();
+    // Moving left grows the right-hand pane, clamped at the maximum.
+    expect(commit).toHaveBeenCalledWith(400);
+    vi.unstubAllGlobals();
+  });
 });

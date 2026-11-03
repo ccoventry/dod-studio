@@ -4737,3 +4737,22 @@ input.field-invalid { border-color: var(--danger-light); }
 .output-row-invalid input { border-color: var(--danger-light); }
 /* Its text style is .field-error-line (field_error.js); this only spans the row. */
 .output-row-detail { flex-basis: 100%; }
+
+/* Draggable panels beyond the first two splits (#46, layout_splits.js). */
+
+/* The handle sits in the 10px gap between two Overviews panels; the negative
+   margins give back the flex gap on both sides so the resting look is the
+   usual gap. A saved width can't push the map below its room: each side panel
+   leaves the map 300px and the other side's 180px minimum. */
+.ov-layout > .split-handle {
+  margin: 0 -10px;
+}
+
+.ov-side {
+  max-width: calc(100% - 510px);
+}
+
+/* A handle under a table inside its panel, not in a flex gap. */
+.split-handle-inline {
+  margin: 2px 0 0;
+}
