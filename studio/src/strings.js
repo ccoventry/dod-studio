@@ -3377,7 +3377,7 @@ export const STRINGS = {
     FALLBACK_PNG: 'One fallback spray',
     FALLBACK_NONE: 'No spray',
     CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
-    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the recorder's in a POV demo, and the watched player's in an HLTV demo's in-eye view.",
+    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the watched player's in a first-person spectator view (an HLTV demo, or a POV demo while the recorder is dead and watching a teammate), and otherwise the recorder's in a POV demo.",
     CROSSHAIR_GAME: "Game's own",
     CROSSHAIR_ONE: 'One fallback crosshair',
     HD_NOTE: "Every spray from a PNG is drawn at the spray size in every demo, whether or not the demo saved one, with or without HD textures (with them on, it's sharper). A spray change shows from the next demo you play. A crosshair changes on the next frame, and in a POV demo needs your cl_xhair_style at 1-16 (0 is DoD's classic crosshair, which has no tile to swap).",
