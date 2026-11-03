@@ -48,6 +48,16 @@
 //! on, so holding Y a moment too long doesn't open chat on the next
 //! highlight ([`HELD`]).
 //!
+//! That release doesn't always come here: a press that moves the review to
+//! another demo runs `viewdemo`, which brings up the menu and the DoD Studio
+//! window, and the last answer opens the Review tab, so a key let go a moment
+//! later goes to vgui2. Its bit then swallowed the key's next press, the
+//! first one on the next highlight, as the rest of the old one (#1320). So
+//! a bit is dropped once two polls in a row find its key up on the keyboard
+//! ([`forget_released`]): one frame is left for a release already on its way
+//! to clear it as usual. A release later still then reaches the bind
+//! (`-jump` for Space), which does nothing.
+//!
 //! ## Threads
 //!
 //! `HUD_Key_Event` and `HUD_Redraw` run on the engine's thread, every key
@@ -234,6 +244,79 @@ pub fn key_event(down: i32, key: i32) -> bool {
 /// never here, so a kept bit would swallow that key's next press.
 pub(crate) fn forget_held() {
     HELD.store(0, Ordering::Relaxed);
+}
+
+/// The Windows virtual-key code of an engine key number: a letter's is its
+/// upper-case ASCII code, Space's 0x20.
+fn virtual_key(key: i32) -> Option<i32> {
+    match u8::try_from(key).ok()? {
+        c @ b'a'..=b'z' => Some(i32::from(c.to_ascii_uppercase())),
+        b' ' => Some(0x20),
+        _ => None,
+    }
+}
+
+/// The bits of `held` whose key `is_down` says is up.
+fn up_now(held: u32, is_down: impl Fn(i32) -> bool) -> u32 {
+    all_keys()
+        .enumerate()
+        .filter(|(i, k)| held & (1 << i) != 0 && !is_down(k.code))
+        .fold(0, |up, (i, _)| up | 1 << i)
+}
+
+/// One poll's look at the held keys: the bits to drop, up now and at the
+/// last poll too, and the bits up for the first time, for the next poll.
+fn released(held: u32, up_before: u32, is_down: impl Fn(i32) -> bool) -> (u32, u32) {
+    let up = up_now(held, is_down);
+    let drop = up & up_before;
+    (drop, up & !drop)
+}
+
+/// The held keys found up at the last poll, whose release may still be on
+/// its way.
+static UP_ONCE: AtomicU32 = AtomicU32::new(0);
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetAsyncKeyState(key: i32) -> i16;
+}
+
+/// Whether the key is down on the keyboard now, whichever window has it. A
+/// key with no virtual-key code counts as down, so its bit waits for its
+/// release as before.
+fn key_is_down(key: i32) -> bool {
+    // Safety: a plain query; the high bit is set while the key is down.
+    virtual_key(key).is_none_or(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
+}
+
+/// Drops the [`HELD`] bit of every taken key found up at two polls in a row
+/// (#1320), whose release went to the menu or a loading demo instead of
+/// here. Called every frame by the review's poll; one atomic load while no
+/// taken key is down. The drop clears only its own bits, so a press taken
+/// meanwhile (from the fallback timer thread's poll) keeps its bit.
+pub(crate) fn forget_released() {
+    let held = HELD.load(Ordering::Relaxed);
+    if held == 0 {
+        UP_ONCE.store(0, Ordering::Relaxed);
+        return;
+    }
+    let (drop, up) = released(held, UP_ONCE.load(Ordering::Relaxed), key_is_down);
+    UP_ONCE.store(up, Ordering::Relaxed);
+    if drop == 0 {
+        return;
+    }
+    HELD.fetch_and(!drop, Ordering::Relaxed);
+    let names: Vec<&str> = all_keys()
+        .enumerate()
+        .filter(|(i, _)| drop & (1 << i) != 0)
+        .map(|(_, k)| k.label)
+        .collect();
+    unsafe {
+        crate::debug::report(&format!(
+            "review_keys: {} is up but its release hasn't reached the game; its next press counts (#1320)",
+            names.join(", ")
+        ))
+    };
 }
 
 /// The action a key asked for since the last poll.
@@ -649,6 +732,65 @@ mod tests {
         for k in &KEYS_LIST {
             assert!(!panel.key_live(k.action));
         }
+    }
+
+    #[test]
+    fn a_key_let_go_elsewhere_is_forgotten() {
+        // #1320: Space moved the review to another demo, whose load brought
+        // the menu up before Space was let go: its release never came.
+        let space = b' ' as i32;
+        let (_, _, held) = decide(true, space, KeyMode::Live, 0);
+        // While it is still down, the bit stays: autorepeat stays taken.
+        assert_eq!(released(held, 0, |k| k == space), (0, 0));
+        // Up at one poll: kept for a frame, for a release on its way.
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!((drop, up), (0, held));
+        // Up at the next poll too: dropped.
+        let (drop, up) = released(held, up, |_| false);
+        assert_eq!((drop, up), (held, 0));
+        let held = held & !drop;
+        // So the first press on the next highlight answers.
+        assert_eq!(
+            decide(true, space, KeyMode::Live, held),
+            (true, Some(Action::Next), 1 << 5)
+        );
+        // Each bit follows its own key.
+        let both = (1 << 0) | (1 << 5);
+        assert_eq!(up_now(both, |k| k == Y), 1 << 5);
+        assert_eq!(released(both, both, |k| k == Y), (1 << 5, 0));
+    }
+
+    #[test]
+    fn a_release_in_time_clears_its_bit_as_usual() {
+        // An ordinary tap: up at one poll, its release arrives before the
+        // next, which then has nothing to drop.
+        let (_, _, held) = decide(true, Y, KeyMode::Live, 0);
+        let (drop, up) = released(held, 0, |_| false);
+        assert_eq!(drop, 0);
+        let (_, _, held) = decide(false, Y, KeyMode::Live, held);
+        assert_eq!(held, 0);
+        assert_eq!(released(held, up, |_| false), (0, 0));
+        // Down again by the next poll (a new press): nothing is dropped.
+        assert_eq!(released(1, 1, |k| k == Y), (0, 0));
+    }
+
+    #[test]
+    fn a_key_with_no_virtual_key_counts_as_down() {
+        assert!(key_is_down(27));
+    }
+
+    #[test]
+    fn every_key_has_a_virtual_key() {
+        for k in all_keys() {
+            let vk = virtual_key(k.code).unwrap_or_else(|| panic!("{}", k.label));
+            // Windows names a letter by its upper-case ASCII code.
+            if k.label.len() == 1 {
+                assert_eq!(vk, k.label.as_bytes()[0] as i32);
+            }
+        }
+        assert_eq!(virtual_key(b' ' as i32), Some(0x20));
+        assert_eq!(virtual_key(27), None);
+        assert_eq!(virtual_key(-1), None);
     }
 
     #[test]

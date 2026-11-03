@@ -12,7 +12,8 @@
 //! Studio's own commands for a demo can't stand in for them either: a
 //! batch runs a demo's init commands once its map has loaded, and `gamma`
 //! set after the load reaches the map only in part. The 25th Anniversary
-//! engine rebuilds the lightmaps on a gamma change (`lightmap_gamma.rs`), but
+//! engine rebuilds the lightmaps on a gamma change (`lightmap_gamma.rs`), as
+//! the pre-Anniversary one does with `lightmap_rebuild.rs` (#662), but
 //! the textures were uploaded through the old table, so a map came out 4 to
 //! 16 luma darker than with the same values set before it loaded (measured
 //! on POST, `local/review-images/map-lighting`).

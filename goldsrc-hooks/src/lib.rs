@@ -113,6 +113,10 @@
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
+//! - `lightmap_rebuild`: a `brightness`, `gamma` or `lightgamma` change
+//!   relights the map on the pre-Anniversary engine too, as the Anniversary
+//!   engine does (#662). On by default; `GOLDSRC_HOOKS_LIGHTMAP_REBUILD=0`
+//!   turns it off.
 //! - `hud_sprites`: `ds_map_hide_asset` for the HUD's own 2D sprites, by
 //!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
 //!   function pointers (#808). Installed when client.dll initialises.
@@ -309,6 +313,7 @@ mod hudelement;
 mod hull_trace_guard;
 mod hw_call_site;
 mod lightmap_gamma;
+mod lightmap_rebuild;
 mod list_panel;
 mod lookahead;
 mod map_cfgs;
@@ -449,6 +454,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_LIGHTMAP_GAMMA", true),
         Ordering::Relaxed,
     );
+    // Makes the pre-Anniversary engine do what the Anniversary one does on a
+    // gamma change, so on unless asked not to.
+    lightmap_rebuild::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_LIGHTMAP_REBUILD", true),
+        Ordering::Relaxed,
+    );
     // A crash fix rather than a capture setting, so on unless asked not to.
     tempent_fix::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
@@ -582,6 +593,9 @@ fn install_fixes() {
     // flag the env var above set as its starting value.
     commands::install();
 
+    // hw.dll, once; before lightmap_gamma, whose detour overwrites the start
+    // of the function this one's signature finds.
+    lightmap_rebuild::install();
     // hw.dll, once; before the first map loads, which is the one it's for.
     lightmap_gamma::install();
 

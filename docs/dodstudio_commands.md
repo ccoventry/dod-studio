@@ -558,9 +558,9 @@ asks for anything and the cvar is 1. The log says `spray: TE_PLAYERDECAL for
 A flip of `ds_player_overrides` reaches sprays loaded after it; a
 spray already on a wall keeps its texture, so reload the demo to compare.
 
-**Crosshairs.** The crosshair on screen is the recorder's in a POV demo and
-the watched player's in an HLTV demo's in-eye view (free and chase cameras
-draw none). It changes on the next frame. No code is patched: the hook
+**Crosshairs.** The crosshair on screen is the watched player's in an
+in-eye view, HLTV or POV (a dead recorder watching a teammate, #1321), and
+otherwise the recorder's in a POV demo (free and chase cameras draw none). It changes on the next frame. No code is patched: the hook
 already sits on the engine's `SPR_Set`/`SPR_Draw*` in client.dll's own
 `gEngfuncs` copy (`hud_sprites.rs`, #808), and when a draw is the
 crosshair's -- any rect of `customXHair.spr`, or exactly the stock 24x24

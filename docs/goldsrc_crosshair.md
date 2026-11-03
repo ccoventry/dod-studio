@@ -356,8 +356,10 @@ the one input it approximates is the speed.
 ## 3. Each player's crosshair (Configuration > Players, #428)
 
 `ds_player_overrides 1` and a crosshair in Studio's Players table give
-the crosshair on screen a sprite and tile per player: the recorder's in a POV
-demo, the in-eye target's in an HLTV demo (`spectator_target::in_eye_target`).
+the crosshair on screen a sprite and tile per player: the in-eye target's
+whenever the in-eye camera is up (`spectator_target::in_eye_target`), in an
+HLTV demo and in a POV demo whose dead recorder watches a teammate (#1321),
+else the recorder's in a POV demo.
 `goldsrc-hooks/src/player_crosshair.rs`.
 
 ### No patch: the sprite calls are already hooked
