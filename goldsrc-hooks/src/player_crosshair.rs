@@ -2,9 +2,10 @@
 //!
 //! ## Which player
 //!
-//! The one whose view is on screen: in a POV demo the recorder (the local
-//! player), in an HLTV demo the player the in-eye camera is on
-//! (`spectator_target::in_eye_target`). Free and chase cameras draw no
+//! The one whose view is on screen: the player the in-eye camera is on
+//! (`spectator_target::in_eye_target`) in an HLTV demo, and in a POV demo
+//! while the dead recorder watches a teammate in first person (#1321); else,
+//! in a POV demo, the recorder (the local player). Free and chase cameras draw no
 //! crosshair, so nothing is decided for them. Outside a demo, and while
 //! `ds_player_overrides` is 0, the game's own crosshair stays.
 //!
@@ -244,11 +245,20 @@ fn handle_for(file: &str) -> i32 {
     handle
 }
 
-/// The entity whose view is on screen in the demo playing: the recorder in
-/// POV, the in-eye target in HLTV.
+/// The entity whose view is on screen in the demo playing: the in-eye
+/// target whenever the in-eye camera is up, else the recorder in POV.
+///
+/// The in-eye camera comes first in POV too: a dead recorder watching a
+/// teammate in first person has the teammate's view on screen, and the
+/// recorder's own crosshair over it was the wrong one (#1321).
+/// `g_iUser1`/`g_iUser2` follow the recorder's observer mode and target in
+/// POV playback, as the server sent them.
 fn viewed_player() -> Option<i32> {
+    if let Some(target) = crate::spectator_target::in_eye_target() {
+        return Some(target);
+    }
     if crate::spray_hltv::hltv() {
-        return crate::spectator_target::in_eye_target();
+        return None;
     }
     let engfuncs = crate::engine::engfuncs()?;
     // Safety: the engine's own call; the result is the local player's
