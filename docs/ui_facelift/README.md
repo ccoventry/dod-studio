@@ -4,7 +4,7 @@ Work in progress for the DoD Studio UI facelift. These are design notes only and
 
 | File | What it is |
 |---|---|
-| `canvas-pages.md` | The visible text of every canvas page (Studio, Studio tools, Tools, Settings, Clip look, Website, Pop-ups), as of 2026-11-04 |
+| `canvas-pages.md` | The visible text of every canvas page (Studio, Studio tools, Tools, Settings, Clip look, Website, Pop-ups, and the Review fixes page), as of 2026-11-05 |
 | `coverage.md` | A check of the canvas against `docs/features.md`, `studio/src/strings.js` and `goldsrc-hooks/src/settings_tab.rs` on dev: what's drawn, what's cut on purpose, what's missing, and contradictions |
 | `simplify-review.md` | Settings the redesign cuts or makes automatic, and why |
 | `ui-map.md` | Map of the current UI (Tauri v2 + Vite, plain JS, single `index.html`) |
