@@ -9,6 +9,7 @@ Work in progress for the DoD Studio UI facelift. These are design notes only and
 | `coverage.md` | A check of the canvas against `docs/features.md`, `studio/src/strings.js` and `goldsrc-hooks/src/settings_tab.rs` on dev: what's drawn, what's cut on purpose, what's missing, and contradictions |
 | `simplify-review.md` | Settings the redesign cuts or makes automatic, and why |
 | `ui-map.md` | Map of the current UI (Tauri v2 + Vite, plain JS, single `index.html`) |
+| `build-plan.md` | Draft build plan: order of work, decisions needed, data model, project-file compatibility, PR-sized steps, frame rate options, collisions with open PRs and new risks |
 
 ## Status as of 2026-11-04
 - Contradictions 1–5, 7–11 and 13–16 in `coverage.md` are fixed on the canvas, and so is 18. Contradictions 6, 12 and 17 are deliberate proposals: players per project (#1085), HD style per project, and more tools on the website (#603). Item 19 lists new ideas that are on the canvas on purpose.
