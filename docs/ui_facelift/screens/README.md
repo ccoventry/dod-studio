@@ -1,6 +1,6 @@
 # Canvas screenshots
 
-One PNG per board on the design canvas, as of 2026-11-05, at 1440 px wide and full height. Menus that start open on the canvas are open here too. Hover and click states aren't shown. `canvas-pages.md` has the same pages as text.
+One PNG per board on the design canvas, as of 2026-11-05 (round 3), at 1440 px wide and full height. Menus that start open on the canvas are open here too. Hover and click states aren't shown. `canvas-pages.md` has the same pages as text.
 
 `render.js` and `shoot.js` are the scripts that make these. They stand in for the canvas runtime, so a page can look slightly different from the live canvas.
 
@@ -21,7 +21,7 @@ One PNG per board on the design canvas, as of 2026-11-05, at 1440 px wide and fu
 | Auditor · Duplicates | [ToolAuditor.png](ToolAuditor.png) |
 | Auditor · Backups | [ToolBackups.png](ToolBackups.png) |
 | Overviews | [ToolOverviews.png](ToolOverviews.png) |
-| Project settings · Clip look | [ClipLook.png](ClipLook.png) |
+| Project settings · Clip settings | [ClipLook.png](ClipLook.png) |
 | Website · home | [WebHome.png](WebHome.png) |
 | Website · Analyzer | [WebAnalyzer.png](WebAnalyzer.png) |
 | Website · Auditor (Chrome, Edge) | [WebAuditor.png](WebAuditor.png) |
