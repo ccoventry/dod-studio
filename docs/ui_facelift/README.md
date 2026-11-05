@@ -1,10 +1,11 @@
 # UI facelift: design notes
 
-Work in progress for the DoD Studio UI facelift. These are design notes only and no code has changed. The live design is the canvas at https://claude.ai/artifact/8mYZLpBitBu4WNjd5FWVMn. It's private to Chris, so `canvas-pages.md` holds a text copy of every page.
+Work in progress for the DoD Studio UI facelift. These are design notes only and no code has changed. The live design is the canvas at https://claude.ai/artifact/8mYZLpBitBu4WNjd5FWVMn. It's private to Chris, so `screens/` holds a picture of every page and `canvas-pages.md` a text copy.
 
 | File | What it is |
 |---|---|
 | `canvas-pages.md` | The visible text of every canvas page (Studio, Studio tools, Tools, Settings, Clip look, Website, Pop-ups, and the Review fixes page), as of 2026-11-05 |
+| `screens/` | A PNG of every canvas page, with an index in `screens/README.md`. Look at these to see the design |
 | `coverage.md` | A check of the canvas against `docs/features.md`, `studio/src/strings.js` and `goldsrc-hooks/src/settings_tab.rs` on dev: what's drawn, what's cut on purpose, what's missing, and contradictions |
 | `simplify-review.md` | Settings the redesign cuts or makes automatic, and why |
 | `ui-map.md` | Map of the current UI (Tauri v2 + Vite, plain JS, single `index.html`) |
