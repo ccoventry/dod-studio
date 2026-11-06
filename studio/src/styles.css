@@ -415,6 +415,13 @@ body {
   background: transparent;
 }
 
+/* Held by a running batch (batch_guard.js, #1085): not `disabled`, which the
+   queue's footer and Load's dialog wait set for their own reasons. */
+.batch-held {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* A file/folder dialog is on its way (dialog_wait.js): the busy cursor
    everywhere, over each element's own cursor, until the dialog returns. */
 html.picking-path,

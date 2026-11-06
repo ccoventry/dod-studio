@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 520; // +2: the queue's Sort by import and one create call
+const BUDGET = 523; // +3: batch_guard.js's import, its create call and its line in createProjectSession (#1085)
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {

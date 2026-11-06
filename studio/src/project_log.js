@@ -46,3 +46,18 @@ export function rendersPickedUpLine(takes, added, elapsedMs) {
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
 }
+
+/** A batch started: the project stays open until it ends. */
+export function batchHeldLine() {
+  return '[project] a batch started: holding Open, New, Clear and Restart until it ends';
+}
+
+/** The batch ended: how long it held the project, and what was turned away. */
+export function batchReleasedLine(elapsedMs, refused) {
+  return `[project] the batch ended after ${elapsedMs} ms: released, ${refused} attempt(s) refused`;
+}
+
+/** A project change was turned away during a batch. */
+export function batchRefusedLine() {
+  return '[project] refused a project change: a batch is running';
+}

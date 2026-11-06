@@ -41,7 +41,8 @@ import { fileNameOf } from './path_display.js';
  *   or saved (File → Open Recent, #935). offerConvert(path) asks to switch a
  *   loaded `.json` project to `.dodstudio` and resolves its new path or null
  *   (project_convert.js, #528); onProjectRenamed(oldPath, newPath) is told
- *   when it did.
+ *   when it did. refuseDuringBatch() from batch_guard.js says why a project
+ *   can't be replaced now and returns true.
  */
 export function createProjectSession({
   getDemos,
@@ -58,6 +59,7 @@ export function createProjectSession({
   onProjectFile = () => {},
   offerConvert = async () => null,
   onProjectRenamed = () => {},
+  refuseDuringBatch = () => false,
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -208,6 +210,7 @@ export function createProjectSession({
   // already wrote the file inside the modal's Save button handler, and
   // 'discard' loads over it either way.
   async function confirmReplaceProject() {
+    if (refuseDuringBatch()) return false;
     if (!needsSavePrompt()) return true;
     return !!(await requestUnsavedChangesConfirmation());
   }
@@ -369,6 +372,7 @@ export function createProjectSession({
   // queue it started from (#938): it asked before it began, and what's open
   // now is a session it chose not to save.
   async function newSession({ quiet = false } = {}) {
+    if (!quiet && refuseDuringBatch()) return;
     if (!quiet && needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();
       if (!outcome) return; // Cancel — abort, keep current state
