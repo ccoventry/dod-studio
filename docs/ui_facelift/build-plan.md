@@ -17,11 +17,11 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 | 7 | Players per project | 4, 2 | 1.5-2.5 h | Monday movie and WSOD25 apart |
 | 8 | Clip settings rows and presets | 4, Q4 | 3-5 h | Clip settings page |
 | 9 | Project profiles (#444), folders, Players and Teams included | 6, 7, 8 | 2.5-3.5 h | Pick, save, import, export |
-| 10 | Batch planner: passes and a dry run | 4 | 2-3 h | Nothing (same batches) |
+| 10 | Batch planner, seek back in a batch, and a dry run (hook DLL) | 4, Q5 | 3.5-5 h | Nothing (same batches), Review's back jumps if Q9 is yes |
 | 11 | Variant rows | 10, Q5 | 3-5 h | Variants on the old table |
 | 12 | Per-clip commands and add-ons | 11, 8 | 2-4 h | Wallhack on one variant |
 | 13 | A batch stage before the demo loads (hook DLL) | 12 | 1-2 h | HD style on a variant |
-| 14 | Per-clip frame rate and Capture mode in one batch | 11, Q5 | 3-5 h | 300 fps on one variant |
+| 14 | Per-clip frame rate and Capture mode in one batch | 11, Q5 | 4-6 h | 300 fps on one variant |
 | 15 | Shell, tokens, one switch for the new pages | Canvas fix list done | 2-3 h | New look, switch off |
 | 16 | Clips page with tick bar | 15, 11 | 4-6 h | The main page |
 | 17 | Capturing, rendering, batch finished | 16 | 3-4 h | |
@@ -30,11 +30,11 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 | 20 | Turn the new pages on for everyone | 16-19 | 2-4 h (test rewrite) | The swap |
 | 21 | Remove the old pages | One release after 20 | 1-2 h | Nothing |
 
-**Total:** about 45-70 h of my time, about 2-3 h of CI (some 25 rounds at ~6 min), and about 5-7 h of your test time spread over the steps. No step is over a normal PR; the risk is engine surprises in 3, 13 and 14, named in each step.
+**Total:** about 48-73 h of my time, about 2-3 h of CI (some 25 rounds at ~6 min), and about 5-7 h of your test time spread over the steps. No step is over a normal PR; the risk is engine surprises in 3, 13 and 14, named in each step.
 
 **Stop points worth having:**
 - After step 9, each movie has its own look and Players. About 15-22 h of my time.
-- After step 14, variants and 300 fps work on today's screens. About 25-40 h.
+- After step 14, variants and 300 fps work on today's screens. About 28-43 h.
 - After step 21, the facelift is done.
 
 **Can run side by side:** 2, 3 and 5 don't touch each other. 15-19 can run at once in separate worktrees once 14 is in.
@@ -67,20 +67,21 @@ None of the questions left hold up #1085. Each has a recommendation; a "yes to a
 | Q2 | Answered: copied in once (6 above) | | | |
 | Q3 | Answered: an older build saves normally, with Save a copy only as the fallback when a normal save can't work | | | Step 1 |
 | Q4 | Answered: decision 9 | | | Step 8 |
-| Q5 | One playthrough with seek-back, or an extra pass per demo? | Waiting on the seek-back test. A batch only moves forward by Studio's choice, not an engine limit. If a rewind matches a fresh load, a variant captures right after its Original with no extra pass. Whether OBS goes on the variant list waits on the `-wavonly` check | | Steps 10, 11, 14 |
+| Q5 | One playthrough with seek-back, or an extra pass per demo? | One playthrough, and OBS on the variant list. Tested 11-06 on PRE and POST, 4 POV demos from 4 players and 1 HLTV demo: a rewound take differs from a fresh one no more than two fresh loads differ. `-wavonly` changes nothing in `sound.wav` (8 pairs). Steps 10, 11 and 14 below assume yes; say no and they go back to an extra pass | About 2-3 s per variant instead of a 10-15 s reload, from the one demo tried with the first-frame start. Needs Flush Decals on. Sprays not proven: none drew on screen, fresh or rewound. Two takes of one moment still differ in smoke, close bullet holes and flicker, however they're made | Steps 10, 11, 14 |
 | Q6 | Answered: Option B below, frame rate per clip in one batch, with no reload for the rate alone | | | Step 14 |
 | Q7 | Answered: Studio writes turn-offs, decision 11. Hook restore can come later | | | Step 12 |
 | Q8 | The smaller calls below | Answered unless marked | | Listed |
+| Q9 | Should Review's POV back jumps use the same rewind? | Yes. It fixes the wrong flags and scoreboard you remembered, on both installs | A POV back jump takes about 2-3 s instead of being instant. HLTV already works this way | Step 10 |
 
 | Canvas-check item | Answer | Where |
 |---|---|---|
-| C2 Classic textures | Honest label now, "Walls only", exact wording after the seek-back test checks walls, sky, detail, models and sprites. A full-restart option stays open until then | Step 13 |
+| C2 Classic textures | Label: "Classic walls and sky (guns, models and HUD icons stay HD until the game restarts)". Tested: a same-map reload with HD off returns walls, floors, sky and detail to exact stock; models and sprites stay HD. Restart option: **your call now**, recommended no for the first release, since a whole project with HD off gets the same result | Step 13 |
 | C5 Row after settings change | "Settings changed · Capture again", takes left alone | Steps 5, 16 |
 | C6 Export to VEGAS | Parked. Not decided | Step 16 |
 | C8 Sound level | Add `mirv_movie_sound_volume 0.25` to Clean clips, take check reports clipping | Step 8 |
 | C9 Old "Their own spray" | Becomes "No spray", said once in the summary | Step 3 |
 | C10 Issue numbers on the canvas | Leave them there, strip them when each page is built | Steps 6, 8, 16-19 |
-| `mirv_fx_xtendvis` in the Wallhack add-on | Waiting on the test, at a far-away or behind-walls spot | Step 12 |
+| `mirv_fx_xtendvis` in the Wallhack add-on | Left out: no visible effect at 5 spots, and `mirv_fx_wh_xtendvis` already defaults to 1 | Step 12 |
 
 ## Data model
 
@@ -237,43 +238,48 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Also:** mirror on project open and close, and read `use_in_game` from the payload, not saved settings (`capture_manager.rs:1303`). Keeps #686's "Use as" names in the same table.
 - **Hook:** none. It rereads the file when its time moves, which is why step 2 comes first.
 - **Move (decision 7):** the page becomes a tab of Project settings; it's read-only during a batch from this step.
+- **Add by SteamID (D11):** "+ Add player" also takes a SteamID in any of the three forms, and nothing else: no name or alias on a manual add. The row shows "Not in any demo yet", then the name once a demo matches it. `steam_ids.js` only converts from SteamID64 today, so it gains the classic and SteamID3 forms.
 - **Files:** `players_tab.rs`, `settings_manager.rs`, `players_ui.js`, `native/src/player_overrides.rs`. **Your test:** 15 min, two projects, one clip each.
 
 ### 8. Clip settings rows and presets
 - **Files:** new `clip_settings.js`, `clip_settings_logic.js`, `clip_settings_rows.js` (the 38 rows, each with its cvar, load or at once). `command_profiles_ui.js` stays for the old tab.
 - **Order, later wins:** game configs, your own commands, Clip settings rows, then (step 12) What's different and add-ons.
 - **Picture wins over presets:** Clean clips carries `mirv_fov 90` and `r_decals 256` (`builtin_profiles.rs:30`). Field of view moves to Picture; the resolver drops the preset's line. Changing Clean clips means adding to `CLEAN_CLIPS_SHIPPED`.
-- **N9, preset life:** Delete greyed with "Used by 12 variants". Edits reach Pending rows; step 16's line covers the rest. An in-game change on a built-in makes "Clean clips (edited)" with a toast.
+- **N9, preset life:** nothing links to a preset (decisions 9 and 10), so Delete just deletes, and an edit reaches only what uses it next. An in-game change on a built-in makes "Clean clips (edited)" with a toast.
 - **Tiers:** every line goes through `cfg_scan` as today; scan, don't ban, `ds_` commands. No new internal command, so no new tier.
 - **Files also:** `builtin_profiles.rs`, `cfg_warnings.js`, `strings.js`. **Your test:** 20 min, a clip with and without a row.
 
 ### 9. Project profiles (#444)
-- Canvas row (decision 3): dropdown, Save, Delete, ⋯ Save as new, Import, Export, the two "Also use" tick boxes. Teams count with Players. "(edited)" as before. Settings · App gets "New projects start from".
+- Canvas row (decision 3): dropdown, Save, Delete, ⋯ Save as new, Import, Export, the window listing sections. "(edited)" as before. Settings · App gets "New projects start from".
 - Import runs `cfg_scan` and ends with "2 things in this profile aren't on this PC" (N9), sprays and crosshairs counted too. Export removes `folders`.
 - **Files:** new `project_profiles.js`, `settings_manager.rs` (`project_profiles: Vec<serde_json::Value>`). **Your test:** 10 min, export and import.
 
-### 10. Batch planner: passes and a dry run
+### 10. Batch planner, seek back and a dry run
 - **Why now:** `build_batch_queue` has side effects (deletes cfgs, makes folders), so the tick bar can't ask it for a cost.
-- **New:** `native/src/patch/builder/passes.rs`, pure. Groups by demo, player and load settings, then deals clips into passes so none overlaps in one pass: all second versions of a demo land in one extra pass (N1). `group_highlights` (`blocks.rs:31`) gets this third key.
+- **New:** `native/src/patch/builder/passes.rs`, pure. Groups by demo, player and load settings, then orders each playthrough so a variant follows its original. Only a load-only setting (step 13's list) gets its own load. `group_highlights` (`blocks.rs:31`) gets this third key.
+- **Hook (Q5), PRE and POST:** `rewinds()` in `demo_seek.rs` drops its `hltv` condition, the rewind starts at the demo's first recorded frame rather than the clock's start, and `batch.rs`'s `Cursor` allows a backward seek (`Cursor::due`, about line 236). The first-frame start was tried on `solifotw-pb2` only, and no real `ds_capture_batch` has sought back yet, so both are the first checks here. A batch that seeks back must check the hook's build first (as #1146 does for reuse).
+- **Rewind depth:** always from the first frame. Round start saves about 1 s, needs a round table and gives nothing on a one-round demo; 60 s back was wrong in 3 of 4 runs.
+- **Flush Decals off:** a rewound take keeps decals a fresh one wouldn't, so a batch that seeks back warns. It doesn't stop.
 - **`blocks_merge` never joins a variant** to anything, its original included (`blocks.rs:137`, `mod.rs:291`).
-- **`plan_batch`:** a `#[tauri::command(async)]` returning passes, parts, seconds and bytes. `capture_estimate.js` and `estimate_batch_capture_blocks` both read it, so there's one source.
+- **`plan_batch`:** a `#[tauri::command(async)]` returning playthroughs, seek-backs, seconds and bytes. `capture_estimate.js` and `estimate_batch_capture_blocks` both read it, so there's one source.
 - **Golden test:** today's payload gives the same batch file and helper cfg, byte for byte. This is what keeps WSOD25 capturing through the rework.
-- **Your test:** none; a batch must look the same.
+- **Your test:** none for a batch, it must look the same. 10 min on Review's back jumps if Q9 is yes, POV on PRE and POST.
 
 ### 11. Variant rows
 - **Files:** new `variant_rows.js`, `variant_rows_logic.js`; `detail_pane.js` ("↳ name", a Duplicate as variant action), `split_carry.js`, `rescan_carry.js`, `project_demos.js` (`relocateDemo` rewrites saved uids), `queue_counts.js`, `review_queue.js`, `clip_name.js` (`{variant}`, R16). Rust: `SerializedStreak` and `CaptureStreak` get `variant`.
 - **Rescan (N11):** carry the clip, then its variants. No match keeps old times and a "Kills changed · Check" chip. A range is clamped with a note.
 - **Hook route only.** A variant batch that can't run from the hook stops with the reason rather than patching (`capture_manager.rs:1438,1544`). #434 removes the patch route anyway, so it gets no new feature.
-- **Capture:** one kill range, its own take, status and clip name, same settings as the project. **Your test:** 20 min, a clip and a 3-3 variant in one batch, on PRE and POST. Must play the demo twice, two takes, right rows.
+- **Capture:** one kill range, its own take, status and clip name, same settings as the project. **Your test:** 20 min, a clip and a 3-3 variant in one batch, on PRE and POST. Must capture both in one playthrough, two takes, right rows.
 
 ### 12. Per-clip commands and add-ons
 - **Files:** new `native/src/patch/clip_layers.rs` (what each clip and job runs, one place), `schedule.rs:399` (`push_custom_commands` reads the clip's list too), `first_banned_command_error` (`capture_manager.rs:1218`) scans each variant, `note_if_runs_during_fast_forward`, `roll_floors.js`. New `add_ons.js`.
-- **Layers:** a preset is the job's init lines, so it adds a job (a load). What's different and add-ons are the clip's Before and After. Before over the lead-in gets the "Runs before the clip starts recording" note (S7).
+- **Layers:** a variant's rows and add-ons are the clip's Before and After. A load-only row needs a load of its own (step 13). Before over the lead-in gets the "Runs before the clip starts recording" note (S7).
 - **The leak (tested):** all four `mirv_` cvars keep their value across reloads and other maps. So:
   - **Union rule:** each job's init states every key any job in the batch touches, or a partial preset carries into the next job.
   - The batch's `end` lines state them too.
   - A batch stopped between Before and After leaves the value on, so the next batch doesn't reuse that game (`batch_reuse.rs`).
-- **`mirv_movie_fps` can't be a command here:** it's a mid-demo hazard (`cfg_scan.rs:443`). That's why frame rate is its own select.
+- **`mirv_movie_fps` stays a select, not a typed command:** it must land before the clip's `mirv_recordmovie_start`, so Studio places it (step 14).
+- **Wallhack add-on:** `mirv_fx_wh_enable` only. `mirv_fx_xtendvis` showed nothing at 5 spots.
 - **Fast-forward gaps on a variant:** `schedule_clips` reads the clip's own value.
 - **Watch in game on any row (N10):** a one-clip batch file with the record lines left out. 45 min of this step.
 - **Your test:** 20 min, the Wallhack add-on on one variant, a plain clip after it on PRE and POST, with a look at the next clip for a leak.
@@ -284,14 +290,19 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Studio:** `runtime_batch.rs` writes it, and only when a job needs it. **An older DLL's `parse` stops on a line it doesn't know** ("unknown line"), so writing it only when needed keeps ordinary batches working on a test DLL, and a variant batch must check the hook's build first (as #1146 does for reuse).
 - **The next job restates its own values,** and `end` puts the project's back.
 - **Per-variant crosshair or spray ("Crosshair for Nifty"):** the hook only reads the table, and `ds_player_spray` is refused. This needs a table per job, a new `ds_capture_players` (refused everywhere, a tier in `cfg_scan.rs` and `command_suggest.js`, plus `Commands.txt`, `console_commands_data.js`, `docs/dodstudio_commands.md`, `NEW_SINCE_555`). Its own small PR, 1-2 h, only if you want those two rows in the first release.
+- **What a reload reaches (tested on 2 maps):** HD off reaches walls, floors, sky and detail. `ds_hd_style` reaches walls only; detail, models and sprites keep the old style until a restart. Models and sprites never change without a restart. So the HD style row carries that note, and Classic uses the C2 label.
+- **POST trap:** the in-game panel's saved settings put `ds_hd_enabled` and `ds_hd_style` back at start-up, over the launch line. The `load` line must send them before the first `viewdemo`.
 - **Your test:** 15 min, a variant on another HD style. Must show on walls, and the next clip must be back.
 
-### 14. Batches in parts
-- **Idea:** a part is an ordinary batch. New `batch_parts.js` splits the ticks by capture mode and frame rate and runs parts one after the other. Each has its own session, manifest and rate, so `record_capture_settings`, `take_meta`, the renderer, take checks and resume all work unchanged.
-- **Between parts:** the same game when it can be reused (`batch_reuse.rs`); a restart for OBS to anything else, since `-wavonly` needs a launch.
-- **Cancel stops the chain.** Studio closed between parts: the rest stay ticked and Pending, so "Capture the rest?" still works.
-- **Files:** `capture_pane.js`, `capture_progress.js` ("Part 2 of 3"), `finish_clips.js`, `render_while_capturing.js`. Variant fields `captureMode`, `captureFps`.
-- **Blow-up:** none known in the engine; the risk is the footer's states. **Your test:** 20 min, a 60 fps project with one 300 fps variant and one AGR variant.
+### 14. Per-clip frame rate and Capture mode in one batch
+- **Idea (Q5, Q6):** one batch, one launch, one manifest, with rate and mode on each `CaptureBlock`. No parts.
+- **Rate on HLAE (tested, PRE and POST):** 60, then 300, then 60 between clips, set 0.6 s before each start; frame counts match. `builder/mod.rs:130` moves from the job to the block, and the `cfg_scan.rs` hazard text changes.
+- **Rate on OBS:** `SetVideoSettings` works between recordings with no restart and is refused during one. Tested on a Display Capture source, so a Game Capture source across the change is the first check here, with how long the change takes.
+- **Launch:** `-wavonly` when any clip uses OBS. It changes nothing in HLAE's `sound.wav`, so the whole batch uses that one launch. OBS is started and checked at the batch's start (decision 12).
+- **Mode between clips (not tested):** the record aliases are written once per batch (`helper_cfg.rs:190-206`), so they go per clip. Frames to Video to AGR to OBS in one game gets a probe first. A pair that fails gets a demo load between the two clips, not a split batch.
+- **Per clip, not per batch:** `record_capture_settings`, `take_meta`, `short_take`, `finish_clips.js`, `capture_estimate.js` and `block_byte_estimate`.
+- **Files also:** `capture_pane.js`, `capture_progress.js`, `render_while_capturing.js`. Variant fields `captureMode`, `captureFps`.
+- **Blow-up:** mode switching in one game, and the footer's states. **Your test:** 20 min, a 60 fps project with one 300 fps variant and one AGR variant, on PRE and POST, then one OBS variant.
 
 ### 15. Shell and tokens
 - `:root` tokens, sidebar, top bar, the `new_ui` switch. New `page_shell.js`. Light and dark can follow (#49, the theme system); the main colour is still open.
@@ -299,7 +310,7 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - `styles.css` is hand-copied by `web-analyzer/www`. Tokens go in a new `tokens.css`, so the website doesn't drift.
 
 ### 16. Clips page with tick bar
-- **Tick bar:** ticks are `selected`. Count, disk, time and "Plays 6 demos twice" come from `plan_batch`, debounced. R10: a variant under a filter shows its clip's name; "Tick all" ticks what's shown, and the bar says "3 ticked, 1 hidden".
+- **Tick bar:** ticks are `selected`. Count, disk, time and "Adds 12 seek-backs" come from `plan_batch`, debounced. R10: a variant under a filter shows its clip's name; "Tick all" ticks what's shown, and the bar says "3 ticked, 1 hidden".
 - **Row states:** R11, R12 (AGR's Captured is final), N3 "Settings changed · Capture again", N6 "Take not found · Find it…" and "Drive E: not connected", S2 one status set, "Bring back" on a cleared row (N14).
 - **Scale (N8):** Sort by, Player filter, draw one page at 364 rows. With no ticks: "Capture all 318 · 1.9 TB", asks first above about 20.
 - **Which video (N7, C6):** newest good take is main, "Use this take" in History. Play, Combine and Export use it.
@@ -307,7 +318,7 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Files:** new `page_clips.js`, `clips_table.js`, `tick_bar.js`, `tick_bar_logic.js`, `variant_drawer.js`. **Your test:** 30 min at real size.
 
 ### 17. Capturing, rendering, finished
-- Flat list with parts, reasons on stops, R8 start checks with the config warnings, R9 OBS on close, S14 batch done.
+- Flat list, each row showing its own rate and mode, reasons on stops, R8 start checks with the config warnings, R9 OBS on close, S14 batch done.
 - **Stop (N13):** "Stop after this clip · Stop now" and "Render the 19 captured?". Cut-short takes appear in History with Move to Recycle Bin.
 - **N16:** the install in Captured with, a start check for a trimmed copy on the wrong install. **Your test:** 20 min.
 
@@ -329,35 +340,27 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 
 ## Frame rate on a variant
 
-**The ask:** one variant at 300 fps in a 60 or 120 fps project. A variant of a moment already needs a second pass, so the question is what else has to change.
+**The ask:** one variant at 300 fps in a 60 or 120 fps project, with no reload for the rate alone. Option B is chosen and tested; the table is what it changes.
 
 **Traced on dev:**
 
 | What | Today | Per-variant rate means |
 |---|---|---|
-| HLAE rate | `mirv_movie_fps` in every job's init (`builder/mod.rs:130`), batch-wide | Per job is one line away. Mid-demo it's a listed hazard (`cfg_scan.rs:406`) |
+| HLAE rate | `mirv_movie_fps` in every job's init (`builder/mod.rs:130`), batch-wide | Per clip, set before each `mirv_recordmovie_start`. Tested. The hazard at `cfg_scan.rs:406` is Studio's assumption, not an engine limit |
 | `host_framerate` | AGR only, per block in the route alias (`helper_cfg.rs:229`). HLAE's movie modes pin the timestep themselves | Nothing for Frames or Video; AGR takes its rate per block |
-| OBS | Real time, set in OBS for the session, `fps_max` follows (`mod.rs:157`). 300 at 1440p lost 98.5% of frames | Not offered. Grey on OBS, or pick Frames (a game restart) |
-| Take record | `record_capture_settings` stamps `manifest.capture_fps` on every block (`capture_manager.rs:1010`) | Wrong for a mixed batch, unless each part has its own manifest |
+| OBS | Real time, set in OBS for the session, `fps_max` follows (`mod.rs:157`). 300 at 1440p lost 98.5% of frames | Set between recordings, tested with Display Capture. Hardware limits warn, never grey (decision 12) |
+| Take record | `record_capture_settings` stamps `manifest.capture_fps` on every block (`capture_manager.rs:1010`) | Goes per block |
 | Render | Reads the take's own file (`take_meta::render_fps`), so the render is right if the record is. `finish_clips.js:350` passes one batch rate | Same |
-| Disk and time | `block_byte_estimate`, `capture_estimate.js`: one rate | Sum per part. About 1 GB a game second at 300 fps |
+| Disk and time | `block_byte_estimate`, `capture_estimate.js`: one rate | Sum per clip. About 1 GB a game second at 300 fps |
 | Take checks | `short_take(block, capture_fps)`, OBS drop tracker: one rate | Same as the record |
-| Demo reloads | One job per demo and player | A second pass already loads it. A variant at another rate with no clip beside it costs one more load |
+| Demo reloads | One job per demo and player | None for the rate |
 | VEGAS | `jobFps` reads each render's own line, one row per clip, PlayRate 1 | Works. A 300 fps event in a 60 fps project needs your ctrl-drag and Frame Blend, as now |
 | Combine | Mixed rates can't stream-copy, so it re-encodes at the first clip's rate (`combine.rs:186,263`) | The slow-motion frames are thrown away quietly. Say so in the Combine prompt |
 
-**Option A: Frame rate beside Capture mode, as its own part.** A select on the variant: Same as project · 60 · 120 · 300 · Custom. It's captured in step 14's part.
-- For: no change to the manifest, take file, renderer, checks or resume. The disk line counts it. AGR's variant uses the same row (R14).
-- Against: a part of its own, so one more demo load per demo touched, in the same game unless OBS is involved.
-- Size: part of step 14, about 30 min beyond it, plus the drawing.
+**Dropped: Option A** (own part of the batch, a demo load per demo) **and Option C** (a second project at 300 fps).
 
-**Option B, chosen: rate per clip in one batch.** Same select, but one batch and one manifest, with the rate on each `CaptureBlock`. A rate change shouldn't cost a reload or launch. The `cfg_scan.rs` hazard is Studio's own assumption, not an engine limit, so the code changes: the record, estimates, checks and `finish_clips.js` go per clip, and time and disk add up per clip. The test confirms HLAE takes a new rate between clips, and whether OBS can.
-- For: one progress bar and session folder.
-- Against: `record_capture_settings`, `capture_estimate.js`, `finish_clips.js` and the checks all go per block, a 2-3 h bigger step for little: the demo loads again either way. It also doesn't solve mode changes, so parts are still needed.
+**Option B, chosen: rate per clip in one batch.** A select on the variant: Same as project · 60 · 120 · 300 · Custom. One batch and one manifest, with the rate on each `CaptureBlock`. The record, estimates, checks and `finish_clips.js` go per clip, and time and disk add up per clip. AGR's variant uses the same row (R14).
 
-**Option C: no variant rate.** A second project at 300 fps over the same demos, or the whole project at 300.
-- For: no code.
-- Against: takes and History split across two projects, or 2.5-5 times the disk for every clip, which is what the variant was meant to avoid.
 
 **Needs on the canvas:** the select and its OBS warning on StudioVariant, per-clip rates on StudioCapturing, and R4's side note drops frame rate from the project-wide list.
 
@@ -381,7 +384,7 @@ List only; nothing is filed.
 
 **Update:**
 - #1085 (a project's own settings): replace "App default or This project" with the decisions above, "Capture profile" is now Project profile, safety step first, the four traps in steps 4 and 7. Its "no new version needed" holds for reading, not for older builds saving.
-- #45 (variants): post the draft comment in `45-tests.md`; add the row model and Q5. Priority-low no longer fits.
+- #45 (variants): post the draft comment in `45-tests.md`; add the row model, Q5 and the seek-back results. Priority-low no longer fits.
 - #444 (profiles): holds Picture, Clip length, Clip settings, names, HD style, folders, Players and Teams; folders never exported; depends on steps 6, 7 and 8. The Configuration dropdown text is out of date.
 - #442 (command profiles, closed): its "a variant row can use a profile" part moved to #45.
 - #1322 (lambda spray): the probe first; C9.
@@ -394,7 +397,8 @@ List only; nothing is filed.
 
 **File (deliberately deferred or not yet tracked):**
 - Project can be opened during a capture batch, losing the take links (step 2).
-- A batch can run in parts (step 14).
+- A POV seek back jumps with no replay, so Review shows wrong flags and scores (step 10, if Q9 is yes).
+- POST crashes at start-up, third time (`hw+0x280403` family), and a same-session reload of an HLTV demo crashed or exited POST twice. A rewind avoids that reload.
 - Per-variant crosshair and spray need a table per job (step 13, optional).
 - Watch in game on a Clips row (N10).
 - Takes that moved or sit on an unplugged drive (N6).
@@ -422,12 +426,14 @@ List only; nothing is filed.
 | `main.js` is at 519 of 520 lines, and 12 steps add wiring | Raise BUDGET with a reason in each PR. Never squeeze |
 | `index.html` and `strings.js` conflict across long-lived branches | Pages in own modules; one step at a time |
 | A 300 fps H.264 "Small" render hasn't been tried | Try it in step 14's test |
+| The first-frame rewind is proven on one demo, and a real batch hasn't sought back | First checks in step 10, on several players' demos |
+| Sprays across a rewind aren't proven: none drew on screen, fresh or rewound | Step 11's test looks at a sprayed wall with Studio's PNG sprays |
 
 ## Where every Not-thought-of and For-Chris item went
 
 | Item | Goes to | Item | Goes to |
 |---|---|---|---|
-| N1 extra pass | Steps 10, 16 | N14 removal | Steps 16, 18 |
+| N1 cost of a variant | Steps 10, 16 | N14 removal | Steps 16, 18 |
 | N2 mode per batch | Step 14, Q5 | N15 merged takes | Step 16 |
 | N3 settings changed | Steps 5, 16; snapshot in the data model | N16 which install | Steps 5, 17 |
 | N4 older build | Step 1, Q3 | N17 first-time player | Step 19 |
