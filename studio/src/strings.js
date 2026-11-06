@@ -1716,6 +1716,12 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── What a running batch holds back (batch_guard.js, #1085) ──
+  BATCH_GUARD: {
+    HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
+    REFUSED_TOAST: 'A capture batch is running: this project stays open until it ends.',
+  },
+
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
     caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
@@ -1725,12 +1731,6 @@ export const STRINGS = {
     // The game is open, so the batch may still be capturing in it (#20).
     WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
     STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
-  },
-
-  // ── What a running batch holds back (batch_guard.js, #1085) ──
-  BATCH_GUARD: {
-    HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
-    REFUSED_TOAST: 'A capture batch is running: this project stays open until it ends.',
   },
 
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
