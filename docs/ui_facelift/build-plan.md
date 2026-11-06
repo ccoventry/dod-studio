@@ -11,12 +11,12 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 | 1 | Project-file safety: version number, unknown data kept on save, backup | Nothing | 1-1.5 h | Almost nothing |
 | 2 | No project switch or app restart during a batch | Nothing | 0.5-1 h | A greyed item |
 | 3 | The lambda spray fix (#1322) | Probe on POST first | 2-4 h | Sprays |
-| 4 | Project settings block and the one place that resolves them | 1, Q1, Q2 | 2-3 h | Nothing yet |
+| 4 | Project settings block and the one place that resolves them | 1 | 2-3 h | Nothing yet |
 | 5 | History with full settings | 4 | 1.5-2.5 h | More detail in History |
-| 6 | Project settings page | 4 | 2-3 h | First new page |
+| 6 | Project settings pop-up | 4 | 2-3 h | First new window |
 | 7 | Players per project | 4, 2 | 1.5-2.5 h | Monday movie and WSOD25 apart |
 | 8 | Clip settings rows and presets | 4, Q4 | 3-5 h | Clip settings page |
-| 9 | Project profiles (#444) | 6, 8 | 1.5-2.5 h | Pick, save, import, export |
+| 9 | Project profiles (#444), folders, Players and Teams included | 6, 7, 8 | 2.5-3.5 h | Pick, save, import, export |
 | 10 | Batch planner: passes and a dry run | 4 | 2-3 h | Nothing (same batches) |
 | 11 | Variant rows | 10, Q5 | 3-5 h | Variants on the old table |
 | 12 | Per-clip commands and add-ons | 11, 8 | 2-4 h | Wallhack on one variant |
@@ -41,12 +41,24 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 
 ## Decisions needed
 
-Only Q1 and Q2 hold up #1085 (a project's own settings). Each has a recommendation; a "yes to all" is a real answer.
+**Decided in review (replaces Q1 and Q2, and #1085's "App default or This project" rule):**
+
+1. **A new project is a copy of a profile, and owns its settings from then on.** There's no live link to an app default, so "App default", "Set by project" chips and "Use app default" links all go. Changing a profile later never touches a project.
+2. **Project settings is a pop-up** with OK, Cancel and Apply, then the project's own Save, like VEGAS. Apply is greyed unless there are changes. OK and Cancel are always enabled. OK marks the project unsaved only if something changed. Cancel reverts what changed since the last Apply and closes. App shortcuts are off while it's open; text boxes keep Ctrl+C, V, Z and A. Smaller settings (Clip settings, What's different, add-ons, Players, marks) apply at once and mark the project unsaved. Settings · App keeps saving as you go.
+3. **Profile row at the top of the pop-up:** dropdown ("None: this project only", "FOTW (edited)"), Save, Delete, and ⋯ for Save as new, Import and Export, like VEGAS's Template row. These act at once on the saved profiles; Cancel only covers the project. Two tick boxes, "Also use its folders" and "Also use its Players and Teams", start unticked on an existing project. A pick is a pending change until OK or Apply.
+4. **Profiles hold everything, folders, Players and Teams included.** Teams (names and merges) are already in the project file, so a shared project carries them anyway; unknown team tags do no harm. Folders are per project and per PC: saved under a PC id, never exported, and a friend chooses their own before their first capture. Players import with names and SteamIDs; a spray or crosshair file that isn't on the PC comes in blank, so that player uses the fallback, and the import ends with a count ("3 sprays and 1 crosshair aren't on this PC"). Bundling the image files can come later.
+5. **Settings · App has one row, "New projects start from":** a profile dropdown with a built-in default. First launch and Ctrl+N use it. A capture with no project saved, and the Analyzer's Launch Preview, use it too.
+6. **An old project gets today's settings copied in once**, with the one-time summary. Every old project gets the same copy, so the order they're opened in doesn't matter, and Monday's are changed once.
+7. **Players and sprays moves from Tools to the Project group in Settings,** beside Clip settings, and its title names the project. The sprays and crosshairs to pick from stay shared on the PC. Read-only during a batch.
+
+Still open: should a batch warn when the project is unsaved? Today it doesn't, and History records what was used, so the plan keeps today's behaviour.
+
+None of the questions left hold up #1085. Each has a recommendation; a "yes to all" is a real answer.
 
 | # | Question | Recommended | If yes | Blocks |
 |---|---|---|---|---|
-| Q1 | Output folders: drives stay on this PC, and the folder under each drive is per project? | Yes. Empty means today's behaviour, so it matches your "app-wide default a project can override" | The last open question on #1085 closes | Step 4 |
-| Q2 | An old project on first open: copy today's app settings into it, or keep following the app? | Copy once, and say so in a one-time summary. Open WSOD25 first, since today's app settings are WSOD25's | Changing the app default for Monday can't shift WSOD25. The canvas's "starts on App default" text changes | Step 4 |
+| Q1 | Answered: folders are per project and per PC (2 and 4 above) | | | |
+| Q2 | Answered: copied in once (6 above) | | | |
 | Q3 | An older build opens a project from a newer one: save normally, or only "Save a copy"? | Save normally. From step 1 on, a build keeps data it doesn't know. Copies would fork a project you move between builds | N4's "Save a copy" is kept only for a breaking change, and none is planned | Step 1 |
 | Q4 | Presets: this PC's library, with each project holding a copy of what it uses? (C7) | Yes. The file travels whole | A preset edit reaches other projects only when they pick it again | Step 8 |
 | Q5 | A batch that needs them runs in parts, with all second versions of a demo in one extra pass, and OBS stays off the variant list? (C3, C4) | Yes | Tick bar says "Plays 6 demos twice · adds about 25 min" and "Runs in 2 parts". An AGR variant in an OBS project restarts the game between parts | Steps 11, 14 |
@@ -75,14 +87,14 @@ Only Q1 and Q2 hold up #1085 (a project's own settings). Each has a recommendati
   "version": "0.12.0",     // stays: nothing reads it, older builds expect it
   "schema": 2,             // new: whole number, up one for each new kind of data
   "saveNeeds": 1,          // new: a build below this can only Save a copy. Stays 1
-  "settings": {            // new: only what this project sets. Missing = App default
+  "settings": {            // new: the project owns all of these. Missing only in a file not migrated yet
     "picture": { "captureMode", "width", "height", "fov", "captureFps", "obsCaptureFps", "agrFps", "finished" },
     "clipLength": { "beforeSeconds", "afterSeconds", "killGaps" },
     "clipSettings": { "preset": "Clean clips", "initCommands": [], "customCommands": [] },
     "clipNames": { "template" },
-    "folders": { "underEachDrive" },
+    "folders": { "<pcId>": { "destinations", "exports" } },  // full paths, this PC only, removed on export
     "install": { "madeWith" },
-    "players": { }         // absent = the app's table (#1085)
+    "players": { }         // the project's own table
   },
   "profile": "FOTW",       // new: the Project profile it started from, for "(edited)"
   "demos": [ { "streaks": [ /* highlights, plus the fields below */ ] } ],
@@ -127,7 +139,7 @@ The same `settings` goes in `dodstudio_take.json` beside the take, so it travels
 
 **Presets stay command profiles** (`CommandProfile`, #442's lists). Clip settings rows are an editor over `init_commands` lines, so there's no new preset format and settings.json doesn't change shape. Before and After in one row saves as two `CustomCommand`s with a shared `pair` id; an older build sees two commands.
 
-**Project profile:** a saved copy of `settings` without `players`, `folders` and `install`, kept in settings.json like `render_presets`, and exported as one small JSON file.
+**Project profile:** a saved copy of `settings` plus the project's `teams`, without `install`, kept in settings.json like `render_presets`, and exported as one small JSON file with `folders` removed. `new_project_profile` in settings.json names the one new projects start from.
 
 **Cache versions.** None of this bumps `analysis::cache::SCHEMA_VERSION` or `HIGHLIGHTS_VERSION`: no scan result changes. Variant rows are not scan-filled, so `scanIsCurrent` stays. `settings_migrations` (settings.json) gets one step, for C9.
 
@@ -153,7 +165,7 @@ Chris moves between builds on one project, and WSOD25 is live with 42 ticked. Wh
 - **Backup on the first save that raises `schema`:** `<name>.before-v<schema>-<date>.dodstudio` beside the file, reusing `rescan_recent.js`'s naming, and a toast says where. Never overwritten, never deleted by Studio.
 - **Three writers, one rule:** `project_session.js:185`, `batch_catch_up.js:120` (keeps keys already: it edits the parsed file) and `rescan_recent.js`. Its once-per-update run saves many projects at once, each backed up first.
 - **Newer file:** the header line says "Made with a newer DoD Studio", and the first save toasts that its new settings are kept but not used here (Q3).
-- **One-time summary (N5):** "Updated: 364 clips, 45 takes found, 3 not found. Backup: [path]". Existing takes stay in their folders, with "Captured with: not recorded".
+- **One-time summary (N5):** "Updated: 364 clips, 45 takes found, 3 not found. Backup: [path]". Existing takes stay in their folders, with "Captured with: not recorded". `settings` is filled once from today's app settings at this point, with today's folders under this PC's id.
 
 **Tests:**
 - Vitest fixture `studio/src/test_fixtures/project_schema1.js`, shaped like WSOD25 with made-up paths: load, migrate, save, compare.
@@ -199,7 +211,7 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **So:** new `project_settings.js` and `project_settings_logic.js` hold `settings`. `resolveSettings(form, project)` is pure and tested. `batchSettingsPayload` (`capture_pane.js:593`) calls it last. Also: `capture_summary.js`, `capture_estimate.js`, `finish_clips.js:283`, `clip_name_ui.js`.
 - **Rust:** `launch_config` takes values from saved settings at five call sites (`game_process_manager.rs:142,232,297`, `demo_preview.rs:252`, `review_manager.rs:167`), so Review and Launch Preview would start the game at the app's size and a reuse check would then ask to relaunch. Pass the resolved size in the request; the field exists.
 - **Install offer:** "This project was made with POST. Switch?", never silent.
-- **Data:** `settings` (Q1, Q2). **Your test:** 10 min with a hand-edited copy; no page yet.
+- **Data:** `settings`, per decisions 1, 4 and 6. Folders keep today's same-drive and free-space checks. **Your test:** 10 min with a hand-edited copy; no page yet.
 
 ### 5. History with full settings
 - **Early on purpose:** only takes captured after this have the record.
@@ -208,16 +220,17 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Render history** already exists (`RenderAttempt`); this adds nothing there.
 - **Blow-up:** none. **Your test:** 5 min, capture one clip and read History.
 
-### 6. Project settings page
-- **Canvas:** Project settings, except Profile (step 9) and the Clip settings link (step 8). Before the first kill and After the last kill map to Start Lead and Stop Trail; pre-roll and post-roll become automatic only after the roll check is tested (`review.md` section 5, rows 92 and 94).
-- **Needs R4, R5, R14, R16, S9, S18 from the fix list.** R5 gives App default a home. AGR's own rate shows when Capture with is AGR.
-- **Files:** new `project_settings_page.js`; opened from File › Project Settings now, from the project switcher at step 19.
+### 6. Project settings pop-up
+- **Canvas:** Project settings, redrawn as a pop-up with OK, Cancel and Apply (decision 2), except Profile (step 9) and the Clip settings link (step 8). Before the first kill and After the last kill map to Start Lead and Stop Trail; pre-roll and post-roll become automatic only after the roll check is tested (`review.md` section 5, rows 92 and 94).
+- **Needs R4, R14, R16, S9, S18 from the fix list.** R5 is replaced by decisions 1 and 5. AGR's own rate shows when Capture with is AGR.
+- **Files:** new `project_settings_dialog.js`; pending edits live there until OK or Apply. `app_shortcuts.js` gets one off switch. Opened from File › Project Settings now, from the project switcher at step 19. Clip settings' link asks first if edits are pending.
 - **Your test:** 20 min.
 
 ### 7. Players per project
 - **Trap:** `players_tab::mirror_table` runs on every settings save (`lib.rs:131`) and at load (`settings_manager.rs:746`), so a settings save would put the app's table back over the project's. It must write the effective table.
 - **Also:** mirror on project open and close, and read `use_in_game` from the payload, not saved settings (`capture_manager.rs:1303`). Keeps #686's "Use as" names in the same table.
 - **Hook:** none. It rereads the file when its time moves, which is why step 2 comes first.
+- **Move (decision 7):** the page goes to the Project group at step 19; its title names the project, and it's read-only during a batch from this step.
 - **Files:** `players_tab.rs`, `settings_manager.rs`, `players_ui.js`, `native/src/player_overrides.rs`. **Your test:** 15 min, two projects, one clip each.
 
 ### 8. Clip settings rows and presets
@@ -229,8 +242,8 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Files also:** `builtin_profiles.rs`, `cfg_warnings.js`, `strings.js`. **Your test:** 20 min, a clip with and without a row.
 
 ### 9. Project profiles (#444)
-- Canvas row: pick, Save as, Import, Export. Copies values in, with Undo and "(edited)". Players stay out.
-- Import runs `cfg_scan` and ends with "2 things in this profile aren't on this PC" (N9).
+- Canvas row (decision 3): dropdown, Save, Delete, ⋯ Save as new, Import, Export, the two "Also use" tick boxes. Teams count with Players. "(edited)" as before. Settings · App gets "New projects start from".
+- Import runs `cfg_scan` and ends with "2 things in this profile aren't on this PC" (N9), sprays and crosshairs counted too. Export removes `folders`.
 - **Files:** new `project_profiles.js`, `settings_manager.rs` (`project_profiles: Vec<serde_json::Value>`). **Your test:** 10 min, export and import.
 
 ### 10. Batch planner: passes and a dry run
@@ -361,9 +374,9 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 List only; nothing is filed.
 
 **Update:**
-- #1085 (a project's own settings): Q1 and Q2 answers, "Capture profile" is now Project profile, safety step first, the four traps in steps 4 and 7. Its "no new version needed" holds for reading, not for older builds saving.
+- #1085 (a project's own settings): replace "App default or This project" with the decisions above, "Capture profile" is now Project profile, safety step first, the four traps in steps 4 and 7. Its "no new version needed" holds for reading, not for older builds saving.
 - #45 (variants): post the draft comment in `45-tests.md`; add the row model and Q5. Priority-low no longer fits.
-- #444 (profiles): holds Picture, Clip length, Clip settings, names, HD style; Players out; depends on steps 6 and 8. The Configuration dropdown text is out of date.
+- #444 (profiles): holds Picture, Clip length, Clip settings, names, HD style, folders, Players and Teams; folders never exported; depends on steps 6, 7 and 8. The Configuration dropdown text is out of date.
 - #442 (command profiles, closed): its "a variant row can use a profile" part moved to #45.
 - #1322 (lambda spray): the probe first; C9.
 - #434 (retire patching): the batch file's `load` line, and that variants are hook-route only.
