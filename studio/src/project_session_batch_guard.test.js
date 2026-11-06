@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn() }));
 vi.mock('./ipc_bridge.js', () => ({
+  filesExist: vi.fn(),
   readProjectFile: vi.fn(async () => JSON.stringify({ version: '0.12.0', demos: [] })),
   writeProjectFile: vi.fn(),
   defaultProjectsDir: vi.fn(),
