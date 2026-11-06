@@ -51,6 +51,8 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 6. **An old project gets today's settings copied in once**, with the one-time summary. Every old project gets the same copy, so the order they're opened in doesn't matter, and Monday's are changed once.
 7. **Players and sprays moves from Tools to the Project group in Settings,** beside Clip settings, and its title names the project. The sprays and crosshairs to pick from stay shared on the PC. Read-only during a batch.
 
+8. **Teams joins the Project group too,** as its own entry beside Players and sprays. It stays its own window, applying at once, because it can read demos, which is too long a job inside the Project settings pop-up. It also opens from the same button on the page it sits on today.
+
 Still open: should a batch warn when the project is unsaved? Today it doesn't, and History records what was used, so the plan keeps today's behaviour.
 
 None of the questions left hold up #1085. Each has a recommendation; a "yes to all" is a real answer.
