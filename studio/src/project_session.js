@@ -79,6 +79,9 @@ export function createProjectSession({
   // True from opening a newer build's file until the first save says what
   // happens to its new settings.
   let newerNoticePending = false;
+  // Counts markProjectDirty() calls, so a save can tell a change that landed
+  // while it wrote from one it has in the file.
+  let changeCount = 0;
   // True whenever project state (scanned demos, takeIndex, scanPaths) has
   // changed since the last successful save or load — gates the "unsaved
   // changes" prompt on window close. Cleared by saveProjectSession() and
@@ -141,6 +144,7 @@ export function createProjectSession({
   // called at every mutation site for currentScannedDemos/takeIndex/
   // scanPaths. Gates the close-window "unsaved changes" prompt.
   function markProjectDirty() {
+    changeCount += 1;
     hasUnsavedChanges = true;
     updateSessionFileIndicator();
   }
@@ -172,10 +176,27 @@ export function createProjectSession({
   // The first save in a newer format: the one-time summary, in the log
   // always and as a toast unless saving quietly. The take check reads the
   // disk, so it runs once the save is safely done.
-  async function reportUpdate(filePath, backup, quiet) {
-    const summary = await updateSummary(getDemos(), getTakeIndex());
+  async function reportUpdate(filePath, takeIndex, backup, quiet) {
+    const summary = await updateSummary(getDemos(), takeIndex);
     logFrontendEvent(projectUpdatedLine(filePath, summary, backup));
     if (!quiet) showToast(STRINGS.PROJECT_FILE.updatedToast(summary, backup), 'success', UPDATE_TOAST_MS);
+  }
+
+  // Writes the project to `path`, and when that can't be done offers Save a
+  // copy, since nothing else lets the user save elsewhere and the work would
+  // stay stuck in memory. Resolves `{ filePath, raised }`, or null when the
+  // copy is cancelled. A quiet save has nobody to ask: it throws.
+  async function writeOrOfferCopy(path, projectFile, quiet) {
+    try {
+      return { filePath: path, raised: await saveProjectFile(path, projectFile) };
+    } catch (err) {
+      if (quiet || !(err instanceof ProjectFileError)) throw err;
+      logFrontendEvent(projectFailedLine('save the project', path, err.message));
+      showToast(err.message, 'error', UPDATE_TOAST_MS);
+      const copy = await whileDialogOpens(() => save(projectCopyDialogOptions(path)));
+      if (!copy) return null;
+      return { filePath: copy, raised: await saveProjectFile(copy, projectFile) };
+    }
   }
 
   // Save Project Session — also called from the Clear All modal's "Save
@@ -198,8 +219,9 @@ export function createProjectSession({
       return true;
     }
     try {
-      const filePath = await saveTarget(quiet);
-      if (!filePath) return false;
+      const target = await saveTarget(quiet);
+      if (!target) return false;
+      const changesInThisSave = changeCount;
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
       // project's, and a project carrying them switched them on every open.
@@ -226,9 +248,12 @@ export function createProjectSession({
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
       }, openedFile);
-      const raised = await saveProjectFile(filePath, projectFile);
+      const written = await writeOrOfferCopy(target, projectFile, quiet);
+      if (!written) return false;
+      const { filePath, raised } = written;
       currentSessionPath = filePath;
-      hasUnsavedChanges = false;
+      // A mark that landed during the write isn't in the file.
+      hasUnsavedChanges = changeCount !== changesInThisSave;
       updateSessionFileIndicator();
       logFrontendEvent(projectSavedLine(filePath, getDemos().length));
       if (!quiet) {
@@ -237,7 +262,11 @@ export function createProjectSession({
         newerNoticePending = false;
         onProjectFile(filePath);
       }
-      if (raised) await reportUpdate(filePath, raised.backup, quiet);
+      // The save is done: a failed summary mustn't report it as failed.
+      if (raised) {
+        await reportUpdate(filePath, prunedTakes, raised.backup, quiet)
+          .catch((err) => logFrontendEvent(projectFailedLine('summarise the update of', filePath, err)));
+      }
       return true;
     } catch (err) {
       console.error("Save project error:", err);

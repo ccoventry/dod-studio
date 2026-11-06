@@ -162,7 +162,10 @@ function headerOf(text) {
 }
 
 /** Backs up the file at `path` when saving `schema` over it raises its format.
- *  Resolves `{ backup, fromSchema }`, or null when no backup was needed. */
+ *  Resolves `{ backup, fromSchema }`, or null when no backup was needed. A
+ *  file already past `schema` was saved by a newer build after this window
+ *  opened it: writing would erase what that build added, so it's refused and
+ *  the file stays as it is. */
 async function backupBeforeRaising(path, schema, io) {
   const S = STRINGS.PROJECT_FILE;
   const startedAt = io.now();
@@ -174,6 +177,7 @@ async function backupBeforeRaising(path, schema, io) {
   }
   const header = headerOf(onDisk);
   if (header.saveNeeds > SAVE_LEVEL) throw new ProjectFileError(S.needsNewerBuild(path));
+  if (header.schema > schema) throw new ProjectFileError(S.newerOnDisk(path));
   if (header.schema >= schema) return null;
   io.log(projectBackupStartedLine(path, header.schema, schema));
   try {
@@ -191,16 +195,20 @@ async function backupBeforeRaising(path, schema, io) {
  * Writes `built` (from buildProjectFile) to `path`: the one way a project file
  * is saved. The file already there is backed up first when this raises its
  * `schema`, and left alone with an error when it needs a newer build to save
- * over it. Resolves `{ backup, fromSchema }` when it raised the file, else
- * null. Throws ProjectFileError when the file couldn't be checked or backed
- * up: nothing is written then. A failed write throws what the write threw.
- * `io` swaps the disk out in tests.
+ * over it or a newer build has saved it since. Resolves `{ backup, fromSchema }`
+ * when it raised the file, else null. Throws ProjectFileError, saying why, when
+ * the file couldn't be saved: the file at `path` is then as it was. `io` swaps
+ * the disk out in tests.
  */
 export async function saveProjectFile(path, built, overrides = {}) {
   const io = { ...defaultIo, ...overrides };
   const found = await io.exists([path]);
   if (!Array.isArray(found)) throw new ProjectFileError(STRINGS.PROJECT_FILE.backupFailed(path, STRINGS.PROJECT_FILE.CANT_CHECK));
   const raised = found[0] ? await backupBeforeRaising(path, built.schema, io) : null;
-  await io.write(path, built.json);
+  try {
+    await io.write(path, built.json);
+  } catch (err) {
+    throw new ProjectFileError(STRINGS.PROJECT_FILE.writeFailed(path, err?.message || err));
+  }
   return raised;
 }

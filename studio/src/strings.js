@@ -1741,6 +1741,8 @@ export const STRINGS = {
     },
     backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
     needsNewerBuild: (path) => `Not saved: ${path} needs a newer DoD Studio to save over it. Use Save a copy.`,
+    newerOnDisk: (path) => `Not saved: a newer DoD Studio saved ${path} after you opened it, and saving here would erase what it added. Save a copy, or open the file again.`,
+    writeFailed: (path, err) => `Not saved: could not write ${path}: ${err}`,
     CANT_CHECK: 'could not check whether the file is there',
     NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
     noMigrationStep: (schema) => `This build has no way to update a project from format ${schema}.`,

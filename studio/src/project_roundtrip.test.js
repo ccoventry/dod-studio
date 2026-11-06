@@ -157,6 +157,84 @@ describe('a schema 1 project in this build', () => {
     expect(JSON.parse(disk.get(PATH)).schema).toBeUndefined();
   });
 
+  it('offers Save a copy when the backup can\'t be made, and carries on in the copy', async () => {
+    const copy = 'D:\\p\\movie copy.dodstudio';
+    const text = JSON.stringify(projectSchema1());
+    disk.set(PATH, text);
+    const { writeProjectFile } = await import('./ipc_bridge.js');
+    saveDialog.mockResolvedValue(copy);
+    const { session } = openSession();
+    await session.loadProjectFile(PATH);
+    session.markProjectDirty();
+    writeProjectFile.mockImplementationOnce(async () => { throw new Error('disk full'); });
+    expect(await session.saveProjectSession()).toBe(true);
+    expect(saveDialog.mock.calls[0][0]).toMatchObject({ title: STRINGS.PROJECT_FILE.SAVE_COPY_DIALOG_TITLE, defaultPath: copy });
+    expect(toasts().join()).toContain('disk full');
+    expect(disk.get(PATH)).toBe(text);
+    expect(clipsOf(JSON.parse(disk.get(copy)))).toHaveLength(clipsOf(projectSchema1()).length);
+    expect(session.currentPath()).toBe(copy);
+    expect(session.needsSavePrompt()).toBe(false);
+  });
+
+  it('offers Save a copy when the write fails, with a quiet save simply failing', async () => {
+    disk.set(PATH, JSON.stringify({ ...projectSchema1(), schema: CURRENT_SCHEMA, saveNeeds: 1 }));
+    const { writeProjectFile } = await import('./ipc_bridge.js');
+    const { session } = openSession();
+    await session.loadProjectFile(PATH, { quiet: true });
+    session.markProjectDirty();
+    writeProjectFile.mockImplementationOnce(async () => { throw new Error('rename refused'); });
+    expect(await session.saveProjectSession({ quiet: true })).toBe(false);
+    expect(saveDialog).not.toHaveBeenCalled();
+    expect(session.needsSavePrompt()).toBe(true);
+  });
+
+  it('stays unsaved when a mark lands while the save writes', async () => {
+    disk.set(PATH, JSON.stringify(projectSchema1()));
+    const { writeProjectFile } = await import('./ipc_bridge.js');
+    const { session } = openSession();
+    await session.loadProjectFile(PATH);
+    session.markProjectDirty();
+    const write = writeProjectFile.getMockImplementation();
+    writeProjectFile.mockImplementation(async (path, text) => {
+      if (path === PATH) session.markProjectDirty();
+      return write(path, text);
+    });
+    await session.saveProjectSession();
+    writeProjectFile.mockImplementation(write);
+    expect(session.needsSavePrompt()).toBe(true);
+    expect(indicator.textContent).toContain('unsaved');
+  });
+
+  it('reports a save that worked as saved, even when its summary fails', async () => {
+    const { takeCaptureStates } = await import('./ipc_bridge.js');
+    takeCaptureStates.mockImplementationOnce(async (folders) => folders);
+    takeCaptureStates.mockImplementationOnce(async () => { throw new Error('no answer'); });
+    const { saved } = await openAndSave(projectSchema1());
+    expect(saved).toBe(true);
+  });
+
+  it('counts only the takes it saved in the summary', async () => {
+    const project = projectSchema1();
+    project.takeIndex['session_gone/chain_01_b0'] = ['D:\\demos\\removed.dem#1#1#2'];
+    await openAndSave(project);
+    expect(toasts().join()).toContain('2 takes found, 1 not found');
+  });
+
+  it('refuses to erase what a newer build saved since this window opened the file', async () => {
+    const copy = 'D:\\p\\movie copy.dodstudio';
+    disk.set(PATH, JSON.stringify(projectSchema1()));
+    const { session } = openSession();
+    await session.loadProjectFile(PATH);
+    const theirs = JSON.stringify({ ...projectSchema1(), schema: CURRENT_SCHEMA + 1, saveNeeds: 1, settings: { a: 1 } });
+    disk.set(PATH, theirs);
+    saveDialog.mockResolvedValue(copy);
+    session.markProjectDirty();
+    expect(await session.saveProjectSession()).toBe(true);
+    expect(disk.get(PATH)).toBe(theirs);
+    expect(disk.has(copy)).toBe(true);
+    expect(toasts().join()).toContain(STRINGS.PROJECT_FILE.newerOnDisk(PATH));
+  });
+
   it('forgets the file\'s held keys on New Session', async () => {
     disk.set(PATH, JSON.stringify({ ...projectSchema1(), settings: { a: 1 } }));
     const { app, session } = openSession();

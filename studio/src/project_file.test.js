@@ -213,6 +213,32 @@ describe('saveProjectFile', () => {
     expect(io.disk.get(PATH)).toBe(SCHEMA1_TEXT);
   });
 
+  it('refuses a save that would lower the file: a newer build saved it after this window opened it', async () => {
+    const text = JSON.stringify({ schema: CURRENT_SCHEMA + 1, saveNeeds: 1, settings: { a: 1 } });
+    const io = fakeDisk({ [PATH]: text });
+    const opened = openProjectText(JSON.stringify({ schema: CURRENT_SCHEMA, demos: [] }));
+    const save = saveProjectFile(PATH, buildProjectFile({ demos: [] }, opened), io);
+    await expect(save).rejects.toBeInstanceOf(ProjectFileError);
+    await expect(save).rejects.toThrow('saved');
+    expect(io.disk.get(PATH)).toBe(text);
+    expect(io.disk.size).toBe(1);
+  });
+
+  it('saves over a newer file this window opened, as it keeps that file\'s schema', async () => {
+    const text = JSON.stringify({ schema: CURRENT_SCHEMA + 1, saveNeeds: 1 });
+    const io = fakeDisk({ [PATH]: text });
+    await saveProjectFile(PATH, buildProjectFile({ demos: [] }, openProjectText(text)), io);
+    expect(JSON.parse(io.disk.get(PATH)).demos).toEqual([]);
+  });
+
+  it('says what failed when the write itself fails', async () => {
+    const io = fakeDisk();
+    io.write = vi.fn(async () => { throw new Error('rename refused'); });
+    const save = saveProjectFile(PATH, built(), io);
+    await expect(save).rejects.toBeInstanceOf(ProjectFileError);
+    await expect(save).rejects.toThrow('rename refused');
+  });
+
   it('refuses to save over a file that needs a newer build', async () => {
     const text = JSON.stringify({ schema: CURRENT_SCHEMA + 1, saveNeeds: SAVE_LEVEL + 1 });
     const io = fakeDisk({ [PATH]: text });
