@@ -78,6 +78,7 @@ function fakeIo(overrides = {}) {
     catchUp: vi.fn(async () => ({ batches: [], waiting_for_game: false })),
     readProject: vi.fn(),
     writeProject: vi.fn(async () => {}),
+    exists: vi.fn(async (paths) => paths.map((path) => path === 'C:/projects/match.json')),
     listen: vi.fn(async () => () => {}),
     toast: vi.fn(),
     ...overrides,
@@ -98,6 +99,43 @@ describe('createBatchCatchUp', () => {
     expect(io.listen).toHaveBeenCalledWith('batch_catch_up', expect.any(Function));
   });
 
+  it('keeps keys this build does not know, backing a schema 1 file up first', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ version: '0.12.0', demos: saved, settings: { a: 1 }, profile: 'FOTW' });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    const [[backup, backedUp], [path, written]] = io.writeProject.mock.calls;
+    expect(backup).toMatch(/^C:\/projects\/match\.before-v2-.*\.dodstudio$/);
+    expect(backedUp).toBe(file);
+    expect(path).toBe('C:/projects/match.json');
+    expect(JSON.parse(written)).toMatchObject({ schema: 2, saveNeeds: 1, settings: { a: 1 }, profile: 'FOTW' });
+    expect(io.toast).toHaveBeenCalledWith(expect.stringContaining(`Backup: ${backup}`), 'info');
+  });
+
+  it('keeps the schema of a newer file, with no backup', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ schema: 9, saveNeeds: 1, demos: saved, settings: { a: 1 } });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    expect(io.writeProject).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(io.writeProject.mock.calls[0][1])).toMatchObject({ schema: 9, settings: { a: 1 } });
+  });
+
+  it('leaves a file that needs a newer build alone, and says so', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ schema: 9, saveNeeds: 2, demos: saved });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    expect(io.writeProject).not.toHaveBeenCalled();
+    expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('needs a newer DoD Studio'), 'error');
+  });
+
   it('marks a batch in its project file when that project is not open', async () => {
     const saved = demos();
     const file = JSON.stringify({ version: '0.12.0', demos: saved });
@@ -107,7 +145,7 @@ describe('createBatchCatchUp', () => {
     await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
 
     expect(io.readProject).toHaveBeenCalledWith('C:/projects/match.json');
-    const [path, written] = io.writeProject.mock.calls[0];
+    const [path, written] = io.writeProject.mock.calls.at(-1);
     expect(path).toBe('C:/projects/match.json');
     const data = JSON.parse(written);
     expect(data.demos[0].streaks[0].status).toBe(HIGHLIGHT_STATUS.CAPTURED);

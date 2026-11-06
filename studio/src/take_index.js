@@ -258,6 +258,16 @@ function isHighlightTracked(streak) {
   return isRangeModified(streak);
 }
 
+/**
+ * Whether a highlight is one of the project's clips, which is worked out, not
+ * stored: anything tracked or captured, short of a Skip. `takenUids` is the
+ * Set of uids the take index holds.
+ */
+export function isClipInProject(demoPath, streak, takenUids) {
+  if (isSkipped(streak)) return false;
+  return isHighlightTracked(streak) || takenUids.has(streakUid(demoPath, streak));
+}
+
 /** True if any of a demo's highlights are tracked (see isHighlightTracked). */
 export function isDemoTracked(demo) {
   return (demo?.streaks || []).some(isHighlightTracked);

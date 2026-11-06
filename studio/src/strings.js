@@ -1727,6 +1727,25 @@ export const STRINGS = {
     STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
   },
 
+  // ── The project file's format, backup and newer-build notes (project_file.js, #1085) ──
+  PROJECT_FILE: {
+    MADE_WITH_NEWER: 'Made with a newer DoD Studio',
+    NEWER_TITLE: 'This project was saved by a newer DoD Studio. Its new settings are kept when you save here, but not used.',
+    NEEDS_COPY_TITLE: 'This project was saved by a newer DoD Studio that asks older builds not to save over it. Save makes a copy instead.',
+    NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
+    SAVE_COPY_DIALOG_TITLE: 'Save a copy',
+    copyName: (stem) => `${stem} copy`,
+    updatedToast: ({ clips, takesFound, takesNotFound }, backup) => {
+      const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
+      return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}. Backup: ${backup}`;
+    },
+    backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
+    needsNewerBuild: (path) => `Not saved: ${path} needs a newer DoD Studio to save over it. Use Save a copy.`,
+    CANT_CHECK: 'could not check whether the file is there',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    noMigrationStep: (schema) => `This build has no way to update a project from format ${schema}.`,
+  },
+
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
   BATCH_RESUME: {
     TITLE: 'Capture the rest?',
@@ -3132,7 +3151,6 @@ export const STRINGS = {
     SCAN_FAILED: 'the scan failed',
     SAVE_FAILED: "the session wasn't saved",
     SESSION_CHANGED: 'another session was opened while it scanned',
-    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
     SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
