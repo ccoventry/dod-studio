@@ -11,6 +11,7 @@ const {
 } = await import('./project_file.js');
 const { CURRENT_SCHEMA } = await import('./project_migrations.js');
 const { projectSchema1 } = await import('./test_fixtures/project_schema1.js');
+const { STRINGS } = await import('./strings.js');
 
 /** An in-memory disk with the io saveProjectFile takes. */
 function fakeDisk(files = {}) {
@@ -218,5 +219,17 @@ describe('saveProjectFile', () => {
     await expect(saveProjectFile(PATH, built(), io)).rejects.toThrow('newer DoD Studio');
     expect(io.disk.get(PATH)).toBe(text);
     expect(io.disk.size).toBe(1);
+  });
+});
+
+describe('the one-time summary', () => {
+  it('names the counts and the backup', () => {
+    expect(STRINGS.PROJECT_FILE.updatedToast({ clips: 364, takesFound: 45, takesNotFound: 3 }, 'D:/p/a.before-v2.dodstudio'))
+      .toBe('Updated: 364 clips, 45 takes found, 3 not found. Backup: D:/p/a.before-v2.dodstudio');
+  });
+
+  it('leaves the takes out when the disk check failed', () => {
+    expect(STRINGS.PROJECT_FILE.updatedToast({ clips: 1, takesFound: null, takesNotFound: null }, 'b'))
+      .toBe('Updated: 1 clip. Backup: b');
   });
 });
