@@ -4,6 +4,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(()
 vi.mock('./ipc_bridge.js', () => ({ logFrontendEvent: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
+const { readFileSync } = await import('node:fs');
 const { createBatchGuard } = await import('./batch_guard.js');
 const { STRINGS } = await import('./strings.js');
 
@@ -158,6 +159,11 @@ describe('when the batch ends', () => {
 });
 
 describe('while Start Capture runs its checks', () => {
+  it('is what main.js wires in, or the hold would start at the first report', () => {
+    const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+    expect(main).toContain('createBatchGuard({ isStarting: isCaptureStarting })');
+  });
+
   it('refuses a project change before the batch\'s first report', () => {
     const t = setUp({ isStarting: () => true });
     expect(t.guard.isHeld()).toBe(true);

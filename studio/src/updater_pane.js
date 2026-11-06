@@ -236,7 +236,9 @@ export async function initUpdater(settings, persistSettings, batchGuard) {
     ?.addEventListener('click', () => checkForUpdatesNow());
 
   document.querySelector('#download-install-update-btn')
-    ?.addEventListener('click', () => beginDownloadAndInstall());
+    ?.addEventListener('click', () => {
+      if (!batchGuard?.refuseDuringBatch()) beginDownloadAndInstall();
+    });
 
   document.querySelector('#restart-to-apply-btn')?.addEventListener('click', async () => {
     // app.restart() is a hard process restart — it never goes through the

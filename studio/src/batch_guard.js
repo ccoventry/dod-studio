@@ -12,7 +12,9 @@
 // a control: project_session.js asks refuseDuringBatch() as well.
 //
 // `capture_status` is what marks a batch running, not isCaptureRunning(): that
-// flag drops on Cancel, while the takes are still being checked and marked.
+// flag drops on Cancel, while the takes are still being checked. The guard lets
+// go at the last report, and the marks follow on the very next event: a gap of
+// milliseconds it doesn't cover.
 
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { logFrontendEvent } from './ipc_bridge.js';
@@ -22,7 +24,10 @@ import { STRINGS } from './strings.js';
 
 /** The controls held by id. Open Recent's rows come and go, so recent_projects.js
  *  marks those itself from heldReason(). */
-const HELD_CONTROLS = ['#new-session-btn', '#load-project-btn', '#rescan-recent-btn', '#clear-all-btn', '#clear-untracked-btn'];
+const HELD_CONTROLS = [
+  '#new-session-btn', '#load-project-btn', '#rescan-recent-btn',
+  '#clear-all-btn', '#clear-untracked-btn', '#clear-selected-btn',
+];
 
 /** Everything a click is refused on. */
 const REFUSED_CLICKS = [...HELD_CONTROLS, '.recent-project-item'].join(', ');

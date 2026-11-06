@@ -28,7 +28,7 @@ const held = (page, selector) => page.locator(selector).evaluate((el) => ({
 test('a running batch greys Open, New and Clear with the reason, and its end gives them back', async ({ page }) => {
   const ownTitle = await page.locator('#load-project-btn').getAttribute('title');
   await batch(page, true);
-  for (const selector of ['#load-project-btn', '#new-session-btn', '#rescan-recent-btn', '#clear-all-btn', '#clear-untracked-btn']) {
+  for (const selector of ['#load-project-btn', '#new-session-btn', '#rescan-recent-btn', '#clear-all-btn', '#clear-untracked-btn', '#clear-selected-btn']) {
     expect(await held(page, selector)).toEqual({ grey: true, title: HELD_TITLE });
   }
   await batch(page, false);
@@ -81,6 +81,41 @@ test('Restart waits for the batch, on the update window and the menu bar', async
   await expect(restart).toBeEnabled();
   await expect(restart).toHaveText('Restart to Apply');
   await expect(page.locator('#update-chip')).toHaveText('Restart to update');
+});
+
+test('Clear Selected during a batch removes nothing and says why', async ({ page }) => {
+  await batch(page, true);
+  await page.evaluate(() => {
+    const btn = document.querySelector('#clear-selected-btn');
+    btn.disabled = false;
+    btn.click();
+  });
+  await expect(page.locator('#toast-container')).toContainText('this project stays open until it ends');
+  await expect(page.locator('#toast-container')).not.toContainText('No demos');
+});
+
+test('a Restart that reaches its handler during a batch is still refused', async ({ page }) => {
+  await page.evaluate(() => window.__mockEmit('update_ready', null));
+  await batch(page, true);
+  await page.evaluate(() => {
+    const btn = document.querySelector('#restart-to-apply-btn');
+    btn.disabled = false;
+    btn.click();
+  });
+  await expect(page.locator('#toast-container')).toContainText('this project stays open until it ends');
+  const restarts = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'restart_app'));
+  expect(restarts).toEqual([]);
+});
+
+test('a Download & Install that reaches its handler during a batch is still refused', async ({ page }) => {
+  await batch(page, true);
+  await page.evaluate(() => {
+    const btn = document.querySelector('#download-install-update-btn');
+    btn.disabled = false;
+    btn.click();
+  });
+  await expect(page.locator('#toast-container')).toContainText('this project stays open until it ends');
+  await expect(page.locator('#update-status-text')).not.toContainText('Downloading');
 });
 
 test('Download & Install waits for the batch: on Windows the installer closes Studio', async ({ page }) => {
