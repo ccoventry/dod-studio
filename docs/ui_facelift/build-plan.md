@@ -13,7 +13,7 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 | 3 | The lambda spray fix (#1322) | Probe on POST first | 2-4 h | Sprays |
 | 4 | Project settings block and the one place that resolves them | 1 | 2-3 h | Nothing yet |
 | 5 | History with full settings | 4 | 1.5-2.5 h | More detail in History |
-| 6 | Project settings pop-up | 4 | 2-3 h | First new window |
+| 6 | Project settings page with tabs and OK, Cancel, Apply | 4 | 2-3 h | First new page |
 | 7 | Players per project | 4, 2 | 1.5-2.5 h | Monday movie and WSOD25 apart |
 | 8 | Clip settings rows and presets | 4, Q4 | 3-5 h | Clip settings page |
 | 9 | Project profiles (#444), folders, Players and Teams included | 6, 7, 8 | 2.5-3.5 h | Pick, save, import, export |
@@ -21,7 +21,7 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 | 11 | Variant rows | 10, Q5 | 3-5 h | Variants on the old table |
 | 12 | Per-clip commands and add-ons | 11, 8 | 2-4 h | Wallhack on one variant |
 | 13 | A batch stage before the demo loads (hook DLL) | 12 | 1-2 h | HD style on a variant |
-| 14 | Batches in parts: variant Capture mode and frame rate | 11, Q5, Q6 | 2.5-4 h | 300 fps on one variant |
+| 14 | Per-clip frame rate and Capture mode in one batch | 11, Q5 | 3-5 h | 300 fps on one variant |
 | 15 | Shell, tokens, one switch for the new pages | Canvas fix list done | 2-3 h | New look, switch off |
 | 16 | Clips page with tick bar | 15, 11 | 4-6 h | The main page |
 | 17 | Capturing, rendering, batch finished | 16 | 3-4 h | |
@@ -44,14 +44,18 @@ For Chris, who decides and tests, and for the Claude sessions that build it. Che
 **Decided in review (replaces Q1 and Q2, and #1085's "App default or This project" rule):**
 
 1. **A new project is a copy of a profile, and owns its settings from then on.** There's no live link to an app default, so "App default", "Set by project" chips and "Use app default" links all go. Changing a profile later never touches a project.
-2. **Project settings is a pop-up** with OK, Cancel and Apply, then the project's own Save, like VEGAS. Apply is greyed unless there are changes. OK and Cancel are always enabled. OK marks the project unsaved only if something changed. Cancel reverts what changed since the last Apply and closes. App shortcuts are off while it's open; text boxes keep Ctrl+C, V, Z and A. Smaller settings (Clip settings, What's different, add-ons, Players, marks) apply at once and mark the project unsaved. Settings · App keeps saving as you go.
-3. **Profile row at the top of the pop-up:** dropdown ("None: this project only", "FOTW (edited)"), Save, Delete, and ⋯ for Save as new, Import and Export, like VEGAS's Template row. These act at once on the saved profiles; Cancel only covers the project. Two tick boxes, "Also use its folders" and "Also use its Players and Teams", start unticked on an existing project. A pick is a pending change until OK or Apply.
+2. **Project settings is one full page with tabs,** Project, Clip settings, and Players and sprays, with one OK, Cancel and Apply covering all three, then the project's own Save, like VEGAS's Project Properties. Apply is greyed unless there are changes. OK and Cancel are always enabled and return to where you came from. OK marks the project unsaved only if something changed. Cancel reverts what changed since the last Apply. Leaving any other way with pending edits asks Apply, Discard or Stay. App shortcuts are off while it's open; text boxes keep Ctrl+C, V, Z and A. On OK or Apply, a change that affects captured or rendered clips warns "This changes how 45 captured clips would look", with Apply anyway and Go back, and counts clips with no record separately. Only settings that affect a capture trigger it. Variants keep their drawer's Add variant and Cancel. Marks and notes apply at once. Settings · App keeps saving as you go.
+3. **Profile row at the top of the page:** dropdown ("None: this project only", "FOTW (edited)"), Save, Delete, and ⋯ for Save as new, Import and Export, like VEGAS's Template row. These act at once on the saved profiles; Cancel only covers the project. Picking or importing a profile opens a window listing its sections: Picture, Clip length, Clip settings, Clip names, HD style, Folders, Players and Teams, each saying what would change. On a new project all are ticked. On an existing project Folders and Players and Teams aren't. Nothing reaches other projects: to pick up a profile's changes, you import it again there.
 4. **Profiles hold everything, folders, Players and Teams included.** Teams (names and merges) are already in the project file, so a shared project carries them anyway; unknown team tags do no harm. Folders are per project and per PC: saved under a PC id, never exported, and a friend chooses their own before their first capture. Players import with names and SteamIDs; a spray or crosshair file that isn't on the PC comes in blank, so that player uses the fallback, and the import ends with a count ("3 sprays and 1 crosshair aren't on this PC"). Bundling the image files can come later.
 5. **Settings · App has one row, "New projects start from":** a profile dropdown with a built-in default. First launch and Ctrl+N use it. A capture with no project saved, and the Analyzer's Launch Preview, use it too.
 6. **An old project gets today's settings copied in once**, with the one-time summary. Every old project gets the same copy, so the order they're opened in doesn't matter, and Monday's are changed once.
-7. **Players and sprays moves from Tools to the Project group in Settings,** beside Clip settings, and its title names the project. The sprays and crosshairs to pick from stay shared on the PC. Read-only during a batch.
+7. **Players and sprays moves from Tools to its tab on Project settings.** The sprays and crosshairs to pick from stay shared on the PC. Read-only during a batch.
 
-8. **Teams joins the Project group too,** as its own entry beside Players and sprays. It stays its own window, applying at once, because it can read demos, which is too long a job inside the Project settings pop-up. It also opens from the same button on the page it sits on today.
+8. **Teams joins the Project group,** beside Project settings, as its own window, applying at once, because it can read demos. The button where it is today opens the same window.
+9. **One rule: libraries hold templates, and using one copies it in.** There are two PC libraries, Project profiles and Clip settings presets. The project holds the real settings. A variant holds only what's different from the project, and follows the project for everything else; that's the only live link. A take is a frozen record.
+10. **A variant has one list.** This replaces "a preset, then What's different". "+ Import from a preset…" adds only the rows that differ from the project, as plain rows with no link to the preset.
+11. **Add-ons:** three routes onto a variant: built-in add-ons with their turn-offs (we ship many), your own (a local PC library, with "Save as add-on…" on a typed row), and "+ Add a command…". An add-on is copied into the variant. A table of known turn-offs, in one file, fills in After for typed commands (`mirv_matte_entities add 7` gets `mirv_matte_entities clear`), and warns about known gotchas. Anything else gets "Studio doesn't know how to undo this." A stopped batch still runs pending After lines.
+12. **Batches and OBS:** if any clip uses OBS, OBS is started and checked at the start of the batch, as an all-OBS batch does today. Hardware limits warn and never grey an option; a warning is specific if the OBS test has run. A clip's `mirv_movie_fps` is set before its `mirv_recordmovie_start`, never while recording.
 
 Still open: should a batch warn when the project is unsaved? Today it doesn't, and History records what was used, so the plan keeps today's behaviour.
 
@@ -61,22 +65,22 @@ None of the questions left hold up #1085. Each has a recommendation; a "yes to a
 |---|---|---|---|---|
 | Q1 | Answered: folders are per project and per PC (2 and 4 above) | | | |
 | Q2 | Answered: copied in once (6 above) | | | |
-| Q3 | An older build opens a project from a newer one: save normally, or only "Save a copy"? | Save normally. From step 1 on, a build keeps data it doesn't know. Copies would fork a project you move between builds | N4's "Save a copy" is kept only for a breaking change, and none is planned | Step 1 |
-| Q4 | Presets: this PC's library, with each project holding a copy of what it uses? (C7) | Yes. The file travels whole | A preset edit reaches other projects only when they pick it again | Step 8 |
-| Q5 | A batch that needs them runs in parts, with all second versions of a demo in one extra pass, and OBS stays off the variant list? (C3, C4) | Yes | Tick bar says "Plays 6 demos twice · adds about 25 min" and "Runs in 2 parts". An AGR variant in an OBS project restarts the game between parts | Steps 11, 14 |
-| Q6 | Frame rate on a variant | Option A below | A Frame rate select beside Capture mode | Step 14 |
-| Q7 | Add-on turn-offs: Studio writes them, or the hook restores the value? | Studio writes them first. Reading is proven, restoring isn't, and three `mirv_fx_` names are commands that can't be read back | The turn-off line is visible and editable. Hook restore can come later | Step 12 |
-| Q8 | The smaller calls in the table below | As listed | | Listed |
+| Q3 | Answered: an older build saves normally, with Save a copy only as the fallback when a normal save can't work | | | Step 1 |
+| Q4 | Answered: decision 9 | | | Step 8 |
+| Q5 | One playthrough with seek-back, or an extra pass per demo? | Waiting on the seek-back test. A batch only moves forward by Studio's choice, not an engine limit. If a rewind matches a fresh load, a variant captures right after its Original with no extra pass. Whether OBS goes on the variant list waits on the `-wavonly` check | | Steps 10, 11, 14 |
+| Q6 | Answered: Option B below, frame rate per clip in one batch, with no reload for the rate alone | | | Step 14 |
+| Q7 | Answered: Studio writes turn-offs, decision 11. Hook restore can come later | | | Step 12 |
+| Q8 | The smaller calls below | Answered unless marked | | Listed |
 
-| Canvas-check item | Recommended | Where |
+| Canvas-check item | Answer | Where |
 |---|---|---|
-| C2 Classic textures | Honest label now. A demo reload changed walls (tested on both installs); models need a restart by the code, and sky and detail weren't checked. Step 14 can add a "restarts the game" part later | Step 13 |
+| C2 Classic textures | Honest label now, "Walls only", exact wording after the seek-back test checks walls, sky, detail, models and sprites. A full-restart option stays open until then | Step 13 |
 | C5 Row after settings change | "Settings changed · Capture again", takes left alone | Steps 5, 16 |
-| C6 Export to VEGAS | Originals' main takes plus variants you tick, newest editing-format render of each | Step 16 |
+| C6 Export to VEGAS | Parked. Not decided | Step 16 |
 | C8 Sound level | Add `mirv_movie_sound_volume 0.25` to Clean clips, take check reports clipping | Step 8 |
 | C9 Old "Their own spray" | Becomes "No spray", said once in the summary | Step 3 |
 | C10 Issue numbers on the canvas | Leave them there, strip them when each page is built | Steps 6, 8, 16-19 |
-| `mirv_fx_xtendvis` in the Wallhack add-on | Leave it out. It changed nothing at the one spot tested (`local\unattended\results-2026-11-05\45-tests.md`) | Step 12 |
+| `mirv_fx_xtendvis` in the Wallhack add-on | Waiting on the test, at a far-away or behind-walls spot | Step 12 |
 
 ## Data model
 
@@ -113,7 +117,7 @@ None of the questions left hold up #1085. Each has a recommendation; a "yes to a
   "uid": "<clip uid>~v1",          // saved, unlike a clip's uid (see below)
   "start_index": 2, "end_index": 2, "status": "Pending", "clipName": "...",
   "variantOf": "<clip uid>",
-  "variant": { "name": "X-ray", "preset": null, "changes": [], "addOns": [],
+  "variant": { "name": "X-ray", "changes": [], "addOns": [],
                "commands": [], "captureMode": null, "captureFps": null, "killGaps": null }
 }
 ```
@@ -222,17 +226,17 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - **Render history** already exists (`RenderAttempt`); this adds nothing there.
 - **Blow-up:** none. **Your test:** 5 min, capture one clip and read History.
 
-### 6. Project settings pop-up
-- **Canvas:** Project settings, redrawn as a pop-up with OK, Cancel and Apply (decision 2), except Profile (step 9) and the Clip settings link (step 8). Before the first kill and After the last kill map to Start Lead and Stop Trail; pre-roll and post-roll become automatic only after the roll check is tested (`review.md` section 5, rows 92 and 94).
+### 6. Project settings page
+- **Canvas:** Project settings as a page with tabs (decision 2), except Profile (step 9). The Clip settings and Players and sprays tabs arrive at steps 8 and 7. Before the first kill and After the last kill map to Start Lead and Stop Trail; pre-roll and post-roll become automatic only after the roll check is tested (`review.md` section 5, rows 92 and 94).
 - **Needs R4, R14, R16, S9, S18 from the fix list.** R5 is replaced by decisions 1 and 5. AGR's own rate shows when Capture with is AGR.
-- **Files:** new `project_settings_dialog.js`; pending edits live there until OK or Apply. `app_shortcuts.js` gets one off switch. Opened from File › Project Settings now, from the project switcher at step 19. Clip settings' link asks first if edits are pending.
+- **Files:** new `project_settings_page.js`; pending edits for all tabs live there until OK or Apply. `app_shortcuts.js` gets one off switch. Opened from File › Project Settings now, from the project switcher at step 19.
 - **Your test:** 20 min.
 
 ### 7. Players per project
 - **Trap:** `players_tab::mirror_table` runs on every settings save (`lib.rs:131`) and at load (`settings_manager.rs:746`), so a settings save would put the app's table back over the project's. It must write the effective table.
 - **Also:** mirror on project open and close, and read `use_in_game` from the payload, not saved settings (`capture_manager.rs:1303`). Keeps #686's "Use as" names in the same table.
 - **Hook:** none. It rereads the file when its time moves, which is why step 2 comes first.
-- **Move (decision 7):** the page goes to the Project group at step 19; its title names the project, and it's read-only during a batch from this step.
+- **Move (decision 7):** the page becomes a tab of Project settings; it's read-only during a batch from this step.
 - **Files:** `players_tab.rs`, `settings_manager.rs`, `players_ui.js`, `native/src/player_overrides.rs`. **Your test:** 15 min, two projects, one clip each.
 
 ### 8. Clip settings rows and presets
@@ -342,12 +346,12 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 | VEGAS | `jobFps` reads each render's own line, one row per clip, PlayRate 1 | Works. A 300 fps event in a 60 fps project needs your ctrl-drag and Frame Blend, as now |
 | Combine | Mixed rates can't stream-copy, so it re-encodes at the first clip's rate (`combine.rs:186,263`) | The slow-motion frames are thrown away quietly. Say so in the Combine prompt |
 
-**Option A, recommended: Frame rate beside Capture mode, as its own part.** A select on the variant: Same as project · 60 · 120 · 300 · Custom. It's captured in step 14's part.
+**Option A: Frame rate beside Capture mode, as its own part.** A select on the variant: Same as project · 60 · 120 · 300 · Custom. It's captured in step 14's part.
 - For: no change to the manifest, take file, renderer, checks or resume. The disk line counts it. AGR's variant uses the same row (R14).
 - Against: a part of its own, so one more demo load per demo touched, in the same game unless OBS is involved.
 - Size: part of step 14, about 30 min beyond it, plus the drawing.
 
-**Option B: rate per job in one batch.** Same select, but one batch and one manifest, with rate on each `CaptureBlock`.
+**Option B, chosen: rate per clip in one batch.** Same select, but one batch and one manifest, with the rate on each `CaptureBlock`. A rate change shouldn't cost a reload or launch. The `cfg_scan.rs` hazard is Studio's own assumption, not an engine limit, so the code changes: the record, estimates, checks and `finish_clips.js` go per clip, and time and disk add up per clip. The test confirms HLAE takes a new rate between clips, and whether OBS can.
 - For: one progress bar and session folder.
 - Against: `record_capture_settings`, `capture_estimate.js`, `finish_clips.js` and the checks all go per block, a 2-3 h bigger step for little: the demo loads again either way. It also doesn't solve mode changes, so parts are still needed.
 
@@ -355,7 +359,7 @@ Each is one PR into `dev`, shippable alone. For all of them: activity-log lines 
 - For: no code.
 - Against: takes and History split across two projects, or 2.5-5 times the disk for every clip, which is what the variant was meant to avoid.
 
-**Needs on the canvas:** the select and its OBS grey state on StudioVariant, the part on StudioCapturing, and R4's side note drops frame rate from the project-wide list.
+**Needs on the canvas:** the select and its OBS warning on StudioVariant, per-clip rates on StudioCapturing, and R4's side note drops frame rate from the project-wide list.
 
 ## Open PRs
 
