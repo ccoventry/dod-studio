@@ -153,6 +153,7 @@ unsafe fn flat_colour(rgb: [i32; 3], draw: impl FnOnce()) {
             return;
         }
     }
+    let _ = rgb;
     draw();
 }
 
