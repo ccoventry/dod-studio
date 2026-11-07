@@ -201,6 +201,12 @@ pub struct AppSettings {
     /// new default can reach a settings file that saved the old one.
     #[serde(default)]
     pub settings_migrations: u32,
+    /// Migration 3 turned a used table's POV fallback from "Their own spray"
+    /// into "No spray", and Studio hasn't said so yet
+    /// (`players_tab::take_pov_own_spray_notice`). The frontend doesn't
+    /// carry this field; `save_settings` keeps the loaded value.
+    #[serde(default)]
+    pub pov_own_spray_notice: bool,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
@@ -574,6 +580,7 @@ impl Default for AppSettings {
             save_local_patched_copy: false,
             hook_runs_batch: native::patch::types::default_hook_runs_batch(),
             settings_migrations: MIGRATIONS,
+            pov_own_spray_notice: false,
             keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
@@ -646,7 +653,7 @@ fn pinned_review_done_in(text: &str) -> bool {
 /// How many one-time changes to saved values exist; `migrate` runs the ones
 /// past a file's `settings_migrations`. The frontend saves settings without
 /// this field, so `save_settings` keeps the loaded value.
-pub const MIGRATIONS: u32 = 2;
+pub const MIGRATIONS: u32 = 3;
 
 impl AppSettings {
     pub fn load_or_default() -> Self {
@@ -655,9 +662,12 @@ impl AppSettings {
             && let Ok(content) = fs::read_to_string(&path)
             && let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content)
         {
+            let migrated = settings.settings_migrations < MIGRATIONS;
             settings.migrate();
-            if settings.migrate_console_names() {
-                // Saved at once, so the file on disk matches what Studio shows.
+            if settings.migrate_console_names() || migrated {
+                // Saved at once, so the file on disk matches what Studio
+                // shows, and a one-time change is only ever said once. A
+                // failed save runs it again next start, which is harmless.
                 let _ = settings.save();
             }
             return settings;
@@ -716,6 +726,10 @@ impl AppSettings {
             if !self.builtin_profile_notice.contains(&name) {
                 self.builtin_profile_notice.push(name);
             }
+        }
+        if self.settings_migrations < 3 {
+            // "Their own spray" left the POV fallback (#1322).
+            self.pov_own_spray_notice = self.players.retire_own_fallback();
         }
         self.settings_migrations = MIGRATIONS;
     }
@@ -1195,6 +1209,41 @@ mod tests {
         )
         .expect("a settings file");
         assert_eq!(older.rescan_offered_for, "");
+    }
+
+    /// A settings file from before migration 3, with this Players table.
+    fn file_with_players(players: &str) -> AppSettings {
+        serde_json::from_str(&format!(
+            r#"{{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6,
+                "settings_migrations": 2, "players": {players}}}"#
+        ))
+        .expect("a settings file")
+    }
+
+    #[test]
+    fn migration_3_turns_a_used_tables_own_fallback_into_no_spray_with_a_notice() {
+        let mut settings = file_with_players(
+            r#"{"pov_fallback": "own", "players": [{"name": "m00cat", "png": "a.png"}]}"#,
+        );
+        settings.migrate();
+        assert_eq!(
+            settings.players.pov_fallback,
+            native::player_overrides::SprayFallback::None
+        );
+        assert!(settings.pov_own_spray_notice);
+        assert_eq!(settings.settings_migrations, MIGRATIONS);
+    }
+
+    #[test]
+    fn migration_3_says_nothing_to_someone_who_never_used_the_table() {
+        let mut settings = file_with_players(r#"{"pov_fallback": "own"}"#);
+        settings.migrate();
+        assert_eq!(
+            settings.players.pov_fallback,
+            native::player_overrides::SprayFallback::Png
+        );
+        assert!(!settings.pov_own_spray_notice);
     }
 
     #[test]

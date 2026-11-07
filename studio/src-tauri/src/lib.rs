@@ -126,6 +126,7 @@ async fn save_settings(
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.pov_own_spray_notice = guard.pov_own_spray_notice;
         settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
@@ -987,6 +988,7 @@ pub fn run() {
             players_tab::crosshair_sprite_image,
             players_tab::add_crosshair_file,
             players_tab::set_player_overrides,
+            players_tab::take_pov_own_spray_notice,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
