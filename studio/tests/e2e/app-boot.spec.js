@@ -133,3 +133,22 @@ test("Studio's first sub-tab is Highlights, and every queue filter sits in one F
   await expect(row.locator('.queue-filter-tracked-only')).toHaveAttribute('title', /No demo is tracked yet/);
   await expect(page.locator('#input-min-kills')).toHaveCount(0);
 });
+
+test('the boot watchdog hears the boot finish and shows nothing', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect.poll(() => page.evaluate(() => window.dodStudioBoot?.state())).toBe('started');
+  await expect(page.locator('#boot-watchdog-banner')).toHaveCount(0);
+});
+
+test('a boot whose scripts never arrive reloads once, then says to restart', async ({ page }) => {
+  await page.addInitScript(() => { window.__dodStudioBootDeadlineMs = 1500; });
+  // One of main.js's imports never answers, as in the tauri dev window that
+  // loaded 76 of the page's scripts after a hard reset.
+  await page.route('**/src/players_ui.js*', () => {});
+  // The page's load event never comes while a module hangs.
+  await page.goto('/index.html', { waitUntil: 'commit' });
+  const banner = page.locator('#boot-watchdog-banner');
+  await expect(banner).toContainText('even after a reload', { timeout: 15000 });
+  expect(await page.evaluate(() => window.dodStudioBoot.state())).toBe('stuck');
+  expect(await page.evaluate(() => sessionStorage.getItem('dodstudio.bootReloaded'))).toBe('1');
+});
