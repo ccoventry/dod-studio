@@ -5,7 +5,9 @@
 // disk when Studio starts, or once the game closes if one is still running;
 // this maps each take back to its highlights through the ids the batch's
 // manifest recorded and marks them Captured, as capture_pane.js does at the
-// end of a batch it watched.
+// end of a batch it watched. A take Render While Capturing rendered and
+// deleted before Studio closed (#861: the backend's `rendered`) is marked
+// Rendered: its clip is done, and that mark was lost with the unsaved project.
 //
 // A batch started from a project file is marked in that file, unless it is
 // the project open right now: then it is marked in the open queue, which
@@ -41,8 +43,8 @@ export function isBatchStillRunningInGame() {
 }
 
 /**
- * Each captured block of `batch` as `{ takeKey, uids, meta }`, the highlights it
- * covers. A block can cover several highlights (overlapping ones are
+ * Each captured block of `batch` as `{ takeKey, uids, meta, rendered }`, the
+ * highlights it covers and whether its clip was rendered. A block can cover several highlights (overlapping ones are
  * recorded as one take).
  */
 export function capturedTakes(batch) {
@@ -53,6 +55,7 @@ export function capturedTakes(batch) {
       takeKey: block.take_key,
       meta: { session_id: batch.session_id, capture_mode: batch.capture_mode, capture_fps: captureRateOf(batch.capture_mode, batch), take_folder: block.take_folder },
       uids: (block.source_streak_indices || []).map((i) => uids[i]).filter(Boolean),
+      rendered: block.rendered === true,
     }))
     .filter((take) => take.uids.length > 0);
 }
@@ -61,30 +64,38 @@ export function capturedTakes(batch) {
  * Marks `batch`'s captured highlights in `demos` and records its takes in
  * `takeIndex`, both in place. Status only moves forward, with the same rule
  * as a watched batch: a hand-set Rendered is overruled, a verified one is
- * kept. Returns `{ captured, total, marked, changed }`.
+ * kept. Returns `{ captured, total, marked, markedRendered, changed }`.
  */
 export function applyCaughtUpBatch(batch, demos, takeIndex) {
   const takes = capturedTakes(batch);
-  const wanted = new Set();
-  takes.forEach(({ takeKey, uids, meta }) => {
+  // Each highlight's status from its take: Rendered when that take's clip
+  // was finished, else Captured.
+  const wanted = new Map();
+  takes.forEach(({ takeKey, uids, meta, rendered }) => {
     if (takeKey) recordTake(takeIndex, takeKey, uids, meta);
-    uids.forEach((uid) => wanted.add(uid));
+    const status = rendered ? HIGHLIGHT_STATUS.RENDERED : HIGHLIGHT_STATUS.CAPTURED;
+    uids.forEach((uid) => { if (wanted.get(uid) !== HIGHLIGHT_STATUS.RENDERED) wanted.set(uid, status); });
   });
 
   let marked = 0;
+  let markedRendered = 0;
   let changed = takes.length > 0;
   (demos || []).forEach((demo) => {
     (demo.streaks || []).forEach((streak) => {
-      if (!wanted.has(streakUid(demo.path, streak))) return;
+      const status = wanted.get(streakUid(demo.path, streak));
+      if (!status) return;
       if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
       if (streak.statusByHand) changed = true;
-      if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) marked += 1;
+      if (setVerifiedStatus(streak, status)) {
+        marked += 1;
+        if (status === HIGHLIGHT_STATUS.RENDERED) markedRendered += 1;
+      }
     });
   });
 
   const total = (batch?.blocks || []).length;
   const captured = (batch?.blocks || []).filter((b) => b.captured).length;
-  return { captured, total, marked, changed: changed || marked > 0 };
+  return { captured, total, marked, markedRendered, changed: changed || marked > 0 };
 }
 
 function toastKind(result) {
@@ -143,13 +154,13 @@ export function createBatchCatchUp({
     const project = batch.project_path;
     if (project && project !== getSessionPath()) {
       const { result, note, failed } = await applyToProjectFile(batch, project);
-      io.toast(`${STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked)}${note}`,
+      io.toast(`${STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked, result.markedRendered)}${note}`,
         failed ? 'error' : toastKind(result));
       return failed ? null : result;
     }
     const result = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
     if (result.changed) onStatusChange();
-    io.toast(STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked), toastKind(result));
+    io.toast(STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked, result.markedRendered), toastKind(result));
     return result;
   }
 

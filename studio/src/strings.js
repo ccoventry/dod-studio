@@ -1729,7 +1729,9 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked, rendered = 0) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.`
+      + (marked > rendered ? ` ${marked - rendered} highlight(s) marked Captured.` : '')
+      + (rendered > 0 ? ` ${rendered} highlight(s) marked Rendered: their clips were finished before it closed.` : ''),
     projectUpdated: (name) => `Marked them in the project ${name}.`,
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
