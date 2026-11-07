@@ -61,3 +61,29 @@ export function rendersPickedUpLine(takes, added, elapsedMs) {
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
 }
+
+/** A save is about to raise a project's format: the backup comes first. */
+export function projectBackupStartedLine(path, fromSchema, toSchema) {
+  return `[project] updating ${path} from format ${fromSchema} to ${toSchema}: backing it up first`;
+}
+
+/** The backup before a format change is on disk. */
+export function projectBackedUpLine(backup, elapsedMs) {
+  return `[project] backed up to ${backup} (${elapsedMs} ms)`;
+}
+
+/** The one-time summary of a project's first save in a newer format. */
+export function projectUpdatedLine(path, { clips, takesFound, takesNotFound }, backup) {
+  const takes = takesFound === null ? 'takes not checked' : `${takesFound} take(s) found, ${takesNotFound} not found`;
+  return `[project] updated ${path}: ${clips} clip(s), ${takes}, backup ${backup}`;
+}
+
+/** A project from a newer build opened: its unknown data is kept, unused. */
+export function projectNewerLine(path, schema, keptKeys) {
+  return `[project] ${path} is format ${schema}, newer than this build: keeping ${keptKeys} unknown key(s)`;
+}
+
+/** A save refused because the file needs a newer build to save over it. */
+export function projectNeedsCopyLine(path) {
+  return `[project] ${path} needs a newer build to save over it: left as it is`;
+}

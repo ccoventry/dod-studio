@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { setStatusByHand, restoreStatus, setVerifiedStatus, setCuration, isSkipped, isDemoTracked, CURATION } from './take_index.js';
+import { setStatusByHand, restoreStatus, setVerifiedStatus, setCuration, isSkipped, isDemoTracked, isClipInProject, streakUid, CURATION } from './take_index.js';
 import { applyRescanWork, matchRescanHighlights } from './rescan_carry.js';
 
 /** What a queue rescan does to a demo's work (queue_scan.js). */
@@ -132,5 +132,23 @@ describe('markBlockCaptured', () => {
     // Seen again at the batch's end (#861 marks it first): nothing changes.
     expect(markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0, 1] }, dispatch, takeIndex))
       .toEqual({ advanced: 0, markCleared: false });
+  });
+});
+
+describe('isClipInProject', () => {
+  const untouched = { player_index: 1, kills: [[10], [20]], start_index: 0, end_index: 1 };
+
+  it('counts a marked row and leaves out an untouched one', () => {
+    expect(isClipInProject('a.dem', { ...untouched, curation: CURATION.KEEP }, new Set())).toBe(true);
+    expect(isClipInProject('a.dem', { ...untouched }, new Set())).toBe(false);
+  });
+
+  it('counts a row with a take, even with nothing else on it', () => {
+    const row = { ...untouched };
+    expect(isClipInProject('a.dem', row, new Set([streakUid('a.dem', row)]))).toBe(true);
+  });
+
+  it('leaves out a Skip, whatever else it holds', () => {
+    expect(isClipInProject('a.dem', { ...untouched, curation: CURATION.SKIP, status: 'Captured' }, new Set())).toBe(false);
   });
 });

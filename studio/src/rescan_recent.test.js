@@ -5,6 +5,7 @@ vi.mock('./ipc_bridge.js', () => ({
   filesExist: vi.fn(),
   readProjectFile: vi.fn(),
   writeProjectFile: vi.fn(),
+  takeCaptureStates: vi.fn(),
   estimateRescan: vi.fn(),
   getAppVersion: vi.fn(),
   logFrontendEvent: vi.fn(),
@@ -12,9 +13,9 @@ vi.mock('./ipc_bridge.js', () => ({
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
-  offerStamp, rescanOfferSettings, applyRescanOfferSettings, localDate, backupPath, planRecent,
+  offerStamp, rescanOfferSettings, applyRescanOfferSettings, planRecent,
   sessionsToRescan, worthOfferingAtStartup, skipAllowed, overallFraction, rescanSessions,
-  createRescanRecent, SKIP_OVER_SECS, freeBackupPath,
+  createRescanRecent, SKIP_OVER_SECS,
 } = await import('./rescan_recent.js');
 const { HIGHLIGHTS_VERSION } = await import('./scan_version.js');
 const { STRINGS } = await import('./strings.js');
@@ -39,29 +40,6 @@ describe('the start-up offer runs once per update', () => {
     expect(rescanOfferSettings()).toEqual({ rescan_offered_for: '' });
     applyRescanOfferSettings({ rescan_offered_for: 7 });
     expect(rescanOfferSettings()).toEqual({ rescan_offered_for: '' });
-  });
-});
-
-describe('backups', () => {
-  it('go beside the session, named after it and the date', () => {
-    expect(backupPath('H:\\movies\\WSOD25 main.json', '2026-10-23'))
-      .toBe('H:\\movies\\WSOD25 main.before-rescan-2026-10-23.json');
-    expect(backupPath('D:/p/monday.json', '2026-10-23')).toBe('D:/p/monday.before-rescan-2026-10-23.json');
-  });
-
-  it('count up for a second rescan the same day, so the first backup is kept', () => {
-    expect(backupPath('D:/p/monday.json', '2026-10-23', 2)).toBe('D:/p/monday.before-rescan-2026-10-23-2.json');
-  });
-
-  it('never overwrite an earlier backup: no free name, or no way to tell, means no backup', () => {
-    const tries = ['a.1.json', 'a.2.json', 'a.3.json'];
-    expect(freeBackupPath(tries, [true, false, false])).toBe('a.2.json');
-    expect(freeBackupPath(tries, [true, true, true])).toBe(null);
-    expect(freeBackupPath(tries, null)).toBe(null);
-  });
-
-  it('dates in local time, zero-padded', () => {
-    expect(localDate(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05');
   });
 });
 
