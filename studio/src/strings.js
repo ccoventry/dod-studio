@@ -1716,6 +1716,12 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── What a running batch holds back (batch_guard.js, #1085) ──
+  BATCH_GUARD: {
+    HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
+    REFUSED_TOAST: 'A capture batch is running: this project stays open until it ends.',
+  },
+
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
     caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
@@ -3010,6 +3016,8 @@ export const STRINGS = {
     AVAILABLE_TITLE: 'A new version of DoD Studio is out. Click to download and install it.',
     READY: 'Restart to update',
     READY_TITLE: 'The update has downloaded. Click, then Restart to Apply.',
+    RESTART_AFTER_BATCH: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'The update has downloaded. A capture batch is running, so it waits for the batch to end.',
   },
 
   // ── About modal (issue #122) ─────────────────────────────────────────────
@@ -3062,6 +3070,9 @@ export const STRINGS = {
     CHECK_NOW_BUTTON: 'Check for Updates Now',
     DOWNLOAD_INSTALL_BUTTON: 'Download & Install',
     RESTART_BUTTON: 'Restart to Apply',
+    RESTART_AFTER_BATCH_BUTTON: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'A capture batch is running: restarting now would stop Studio watching it.',
+    INSTALL_AFTER_BATCH_TITLE: 'A capture batch is running: installing closes DoD Studio, so this waits for the batch to end.',
     CLOSE_BUTTON: 'Close',
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',

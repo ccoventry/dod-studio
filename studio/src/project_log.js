@@ -21,6 +21,21 @@ export function projectFailedLine(action, path, err) {
 /** A new, empty session replaced the open one. */
 export const NEW_SESSION_LINE = '[project] new session';
 
+/** A batch started: the project stays open until it ends. */
+export function batchHeldLine() {
+  return '[project] a batch started: holding Open, New, Clear and Restart until it ends';
+}
+
+/** The batch ended: how long it held the project, and what was turned away. */
+export function batchReleasedLine(elapsedMs, refused) {
+  return `[project] the batch ended after ${elapsedMs} ms: released, ${refused} attempt(s) refused`;
+}
+
+/** A project change was turned away during a batch. */
+export function batchRefusedLine() {
+  return '[project] refused a project change: a batch is running';
+}
+
 /** What the search for a project's missing demos found. */
 export function missingDemosLine(checked, missing, foundElsewhere) {
   if (missing === 0) return `[project] all ${checked} demo(s) are where the project says`;

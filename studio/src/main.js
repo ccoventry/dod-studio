@@ -7,7 +7,8 @@ import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer, isCaptureStarting } from './capture_pane.js';
+import { createBatchGuard } from './batch_guard.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
@@ -137,6 +138,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
+  const batchGuard = createBatchGuard({ isStarting: isCaptureStarting });
   const projectSession = createProjectSession({
     getDemos: queue.getDemos,
     replaceDemos: (demos) => queue.replace(demos),
@@ -152,11 +154,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     onProjectFile: (path) => recentProjects.remember(path),
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
+    refuseDuringBatch: batchGuard.refuseDuringBatch,
   });
   const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
   // File → Open Recent (#935), saved in the settings file.
-  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
+  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings(), heldReason: batchGuard.heldReason });
 
   // Initialize modular UI panes
   initThemedConfirm();
@@ -238,7 +241,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Wires the Updates tab's buttons regardless of whether settings loaded —
   // only the startup auto-check itself is conditional on settings being
   // present. Not awaited: a background check shouldn't block startup.
-  initUpdater(settings, persistAppSettings);
+  initUpdater(settings, persistAppSettings, batchGuard);
   startWhatsNew();
   initAppMenu();
   if (pinnedListCleaned) persistAppSettings();
