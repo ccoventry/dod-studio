@@ -102,6 +102,9 @@
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
+//! - `crosshair_outline`: `ds_hud_crosshair_outline_size` and `_color` -- a drawn
+//!   border around any crosshair, in the frame's own pixels (§5 of
+//!   `docs/goldsrc_crosshair.md`).
 //! - `crosshair_scale`: the `ds_hud_crosshair_scale` cvar -- draw the crosshair
 //!   S times bigger, for movies at high resolutions (#1335).
 //! - `objicons`: the `ds_hud_objectives` command -- place the objective
@@ -272,6 +275,7 @@ mod console_tokens;
 mod crash;
 mod crosshair;
 mod crosshair_gap;
+mod crosshair_outline;
 mod crosshair_scale;
 mod deathmsg;
 mod debug;

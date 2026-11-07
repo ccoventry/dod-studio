@@ -29,6 +29,10 @@ HUD
       Hide the crosshair and keep it hidden.
   ds_hud_crosshair_scale <n>
       Draw the crosshair n times bigger, for movies at high resolutions (default 1, at most 8).
+  ds_hud_crosshair_outline_size <px>
+      Draw a border this many pixels thick around the crosshair (default 0, off; at most 8).
+  ds_hud_crosshair_outline_color "R G B"
+      The crosshair border's colour, three whole numbers 0-255 (default "0 0 0", black).
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   ds_hud_hide_hints 0/1

@@ -87,6 +87,21 @@ fn is_scaled_draw(sheet: Sheet, rect: &Wrect, in_eye: bool) -> bool {
     sheet == Sheet::Red || is_crosshair_draw(sheet, rect, in_eye)
 }
 
+/// Whether the draw about to happen is part of the crosshair. Atomics only.
+///
+/// # Safety
+///
+/// `prc` is the rect pointer the game passed to `SPR_Draw*`, null or valid.
+pub unsafe fn is_crosshair(sheet: Sheet, prc: *const Wrect) -> bool {
+    sheet != Sheet::Other
+        && !prc.is_null()
+        && is_scaled_draw(
+            sheet,
+            unsafe { &*prc },
+            crate::spectator_target::mode() == Some(4),
+        )
+}
+
 /// From a draw hook: the point and scale to zoom this draw by, or `None` to
 /// draw it as it is. Atomics only.
 ///
@@ -95,11 +110,7 @@ fn is_scaled_draw(sheet: Sheet, rect: &Wrect, in_eye: bool) -> bool {
 /// `prc` is the rect pointer the game passed to `SPR_Draw*`, null or valid.
 pub unsafe fn zoom(sheet: Sheet, prc: *const Wrect) -> Option<(f32, f32, f32)> {
     let scale = f32::from_bits(SCALE.load(Ordering::Relaxed));
-    if scale == 1.0 || sheet == Sheet::Other || prc.is_null() {
-        return None;
-    }
-    let in_eye = crate::spectator_target::mode() == Some(4);
-    if !is_scaled_draw(sheet, unsafe { &*prc }, in_eye) {
+    if scale == 1.0 || !unsafe { is_crosshair(sheet, prc) } {
         return None;
     }
     let (x, y) = (

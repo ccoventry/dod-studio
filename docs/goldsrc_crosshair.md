@@ -2,7 +2,7 @@
 
 `ds_hud_hide_crosshair`, the crosshair half of `ds_spec_match_pov`,
 each player's crosshair from Studio's Players table (§3),
-and `ds_hud_crosshair_scale` (§4).
+`ds_hud_crosshair_scale` (§4) and the drawn border (§5).
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -424,6 +424,32 @@ spectator rect and all five pieces of the red crosshair, whose gap scales with
 it. The zoom sits in `hud_sprites::draw_through`, around §3's swap, so what is
 drawn and when are decided as before, and §1's hide and §2's gate still win.
 
-The bars and any border scale with the crosshair. A thin border on a big
-crosshair would need a sheet bigger than 256x256, which the creator doesn't
-make.
+The bars and any border in the sheet scale with the crosshair. A thin border
+on a big crosshair is §5's job.
+
+---
+
+## 5. `ds_hud_crosshair_outline_size` and `_color`
+
+The kill-feed icons' outline is part of their art. A crosshair sheet has no room
+for one, and a border in a sheet doubles with §4's scale, so `crosshair_outline.rs`
+draws it: the crosshair's own `SPR_DrawHoles`, once for each pixel offset out to
+the size, then the crosshair on top. The offsets are applied outside §4's zoom,
+so the border stays that many of the frame's pixels at any scale, and a 128 px
+crosshair can have a 2 px edge.
+
+They fill the whole square, not its rim: an arm thinner than the border would
+otherwise leave a gap to its copy. That makes corners square, like the borders
+in the creator's sheets.
+
+`SPR_Set`'s tint multiplies the sprite, so it can make a tile black but not
+white. A `GL_COMBINE` texture stage set before the draw changes nothing: the
+engine's draw sets the stage itself (measured on both builds). So the copies
+draw under GL fog at full strength, which replaces a fragment's colour after
+texturing and leaves its alpha, the crosshair's shape, alone.
+
+`SPR_Draw` and `SPR_DrawAdditive` draws get no border: `SPR_DrawAdditive` has no
+mask, so a copy would be the whole rect.
+
+Each of the red crosshair's five pieces gets its own border, so a border wider
+than half the gap covers the piece next to it where the two meet.
