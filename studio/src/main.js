@@ -520,4 +520,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Ctrl+N/O/S, swallowed reload keys, no browser context menu: app_shortcuts.js.
   startAppShortcuts();
+  // The boot ran: public/boot_watchdog.js stops waiting for it.
+  window.dodStudioBoot?.done();
 });
