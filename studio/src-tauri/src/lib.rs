@@ -45,6 +45,7 @@ mod review_library;
 mod review_manager;
 mod scan_manager;
 mod settings_manager;
+mod settings_migrations;
 mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
