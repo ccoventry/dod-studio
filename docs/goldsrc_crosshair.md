@@ -1,7 +1,8 @@
 # The crosshair: hiding it, and matching it while spectating
 
 `ds_hud_hide_crosshair`, the crosshair half of `ds_spec_match_pov`,
-and each player's crosshair from Studio's Players table (§3).
+each player's crosshair from Studio's Players table (§3),
+and `ds_hud_crosshair_scale` (§4).
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -406,3 +407,23 @@ table's crosshair does not appear.
 
 The draw path reads three atomics; the decision (the player, their row, the
 handle) is made once a frame in `HUD_Frame`.
+
+---
+
+## 4. `ds_hud_crosshair_scale` (#1335)
+
+Every crosshair draw is exact pixels from a small rect, and a `customXHair.spr`
+tile is 64x64, so at 2560x1440 no crosshair can pass 4% of the frame's height.
+Vertex's creator stops at the tile too: fully cranked, the arms reach the
+tile's edge and leave no room for a border.
+
+`crosshair_scale.rs` wraps each of the crosshair's draws in `gl_zoom`, the
+modelview zoom the kill feed's scale uses, about the screen's centre. Both
+paths in §1's fork centre on that point, so one centre serves the tile, the
+spectator rect and all five pieces of the red crosshair, whose gap scales with
+it. The zoom sits in `hud_sprites::draw_through`, around §3's swap, so what is
+drawn and when are decided as before, and §1's hide and §2's gate still win.
+
+The bars and any border scale with the crosshair. A thin border on a big
+crosshair would need a sheet bigger than 256x256, which the creator doesn't
+make.

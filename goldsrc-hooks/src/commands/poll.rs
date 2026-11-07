@@ -354,6 +354,7 @@ pub fn poll() {
     );
     poll_hand_signals();
     poll_ex_interp();
+    crate::crosshair_scale::poll(CVAR_CROSSHAIR_SCALE.value());
     poll_flag(
         TEXTURE_HIRES_LOG_NAME,
         &CVAR_TEXTURE_HIRES_LOG,

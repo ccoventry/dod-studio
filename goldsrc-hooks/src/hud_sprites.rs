@@ -303,9 +303,8 @@ fn skip_draw(prc: *const Wrect) -> bool {
     }
 }
 
-/// One of the three draws, through to the engine: the crosshair's own as the
-/// Players table says (`player_crosshair::swap`: the table's sprite set for
-/// this one draw, then the game's set back), anything else as asked.
+/// One of the three draws, through to the engine, under the crosshair's zoom
+/// when it is one of the crosshair's (`crosshair_scale`).
 ///
 /// # Safety
 ///
@@ -317,6 +316,31 @@ unsafe fn draw_through(real: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc
     }
     let real: SprDrawFn = unsafe { std::mem::transmute(real) };
     let sheet = crate::player_crosshair::Sheet::from_u8(CURRENT_SHEET.load(Ordering::Relaxed));
+    let draw = || unsafe { draw_sprite(real, sheet, frame, x, y, prc) };
+    if let Some((cx, cy, scale)) = unsafe { crate::crosshair_scale::zoom(sheet, prc) }
+        // Safety: a HUD draw, on the engine's GL thread.
+        && unsafe { crate::gl_zoom::about(cx, cy, scale, draw) }
+    {
+        return;
+    }
+    draw();
+}
+
+/// The crosshair's own draw as the Players table says
+/// (`player_crosshair::swap`: the table's sprite set for this one draw, then
+/// the game's set back), anything else as asked.
+///
+/// # Safety
+///
+/// As [`draw_through`].
+unsafe fn draw_sprite(
+    real: SprDrawFn,
+    sheet: crate::player_crosshair::Sheet,
+    frame: i32,
+    x: i32,
+    y: i32,
+    prc: *const Wrect,
+) {
     let set = REAL_SPR_SET.load(Ordering::Acquire);
     if !set.is_null()
         && let Some((handle, rect, nx, ny)) =
