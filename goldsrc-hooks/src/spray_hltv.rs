@@ -57,6 +57,9 @@
 //! 3840 px PNG never stalls a demo; a spray that isn't ready yet is left to
 //! the engine.
 //!
+//! Lambdas, which a server places with no player attached, have a route of
+//! their own (`spray_lambda`) that shoots through [`shoot`].
+//!
 //! "No spray" draws a transparent texture rather than skipping the shoot:
 //! skipping would need another patch inside `CL_ParseTEnt` on both builds,
 //! and the custom branch with a texture of ours is the path already proven
@@ -112,6 +115,8 @@ struct Build {
     custom_at: usize,
     /// The wad-decal branch's first instruction, from the site.
     else_at: usize,
+    /// The custom branch's `call R_CustomDecalShoot`, from the site.
+    shoot_call_at: usize,
     /// `Draw_DecalTexture`'s entry, through its `customdata` load.
     decal_texture: &'static str,
     /// Where in that match the `customdata` table's address (`disp32`) is.
@@ -134,6 +139,7 @@ const BUILDS: [Build; 2] = [
         playernum_disp: 0xc8,
         custom_at: 0x0d,
         else_at: 0x2f,
+        shoot_call_at: 0x20,
         decal_texture: "55 8B EC 8B 4D 08 56 85 C9 57 7D 79 83 C8 FF 2B C1 8D 0C C0 8D 14 88 C1 E2 04 \
                         8B 8A ?? ?? ?? ?? 85 C9 74 46",
         customdata_at: 28,
@@ -153,6 +159,7 @@ const BUILDS: [Build; 2] = [
         playernum_disp: 0xa4,
         custom_at: 0x0c,
         else_at: 0x32,
+        shoot_call_at: 0x19,
         decal_texture: "55 8B EC 8B 4D 08 85 C9 79 74 F7 D1 69 D1 50 02 00 00 8B 82 ?? ?? ?? ?? 85 C0 \
                         74 49",
         customdata_at: 20,
@@ -168,6 +175,14 @@ const DT_STOLEN: [u8; 6] = [0x55, 0x8b, 0xec, 0x8b, 0x4d, 0x08];
 const PLAYER_STRIDE: u32 = 0x250;
 /// `MAX_CLIENTS`: the slots `CL_ParseTEnt` looks a `customdata` up for.
 const MAX_PLAYERS: usize = 32;
+/// The slot past the players: what a lambda nobody owns is shot under, so
+/// its fallback picture can't turn into a player's.
+pub const UNKNOWN_SLOT: usize = MAX_PLAYERS;
+/// The slots the `Draw_DecalTexture` stub answers for.
+const SLOTS: usize = MAX_PLAYERS + 1;
+/// `R_CustomDecalShoot`'s flag, the one `CL_ParseTEnt`'s custom branch passes
+/// and the engine gives `}lambda06` too: a custom decal.
+const CUSTOM_DECAL_FLAG: i32 = 4;
 /// `cachewad_t::cacheExtra` for the decal cache: the `texture_t` prefix in
 /// front of each lump, which `Draw_MiptexTexture` insists on.
 const TEX_PREFIX: usize = 0x20;
@@ -179,10 +194,12 @@ const PALETTE_PAD: usize = 768;
 /// with no `customdata`, read by the `Draw_DecalTexture` stub every frame.
 /// Never set back to 0 once set: a decal already on a wall would then find
 /// nothing, and the engine's lookup returns NULL for them.
-static SLOT_TEX: [AtomicUsize; MAX_PLAYERS] = [const { AtomicUsize::new(0) }; MAX_PLAYERS];
+static SLOT_TEX: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
 /// The same for a player whose `customdata` is there: our texture over their
 /// saved spray, or 0 for the engine's, which can always answer for them.
-static SLOT_OVER: [AtomicUsize; MAX_PLAYERS] = [const { AtomicUsize::new(0) }; MAX_PLAYERS];
+/// [`UNKNOWN_SLOT`] has both set: the stub's `customdata` read for it lands
+/// past the player table, in `cl`, and means nothing either way.
+static SLOT_OVER: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
 /// `cl.players[0].customdata`'s list head, read out of `Draw_DecalTexture`;
 /// a slot's is [`PLAYER_STRIDE`] further on per slot.
 static CUSTOMDATA: AtomicUsize = AtomicUsize::new(0);
@@ -195,6 +212,8 @@ static TE_RESUME: AtomicUsize = AtomicUsize::new(0);
 static DT_RESUME: AtomicUsize = AtomicUsize::new(0);
 /// `Draw_MiptexTexture`.
 static MIPTEX: AtomicUsize = AtomicUsize::new(0);
+/// `R_CustomDecalShoot`.
+static CUSTOM_SHOOT: AtomicUsize = AtomicUsize::new(0);
 /// The two patched sites, for [`poll`]'s check.
 static TE_SITE: AtomicUsize = AtomicUsize::new(0);
 static DT_SITE: AtomicUsize = AtomicUsize::new(0);
@@ -336,7 +355,7 @@ fn te_stub(build: &Build, callback: usize, custom: usize, els: usize, resume: us
 /// ```asm
 ///         mov   eax, [esp+4]             ; index
 ///         not   eax                      ; the player, if index < 0
-///         cmp   eax, 32
+///         cmp   eax, SLOTS
 ///         jae   .game                    ; index >= 0 (or out of range)
 ///         mov   ecx, eax
 ///         imul  ecx, ecx, PLAYER_STRIDE
@@ -357,7 +376,7 @@ fn te_stub(build: &Build, callback: usize, custom: usize, els: usize, resume: us
 fn dt_stub(slot_tex: usize, slot_over: usize, customdata: usize, resume: usize) -> Vec<u8> {
     let mut code = vec![0x8b, 0x44, 0x24, 0x04]; // mov eax, [esp+4]
     code.extend_from_slice(&[0xf7, 0xd0]); // not eax
-    code.extend_from_slice(&[0x83, 0xf8, MAX_PLAYERS as u8]); // cmp eax, 32
+    code.extend_from_slice(&[0x83, 0xf8, SLOTS as u8]); // cmp eax, SLOTS
     let jae_at = code.len();
     code.extend_from_slice(&[0x73, 0]); // jae .game
     code.extend_from_slice(&[0x8b, 0xc8]); // mov ecx, eax
@@ -400,6 +419,7 @@ struct Sites {
     dt: usize,
     customdata: usize,
     miptex: usize,
+    custom_shoot: usize,
 }
 
 fn find_sites(base: usize) -> Result<Sites, String> {
@@ -430,6 +450,13 @@ fn find_sites(base: usize) -> Result<Sites, String> {
                 build.name
             ));
         }
+        let call = te + build.shoot_call_at;
+        if !present(call, &[0xe8]) {
+            return Err(format!("{}: no R_CustomDecalShoot call", build.name));
+        }
+        // Safety: the `rel32` of the `call` just checked, inside the match.
+        let rel = unsafe { ((call + 1) as *const i32).read_unaligned() };
+        let custom_shoot = (call + 5).wrapping_add_signed(rel as isize);
         if customdata == 0 {
             return Err(format!("{}: no customdata table", build.name));
         }
@@ -439,6 +466,7 @@ fn find_sites(base: usize) -> Result<Sites, String> {
             dt,
             customdata,
             miptex,
+            custom_shoot,
         });
     }
     Err(misses.join("; "))
@@ -466,6 +494,7 @@ fn install() {
         detours.push(unsafe { detour::install(sites.dt, DT_STOLEN.len(), &dt) }?);
         MIPTEX.store(sites.miptex, Ordering::Release);
         let build = sites.build;
+        CUSTOM_SHOOT.store(sites.custom_shoot, Ordering::Release);
         TE_CUSTOM.store(sites.te + build.custom_at, Ordering::Release);
         TE_ELSE.store(sites.te + build.else_at, Ordering::Release);
         TE_RESUME.store(sites.te + build.te_stolen.len(), Ordering::Release);
@@ -536,6 +565,9 @@ pub fn poll() {
     }
     if ACTIVE.load(Ordering::Relaxed) && crate::player_overrides::on() {
         install();
+        if INSTALLED.load(Ordering::Acquire) {
+            crate::spray_lambda::poll();
+        }
     }
     check_sites();
 }
@@ -854,6 +886,64 @@ pub fn choice_for_slot(slot: usize) -> Option<Choice> {
     ))
 }
 
+/// The `texture_t` for `choice`, a PNG or the blank, built for this message;
+/// `None` when it can't be had yet, said once with `what` the message.
+fn choice_texture(choice: &Choice, what: &str) -> Option<usize> {
+    let lump = match PREPARED.read().ok().and_then(|p| p.get(choice).cloned()) {
+        Some(Ok(lump)) => lump,
+        Some(Err(_)) => return None, // said when it failed
+        None => {
+            warn_once(
+                choice,
+                format!("spray: {what}: {choice} isn't built yet, the game's own"),
+            );
+            return None;
+        }
+    };
+    let texture = texture_for(&lump);
+    if texture.is_none() {
+        warn_once(
+            choice,
+            format!("spray: {what}: the engine made no texture from {choice}"),
+        );
+    }
+    texture
+}
+
+/// The Players table, while it applies: `Table::active`, `ds_player_overrides`
+/// 1 and a demo playing.
+pub fn table_in_use() -> Option<Arc<Table>> {
+    (ACTIVE.load(Ordering::Relaxed) && crate::player_overrides::on() && playing_demo())
+        .then(current_table)
+        .flatten()
+}
+
+/// Shoots `choice` at `pos` under `slot` (0-based, or [`UNKNOWN_SLOT`]), the
+/// way the engine shoots a player's saved spray, for a message that isn't a
+/// spray's (`spray_lambda`). False when it shot nothing.
+pub fn shoot(slot: usize, choice: &Choice, pos: *const [f32; 3]) -> bool {
+    let shooter = CUSTOM_SHOOT.load(Ordering::Acquire);
+    if shooter == 0 || slot >= SLOTS {
+        return false;
+    }
+    let Some(texture) = choice_texture(choice, "lambda") else {
+        return false;
+    };
+    SLOT_TEX[slot].store(texture, Ordering::Release);
+    if slot == UNKNOWN_SLOT || has_customdata(slot) {
+        SLOT_OVER[slot].store(texture, Ordering::Release);
+    }
+    // Safety: R_CustomDecalShoot(texture, player, entity, model, pos, flags),
+    // cdecl, found out of `CL_ParseTEnt`'s own call and called on its thread
+    // with what that call passes for a spray on the world. `pos` is valid
+    // for the call.
+    let shoot: unsafe extern "C" fn(usize, i32, i32, i32, *const [f32; 3], i32) =
+        unsafe { std::mem::transmute::<usize, _>(shooter) };
+    unsafe { shoot(texture, slot as i32, 0, 0, pos, CUSTOM_DECAL_FLAG) };
+    DRAWN.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
 /// Called by the `CL_ParseTEnt` stub for every spray. Returns the
 /// `texture_t` to shoot it with, or 0 for the engine's own: their saved spray
 /// when they have one, the wad decal when not.
@@ -878,24 +968,7 @@ unsafe extern "C" fn slot_texture(playernum: i32) -> usize {
         }
     };
     let name = player(slot).map(|(n, _)| n).unwrap_or_default();
-    let lump = match PREPARED.read().ok().and_then(|p| p.get(&choice).cloned()) {
-        Some(Ok(lump)) => lump,
-        Some(Err(_)) => return 0, // said when it failed
-        None => {
-            warn_once(
-                &choice,
-                format!(
-                    "spray: TE_PLAYERDECAL for {name}: {choice} isn't built yet, the game's own"
-                ),
-            );
-            return 0;
-        }
-    };
-    let Some(texture) = texture_for(&lump) else {
-        warn_once(
-            &choice,
-            format!("spray: TE_PLAYERDECAL for {name}: the engine made no texture from {choice}"),
-        );
+    let Some(texture) = choice_texture(&choice, &format!("TE_PLAYERDECAL for {name}")) else {
         return 0;
     };
     SLOT_TEX[slot].store(texture, Ordering::Release);
@@ -935,8 +1008,9 @@ pub fn status() -> String {
     if INSTALLED.load(Ordering::Relaxed) {
         let build = BUILD_NAME.lock().map(|n| *n).unwrap_or_default();
         format!(
-            "on ({build} hw.dll), {} spray(s) drawn this session",
-            DRAWN.load(Ordering::Relaxed)
+            "on ({build} hw.dll), {} spray(s) drawn this session; {}",
+            DRAWN.load(Ordering::Relaxed),
+            crate::spray_lambda::status()
         )
     } else if GAVE_UP.load(Ordering::Relaxed) {
         "not installed (see the log)".to_string()
@@ -1092,7 +1166,7 @@ mod tests {
             vec![
                 0x8b, 0x44, 0x24, 0x04,                   //  0 mov  eax, [esp+4]
                 0xf7, 0xd0,                               //  4 not  eax
-                0x83, 0xf8, 0x20,                         //  6 cmp  eax, 32
+                0x83, 0xf8, 0x21,                         //  6 cmp  eax, SLOTS
                 0x73, 0x28,                               //  9 jae  .game (51)
                 0x8b, 0xc8,                               // 11 mov  ecx, eax
                 0x69, 0xc9, 0x50, 0x02, 0x00, 0x00,       // 13 imul ecx, ecx, 0x250
