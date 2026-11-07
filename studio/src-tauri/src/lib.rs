@@ -19,6 +19,7 @@ mod demo_split_manager;
 mod dir_browser;
 mod download_progress;
 mod drop_paths;
+mod file_replace;
 mod game_process_manager;
 mod hd_manager;
 mod hook_batch;
@@ -152,7 +153,7 @@ fn builtin_command_profiles() -> Vec<settings_manager::CommandProfile> {
 #[tauri::command]
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+        file_replace::replace_file(std::path::Path::new(&path), &contents)
     }))
     .await
 }

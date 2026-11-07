@@ -540,6 +540,11 @@ html.picking-path * {
   white-space: nowrap;
 }
 
+/* Room for "Made with a newer DoD Studio" after the file name (#1085). */
+.session-file-indicator.newer-project {
+  max-width: 420px;
+}
+
 /* Notification settings tab (issue #98) — two columns where they fit,
    collapsing to one on a narrow window. */
 .notification-settings-grid {

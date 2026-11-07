@@ -13,10 +13,12 @@
 // marked in the open queue, which matches only if those demos are loaded.
 
 import { listen } from '@tauri-apps/api/event';
-import { catchUpUnwatchedBatches, readProjectFile, writeTextFile } from './ipc_bridge.js';
+import { catchUpUnwatchedBatches, filesExist, readProjectFile, writeTextFile } from './ipc_bridge.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { captureRateOf, attachCaptures, capturesToSave } from './take_record.js';
+import { openProjectText, buildProjectFile, saveProjectFile } from './project_file.js';
+import { updateSummary } from './project_migrations.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
@@ -93,6 +95,7 @@ const defaultIo = {
   catchUp: catchUpUnwatchedBatches,
   readProject: readProjectFile,
   writeProject: writeTextFile,
+  exists: filesExist,
   listen,
   toast: showToast,
 };
@@ -112,17 +115,23 @@ export function createBatchCatchUp({
   /** Marks `batch` in the project file it came from. Returns a note for the toast. */
   async function applyToProjectFile(batch, path) {
     try {
-      const data = JSON.parse(await io.readProject(path));
+      const opened = openProjectText(await io.readProject(path));
+      const { data } = opened;
       data.takeIndex = data.takeIndex || {};
       attachCaptures(data.takeIndex, data.takeCaptures);
       const result = applyCaughtUpBatch(batch, data.demos || [], data.takeIndex);
-      if (result.changed) data.takeCaptures = capturesToSave(data.takeIndex);
-      if (result.changed) await io.writeProject(path, JSON.stringify(data, null, 2));
-      return { result, note: result.changed ? ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileNameOf(path) || path)}` : '' };
+      if (!result.changed) return { result, note: '' };
+      data.takeCaptures = capturesToSave(data.takeIndex);
+      const raised = await saveProjectFile(path, buildProjectFile(data, opened),
+        { read: io.readProject, write: io.writeProject, exists: io.exists });
+      const note = ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileNameOf(path) || path)}`;
+      if (!raised) return { result, note };
+      const summary = await updateSummary(data.demos, data.takeIndex);
+      return { result, note: `${note} ${STRINGS.PROJECT_FILE.updatedToast(summary, raised.backup)}` };
     } catch (err) {
       return {
         result: applyCaughtUpBatch(batch, [], {}),
-        note: ` ${STRINGS.BATCH_CATCH_UP.projectNotUpdated(fileNameOf(path) || path, err)}`,
+        note: ` ${STRINGS.BATCH_CATCH_UP.projectNotUpdated(fileNameOf(path) || path, err?.message || err)}`,
         failed: true,
       };
     }

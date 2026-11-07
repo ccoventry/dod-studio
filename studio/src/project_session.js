@@ -7,10 +7,15 @@
 import { save } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
 import { whileDialogOpens } from './dialog_wait.js';
-import { defaultProjectsDir, readProjectFile, writeProjectFile, logFrontendEvent } from './ipc_bridge.js';
+import { defaultProjectsDir, readProjectFile, logFrontendEvent } from './ipc_bridge.js';
 import {
-  projectSavedLine, projectOpenedLine, projectFailedLine, NEW_SESSION_LINE,
+  projectSavedLine, projectOpenedLine, projectFailedLine, projectUpdatedLine, projectNewerLine,
+  projectNeedsCopyLine, NEW_SESSION_LINE,
 } from './project_log.js';
+import {
+  openProjectText, buildProjectFile, saveProjectFile, isNewerProject, canSaveOver, ProjectFileError,
+} from './project_file.js';
+import { updateSummary } from './project_migrations.js';
 import { updateStreakVisuals } from './detail_pane.js';
 import { clearCheckedPaths } from './master_pane.js';
 import { switchNavTab } from './nav.js';
@@ -24,9 +29,13 @@ import { projectFolders } from './project_paths.js';
 import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
-import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
+import { projectSaveDialogOptions, projectCopyDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 import { createProjectOpenProgress } from './project_open_progress.js';
 import { fileNameOf } from './path_display.js';
+
+/** How long the toasts that say where a backup went, or what a newer file's
+ *  save means, stay up: long enough to read a whole path. */
+const UPDATE_TOAST_MS = 12000;
 
 /**
  * @param {object} app  What this needs from main.js:
@@ -63,6 +72,16 @@ export function createProjectSession({
   // once set, "Save Session" writes straight back to it instead of asking
   // Save-As every time (matches Ctrl+S's behavior in every other app).
   let currentSessionPath = null;
+  // What the open file said of itself (project_file.js): its format, and the
+  // keys only a newer build knows, written back on save. Null for a project
+  // that didn't come from a file.
+  let openedFile = null;
+  // True from opening a newer build's file until the first save says what
+  // happens to its new settings.
+  let newerNoticePending = false;
+  // Counts markProjectDirty() calls, so a save can tell a change that landed
+  // while it wrote from one it has in the file.
+  let changeCount = 0;
   // True whenever project state (scanned demos, takeIndex, scanPaths) has
   // changed since the last successful save or load — gates the "unsaved
   // changes" prompt on window close. Cleared by saveProjectSession() and
@@ -105,7 +124,13 @@ export function createProjectSession({
     const el = document.querySelector('#session-file-indicator');
     if (!el) return;
     const dirtySuffix = hasUnsavedChanges ? ' • unsaved' : '';
-    if (currentSessionPath) {
+    const newer = currentSessionPath && isNewerProject(openedFile);
+    el.classList.toggle('newer-project', !!newer);
+    if (newer) {
+      const S = STRINGS.PROJECT_FILE;
+      el.textContent = `${fileNameOf(currentSessionPath)}${dirtySuffix} • ${S.MADE_WITH_NEWER}`;
+      el.title = `${currentSessionPath}\n${canSaveOver(openedFile) ? S.NEWER_TITLE : S.NEEDS_COPY_TITLE}`;
+    } else if (currentSessionPath) {
       const filename = fileNameOf(currentSessionPath) || currentSessionPath;
       el.textContent = filename + dirtySuffix;
       el.title = currentSessionPath;
@@ -119,6 +144,7 @@ export function createProjectSession({
   // called at every mutation site for currentScannedDemos/takeIndex/
   // scanPaths. Gates the close-window "unsaved changes" prompt.
   function markProjectDirty() {
+    changeCount += 1;
     hasUnsavedChanges = true;
     updateSessionFileIndicator();
   }
@@ -127,6 +153,51 @@ export function createProjectSession({
   // renders finish, and filled from the take folders when a project opens.
   const projectRenders = createProjectRenders({ getTakeIndex, markDirty: markProjectDirty });
   projectRenders.startRecording();
+
+  // Where this save writes. A project that needs a newer build to save over
+  // it has only Save a copy, so a quiet save has nowhere to go and is refused:
+  // null. Otherwise null is a cancelled dialog. Once a session's been loaded
+  // or saved once in this window, it keeps writing back to that same file
+  // instead of asking Save-As again. A first save is `.dodstudio`; a project
+  // opened from `.json` keeps saving to that `.json` (#528,
+  // project_file_type.js).
+  async function saveTarget(quiet) {
+    if (!canSaveOver(openedFile)) {
+      if (quiet) {
+        logFrontendEvent(projectNeedsCopyLine(currentSessionPath));
+        return null;
+      }
+      return whileDialogOpens(() => save(projectCopyDialogOptions(currentSessionPath)));
+    }
+    return currentSessionPath || whileDialogOpens(async () =>
+      save(projectSaveDialogOptions(await defaultProjectsDir())));
+  }
+
+  // The first save in a newer format: the one-time summary, in the log
+  // always and as a toast unless saving quietly. The take check reads the
+  // disk, so it runs once the save is safely done.
+  async function reportUpdate(filePath, takeIndex, backup, quiet) {
+    const summary = await updateSummary(getDemos(), takeIndex);
+    logFrontendEvent(projectUpdatedLine(filePath, summary, backup));
+    if (!quiet) showToast(STRINGS.PROJECT_FILE.updatedToast(summary, backup), 'success', UPDATE_TOAST_MS);
+  }
+
+  // Writes the project to `path`, and when that can't be done offers Save a
+  // copy, since nothing else lets the user save elsewhere and the work would
+  // stay stuck in memory. Resolves `{ filePath, raised }`, or null when the
+  // copy is cancelled. A quiet save has nobody to ask: it throws.
+  async function writeOrOfferCopy(path, projectFile, quiet) {
+    try {
+      return { filePath: path, raised: await saveProjectFile(path, projectFile) };
+    } catch (err) {
+      if (quiet || !(err instanceof ProjectFileError)) throw err;
+      logFrontendEvent(projectFailedLine('save the project', path, err.message));
+      showToast(err.message, 'error', UPDATE_TOAST_MS);
+      const copy = await whileDialogOpens(() => save(projectCopyDialogOptions(path)));
+      if (!copy) return null;
+      return { filePath: copy, raised: await saveProjectFile(copy, projectFile) };
+    }
+  }
 
   // Save Project Session — also called from the Clear All modal's "Save
   // Session First" action, so it lives here as a plain function rather than
@@ -148,19 +219,14 @@ export function createProjectSession({
       return true;
     }
     try {
-      // Once a session's been loaded or saved once in this window, keep
-      // writing back to that same file instead of asking Save-As again.
-      // A first save is `.dodstudio`; a project opened from `.json` keeps
-      // saving to that `.json` (#528, project_file_type.js).
-      const filePath = currentSessionPath || await whileDialogOpens(async () =>
-        save(projectSaveDialogOptions(await defaultProjectsDir())));
-      if (!filePath) return false;
+      const target = await saveTarget(quiet);
+      if (!target) return false;
+      const changesInThisSave = changeCount;
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
       // project's, and a project carrying them switched them on every open.
       const prunedTakes = pruneTakeIndex(getTakeIndex(), collectAllUids());
-      const projectData = JSON.stringify({
-        version: "0.12.0",
+      const projectFile = buildProjectFile({
         // The folders this project's demos are in, not the app-wide pinned
         // list (that is every folder ever added, nothing to do with the
         // project). Read back only to look for demos that have moved (#21).
@@ -181,21 +247,31 @@ export function createProjectSession({
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
-      }, null, 2);
-      await writeProjectFile(filePath, projectData);
+      }, openedFile);
+      const written = await writeOrOfferCopy(target, projectFile, quiet);
+      if (!written) return false;
+      const { filePath, raised } = written;
       currentSessionPath = filePath;
-      hasUnsavedChanges = false;
+      // A mark that landed during the write isn't in the file.
+      hasUnsavedChanges = changeCount !== changesInThisSave;
       updateSessionFileIndicator();
       logFrontendEvent(projectSavedLine(filePath, getDemos().length));
       if (!quiet) {
         showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
+        if (newerNoticePending) showToast(STRINGS.PROJECT_FILE.NEWER_SAVED_TOAST, 'info', UPDATE_TOAST_MS);
+        newerNoticePending = false;
         onProjectFile(filePath);
+      }
+      // The save is done: a failed summary mustn't report it as failed.
+      if (raised) {
+        await reportUpdate(filePath, prunedTakes, raised.backup, quiet)
+          .catch((err) => logFrontendEvent(projectFailedLine('summarise the update of', filePath, err)));
       }
       return true;
     } catch (err) {
       console.error("Save project error:", err);
       logFrontendEvent(projectFailedLine('save the project', currentSessionPath, err));
-      if (!quiet) showToast(STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
+      if (!quiet) showToast(err instanceof ProjectFileError ? err.message : STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
       return false;
     }
   }
@@ -271,9 +347,12 @@ export function createProjectSession({
   async function loadProjectFile(selected, { quiet = false, rescanOffer = !quiet } = {}) {
     openProgress.opening();
     try {
-      const content = await readProjectFile(selected);
-      const data = JSON.parse(content);
+      const opened = openProjectText(await readProjectFile(selected));
+      const { data } = opened;
       if (!data) return false;
+      openedFile = opened;
+      newerNoticePending = isNewerProject(opened);
+      if (newerNoticePending) logFrontendEvent(projectNewerLine(selected, opened.schema, Object.keys(opened.unknownKeys).length));
       currentSessionPath = selected;
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
@@ -375,6 +454,8 @@ export function createProjectSession({
     }
     replaceDemos([]);
     currentSessionPath = null;
+    openedFile = null;
+    newerNoticePending = false;
     setTakeIndex({});
     setProjectTeams(emptyProjectTeams());
     setReviewSettings(null);
