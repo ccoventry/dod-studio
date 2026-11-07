@@ -264,7 +264,14 @@ pub fn install() {
         crate::spec_xray::XRAY.set_cvar(xray);
     }
     {
+        use crate::crosshair_outline as outline;
         use crate::spec_xray::colour;
+        if let Some(size) = register(outline::SIZE_NAME, "0") {
+            outline::SIZE.set(size);
+        }
+        if let Some(colour) = register(outline::COLOR_NAME, outline::COLOR_DEFAULT) {
+            outline::COLOR.set(colour);
+        }
         if let Some(allies) = register(colour::ALLIES_NAME, colour::ALLIES_DEFAULT) {
             colour::ALLIES.set(allies);
         }

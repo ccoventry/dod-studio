@@ -104,6 +104,8 @@ mod tests {
         "debug_log_view_bob",
         "debug_record_frame_times",
         "debug_texture",
+        "hud_crosshair_outline_color",
+        "hud_crosshair_outline_size",
         "hud_crosshair_scale",
         "demo_show_load_progress",
         "hud_hide_center_text",
