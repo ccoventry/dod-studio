@@ -90,6 +90,7 @@ const STATUS_NAME: &str = console_name!("debug_status");
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
+const CROSSHAIR_SCALE_NAME: &str = crate::crosshair_scale::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
 const EX_INTERP_NAME: &str = ex_interp::NAME;
@@ -108,6 +109,7 @@ static CVAR_VOICE: Cvar = Cvar::new();
 static CVAR_CROSSHAIR: Cvar = Cvar::new();
 static CVAR_HAND_SIGNALS: Cvar = Cvar::new();
 static CVAR_EX_INTERP: Cvar = Cvar::new();
+static CVAR_CROSSHAIR_SCALE: Cvar = Cvar::new();
 static CVAR_TEXTURE_HIRES_LOG: Cvar = Cvar::new();
 
 pub(crate) fn console_print(text: &str) {

@@ -102,6 +102,8 @@
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
+//! - `crosshair_scale`: the `ds_hud_crosshair_scale` cvar -- draw the crosshair
+//!   S times bigger, for movies at high resolutions (#1335).
 //! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
 //!   different y while spectating than it does in a POV demo, and scale
@@ -270,6 +272,7 @@ mod console_tokens;
 mod crash;
 mod crosshair;
 mod crosshair_gap;
+mod crosshair_scale;
 mod deathmsg;
 mod debug;
 mod debug_texture;

@@ -185,6 +185,9 @@ fn status_text() -> String {
     if let Some(crosshair) = crate::player_crosshair::status_line() {
         lines.push(crosshair);
     }
+    if let Some(scale) = crate::crosshair_scale::status_line() {
+        lines.push(scale);
+    }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
     }

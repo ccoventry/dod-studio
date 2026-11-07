@@ -145,6 +145,7 @@ pub fn install() {
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
+    let crosshair_scale_cvar = register(CROSSHAIR_SCALE_NAME, "1");
     let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
     // Defaults to the engine's own ceiling, so registering it changes nothing
     // until someone asks for more.
@@ -325,6 +326,7 @@ pub fn install() {
         (&CVAR_CROSSHAIR, crosshair_cvar),
         (&CVAR_HAND_SIGNALS, hand_signals_cvar),
         (&CVAR_EX_INTERP, ex_interp_cvar),
+        (&CVAR_CROSSHAIR_SCALE, crosshair_scale_cvar),
         (&CVAR_TEXTURE_HIRES_LOG, texture_hires_log_cvar),
     ] {
         match registered {
