@@ -198,6 +198,11 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // The totals row under the queue's header (queue_totals.js).
+    totalsLabel: (shown, queued) => (shown === queued
+      ? `Total: ${shown} demo${shown === 1 ? '' : 's'}`
+      : `Total: ${shown} of ${queued} demos`),
+    TOTALS_TITLE: 'Totals of the demos listed below, with the search and filters applied. Hover Status or Review for the numbers in words.',
     // #21: a project demo that is not at its saved path.
     MISSING_BADGE: 'missing',
     missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
