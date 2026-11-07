@@ -115,3 +115,27 @@ describe('opening a project whose take folders hold new renders', () => {
     expect(t.demos()[0].streaks.map((s) => s.status)).toEqual(['Captured', 'Captured']);
   });
 });
+
+describe('saveIfOnlyChange (#1344: a batch caught up on in the open project)', () => {
+  it('saves when its change is the only one', async () => {
+    const t = open({ renders: [] });
+    await t.session.openProject(PATH);
+    await settle();
+    const { result, saved } = await t.session.saveIfOnlyChange(() => { t.session.markProjectDirty(); return 'marks'; });
+    expect(result).toBe('marks');
+    expect(saved).toBe(true);
+    expect(t.session.needsSavePrompt()).toBe(false);
+  });
+
+  it("leaves the user's own unsaved edits, and its change, for the user to save", async () => {
+    const t = open({ renders: [] });
+    await t.session.openProject(PATH);
+    await settle();
+    t.session.markProjectDirty();
+    ipc.writeProjectFile.mockClear();
+    const { saved } = await t.session.saveIfOnlyChange(() => t.session.markProjectDirty());
+    expect(saved).toBe(false);
+    expect(ipc.writeProjectFile).not.toHaveBeenCalled();
+    expect(t.session.needsSavePrompt()).toBe(true);
+  });
+});

@@ -351,15 +351,33 @@ export function createProjectSession({
   // relocated demo, an edit made meanwhile) leaves it all unsaved: those are
   // the user's to save. A quiet open (Rescan Recent Sessions) saves itself.
   async function pickUpRendersOnOpen(path, quiet) {
+    let marked = 0;
+    const { result, saved } = await saveIfOnlyChange(async () => {
+      const found = await projectRenders.pickUpTakeFolderRenders();
+      if (found.added === 0 || currentSessionPath !== path) return found;
+      marked = markTakesRendered(getTakeIndex(), found.takeKeys, getDemos());
+      if (marked > 0) onStatusChange();
+      return found;
+    }, { allowed: !quiet && currentSessionPath === path });
+    if (saved) logFrontendEvent(rendersSavedOnOpenLine(path, result.added, marked));
+  }
+
+  /**
+   * Runs `change`, which marks the project unsaved at most once, and saves
+   * quietly when that mark is the only change since before it ran: work
+   * Studio did by itself (renders found on open, #1345; a batch caught up on,
+   * #1344) shouldn't leave the user a save prompt for changes they never
+   * made. Anything else unsaved means the project holds the user's edits too,
+   * and those stay theirs to save. `allowed: false` never saves. Resolves
+   * `{ result, saved }`.
+   */
+  async function saveIfOnlyChange(change, { allowed = true } = {}) {
     const cleanBefore = !hasUnsavedChanges;
     const changesBefore = changeCount;
-    const { added, takeKeys } = await projectRenders.pickUpTakeFolderRenders();
-    if (added === 0 || currentSessionPath !== path) return;
-    const marked = markTakesRendered(getTakeIndex(), takeKeys, getDemos());
-    if (marked > 0) onStatusChange();
-    // The pick-up marked the project dirty once; anything more is someone else's.
-    if (quiet || !cleanBefore || changeCount !== changesBefore + 1) return;
-    if (await saveProjectSession({ quiet: true })) logFrontendEvent(rendersSavedOnOpenLine(path, added, marked));
+    const result = await change();
+    const onlyChange = cleanBefore && changeCount === changesBefore + 1;
+    const saved = allowed && onlyChange && !!currentSessionPath && await saveProjectSession({ quiet: true });
+    return { result, saved: !!saved };
   }
 
   // Reads and applies a project file: the half of Load Session after the
@@ -538,5 +556,6 @@ export function createProjectSession({
     newSession,
     /** The open session's file, or null when none is. */
     currentPath: () => currentSessionPath,
+    saveIfOnlyChange,
   };
 }

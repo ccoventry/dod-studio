@@ -182,6 +182,28 @@ describe('createBatchCatchUp', () => {
     expect(onStatusChange).toHaveBeenCalled();
   });
 
+  it('saves the open project when the marks are its only change, and says so (#1344)', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const onStatusChange = vi.fn();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: true }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange, saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(saveIfOnlyChange).toHaveBeenCalledTimes(1);
+    expect(onStatusChange).toHaveBeenCalled();
+    expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
+    expect(io.toast.mock.calls[0][0]).toContain('Saved them in the open project.');
+  });
+
+  it('says nothing of saving when the open project had other unsaved edits', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: false }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange: vi.fn(), saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(io.toast.mock.calls[0][0]).not.toContain('Saved');
+  });
+
   it('says so when the project file cannot be read', async () => {
     const io = fakeIo({ readProject: vi.fn(async () => { throw new Error('gone'); }) });
     const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });

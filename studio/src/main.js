@@ -436,7 +436,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // and offer to capture the ones it never got to (#20).
   createBatchCatchUp({ getDemos: queue.getDemos, getTakeIndex: () => takeIndex,
     getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange,
-    openProject, startCapture: startCaptureFromOffer }).start();
+    openProject, startCapture: startCaptureFromOffer, saveIfOnlyChange: projectSession.saveIfOnlyChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
