@@ -10,7 +10,7 @@ import { whileDialogOpens } from './dialog_wait.js';
 import { defaultProjectsDir, readProjectFile, logFrontendEvent } from './ipc_bridge.js';
 import {
   projectSavedLine, projectOpenedLine, projectFailedLine, projectUpdatedLine, projectNewerLine,
-  projectNeedsCopyLine, NEW_SESSION_LINE,
+  projectNeedsCopyLine, NEW_SESSION_LINE, rendersSavedOnOpenLine,
 } from './project_log.js';
 import {
   openProjectText, buildProjectFile, saveProjectFile, isNewerProject, canSaveOver, ProjectFileError,
@@ -19,7 +19,7 @@ import { updateSummary } from './project_migrations.js';
 import { updateStreakVisuals } from './detail_pane.js';
 import { clearCheckedPaths } from './master_pane.js';
 import { switchNavTab } from './nav.js';
-import { streakUid, pruneTakeIndex } from './take_index.js';
+import { streakUid, pruneTakeIndex, markTakesRendered } from './take_index.js';
 import { attachCaptures, capturesToSave } from './take_record.js';
 import { attachRenders, rendersToSave } from './take_renders.js';
 import { createProjectRenders } from './project_renders.js';
@@ -51,7 +51,8 @@ const UPDATE_TOAST_MS = 12000;
  *   loaded `.json` project to `.dodstudio` and resolves its new path or null
  *   (project_convert.js, #528); onProjectRenamed(oldPath, newPath) is told
  *   when it did. refuseDuringBatch() from batch_guard.js says why a project
- *   can't be replaced now and returns true.
+ *   can't be replaced now and returns true. onStatusChange() redraws the
+ *   tables after highlights' status changed without a click (#1345).
  */
 export function createProjectSession({
   getDemos,
@@ -69,6 +70,7 @@ export function createProjectSession({
   offerConvert = async () => null,
   onProjectRenamed = () => {},
   refuseDuringBatch = () => false,
+  onStatusChange = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -342,6 +344,24 @@ export function createProjectSession({
     return confirmed ? loadProjectFile(path) : false;
   }
 
+  // The renders the take folders hold that the project doesn't (#1264): their
+  // highlights become Rendered, and when they are the only change since the
+  // open, they're saved with it, so a project opens saved instead of asking
+  // about changes nobody made (#1345). Any other change since the open (a
+  // relocated demo, an edit made meanwhile) leaves it all unsaved: those are
+  // the user's to save. A quiet open (Rescan Recent Sessions) saves itself.
+  async function pickUpRendersOnOpen(path, quiet) {
+    const cleanBefore = !hasUnsavedChanges;
+    const changesBefore = changeCount;
+    const { added, takeKeys } = await projectRenders.pickUpTakeFolderRenders();
+    if (added === 0 || currentSessionPath !== path) return;
+    const marked = markTakesRendered(getTakeIndex(), takeKeys, getDemos());
+    if (marked > 0) onStatusChange();
+    // The pick-up marked the project dirty once; anything more is someone else's.
+    if (quiet || !cleanBefore || changeCount !== changesBefore + 1) return;
+    if (await saveProjectSession({ quiet: true })) logFrontendEvent(rendersSavedOnOpenLine(path, added, marked));
+  }
+
   // Reads and applies a project file: the half of Load Session after the
   // picker. Resolves whether it loaded. `quiet`, for Rescan Recent Sessions
   // working through each one (#938): no toasts, no move to the top of Open
@@ -414,7 +434,7 @@ export function createProjectSession({
       }
       refreshTeamsPane();
       // In the background: the project is usable while the take folders answer.
-      projectRenders.pickUpTakeFolderRenders()
+      pickUpRendersOnOpen(selected, quiet)
         .catch((err) => console.error('Picking up the take folders\' renders failed:', err));
     } catch (err) {
       console.error("Load project error:", err);

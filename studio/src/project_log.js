@@ -57,6 +57,12 @@ export function rendersPickedUpLine(takes, added, elapsedMs) {
   return `[project] read the render history of ${takes} take folder(s): ${added} video(s) new to the project (${elapsedMs} ms)`;
 }
 
+/** The renders opening found were the only change, so they were saved with
+ *  the open (#1345). */
+export function rendersSavedOnOpenLine(path, added, marked) {
+  return `[project] saved ${path} with the ${added} video(s) found in its take folders; ${marked} highlight(s) now Rendered`;
+}
+
 /** The take folders' render histories could not be read. */
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;

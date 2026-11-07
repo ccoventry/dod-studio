@@ -155,6 +155,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
     refuseDuringBatch: batchGuard.refuseDuringBatch,
+    onStatusChange: () => { queue.renderQueue(); queue.redrawSelected(); },
   });
   const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
