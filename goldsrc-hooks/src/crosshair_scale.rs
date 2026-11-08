@@ -102,6 +102,19 @@ pub unsafe fn is_crosshair(sheet: Sheet, prc: *const Wrect) -> bool {
         )
 }
 
+/// The point a crosshair zooms about, for a screen centre `(x, y)`: the
+/// middle of the pixel there, not its corner, since that is where the drawn
+/// crosshair is centred (#1348). Measured on 2560x1440 captures: at the
+/// game's size a tile's pixels mirror about the middle of pixel (1280, 720),
+/// and a zoom about the corner moved that middle `0.5 * (S - 1)` px down and
+/// right, onto no pixel's middle or edge. Every edge then rounded a different
+/// way, and a 1-texel border came out 1.5 px on the top and left and 2.3 px
+/// on the bottom and right at 1.25. About the middle it stays put at any S,
+/// so the crosshair mirrors left to right and top to bottom.
+fn zoom_point(x: i32, y: i32) -> (f32, f32) {
+    (x as f32 + 0.5, y as f32 + 0.5)
+}
+
 /// From a draw hook: the point and scale to zoom this draw by, or `None` to
 /// draw it as it is. Atomics only.
 ///
@@ -117,7 +130,10 @@ pub unsafe fn zoom(sheet: Sheet, prc: *const Wrect) -> Option<(f32, f32, f32)> {
         CENTRE_X.load(Ordering::Relaxed),
         CENTRE_Y.load(Ordering::Relaxed),
     );
-    (x > 0 && y > 0).then_some((x as f32, y as f32, scale))
+    (x > 0 && y > 0).then(|| {
+        let (cx, cy) = zoom_point(x, y);
+        (cx, cy, scale)
+    })
 }
 
 /// The `ds_debug_status` line, while the crosshair is scaled.
@@ -155,6 +171,13 @@ mod tests {
         assert!(!is_scaled_draw(Sheet::Other, &ANY_RECT, true));
         // crosshairs.spr holds other things: only the spectator's rect, in-eye.
         assert!(!is_scaled_draw(Sheet::Stock, &ANY_RECT, true));
+    }
+
+    #[test]
+    fn the_zoom_is_about_the_middle_of_the_centre_pixel() {
+        // A point s times further from the zoom point lands back on the
+        // middle of pixel (1280, 720) at any scale only if that is the point.
+        assert_eq!(zoom_point(1280, 720), (1280.5, 720.5));
     }
 
     #[test]

@@ -424,6 +424,20 @@ spectator rect and all five pieces of the red crosshair, whose gap scales with
 it. The zoom sits in `hud_sprites::draw_through`, around §3's swap, so what is
 drawn and when are decided as before, and §1's hide and §2's gate still win.
 
+The zoom is about the middle of the screen's centre pixel, (W/2 + 0.5,
+H/2 + 0.5), not its corner (#1348). At the game's size a `customXHair.spr`
+tile's pixels mirror about that middle (measured at 2560x1440: the blended
+pixels 7 and 15 px either side of pixel 1280 match, 39% and 73%). A zoom
+about the corner moved the crosshair's middle `0.5 * (S - 1)` px down and
+right, onto no pixel's middle or edge, so its two sides were sampled at
+different phases: at 1.25 a sheet's 1-texel border came out 1.5 px on the
+top and left and 2.3 px on the bottom and right (the art itself is a mirror
+image, centred in its tile). About the middle the crosshair stays mirrored at
+any scale. One arm's two ends can still differ by up to a pixel: a texel is
+about 1.27 px at 1.25 (the engine's half-texel inset makes it `S * 64/63`),
+so an arm's outer and inner ends fall at different phases, the same on every
+arm.
+
 The bars and any border in the sheet scale with the crosshair. A thin border
 on a big crosshair is §5's job.
 
