@@ -8,6 +8,7 @@ vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
   settingHint, alreadyRendering, scanBusy, createClipRenderQueue, roomStatusLine, holdsForRoom,
+  rendersAtOnceFrom,
 } = await import('./render_while_capturing.js');
 const { STRINGS } = await import('./strings.js');
 
@@ -19,6 +20,21 @@ describe('settingHint', () => {
     expect(settingHint(true, 'delete')).toBe(STRINGS.RENDER_WHILE_CAPTURING.HINT_ON_DELETE);
     expect(settingHint(true, 'keep')).toBe(STRINGS.RENDER_WHILE_CAPTURING.HINT_ON_KEEP);
     expect(settingHint(true, 'recycle')).toBe(STRINGS.RENDER_WHILE_CAPTURING.HINT_ON_KEEP);
+  });
+});
+
+describe('rendersAtOnceFrom', () => {
+  it('keeps 1 to 4, from the select\'s text too', () => {
+    expect(rendersAtOnceFrom(1)).toBe(1);
+    expect(rendersAtOnceFrom('3')).toBe(3);
+    expect(rendersAtOnceFrom(4)).toBe(4);
+  });
+  it('reads 1 for settings saved before it existed, or anything out of range', () => {
+    expect(rendersAtOnceFrom(undefined)).toBe(1);
+    expect(rendersAtOnceFrom(0)).toBe(1);
+    expect(rendersAtOnceFrom(5)).toBe(1);
+    expect(rendersAtOnceFrom(2.5)).toBe(1);
+    expect(rendersAtOnceFrom('x')).toBe(1);
   });
 });
 

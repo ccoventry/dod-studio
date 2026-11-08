@@ -7,8 +7,8 @@
 // those renders have freed the room.
 //
 // The backend follows the batch (capture_room_manager.rs): it sends
-// `capture_clip_ready` once a take stops growing, runs one render at a time
-// while the capture runs, decides when the batch holds and reports it with
+// `capture_clip_ready` once a take stops growing, runs "Renders at once" of
+// them while the capture runs, decides when the batch holds and reports it with
 // `capture_room_status`. This module is the setting, queueing each ready take
 // through the Render tab's own queue (the same payload the finish step, #440,
 // uses), and the status line while the batch holds.
@@ -115,6 +115,7 @@ export function roomStatusLine(status, formatSize) {
 // ── Page wiring ──────────────────────────────────────────────────────────────
 
 let enabled = false;
+let rendersAtOnce = 1;
 
 function sizeText(bytes) {
   return renderSizeText(bytes, 1);
@@ -123,6 +124,12 @@ function sizeText(bytes) {
 function paint() {
   const box = document.querySelector('#config-render-while-capturing');
   if (box) box.checked = enabled;
+  const count = document.querySelector('#config-renders-while-capturing');
+  if (count) {
+    count.value = String(rendersAtOnce);
+    // Dimmed, not hidden, while the setting is off (it does nothing then).
+    count.disabled = !enabled;
+  }
   const hint = document.querySelector('#config-render-while-capturing-hint');
   const choice = document.querySelector('#config-take-after-finish')?.value;
   if (hint) hint.textContent = settingHint(enabled, choice);
@@ -138,14 +145,24 @@ export function rendersMakeRoom() {
   });
 }
 
+/**
+ * "Renders at once" beside the capture: a whole number from 1 to 4, and 1
+ * for anything else (settings saved before it existed have none).
+ */
+export function rendersAtOnceFrom(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;
+}
+
 /** What settings_sync.js saves. */
 export function getRenderWhileCapturing() {
-  return { render_while_capturing: enabled };
+  return { render_while_capturing: enabled, renders_while_capturing: rendersAtOnce };
 }
 
 /** What settings_sync.js loads. */
-export function setRenderWhileCapturing(value) {
+export function setRenderWhileCapturing(value, renders) {
   enabled = !!value;
+  rendersAtOnce = rendersAtOnceFrom(renders);
   paint();
 }
 
@@ -155,6 +172,11 @@ export function initRenderWhileCapturing({ onSettingsChange } = {}) {
   document.querySelector('#config-render-while-capturing')?.addEventListener('change', (e) => {
     enabled = e.target.checked;
     paint();
+    onSettingsChange?.();
+  });
+  document.querySelector('#config-renders-while-capturing')?.addEventListener('change', (e) => {
+    // The batch's start line in the activity log says how many it ran.
+    rendersAtOnce = rendersAtOnceFrom(e.target.value);
     onSettingsChange?.();
   });
   document.querySelector('#config-take-after-finish')?.addEventListener('change', paint);

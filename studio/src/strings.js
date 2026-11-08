@@ -1156,7 +1156,10 @@ export const STRINGS = {
   RENDER_WHILE_CAPTURING: {
     LABEL: 'Render while capturing',
     TITLE:
-        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+        'Each clip renders as soon as the batch has recorded it, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    AT_ONCE_LABEL: 'Renders at once:',
+    AT_ONCE_TITLE:
+        'How many clips render at the same time while the batch captures, never more than the Render tab\'s own number. Each takes the share of the CPU one of the Render tab\'s renders gets (a quarter at 4 at once). One leaves most of the CPU idle, so the renders fall behind the capture; more keep up better but slow the capture down. The capture never drops frames, it only takes longer.',
     HINT_OFF: 'Clips render after the batch.',
     HINT_ON_KEEP:
         'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
