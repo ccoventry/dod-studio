@@ -102,17 +102,28 @@ pub unsafe fn is_crosshair(sheet: Sheet, prc: *const Wrect) -> bool {
         )
 }
 
-/// The point a crosshair zooms about, for a screen centre `(x, y)`: the
-/// middle of the pixel there, not its corner, since that is where the drawn
-/// crosshair is centred (#1348). Measured on 2560x1440 captures: at the
-/// game's size a tile's pixels mirror about the middle of pixel (1280, 720),
-/// and a zoom about the corner moved that middle `0.5 * (S - 1)` px down and
-/// right, onto no pixel's middle or edge. Every edge then rounded a different
-/// way, and a 1-texel border came out 1.5 px on the top and left and 2.3 px
-/// on the bottom and right at 1.25. About the middle it stays put at any S,
-/// so the crosshair mirrors left to right and top to bottom.
-fn zoom_point(x: i32, y: i32) -> (f32, f32) {
-    (x as f32 + 0.5, y as f32 + 0.5)
+/// The point to zoom a crosshair `s` times about, for a screen centre
+/// `(x, y)`: the one that puts the crosshair's middle exactly on the corner
+/// `(x, y)` at any scale (#1348).
+///
+/// At the game's size the crosshair's middle is the middle of pixel `(x, y)`,
+/// half a pixel down and right of that corner (measured at 2560x1440: a
+/// tile's pixels mirror about the middle of pixel (1280, 720)). A zoom about
+/// the corner itself moved that middle `0.5 * (s - 1)` px further, onto no
+/// pixel's middle or edge, so the crosshair's two sides were sampled
+/// differently: at 1.25 a sheet's 1-texel border came out 1.5 px on the top
+/// and left and 2.3 px on the bottom and right. Landed on a pixel corner the
+/// crosshair mirrors left to right and top to bottom, and since the
+/// creator's crosshairs are drawn about a texel corner too, every edge of
+/// the border comes out alike (1.7 to 1.85 px at 1.25 measured, where the
+/// middle of a pixel gave 1.5 to 2.4).
+///
+/// A zoom about `z` takes the middle `m` to `z + s * (m - z)`; setting that
+/// to the corner `c` gives `z = (c - s * m) / (1 - s)`. Never called at
+/// `s == 1`, where nothing is zoomed.
+fn zoom_point(x: i32, y: i32, s: f32) -> (f32, f32) {
+    let z = |c: i32| (c as f32 - s * (c as f32 + 0.5)) / (1.0 - s);
+    (z(x), z(y))
 }
 
 /// From a draw hook: the point and scale to zoom this draw by, or `None` to
@@ -131,7 +142,7 @@ pub unsafe fn zoom(sheet: Sheet, prc: *const Wrect) -> Option<(f32, f32, f32)> {
         CENTRE_Y.load(Ordering::Relaxed),
     );
     (x > 0 && y > 0).then(|| {
-        let (cx, cy) = zoom_point(x, y);
+        let (cx, cy) = zoom_point(x, y, scale);
         (cx, cy, scale)
     })
 }
@@ -174,10 +185,14 @@ mod tests {
     }
 
     #[test]
-    fn the_zoom_is_about_the_middle_of_the_centre_pixel() {
-        // A point s times further from the zoom point lands back on the
-        // middle of pixel (1280, 720) at any scale only if that is the point.
-        assert_eq!(zoom_point(1280, 720), (1280.5, 720.5));
+    fn the_crosshairs_middle_lands_on_the_centre_corner_at_any_scale() {
+        for s in [0.5f32, 1.25, 1.5, 2.0, 3.0, 8.0] {
+            let (zx, zy) = zoom_point(1280, 720, s);
+            // Where the zoom takes the middle of pixel (1280, 720).
+            let to = |z: f32, m: f32| z + s * (m - z);
+            assert!((to(zx, 1280.5) - 1280.0).abs() < 1e-3, "x at {s}");
+            assert!((to(zy, 720.5) - 720.0).abs() < 1e-3, "y at {s}");
+        }
     }
 
     #[test]
