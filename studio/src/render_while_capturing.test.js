@@ -8,7 +8,7 @@ vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
   settingHint, alreadyRendering, scanBusy, createClipRenderQueue, roomStatusLine, holdsForRoom,
-  rendersAtOnceFrom,
+  rendersAtOnceFrom, cpuSharePercent, rendersAtOnceLabel,
 } = await import('./render_while_capturing.js');
 const { STRINGS } = await import('./strings.js');
 
@@ -35,6 +35,23 @@ describe('rendersAtOnceFrom', () => {
     expect(rendersAtOnceFrom(5)).toBe(1);
     expect(rendersAtOnceFrom(2.5)).toBe(1);
     expect(rendersAtOnceFrom('x')).toBe(1);
+  });
+});
+
+describe('the CPU share each choice takes', () => {
+  it('is renders over the Render tab\'s number', () => {
+    expect([1, 2, 3, 4].map((n) => cpuSharePercent(n, 4))).toEqual([25, 50, 75, 100]);
+    expect(cpuSharePercent(1, 8)).toBe(13);
+    expect(cpuSharePercent(1, 3)).toBe(33);
+  });
+  it('never passes all of it: the Render tab\'s number caps how many run', () => {
+    expect(cpuSharePercent(4, 2)).toBe(100);
+  });
+  it('reads the Render tab as 2 when its box is empty, as the render payload does', () => {
+    expect(cpuSharePercent(1, NaN)).toBe(50);
+  });
+  it('labels each option with it', () => {
+    expect(rendersAtOnceLabel(2, 4)).toBe('2 (about 50% of the CPU)');
   });
 });
 

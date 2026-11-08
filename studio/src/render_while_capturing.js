@@ -126,6 +126,10 @@ function paint() {
   if (box) box.checked = enabled;
   const count = document.querySelector('#config-renders-while-capturing');
   if (count) {
+    const renderTab = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10);
+    for (const option of count.options) {
+      option.textContent = rendersAtOnceLabel(Number(option.value), renderTab);
+    }
     count.value = String(rendersAtOnce);
     // Dimmed, not hidden, while the setting is off (it does nothing then).
     count.disabled = !enabled;
@@ -154,6 +158,23 @@ export function rendersAtOnceFrom(value) {
   return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;
 }
 
+/**
+ * The share of the CPU `renders` take beside a capture, in percent. Each one
+ * gets the threads one of the Render tab's renders would, so it is
+ * renders / the Render tab's number (1 to 8, 2 when unreadable, as the
+ * render payload reads it), and never more than all of it: the Render tab's
+ * number also caps how many run.
+ */
+export function cpuSharePercent(renders, renderTab) {
+  const tab = Number.isInteger(renderTab) && renderTab >= 1 ? Math.min(8, renderTab) : 2;
+  return Math.round((100 * Math.min(renders, tab)) / tab);
+}
+
+/** An option's text: the number and the CPU share it takes. */
+export function rendersAtOnceLabel(renders, renderTab) {
+  return STRINGS.RENDER_WHILE_CAPTURING.atOnceOption(renders, cpuSharePercent(renders, renderTab));
+}
+
 /** What settings_sync.js saves. */
 export function getRenderWhileCapturing() {
   return { render_while_capturing: enabled, renders_while_capturing: rendersAtOnce };
@@ -180,6 +201,8 @@ export function initRenderWhileCapturing({ onSettingsChange } = {}) {
     onSettingsChange?.();
   });
   document.querySelector('#config-take-after-finish')?.addEventListener('change', paint);
+  // Each option's CPU share follows the Render tab's own number.
+  document.querySelector('#render-max-concurrent-input')?.addEventListener('input', paint);
 
   const renders = createClipRenderQueue({
     queue: queueRenderBatch,
