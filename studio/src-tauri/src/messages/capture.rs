@@ -106,14 +106,19 @@ pub fn listener_panicked_status(msg: impl Display) -> String {
 // ── capture_room_manager.rs: render while capturing ──────────────────────
 
 /// Render-while-capturing switched on for a batch.
-pub fn room_on(clips: usize, can_hold: bool) -> String {
+pub fn room_on(clips: usize, renders: usize, can_hold: bool) -> String {
     let tail = if can_hold {
         ", and the batch holds between clips when the next one would not fit"
     } else {
         "; this batch is patched, so it can't hold for space"
     };
+    let at_once = if renders == 1 {
+        "one render at a time".to_string()
+    } else {
+        format!("up to {renders} renders at a time")
+    };
     format!(
-        "[render-while-capturing] on for {clips} clip(s): each take renders once recorded, one render at a time{tail}"
+        "[render-while-capturing] on for {clips} clip(s): each take renders once recorded, {at_once}{tail}"
     )
 }
 
@@ -194,7 +199,11 @@ mod tests {
 
     #[test]
     fn room_lines_keep_their_wording() {
-        assert!(room_on(3, false).ends_with("; this batch is patched, so it can't hold for space"));
+        assert!(
+            room_on(3, 1, false).ends_with("; this batch is patched, so it can't hold for space")
+        );
+        assert!(room_on(3, 1, true).contains("once recorded, one render at a time, and"));
+        assert!(room_on(3, 2, true).contains("once recorded, up to 2 renders at a time, and"));
         assert_eq!(
             room_going_on(2, "5 GB", 12.4),
             "[render-while-capturing] Room for clip 2 (5 GB free); going on after 12 s"
