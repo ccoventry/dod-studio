@@ -10,8 +10,8 @@
 //!   checks the drive every second until `may_resume` says go.
 //! - **A clip stops recording** (`STOP_RECORD`): once its take stops growing
 //!   it is sent to the frontend (`capture_clip_ready`), which queues its
-//!   render; the Render tab runs one render at a time while the capture runs
-//!   and deletes each take as its clip finishes, per "After a clip is
+//!   render; the Render tab runs up to "Renders at once" of them while the
+//!   capture runs (one by default) and deletes each take as its clip finishes, per "After a clip is
 //!   finished" (#644).
 //! - **Held and it can never fit** (every pending take rendered and deleted
 //!   would still leave it short, or nothing is rendering any more): the batch
@@ -228,6 +228,17 @@ pub(crate) fn enabled(app: &AppHandle) -> bool {
         .render_while_capturing
 }
 
+/// How many renders run at once beside the capture, from the saved
+/// settings: 1 to 4.
+fn renders_beside(app: &AppHandle) -> usize {
+    app.state::<SettingsManager>()
+        .inner
+        .lock()
+        .unwrap()
+        .renders_while_capturing
+        .clamp(1, 4)
+}
+
 impl CaptureRoom {
     // Constructor taking the room's inputs, each independent of the others.
     #[allow(clippy::too_many_arguments)]
@@ -241,8 +252,14 @@ impl CaptureRoom {
         cancel: Arc<AtomicBool>,
         can_hold: bool,
     ) -> Arc<Self> {
-        app.state::<RenderManager>().set_while_capturing(true);
-        log_markdown(&crate::messages::capture::room_on(blocks.len(), can_hold));
+        let renders = renders_beside(&app);
+        app.state::<RenderManager>()
+            .set_while_capturing(true, renders);
+        log_markdown(&crate::messages::capture::room_on(
+            blocks.len(),
+            renders,
+            can_hold,
+        ));
         Arc::new(Self {
             app,
             blocks: room_blocks(blocks, planned_total),
@@ -259,7 +276,9 @@ impl CaptureRoom {
     /// The batch ended, however it ended.
     pub(crate) fn finish(&self) {
         self.hold.store(false, Ordering::Relaxed);
-        self.app.state::<RenderManager>().set_while_capturing(false);
+        self.app
+            .state::<RenderManager>()
+            .set_while_capturing(false, 1);
         let _ = self
             .app
             .emit("capture_room_status", serde_json::Value::Null);
