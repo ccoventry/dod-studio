@@ -152,7 +152,13 @@ impl Zoom {
     /// current.
     pub unsafe fn run(self, draw: impl FnOnce()) -> bool {
         // Safety: the caller's.
-        unsafe { crate::gl_zoom::mapped_xy(self.from, self.to, self.scale, draw) }
+        let zoomed = unsafe { crate::gl_zoom::mapped_xy(self.from, self.to, self.scale, draw) };
+        // Counted only once a draw really went through the zoom, so the status
+        // line never claims a fit that the GL calls couldn't give.
+        if zoomed {
+            ZOOMED.fetch_add(1, Ordering::Relaxed);
+        }
+        zoomed
     }
 }
 
@@ -226,7 +232,6 @@ pub unsafe fn zoom(sheet: Sheet, prc: *const Wrect, x: i32, y: i32, drawn: &Wrec
     );
     LAST_WIDTH.store(drawn.right - drawn.left, Ordering::Relaxed);
     LAST_HEIGHT.store(drawn.bottom - drawn.top, Ordering::Relaxed);
-    ZOOMED.fetch_add(1, Ordering::Relaxed);
     let centre = (centre.0 > 0 && centre.1 > 0).then_some(centre);
     Some(zoom_for(x, y, drawn, scale, centre))
 }
@@ -240,10 +245,18 @@ pub fn status_line() -> Option<String> {
         LAST_WIDTH.load(Ordering::Relaxed),
         LAST_HEIGHT.load(Ordering::Relaxed),
     );
+    // `fit` leaves a rect under 2 px as it is, so the line says so too.
+    let side = |n: i32| {
+        if n >= 2 {
+            format!("{}/{n}", n - 1)
+        } else {
+            "1".to_string()
+        }
+    };
     let fit = format!(
-        "its {w}x{h} rect fitted by {}/{w} x {}/{h} so each texel is one pixel ({draws} draw(s) this session)",
-        (w - 1).max(1),
-        (h - 1).max(1)
+        "its {w}x{h} rect fitted by {} x {} so each texel is one pixel ({draws} draw(s) this session)",
+        side(w),
+        side(h)
     );
     if scale != 1.0 {
         Some(format!(

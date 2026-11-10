@@ -471,7 +471,23 @@ own). Texel `j` then lands on the middle of pixel `x + j`: the art draws at
 exactly its own pixels, an odd-sized crosshair centred on texel 32 centres on
 pixel (W/2, H/2), and an even one on that corner. The rect's last texel row
 and column (texel 63 of a tile) are no longer drawn; the creator's tiles
-leave them clear.
+leave them clear, but `dodcross.spr`'s pieces don't: its arms are 10 texels
+of red end to end, so the red crosshair now draws 9 px arms 1 px thick
+(before, 10 px smeared over two rows at about 67%), a 1 px dot on
+(W/2, H/2) and four equal gaps of `gap - 1` px (before, `gap - 2` left and
+top, `gap - 1` right and bottom). Which edge texel drops depends on how the
+GPU settles pixels exactly on a quad's edge: measured on NVIDIA only; a GPU
+that settles them the other way drops texel 0 instead, which leaves the
+tiles exact but the red crosshair's gaps a pixel uneven.
+
+At a scale above 1 the zoom is about the centre corner (W/2, H/2), which
+keeps even-sized art where it is; odd-sized art (centred on texel 32's
+middle) moves (S - 1) / 2 px right and down as the scale grows, as it did
+before the fit (1.5 px at 4, 3.5 px at 8). Its sampling stays mirror
+symmetric either way.
+
+Nothing turns the fit off: `ds_hud_crosshair_scale 1` means the art at its
+own pixels, not the engine's untouched draw.
 
 Measured at scale 1 on both builds (`wsod25_grp5_h1_m00cat` and
 `wsod25_grp5_h1_hltv`, 2560x1440): tiles 6, 8 and 9 of
