@@ -15,7 +15,7 @@ pub fn files(why: &str) -> String {
 }
 
 pub const HD_OFF: &str = "HD textures are off (ds_hd_enabled 0), and the even layout draws its icons from them. \
-     Turn HD textures on";
+     Turn HD textures on, then start the game again: the atlas loads once, when the game starts";
 
 /// The atlas went up without its HD frames for `style`.
 pub fn no_hd(style: &str) -> String {
@@ -25,9 +25,9 @@ pub fn no_hd(style: &str) -> String {
         style
     };
     format!(
-        "the kill-feed atlas has no HD frames for the {style} HD style. Build them with \
-         killfeed_icons.py --even with HD_STYLE={style}, then start the game again (or, if HD \
-         was off when the game started, just start it again)"
+        "the kill-feed atlas has no HD frames for the {style} HD style. If HD textures were \
+         off when the game started, just start it again. Otherwise build them with \
+         killfeed_icons.py --even with HD_STYLE={style}, then start the game again"
     )
 }
 
@@ -39,7 +39,11 @@ pub const NO_HOOKS: &str = "the hook couldn't take over the kill feed's icon dra
 
 /// A reason this Studio doesn't know yet, from a newer hook DLL.
 pub fn unknown(code: &str) -> String {
-    format!("the hook gave a reason this Studio doesn't know ({code})")
+    if code.is_empty() {
+        "the hook gave no reason".to_string()
+    } else {
+        format!("the hook gave a reason this Studio doesn't know ({code})")
+    }
 }
 
 /// The warning a capture batch shows; `reason` is one of the above.
