@@ -1,8 +1,8 @@
 // A project's own settings through the session (#1085, build plan step 4):
 // an old project gets Configuration's copied in once and saved with it, a
 // project with its own settings resolves to them without touching the form,
-// and an edit in Configuration reaches the open project until the Project
-// settings page exists.
+// an edit in Configuration reaches the open project, and the Project settings
+// page (step 6) edits its block through the session.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -167,5 +167,58 @@ describe('loadPcId', () => {
   it('makes one for a file without, and says the file needs saving', () => {
     expect(settings.loadPcId(undefined)).toBe(true);
     expect(settings.getPcId()).not.toBe('');
+  });
+});
+
+describe('the Project settings page (#1085, step 6)', () => {
+  const own = { picture: { width: 2560, height: 1440 } };
+
+  it("gets the open project's block to edit", async () => {
+    const session = openSession(projectText({ schema: 3, settings: own }));
+    await session.openProject(PATH);
+    expect(settings.blockForPage()).toMatchObject({ form, pcId: 'pc-a', block: own });
+  });
+
+  it('gets a block made from Configuration for a session not saved yet', async () => {
+    const session = openSession(projectText());
+    await session.newSession({ quiet: true });
+    const { block } = settings.blockForPage();
+    expect(block.picture).toMatchObject({ width: 1920, height: 1080 });
+    expect(block.folders['pc-a'].destinations).toEqual(['E:/captures']);
+  });
+
+  it('applies a block: the project is unsaved, captures use it, and the save writes it', async () => {
+    const session = openSession(projectText({ schema: 3, settings: own }));
+    await session.openProject(PATH);
+    settings.applyBlockFromPage({ ...own, clipLength: { beforeSeconds: 2 } });
+    expect(session.needsSavePrompt()).toBe(true);
+    expect(settings.effectiveSetting('record_start_lead', 5)).toBe(2);
+    expect(form.record_start_lead).toBeUndefined();
+    await session.saveProjectSession();
+    expect(lastWritten().settings.clipLength).toEqual({ beforeSeconds: 2 });
+  });
+
+  it('keeps another project from opening while the page says Stay', async () => {
+    const session = openSession(projectText());
+    settings.setProjectSettingsPageLeave(async () => false);
+    ipc.readProjectFile.mockClear();
+    try {
+      expect(await session.openProject(PATH)).toBe(false);
+      expect(ipc.readProjectFile).not.toHaveBeenCalled();
+    } finally {
+      settings.setProjectSettingsPageLeave(async () => true);
+    }
+  });
+
+  it('tells the page when a project opens under it', async () => {
+    const session = openSession(projectText());
+    let told = 0;
+    settings.onProjectBlockReplaced(() => { told += 1; });
+    try {
+      await session.openProject(PATH);
+      expect(told).toBe(1);
+    } finally {
+      settings.onProjectBlockReplaced(() => {});
+    }
   });
 });
