@@ -329,26 +329,29 @@ pub struct RenderManager {
     /// rows take ids no earlier row had. Read and written under `jobs`.
     next_job_id: AtomicUsize,
     /// Render While Capturing (#861): set while a capture batch runs with it
-    /// on. Renders then start one at a time, and each take whose clip
-    /// finished goes at once rather than when the render batch ends.
+    /// on. Renders then start up to [`Self::renders_while_capturing`] at a
+    /// time, and each take whose clip finished goes at once rather than when
+    /// the render batch ends.
     while_capturing: Arc<AtomicBool>,
+    /// How many renders run at once beside that capture (Render While
+    /// Capturing's "Renders at once"), set when the batch starts.
+    renders_while_capturing: Arc<AtomicUsize>,
     /// The capture is held between clips for space (#861): nothing records,
     /// so renders started now get the machine as they would without a capture.
     capture_held: Arc<AtomicBool>,
 }
 
-/// How many renders run at once while a capture batch runs (#861): one, so
-/// the game keeps most of the machine.
-pub(crate) const RENDERS_WHILE_CAPTURING: usize = 1;
-
-/// What the scheduler may run at once: the batch's own number, or
-/// [`RENDERS_WHILE_CAPTURING`] while a capture runs.
-fn concurrency_cap(configured: usize, while_capturing: bool) -> usize {
+/// What the scheduler may run at once: the batch's own number, or, while a
+/// capture runs, Render While Capturing's "Renders at once" (at least one, at most
+/// the batch's own number). Each of those renders still gets the threads one
+/// of the batch's usual renders would (the scheduler's `thread_share`), so
+/// the setting decides how much of the machine the renders take from the
+/// game: one render at 4 at once measured ~1/3 of a 16-thread CPU busy.
+fn concurrency_cap(configured: usize, while_capturing: Option<usize>) -> usize {
     let configured = configured.max(1);
-    if while_capturing {
-        configured.min(RENDERS_WHILE_CAPTURING)
-    } else {
-        configured
+    match while_capturing {
+        Some(renders) => configured.min(renders.max(1)),
+        None => configured,
     }
 }
 
@@ -369,6 +372,7 @@ struct SchedulerHandles {
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
     clear_on_finish: Arc<AtomicBool>,
     while_capturing: Arc<AtomicBool>,
+    renders_while_capturing: Arc<AtomicUsize>,
     capture_held: Arc<AtomicBool>,
 }
 
@@ -398,13 +402,16 @@ impl RenderManager {
             scanning: AtomicBool::new(false),
             next_job_id: AtomicUsize::new(0),
             while_capturing: Arc::new(AtomicBool::new(false)),
+            renders_while_capturing: Arc::new(AtomicUsize::new(1)),
             capture_held: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Render While Capturing (#861): a capture batch with it on started
-    /// (true) or ended (false).
-    pub(crate) fn set_while_capturing(&self, on: bool) {
+    /// (true) or ended (false), with `renders` running at once beside it.
+    pub(crate) fn set_while_capturing(&self, on: bool, renders: usize) {
+        self.renders_while_capturing
+            .store(renders.max(1), Ordering::SeqCst);
         self.while_capturing.store(on, Ordering::SeqCst);
         self.capture_held.store(false, Ordering::SeqCst);
     }
@@ -627,6 +634,7 @@ impl RenderManager {
             export_reservations: self.export_reservations.clone(),
             clear_on_finish: self.clear_on_finish.clone(),
             while_capturing: self.while_capturing.clone(),
+            renders_while_capturing: self.renders_while_capturing.clone(),
             capture_held: self.capture_held.clone(),
         }
     }
@@ -871,7 +879,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             // as they would with no capture (measured on #861: a lone ProRes
             // render is 3x faster on every core than on a quarter of them).
             let game_busy = while_capturing && !handles.capture_held.load(Ordering::SeqCst);
-            let max_concurrent = concurrency_cap(config.max_concurrent_renders, game_busy);
+            let max_concurrent = concurrency_cap(
+                config.max_concurrent_renders,
+                game_busy.then(|| handles.renders_while_capturing.load(Ordering::SeqCst)),
+            );
             let mut dirty = false;
             let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
@@ -913,7 +924,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // gives a lone job all available threads instead of only 1/max of them.
                     let effective_concurrent =
                         (active_count + jobs_starting).min(max_concurrent).max(1);
-                    // While a capture runs (#861) the one render takes the
+                    // While a capture runs (#861) each render takes the
                     // threads one of the batch's usual renders would, not
                     // every core: the game needs the rest.
                     let thread_share = if game_busy {
@@ -1799,11 +1810,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn renders_run_one_at_a_time_while_a_capture_runs() {
-        assert_eq!(concurrency_cap(4, false), 4);
-        assert_eq!(concurrency_cap(4, true), 1);
-        assert_eq!(concurrency_cap(0, false), 1);
-        assert_eq!(concurrency_cap(0, true), 1);
+    fn renders_while_a_capture_runs_follow_the_setting_within_the_batchs_own_number() {
+        assert_eq!(concurrency_cap(4, None), 4);
+        assert_eq!(concurrency_cap(4, Some(1)), 1);
+        assert_eq!(concurrency_cap(4, Some(3)), 3);
+        // Never more than the Render tab's own number, never none.
+        assert_eq!(concurrency_cap(2, Some(4)), 2);
+        assert_eq!(concurrency_cap(4, Some(0)), 1);
+        assert_eq!(concurrency_cap(0, None), 1);
+        assert_eq!(concurrency_cap(0, Some(1)), 1);
     }
 
     #[test]

@@ -115,3 +115,17 @@ export function dismissThemedConfirm(result) {
 export function isThemedConfirmOpen() {
   return pendingResolve !== null;
 }
+
+/** Whether any dialog is on screen: this one, or one of the app's own
+ *  `.modal` windows (Render Batch Interrupted shows its own, not through
+ *  themedConfirm). Prompts that open by themselves at start-up wait for this
+ *  to clear, so they come one at a time instead of on top of each other.
+ *  `doc` and `view` are for tests. */
+export function isAnyDialogOpen(doc = globalThis.document, view = globalThis) {
+  if (isThemedConfirmOpen()) return true;
+  if (!doc?.querySelectorAll) return false;
+  return [...doc.querySelectorAll('.modal')].some((el) => {
+    const display = view?.getComputedStyle ? view.getComputedStyle(el).display : el.style?.display;
+    return display !== 'none';
+  });
+}

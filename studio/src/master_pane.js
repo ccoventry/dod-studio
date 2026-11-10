@@ -13,6 +13,7 @@ import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
 import { multiMapSplitButton } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { renderQueueTotals } from './queue_totals.js';
 import { matchesInQueue } from './queue_match_groups.js';
 import { groupDemos, currentGroupBy } from './queue_group_by.js';
 import { sortDemos, currentSortBy } from './queue_sort_by.js';
@@ -384,6 +385,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   if (!currentDemos || currentDemos.length === 0) {
     tableBody.innerHTML =
       `<tr><td colspan="7" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_DEMOS_IN_DIRS}</td></tr>`;
+    renderQueueTotals([], 0);
     // Notify only on the transition INTO empty, not on every re-render of an
     // already-empty queue. Without this guard, a currentOnSelectDemo(null,
     // null) implementation that calls renderDetailView (Load Session's does)
@@ -406,6 +408,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   }
 
   const filteredDemos = getVisibleDemos();
+  renderQueueTotals(filteredDemos, currentDemos.length);
 
   if (filteredDemos.length === 0) {
     tableBody.innerHTML =

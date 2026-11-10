@@ -14,7 +14,8 @@ import { listen } from '@tauri-apps/api/event';
 import { filesExist, readProjectFile, writeProjectFile, estimateRescan, getAppVersion, logFrontendEvent } from './ipc_bridge.js';
 import { outdatedDemos, HIGHLIGHTS_VERSION } from './scan_version.js';
 import { estimateSeconds, formatDuration, rescanTimeLine, getScanReadRate } from './rescan_estimate.js';
-import { fileNameOf, folderOf } from './path_display.js';
+import { localDate, writeProjectBackup } from './project_file.js';
+import { fileNameOf } from './path_display.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { durationTextMs } from './time_format.js';
@@ -24,8 +25,8 @@ export const SKIP_OVER_SECS = 60;
 /** The start-up offer needs this many sessions to rescan: one alone is
  *  covered by its own prompt when it opens. The File menu item takes one. */
 export const MIN_SESSIONS_AT_STARTUP = 2;
-/** Backups tried per session per day: `-2`, `-3`… after the first. */
-const BACKUP_TRIES = 9;
+/** Each session's backup: `<name>.before-rescan-<date>.json`. */
+const RESCAN_BACKUP = { label: 'rescan', extension: 'json' };
 
 // ── Which update the start-up offer last ran for (settings file) ────────────
 
@@ -50,33 +51,6 @@ export function offerStamp(appVersion) {
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
-
-/** "2026-10-23", in local time. */
-export function localDate(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** Where try `n` (1 first) of a session's backup goes: beside it, named
- *  `<name>.before-rescan-<date>.json`, then `…-<date>-2.json` and on, so a
- *  second rescan the same day keeps the first backup. */
-export function backupPath(path, date, n = 1) {
-  const name = fileNameOf(path);
-  const stem = name.replace(/\.json$/i, '');
-  const folder = name === path ? '' : folderOf(path);
-  const sep = path.includes('\\') ? '\\' : '/';
-  const file = `${stem}.before-rescan-${date}${n > 1 ? `-${n}` : ''}.json`;
-  return folder ? `${folder}${sep}${file}` : file;
-}
-
-/** The first of `tries` that `taken` (one boolean per name, or null when
- *  the check failed) says is free. Null when none is, or when it can't tell:
- *  the session then fails rather than overwrite an earlier backup, which may
- *  be the only copy of how it was before any rescan. */
-export function freeBackupPath(tries, taken) {
-  if (!Array.isArray(taken)) return null;
-  return tries.find((_, k) => taken[k] === false) ?? null;
-}
 
 /**
  * The offer's rows, one per recent session: `state` is 'outdated' (with
@@ -373,13 +347,8 @@ export function createRescanRecent({
   });
 
   async function backup(path) {
-    const contents = await read(path);
     const date = localDate(new Date(now()));
-    const tries = Array.from({ length: BACKUP_TRIES }, (_, k) => backupPath(path, date, k + 1));
-    const target = freeBackupPath(tries, await exists(tries));
-    if (!target) throw new Error(S.NO_BACKUP_NAME);
-    await write(target, contents);
-    return target;
+    return writeProjectBackup(path, await read(path), RESCAN_BACKUP, { date, exists, write });
   }
 
   async function run(rows) {
