@@ -39,7 +39,7 @@ Established by static analysis of the pre-Anniversary `hw.dll` (2026-09-09).
 
 Supporting probes: `salvage_probe`, `salvage_demo`, `bridge_ceiling` (swallowed-frame and backwards-time checks), `snapshot_check` (declared vs. replayed entity counts), `event_rate` (events per minute, to spot silent loss), `graft_signon`, `inject_breadcrumbs`, `patch_resource_url`, `find_crash_spot`, `deathmsg_diag`. Superseded and not to be revived: re-numbering the tail's `delta_sequence` (it stops `svc_bad` only by making the engine discard every entity packet after the join), `bridge_search`/`bridge_best`/`reseq_probe`.
 
-Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes). Live on PRE, `m3_h2`, `m1_h1` and `m3_h1-1` play to their ends; `m1_h2` plays its whole match and stops at the level change after it (see "Still open").
+Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes). Live on PRE, `m3_h2`, `m1_h1` and `m3_h1-1` play to their ends; `m1_h2` too (`_v15`, see "Still open").
 
 ## Checking a copy for lost frames (#41)
 
@@ -108,12 +108,14 @@ The injected snapshot is the wrong size in two ways (`snapshot_check`): the repl
 | --- | --- | --- |
 | `m1_h1_v14` | 2 (first snapshot 245 → 48 entities) | plays to its end (last breadcrumb 1265 s) |
 | `m3_h1-1_v14` | 3 | plays to its end (last breadcrumb 1290 s) |
-| `m1_h2_v14` | 3 | past joins 1 (740 s) and 2 (1116 s) with the world drawn and no error, through the rest of the `dod_anzio` match. Crashes 1.3 s into the recording's own level change to `dod_pandemic_aim` at 1479 s (stack overflow at `ntdll.dll+0x407ee`), twice at the same demo second. Join 3 (1519 s) comes after it, on the next map, and was never reached |
+| `m1_h2_v14` | 3 | past joins 1 (740 s) and 2 (1116 s) with the world drawn and no error, through the rest of the `dod_anzio` match, then stopped by the hook DLL's level-change crash (below) |
+| `m1_h2_v15` | 3 | **plays to its end** (last breadcrumb 1830 s) with the level-change fix: through both level changes (`dod_pandemic_aim` at 1479 s, `dod_thunder2_b5a` at 1527 s) and join 3 (1519 s), no error |
 
-No `Sprite: no such frame` lines in any of these runs.
+No `Sprite: no such frame` lines in any of these runs. All four damaged demos now play to their ends on PRE.
 
-The level-change crash is not the salvage. A healthy, unsalvaged POV demo (`bewton-playoffs-round1-armory-allied.dem`) crashes with the same stack 1.3 s into its first level change on the same setup (PRE, `playdemo`, the hook DLL built from `dev`). The crash recorder's stack scan shows `connect_guard::guard`, `review_lock::console::wrapped` and `cmd_list::tokens_from` from the hook DLL: a lead, not a proven call chain.
+**A level change inside the prefix resets the snapshot's state.** It re-sends the signon inline, and the new map's edicts replace the old map's. `m1_h2_v14`'s third join, on `dod_pandemic_aim`, listed `dod_anzio` entities and spammed `Tried to link edict 93 without model` (also 267 and 331) from the join on, and the game died 9 s later. `snapshot_inject` now starts again from an inline `SvcSpawnBaseline`: that snapshot dropped from 42 to 6 entities (`_v15`). `m1_h1` and `m3_h1-1` have no level change, and their `_v15` builds are byte-identical to `_v14`.
+
+**The level-change crash was the hook DLL**, not the salvage: under `playdemo`, the connect guard and the review lock wrapped `reconnect` into a loop, a stack overflow 1.3 s into any level change (a healthy `bewton-playoffs-round1-armory-allied.dem` crashed the same way). Fixed by #1370.
 
 Still open:
-- The crash at a level change under `playdemo`, which keeps `m1_h2` from reaching its third join. Any demo with a level change hits it.
-- `inject_breadcrumbs` sorts every frame by time. `multi_bridge` keeps a damaged frame at the edge of some holes (`m1_h2`: a `Sound` frame stamped 0.000 s at join 1, a `ClientData` frame stamped 2031 s at join 3), and the sort moves them to the start and the end. Where the clock steps back at a join (`m3_h1-1`, 893 → 877 s), the sort interleaves the two sides. The `_v13` and `_v14` builds play anyway.
+- `inject_breadcrumbs` sorts every frame by time. `multi_bridge` keeps a damaged frame at the edge of some holes (`m1_h2`: a `Sound` frame stamped 0.000 s at join 1, a `ClientData` frame stamped 2031 s at join 3), and the sort moves them to the start and the end. Where the clock steps back at a join (`m3_h1-1`, 893 → 877 s), the sort interleaves the two sides. The builds play anyway.

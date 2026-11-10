@@ -71,6 +71,16 @@ struct ClientAcc {
     cur_weapon: Option<(u8, Vec<u8>)>,
 }
 
+/// Merges a `SvcSpawnBaseline`'s fields into `acc`.
+fn seed_baseline(acc: &mut BTreeMap<u16, EntAcc>, sb: &dem::types::SvcSpawnBaseline) {
+    for es in &sb.entities {
+        let e = acc.entry(es.entity_index).or_default();
+        for (k, v) in es.delta.iter() {
+            e.fields.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 /// Removes from `state` every entity no real packet listed, and returns them
 /// for the report. Entity 0 stays: the snapshot leaves it out on its own terms.
 fn drop_never_carried(
@@ -219,12 +229,7 @@ fn main() {
                 let EngineMessage::SvcSpawnBaseline(sb) = &**em else {
                     continue;
                 };
-                for es in &sb.entities {
-                    let e = acc.entry(es.entity_index).or_default();
-                    for (k, v) in es.delta.iter() {
-                        e.fields.insert(k.clone(), v.clone());
-                    }
-                }
+                seed_baseline(&mut acc, sb);
             }
         }
     }
@@ -286,6 +291,16 @@ fn main() {
                     continue;
                 };
                 match &**em {
+                    // A level change re-sends the signon inline: the new map's
+                    // edicts replace the old map's outright. Carrying the old
+                    // map's entities into a later join's snapshot is what made
+                    // `m1_h2`'s third join (on the map after a level change)
+                    // spam "Tried to link edict 93 without model" (#15).
+                    EngineMessage::SvcSpawnBaseline(sb) => {
+                        acc.clear();
+                        carried.clear();
+                        seed_baseline(&mut acc, sb);
+                    }
                     EngineMessage::SvcClientData(cd) => {
                         for (k, v) in cd.client_data.iter() {
                             client_acc.fields.insert(k.clone(), v.clone());
