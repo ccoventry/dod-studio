@@ -34,12 +34,12 @@ Established by static analysis of the pre-Anniversary `hw.dll` (2026-09-09).
 ## The recovery pipeline
 
 1. **`multi_bridge`**: walk the file, cut at each damaged region, find the next honest resume point, repeat. Demos usually have several holes; assuming one hides every resume point before the last break.
-2. **`snapshot_inject`**: at every join, inject a full entity snapshot built by replaying the prefix, **seeded from `SvcSpawnBaseline`** (below), then a ramp of synthetic no-op frames up to the tail.
+2. **`snapshot_inject`**: at every join, inject a full entity snapshot built by replaying the prefix, **seeded from `SvcSpawnBaseline`** (below) but listing only entities a real packet carried (see "Still open"), then a ramp of synthetic no-op frames up to the tail.
 3. **`flush_predict`**: verify no entity packet will be discarded. Sequence-level only (see Traps).
 
 Supporting probes: `salvage_probe`, `salvage_demo`, `bridge_ceiling` (swallowed-frame and backwards-time checks), `snapshot_check` (declared vs. replayed entity counts), `event_rate` (events per minute, to spot silent loss), `graft_signon`, `inject_breadcrumbs`, `patch_resource_url`, `find_crash_spot`, `deathmsg_diag`. Superseded and not to be revived: re-numbering the tail's `delta_sequence` (it stops `svc_bad` only by making the engine discard every entity packet after the join), `bridge_search`/`bridge_best`/`reseq_probe`.
 
-Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes).
+Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes). Live on PRE, `m3_h2`, `m1_h1` and `m3_h1-1` play to their ends; `m1_h2` too (`_v15`, see "Still open").
 
 ## Checking a copy for lost frames (#41)
 
@@ -102,4 +102,20 @@ The injected snapshot is the wrong size in two ways (`snapshot_check`): the repl
 
 **A count below the carried set is a crash, not just ghosts** (measured live on PRE, #15). `CL_ParsePacketEntities` allocates the new frame from the packet's declared `entity_count` and copies every carried entity into it without a bounds check (`rep movsd` of 0x154 bytes at `hw.dll+0x13453`). All three unplayed `_v10` builds die a few seconds after their first join: `m1_h1` with an access violation right there (its tail's first delta names the prefix's 48-entity snapshot and declares 10), `m1_h2` and `m3_h1-1` with heap corruption a few seconds later. `analysis/examples/entity_count_fix.rs` restates every packet's count from the carried-forward set (`examples/shared/entity_carry.rs`, the engine's 64-slot ring by `incoming_sequence & 63`, with the flush rule: keyed by the whole low byte it disagreed with the engine after a sequence jump). With it, `m1_h1` and `m3_h1-1` play to their ends (`recovered_*_v13.dem` in the PRE install's `dod` folder).
 
-**The injected snapshot also carries entities real snapshots never send.** Seeded from `SvcSpawnBaseline`, it includes trigger brushes (`dod_trigger_sandbag`, `trigger_hurt`, `dod_capture_area` on `dod_anzio`), which the server leaves out (`EF_NODRAW`). `m1_h2`'s count-fixed build stops 7 s after its first join with `Fatal Error: lightmap for texture aaatrigger too large`, the client drawing a trigger brush (the `_v10` build died at the same demo second); the injected snapshot is the likely source, not yet proven. It should hold only entities some real packet in the prefix carried.
+**The injected snapshot must list only entities a real packet carried** (fixed, #15). Seeded from `SvcSpawnBaseline` alone, it listed every edict the map spawned, and the server never sends some of them. At `m1_h2`'s first join, 45 of its 113 entities were in no packet of the prefix: 28 trigger brushes (`dod_trigger_sandbag` ×15, `trigger_multiple` ×6, `trigger_hurt` ×5, `dod_capture_area` ×2), 15 other brush entities the recorder never had in view (`func_wall` ×10, `func_breakable` ×2, `func_illusionary`, `func_ladder`, `func_water`) and two player slots. The count-fixed build died 7 s after that join with `Fatal Error: lightmap for texture aaatrigger too large`, the client drawing a trigger brush. `snapshot_inject` now keeps the baseline's fields but lists only entities some real packet before the join listed, and prints what it left out (a `*N` model is the BSP entity whose `"model"` key is `*N`). `recovered_{m1_h1,m1_h2,m3_h1-1}_v14.dem` (PRE `dod` folder) are built from the originals through `multi_bridge`, `snapshot_inject`, `inject_breadcrumbs` and `entity_count_fix`. Measured live on PRE (`playdemo`, `host_framerate 0.1`, 2026-11-10):
+
+| build | joins | result |
+| --- | --- | --- |
+| `m1_h1_v14` | 2 (first snapshot 245 → 48 entities) | plays to its end (last breadcrumb 1265 s) |
+| `m3_h1-1_v14` | 3 | plays to its end (last breadcrumb 1290 s) |
+| `m1_h2_v14` | 3 | past joins 1 (740 s) and 2 (1116 s) with the world drawn and no error, through the rest of the `dod_anzio` match, then stopped by the hook DLL's level-change crash (below) |
+| `m1_h2_v15` | 3 | **plays to its end** (last breadcrumb 1830 s) with the level-change fix: through both level changes (`dod_pandemic_aim` at 1479 s, `dod_thunder2_b5a` at 1527 s) and join 3 (1519 s), no error |
+
+No `Sprite: no such frame` lines in any of these runs. All four damaged demos now play to their ends on PRE.
+
+**A level change inside the prefix resets the snapshot's state.** It re-sends the signon inline, and the new map's edicts replace the old map's. `m1_h2_v14`'s third join, on `dod_pandemic_aim`, listed `dod_anzio` entities and spammed `Tried to link edict 93 without model` (also 267 and 331) from the join on, and the game died 9 s later. `snapshot_inject` now starts again from an inline `SvcSpawnBaseline`: that snapshot dropped from 42 to 6 entities (`_v15`). `m1_h1` and `m3_h1-1` have no level change, and their `_v15` builds are byte-identical to `_v14`.
+
+**The level-change crash was the hook DLL**, not the salvage: under `playdemo`, the connect guard and the review lock wrapped `reconnect` into a loop, a stack overflow 1.3 s into any level change (a healthy `bewton-playoffs-round1-armory-allied.dem` crashed the same way). Fixed by #1370.
+
+Still open:
+- `inject_breadcrumbs` sorts every frame by time. `multi_bridge` keeps a damaged frame at the edge of some holes (`m1_h2`: a `Sound` frame stamped 0.000 s at join 1, a `ClientData` frame stamped 2031 s at join 3), and the sort moves them to the start and the end. Where the clock steps back at a join (`m3_h1-1`, 893 → 877 s), the sort interleaves the two sides. The builds play anyway.
