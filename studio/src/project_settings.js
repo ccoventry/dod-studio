@@ -114,11 +114,12 @@ function formNow() {
 
 // Told when the open project's block is replaced from outside the Project
 // settings page (a project opened, New Session), so the page drops edits
-// made against the block that was there.
+// made against the block that was there and what reads the settings in
+// effect is redrawn.
 let onReplaced = () => {};
 
-/** Registers `listener()`, called when a project opens or closes. One
- *  listener: the Project settings page. */
+/** Registers `listener()`, called once a project has opened or closed, its
+ *  block in place. One listener: the Project settings page. */
 export function onProjectBlockReplaced(listener) {
   onReplaced = listener;
 }
@@ -183,18 +184,25 @@ export function createProjectSettings({ markDirty: mark }) {
   markDirty = mark;
 
   function open(raw, path) {
+    const copied = openBlock(raw, path);
     onReplaced();
+    return { copied };
+  }
+
+  /** Makes `raw` the open block, or Configuration's copy for a file without
+   *  one. Returns whether it copied. */
+  function openBlock(raw, path) {
     const form = formNow();
     formAtLastLook = form;
     if (raw && typeof raw === 'object') {
       block = raw;
       const differs = form ? keysDifferingFromForm(form, block, pcId) : [];
       if (differs.length > 0) logFrontendEvent(projectSettingsDifferLine(path, differs));
-      return { copied: false };
+      return false;
     }
     block = form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null;
     if (block) logFrontendEvent(projectSettingsCopiedLine(path));
-    return { copied: !!block };
+    return !!block;
   }
 
   function toSave() {
@@ -207,9 +215,9 @@ export function createProjectSettings({ markDirty: mark }) {
   }
 
   function clear() {
-    onReplaced();
     block = null;
     formAtLastLook = null;
+    onReplaced();
   }
 
   return {

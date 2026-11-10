@@ -49,12 +49,13 @@ function isSwallowedAppKey(e) {
 
 /**
  * @param {object} app  `getProjectPath()` the open project's file, or null
- *   for a session not saved yet; `onApplied()` redraws what reads the
- *   settings in effect (the capture summary, the clip names shown);
+ *   for a session not saved yet; `onSettingsInEffectChange()` redraws what
+ *   reads the settings in effect (the capture summary, the clip names shown), after
+ *   an Apply and after a project opens or closes;
  *   `isBatchRunning()` whether a capture batch runs, for the banner.
  * @returns {{ open: () => void, isOpen: () => boolean, leave: (how: string) => Promise<boolean> }}
  */
-export function createProjectSettingsPage({ getProjectPath, onApplied = () => {}, isBatchRunning = () => false }) {
+export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectChange = () => {}, isBatchRunning = () => false }) {
   const navbar = document.querySelector('#top-navbar');
   let root = null;
   let tabBody = null;
@@ -62,7 +63,8 @@ export function createProjectSettingsPage({ getProjectPath, onApplied = () => {}
   let banner = null;
   let kicker = null;
   // While open: the values the page started from (or last applied), the
-  // pending ones, the inputs they came from, and the Custom boxes left open.
+  // pending ones, the block and form they came from, and which Custom boxes
+  // are open (`ui`).
   let state = null;
   let leavePrompt = null;
 
@@ -191,7 +193,7 @@ export function createProjectSettingsPage({ getProjectPath, onApplied = () => {}
     state.block = next;
     state.start = structuredClone(state.pending);
     logFrontendEvent(projectSettingsPageAppliedLine(getProjectPath(), how, changed));
-    onApplied();
+    onSettingsInEffectChange();
     refresh();
     return true;
   }
@@ -271,21 +273,25 @@ export function createProjectSettingsPage({ getProjectPath, onApplied = () => {}
     const target = e.target.closest?.('button');
     if (!state || !target || !navbar?.contains(target)) return;
     if (target.classList.contains('menu-dropdown-btn') || target.id === MENU_ITEM_ID) return;
+    const how = target.dataset.nav || target.id || 'menu bar';
     if (changedKeys(state.start, state.pending).length === 0) {
-      close(target.textContent.trim() || 'menu bar');
+      close(how);
       return;
     }
     e.preventDefault();
     e.stopPropagation();
     document.querySelectorAll('.menu-dropdown.open').forEach((m) => m.classList.remove('open'));
-    leave(target.textContent.trim() || 'menu bar').then((left) => { if (left) target.click(); });
+    leave(how).then((left) => { if (left) target.click(); });
   }
 
   addMenuItem(open);
-  // A project opened or closed under the page: its edits were for the one
-  // that was open. The paths that ask first (leaveProjectSettingsPage) have
-  // closed it already.
-  onProjectBlockReplaced(() => close('another project opened'));
+  // A project opened or closed: the page's edits were for the one that was
+  // open (the paths that ask first, leaveProjectSettingsPage, have closed it
+  // already), and the capture summary must show the new one's settings.
+  onProjectBlockReplaced(() => {
+    close('another project opened');
+    onSettingsInEffectChange();
+  });
   setProjectSettingsPageLeave(leave);
   return { open, isOpen, leave };
 }

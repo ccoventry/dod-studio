@@ -136,7 +136,7 @@ export function createProjectTab({ getState, onEdit }) {
     if (picked === 'custom') {
       controls.push(el('div', { class: 'ps-inline' }, [
         unit(S.WIDTH), numberBox('resolution_width', pending.resolution_width, (v) => onEdit({ resolution_width: v })),
-        unit('×'),
+        unit(S.BY),
         unit(S.HEIGHT), numberBox('resolution_height', pending.resolution_height, (v) => onEdit({ resolution_height: v })),
       ]));
     }
@@ -266,7 +266,7 @@ export function createProjectTab({ getState, onEdit }) {
   function folderRow(key, label, hint, folders, { field, title, showSpace = false }) {
     const list = folders || [];
     const folderChips = list.map((path, i) => {
-      const remove = el('button', { type: 'button', class: 'ps-chip-x', text: '×', title: S.removeFolderTitle(path) });
+      const remove = el('button', { type: 'button', class: 'ps-chip-x', text: S.REMOVE_MARK, title: S.removeFolderTitle(path) });
       remove.addEventListener('click', () => onEdit({ [key]: withoutFolder(getState().pending[key], i) }, { redraw: true }));
       return el('span', { class: 'ps-folder-chip', title: path }, [el('span', { text: path }), remove]);
     });
@@ -278,7 +278,8 @@ export function createProjectTab({ getState, onEdit }) {
       } catch (err) {
         console.error('Project settings: folder picker failed:', err);
       }
-      if (typeof picked === 'string') onEdit({ [key]: withFolder(getState().pending[key], picked) }, { redraw: true });
+      // The page may have closed while the dialog was up.
+      if (typeof picked === 'string' && getState()) onEdit({ [key]: withFolder(getState().pending[key], picked) }, { redraw: true });
     });
     const controls = [el('div', { class: 'ps-folder-chips' }, [
       ...(folderChips.length ? folderChips : [el('span', { class: 'ps-muted', text: S.NO_FOLDERS })]),

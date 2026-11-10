@@ -477,9 +477,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     },
   });
 
-  // File > Project Settings (#1085): an Apply redraws what reads the settings in effect.
+  // File > Project Settings (#1085); an Apply or a project opening redraws what reads its settings.
   createProjectSettingsPage({ getProjectPath: projectSession.currentPath, isBatchRunning: isCaptureRunning,
-    onApplied: () => { renderCaptureSummary(); queue.redrawSelected(); } });
+    onSettingsInEffectChange: () => { renderCaptureSummary(); queue.redrawSelected(); } });
 
   initDetailPane(queue.getDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
