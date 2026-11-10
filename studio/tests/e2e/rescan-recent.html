@@ -71,7 +71,7 @@
     window.__scans = [];
     window.__hold = false;
     window.__mockInvokeHandlers.files_exist = ({ paths }) =>
-      paths.map((p) => !window.__gone.includes(p) && (!p.endsWith('.json') || p in window.__files));
+      paths.map((p) => !window.__gone.includes(p) && (!/\.(json|dodstudio)$/.test(p) || p in window.__files));
     window.__mockInvokeHandlers.load_project_session = ({ path }) => {
       if (!(path in window.__files)) throw new Error(`no file ${path}`);
       return window.__files[path];

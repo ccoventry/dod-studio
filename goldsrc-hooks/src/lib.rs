@@ -43,7 +43,9 @@
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
 //!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook `anim_fix` and the gunshot
-//!   modules hear gunshots through. It changes no sound.
+//!   modules hear gunshots through. It changes no sound but the headshot's.
+//! - `headshot_sound`: `ds_sound_headshot_farther`, the headshot sound
+//!   (`player/helmet_hit.wav`) carries twice as far, through that hook.
 //! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
@@ -102,6 +104,11 @@
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
+//! - `crosshair_outline`: `ds_hud_crosshair_outline_size` and `_color` -- a drawn
+//!   border around any crosshair, in the frame's own pixels (§5 of
+//!   `docs/goldsrc_crosshair.md`).
+//! - `crosshair_scale`: the `ds_hud_crosshair_scale` cvar -- draw the crosshair
+//!   S times bigger, for movies at high resolutions (#1335).
 //! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
 //!   different y while spectating than it does in a POV demo, and scale
@@ -270,6 +277,8 @@ mod console_tokens;
 mod crash;
 mod crosshair;
 mod crosshair_gap;
+mod crosshair_outline;
+mod crosshair_scale;
 mod deathmsg;
 mod debug;
 mod debug_texture;
@@ -301,6 +310,7 @@ mod game_folder;
 mod gl_zoom;
 mod gun_log;
 mod hand_signals;
+mod headshot_sound;
 mod hide_asset;
 mod hint_panel;
 mod hlae_window;
