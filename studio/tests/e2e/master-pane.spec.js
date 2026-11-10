@@ -124,3 +124,27 @@ test.describe('master_pane search clear button (#529)', () => {
     await expect(rows(page)).toHaveCount(3);
   });
 });
+
+test.describe('master_pane totals row', () => {
+  test('adds up each column under the header, for the demos listed', async ({ page }) => {
+    await gotoHarness(page);
+    const cells = page.locator('#master-totals-row td');
+    // One cell per column of the real table: checkbox, Demo File, Highlights,
+    // Selected, Status, Review, Actions.
+    await expect(cells).toHaveCount(7);
+    await expect(cells.nth(1)).toHaveText('Total: 3 demos');
+    await expect(cells.nth(2)).toHaveText('4');
+    await expect(cells.nth(3)).toHaveText('0');
+    await expect(cells.nth(4)).toHaveText('1 / 1 / 0');
+    await expect(cells.nth(4)).toHaveAttribute('title', '1 Pending, 1 Captured, 0 Rendered');
+    await expect(cells.nth(5)).toHaveText('2 / 1 / 0 / 1');
+  });
+
+  test('follows the search: totals of what is listed, out of the queue', async ({ page }) => {
+    await gotoHarness(page);
+    await page.fill('#demo-search-input', 'here');
+    await page.evaluate(() => document.querySelector('#demo-search-input').dispatchEvent(new Event('input')));
+    await expect(page.locator('#master-totals-row td').nth(1)).toHaveText('Total: 1 of 3 demos');
+  });
+});
+

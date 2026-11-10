@@ -449,6 +449,38 @@ impl Wait {
             _ => Wait::None,
         }
     }
+
+    /// The reason's word on the events pipe (`layout_report`, #1339).
+    fn code(self) -> &'static str {
+        match self {
+            Wait::None => "",
+            Wait::Files => "files",
+            Wait::HdOff => "hd_off",
+            Wait::NoHd => "no_hd",
+            Wait::NoNames => "no_names",
+            Wait::NoHooks => "no_hooks",
+        }
+    }
+}
+
+/// The layout's state as `layout_report` follows it.
+fn report_state(want_even: bool, wait: Wait) -> u8 {
+    match (want_even, wait) {
+        (false, _) => super::layout_report::DEFAULT,
+        (true, Wait::None) => super::layout_report::DRAWING,
+        (true, wait) => super::layout_report::WAITING + wait as u8,
+    }
+}
+
+/// Tells Studio the state once it settles (`layout_report`), with a level
+/// loaded: the engine names one, on either build. At the menu before the
+/// first demo the layout can't draw at all, which is no news.
+fn report_to_studio(state: u8) {
+    let level = || crate::map_text::level_name().is_some();
+    super::layout_report::follow(state, level, || {
+        let wait = Wait::from_u8(WAIT.load(Ordering::Relaxed));
+        (wait.code(), why_waiting())
+    });
 }
 
 /// The layout asked for: 1 for `even`.
@@ -679,6 +711,7 @@ fn even_on() -> Result<String, String> {
 pub(super) fn poll() {
     if !WANT_EVEN.load(Ordering::Relaxed) {
         READY.store(false, Ordering::Relaxed);
+        report_to_studio(report_state(false, Wait::None));
         return;
     }
     #[cfg(target_arch = "x86")]
@@ -693,6 +726,7 @@ pub(super) fn poll() {
     let wait = waiting();
     WAIT.store(wait as u8, Ordering::Relaxed);
     READY.store(wait == Wait::None, Ordering::Relaxed);
+    report_to_studio(report_state(true, wait));
 }
 
 /// What still keeps the even layout from drawing, cheapest checks first.
@@ -1219,5 +1253,30 @@ mod tests {
         assert_eq!(box_for(0), None);
         poll();
         assert!(!ready(), "nothing to follow without `layout even`");
+    }
+
+    /// Studio hears each reason by its own word (#1339), and the state a
+    /// reason sends never reads as `default` or `even`.
+    #[test]
+    fn each_reason_reaches_studio_by_its_word() {
+        use super::super::layout_report::{DEFAULT, DRAWING, WAITING, label};
+        assert_eq!(report_state(false, Wait::NoHd), DEFAULT);
+        assert_eq!(report_state(true, Wait::None), DRAWING);
+        for (wait, code) in [
+            (Wait::Files, "files"),
+            (Wait::HdOff, "hd_off"),
+            (Wait::NoHd, "no_hd"),
+            (Wait::NoNames, "no_names"),
+            (Wait::NoHooks, "no_hooks"),
+        ] {
+            let state = report_state(true, wait);
+            assert!(state >= WAITING, "{wait:?}");
+            assert_eq!(Wait::from_u8(state - WAITING), wait);
+            assert_eq!(wait.code(), code);
+            assert!(
+                label(state, wait.code(), "ultrasharp", "why")
+                    .starts_with(&format!("KILLFEED_LAYOUT\twaiting\treason={code}\t"))
+            );
+        }
     }
 }
