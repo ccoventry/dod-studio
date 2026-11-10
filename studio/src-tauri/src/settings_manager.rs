@@ -289,11 +289,17 @@ pub struct AppSettings {
     #[serde(default)]
     pub take_delete_only_when_space_needed: bool,
     /// "Render while capturing" (#861): each take renders as soon as the
-    /// batch has recorded it, one render at a time, and a batch short of room
-    /// holds between clips until renders free enough. Off by default: how
-    /// much a render slows the capture depends on the machine.
+    /// batch has recorded it, and a batch short of room holds between clips
+    /// until renders free enough. Off by default: how much a render slows the
+    /// capture depends on the machine.
     #[serde(default)]
     pub render_while_capturing: bool,
+    /// How many of those renders run at once beside the capture, 1 to 4.
+    /// One by default, and for every settings file written before it
+    /// existed: more renders finish sooner but take more of the CPU from the
+    /// game.
+    #[serde(default = "default_renders_while_capturing")]
+    pub renders_while_capturing: usize,
     /// Configuration > Timing's "Gaps between kills over N s" (#831): kept,
     /// or recorded sped up. Kept by default, and for every settings file
     /// written before it existed.
@@ -521,6 +527,9 @@ fn default_finish_codec_render_tab() -> String {
 fn default_take_after_finish() -> String {
     "keep".to_string()
 }
+fn default_renders_while_capturing() -> usize {
+    1
+}
 fn default_dem_open_target() -> String {
     "analyzer".to_string()
 }
@@ -614,6 +623,7 @@ impl Default for AppSettings {
             take_after_finish: default_take_after_finish(),
             take_delete_only_when_space_needed: false,
             render_while_capturing: false,
+            renders_while_capturing: default_renders_while_capturing(),
             kill_gaps: native::patch::types::KillGaps::default(),
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
@@ -854,6 +864,7 @@ mod tests {
         assert!(!settings.take_delete_only_when_space_needed);
         // Settings saved before #861 don't render while capturing.
         assert!(!settings.render_while_capturing);
+        assert_eq!(settings.renders_while_capturing, 1);
         // Settings saved before #831 keep the gaps between kills.
         assert_eq!(
             settings.kill_gaps.mode,

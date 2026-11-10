@@ -6,6 +6,8 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title data-str="NAV.APP_TITLE">DoD Studio</title>
+    <!-- Classic, not a module, and first: it notices when the modules never start. -->
+    <script src="/boot_watchdog.js"></script>
     <script type="module" src="/src/main.js" defer></script>
   </head>
 
@@ -882,6 +884,15 @@
                 <div class="control-group">
                   <input type="checkbox" id="config-render-while-capturing" />
                   <label for="config-render-while-capturing" data-str="RENDER_WHILE_CAPTURING.LABEL" data-str-title="RENDER_WHILE_CAPTURING.TITLE">Render while capturing</label>
+                </div>
+                <div class="control-group">
+                  <label for="config-renders-while-capturing" data-str="RENDER_WHILE_CAPTURING.AT_ONCE_LABEL" data-str-title="RENDER_WHILE_CAPTURING.AT_ONCE_TITLE">Renders at once:</label>
+                  <select id="config-renders-while-capturing">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                  </select>
                 </div>
               </div>
               <p id="config-render-while-capturing-hint" class="setting-hint">Clips render after the batch.</p>
@@ -1915,6 +1926,8 @@
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
           <p id="obs-drop-rate" class="status-text" hidden></p>
+          <!-- The kill feed's even layout can't draw in the batch's game (#1339). -->
+          <p id="killfeed-layout-warning" class="status-text" hidden></p>
           <p id="disk-space-warning-banner" style="display: none; color: var(--danger); font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>

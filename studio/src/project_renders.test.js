@@ -58,24 +58,24 @@ describe('opening a project', () => {
       { exists: true, renders: [finished(1), { ...finished(2), outcome: 'failed', output_path: '' }] },
       { exists: false, renders: [] },
     ]);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(1);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 1, takeKeys: ['s/b0'] });
     expect(io.fetchStates).toHaveBeenCalledWith(['D:/caps/s/b0', 'D:/caps/s/b1']);
     expect(rendersOf(index, 's/b0').map((r) => r.started_unix_ms)).toEqual([1]);
     expect(markDirty).toHaveBeenCalledTimes(1);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(markDirty).toHaveBeenCalledTimes(1);
   });
 
   it('drops the answer when another project opened meanwhile', async () => {
     const setup = setUp([{ exists: true, renders: [finished(1)] }, { exists: true, renders: [] }]);
     setup.io.fetchStates = vi.fn(async () => { setup.swap({}); return [{ exists: true, renders: [finished(1)] }, { exists: true, renders: [] }]; });
-    expect(await setup.renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await setup.renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(rendersOf(setup.index, 's/b0')).toEqual([]);
   });
 
   it('logs a failed check and changes nothing', async () => {
     const { renders, markDirty, io } = setUp(null);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(markDirty).not.toHaveBeenCalled();
     expect(io.log).toHaveBeenCalledTimes(1);
   });

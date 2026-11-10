@@ -65,6 +65,11 @@ pub mod preview_in_place;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_bar_res;
 
+/// The louder headshot sounds, written into `dod_addon` at every launch
+/// from the game's own (#1353).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headshot_louder;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
