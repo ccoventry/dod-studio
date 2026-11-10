@@ -1,6 +1,7 @@
-//! `ds_sound_headshot_far`: the headshot sound (`player/helmet_hit.wav`)
+//! `ds_sound_headshot_farther`: the headshot sound (`player/helmet_hit.wav`)
 //! falls off half as fast with distance, so a headshot is heard twice as far
-//! away. No `.wav` file or demo is touched.
+//! away. No `.wav` file or demo is touched. `ds_sound_headshot_pov_farther`
+//! keeps that to the headshots the POV player makes (#1353).
 //!
 //! ## Where the sound comes from
 //!
@@ -40,25 +41,60 @@
 //! plays at full level in both ears, setting on or off), so in a POV demo the
 //! recorder's own headshot deaths are unchanged; every head hit he sees or
 //! hears someone else take, his own kills included, carries further.
+//!
+//! ## The POV player's headshots (#1353)
+//!
+//! Most far headshots in a POV demo are other players' kills: inside the
+//! WSOD25 project's Keep clips, 8 of the recorder's own against 91 of someone
+//! else's at 1250-2500 units, the band only this setting makes heard. With
+//! `ds_sound_headshot_pov_farther` on, only a head hit the POV player made
+//! carries further: the POV recorder, or the player an HLTV demo watches in
+//! first person (`deathmsg::is_watched_player`).
+//!
+//! The event names the victim, not the shooter. The kill's `DeathMsg` names
+//! both, and the engine dispatches a packet's user messages while it parses
+//! it, before `CL_FireEvents` plays that frame's events, so [`note_kill`]
+//! has usually seen the kill by the time the sound asks: over 40 WSOD25 POV
+//! demos the `DeathMsg` came in the same frame as 188 of the recorder's 197
+//! headshot kills, and a frame later for the other 9, which play at the
+//! game's distance. A head hit that doesn't kill has no `DeathMsg` and counts
+//! as someone else's.
 
 use std::ffi::CStr;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use crate::engine::{self, ClEntityS};
 use crate::names::console_name;
 use crate::setting::Cvar;
 
-pub const NAME: &str = console_name!("sound_headshot_far");
+pub const NAME: &str = console_name!("sound_headshot_farther");
 pub static CVAR: Cvar = Cvar::new();
+pub const POV_FARTHER_NAME: &str = console_name!("sound_headshot_pov_farther");
+pub static POV_FARTHER: Cvar = Cvar::new();
 
 /// The sample DoD plays for a head hit.
 const SAMPLE: &[u8] = b"player/helmet_hit.wav";
 /// How much of its attenuation a headshot keeps with the setting on.
 const FAR_SCALE: f32 = 0.5;
 
+/// How far apart, in client seconds, a kill's `DeathMsg` and its head hit may
+/// be to pair. They share a frame when they pair at all; the slack covers a
+/// frame time and no more, so an earlier kill of the same player isn't taken
+/// for this one.
+const KILL_WINDOW: f32 = 0.1;
+/// How many recent kills are kept: more than can die in one frame.
+const KILLS_KEPT: usize = 8;
+
+/// Recent kills, `pack`ed, written by the `DeathMsg` hook and read by the
+/// sound hook, both on the engine thread: atomics, not a lock.
+static KILLS: [AtomicU64; KILLS_KEPT] = [const { AtomicU64::new(0) }; KILLS_KEPT];
+static NEXT_KILL: AtomicUsize = AtomicUsize::new(0);
+
 // Counters, not per-call logging: read by `ds_debug_status`.
 static PLAYED: AtomicU32 = AtomicU32::new(0);
 static STRETCHED: AtomicU32 = AtomicU32::new(0);
+/// Headshots left at the game's distance because the POV player didn't make them.
+static NOT_VIEWED: AtomicU32 = AtomicU32::new(0);
 /// The last headshot's distance from the local player, in whole units.
 static LAST_DISTANCE: AtomicU32 = AtomicU32::new(u32::MAX);
 
@@ -72,11 +108,70 @@ fn scaled(sample: &[u8], attenuation: f32, far: bool) -> f32 {
     }
 }
 
+/// A kill as [`KILLS`] keeps it: a set bit, killer, victim, the client time.
+fn pack(killer: i32, victim: i32, time: f32) -> u64 {
+    1 << 48
+        | u64::from(killer as u8) << 40
+        | u64::from(victim as u8) << 32
+        | u64::from(time.to_bits())
+}
+
+fn unpack(kill: u64) -> Option<(i32, i32, f32)> {
+    (kill >> 48 & 1 == 1).then(|| {
+        (
+            i32::from((kill >> 40) as u8),
+            i32::from((kill >> 32) as u8),
+            f32::from_bits(kill as u32),
+        )
+    })
+}
+
+/// Who killed `victim` within [`KILL_WINDOW`] of `now`, the newest kill first.
+fn killer_of(kills: impl Iterator<Item = (i32, i32, f32)>, victim: i32, now: f32) -> Option<i32> {
+    kills
+        .filter(|&(_, v, t)| v == victim && (now - t).abs() <= KILL_WINDOW)
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(k, _, _)| k)
+}
+
+/// Whether a headshot carries further: the setting is on, and either it's for
+/// every headshot or the POV player made this one.
+fn carries_far(far: bool, viewed_only: bool, by_viewed: impl FnOnce() -> bool) -> bool {
+    far && (!viewed_only || by_viewed())
+}
+
+/// Whether the `DeathMsg` hook must stay installed for [`note_kill`].
+pub fn wants_kills() -> bool {
+    CVAR.on() && POV_FARTHER.on()
+}
+
+/// Called by the `DeathMsg` hook for every kill as it was recorded, before
+/// the game handles it.
+pub fn note_kill(killer: i32, victim: i32) {
+    let Some(now) = engine::engine_client_time() else {
+        return;
+    };
+    let slot = NEXT_KILL.fetch_add(1, Ordering::Relaxed) % KILLS_KEPT;
+    KILLS[slot].store(pack(killer, victim, now), Ordering::Relaxed);
+}
+
+/// Whether the POV player killed `victim` this frame.
+fn by_viewed_player(victim: i32) -> bool {
+    let Some(now) = engine::engine_client_time() else {
+        return false;
+    };
+    let kills = KILLS
+        .iter()
+        .filter_map(|k| unpack(k.load(Ordering::Relaxed)));
+    killer_of(kills, victim, now).is_some_and(crate::deathmsg::is_watched_player)
+}
+
 /// Called by `fire_sounds` for every `EV_PlaySound`, on the engine thread.
+/// `ent` is the event's entity: for the headshot, the player hit.
 ///
 /// # Safety
 /// `origin` is null or three floats, as the engine passes it.
-pub unsafe fn attenuation(sample: &CStr, origin: *const f32, attenuation: f32) -> f32 {
+pub unsafe fn attenuation(sample: &CStr, ent: i32, origin: *const f32, attenuation: f32) -> f32 {
     let sample = sample.to_bytes();
     if sample != SAMPLE {
         return attenuation;
@@ -93,9 +188,12 @@ pub unsafe fn attenuation(sample: &CStr, origin: *const f32, attenuation: f32) -
             LAST_DISTANCE.store(d as u32, Ordering::Relaxed);
         }
     }
-    let far = CVAR.on();
+    let viewed_only = POV_FARTHER.on();
+    let far = carries_far(CVAR.on(), viewed_only, || by_viewed_player(ent));
     if far {
         STRETCHED.fetch_add(1, Ordering::Relaxed);
+    } else if CVAR.on() && viewed_only {
+        NOT_VIEWED.fetch_add(1, Ordering::Relaxed);
     }
     scaled(sample, attenuation, far)
 }
@@ -115,9 +213,10 @@ pub fn status() -> String {
         d => format!("{d} units from the local player"),
     };
     format!(
-        "{} headshot sounds, {} played with half the falloff; the last {last}",
+        "{} headshot sounds, {} played with half the falloff, {} at the game's because the POV player didn't make them; the last {last}",
         PLAYED.load(Ordering::Relaxed),
         STRETCHED.load(Ordering::Relaxed),
+        NOT_VIEWED.load(Ordering::Relaxed),
     )
 }
 
@@ -132,5 +231,34 @@ mod tests {
         assert_eq!(scaled(b"weapons/garand_shoot.wav", 0.8, true), 0.8);
         assert_eq!(scaled(b"player/helmet_hit.wav2", 0.8, true), 0.8);
         assert_eq!(scaled(b"", 0.8, true), 0.8);
+    }
+
+    #[test]
+    fn a_kill_packs_and_unpacks() {
+        assert_eq!(unpack(pack(13, 3, 789.65)), Some((13, 3, 789.65)));
+        assert_eq!(unpack(pack(0, 32, 0.0)), Some((0, 32, 0.0)));
+        assert_eq!(unpack(0), None);
+    }
+
+    #[test]
+    fn the_hit_pairs_with_its_own_kill_only() {
+        let kills = [(13, 3, 789.65), (4, 6, 789.70), (13, 6, 700.0)];
+        assert_eq!(killer_of(kills.into_iter(), 3, 789.65), Some(13));
+        assert_eq!(killer_of(kills.into_iter(), 6, 789.70), Some(4));
+        // An earlier kill of the same player is not this one.
+        assert_eq!(killer_of(kills.into_iter(), 6, 701.0), None);
+        // A head hit nobody died of has no killer.
+        assert_eq!(killer_of(kills.into_iter(), 9, 789.65), None);
+        // A seek back puts the clock before the kill: still too far apart.
+        assert_eq!(killer_of(kills.into_iter(), 3, 780.0), None);
+    }
+
+    #[test]
+    fn viewed_only_keeps_far_to_the_viewed_players_headshots() {
+        assert!(carries_far(true, false, || false));
+        assert!(carries_far(true, true, || true));
+        assert!(!carries_far(true, true, || false));
+        assert!(!carries_far(false, true, || true));
+        assert!(!carries_far(false, false, || true));
     }
 }

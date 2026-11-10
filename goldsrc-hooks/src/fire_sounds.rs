@@ -15,7 +15,7 @@
 //! - `pov_recorder_shots` the same for a POV recorder's own rounds.
 //!
 //! The sound itself is passed through untouched, except the headshot's
-//! attenuation while `ds_sound_headshot_far` is on (`headshot_sound`).
+//! attenuation while `ds_sound_headshot_farther` is on (`headshot_sound`).
 //!
 //! ## What this used to be
 //!
@@ -80,7 +80,7 @@ unsafe extern "C" fn hook_ev_play_sound(
             crate::pov_recorder_shots::on_shot_sound(ent);
         }
         // Safety: `origin` is the engine's, null or three floats.
-        attenuation = unsafe { crate::headshot_sound::attenuation(name, origin, attenuation) };
+        attenuation = unsafe { crate::headshot_sound::attenuation(name, ent, origin, attenuation) };
     }
     let real = REAL_EV_PLAY_SOUND.load(Ordering::Acquire);
     // Safety: the engine's own function, captured at install.

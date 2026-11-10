@@ -674,19 +674,33 @@
 		"textAlignment"		"west"
 		"helptext"		"ds_sound_restore_gunshots: play the gunshots a demo left silent, every player's."
 	}
-	"cvar_ds_sound_headshot_far"
+	"cvar_ds_sound_headshot_farther"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_sound_headshot_far"
+		"fieldName"		"cvar_ds_sound_headshot_farther"
 		"xpos"		"8"
 		"ypos"		"594"
 		"wide"		"246"
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Hear headshots further away"
+		"labelText"		"Hear headshots farther away"
 		"textAlignment"		"west"
-		"helptext"		"ds_sound_headshot_far: a headshot's sound fades half as fast with distance, so it carries twice as far."
+		"helptext"		"ds_sound_headshot_farther: a headshot's sound fades half as fast with distance, so it carries twice as far."
+	}
+	"cvar_ds_sound_headshot_pov_farther"
+	{
+		"ControlName"		"CheckButton"
+		"fieldName"		"cvar_ds_sound_headshot_pov_farther"
+		"xpos"		"262"
+		"ypos"		"594"
+		"wide"		"246"
+		"tall"		"22"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"POV player only"
+		"textAlignment"		"west"
+		"helptext"		"ds_sound_headshot_pov_farther: only the headshots the POV player (or the HLTV player you watch in first person) makes carry farther."
 	}
 	"HeadingDemo"
 	{
