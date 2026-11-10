@@ -352,6 +352,11 @@ pub const AREAS: &[Area] = &[
                 "Play gunshots a demo left out",
                 "play the gunshots a demo left silent, every player's.",
             ),
+            check(
+                console_name!("sound_headshot_far"),
+                "Hear headshots further away",
+                "a headshot's sound fades half as fast with distance, so it carries twice as far.",
+            ),
         ],
     },
     Area {
