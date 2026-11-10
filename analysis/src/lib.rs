@@ -26,6 +26,8 @@ mod localization;
 mod match_group;
 mod mortality;
 mod objective;
+/// Stretches an HLTV demo replays after a pause, counted once.
+mod pause_replay;
 mod player;
 mod position;
 mod pov_stats;
@@ -91,6 +93,7 @@ pub use crate::{
         AttemptOutcome, BREAK_WINDOW, CancelCause, CaptureAttempt, Flag, FlagCapture, Objectives,
         cancel_cause,
     },
+    pause_replay::PauseReplay,
     player::{Connection, Player, PlayerGlobalId, SteamId, steam_id_of},
     position::{KillPosition, PlayerPose},
     round::Round,
@@ -167,6 +170,13 @@ pub struct AnalyzerState {
     /// Who stood in the capture areas over the demo (#1132).
     #[serde(default)]
     pub capture_areas: CaptureAreas,
+    /// The stretches an HLTV demo replays after a match pause, oldest
+    /// first. Their events are counted once, at their first showing.
+    #[serde(default)]
+    pub pause_replays: Vec<PauseReplay>,
+    /// Whether the frame being read is inside one of `pause_replays`.
+    #[serde(skip)]
+    replaying: bool,
 }
 
 /// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
@@ -252,6 +262,13 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
         return;
     }
+    if let AnalyzerEvent::Frame(_) = event {
+        state.replaying = pause_replay::is_replayed(&state.pause_replays, state.frame_index + 1);
+    }
+    if state.replaying && !matches!(event, AnalyzerEvent::Finalization) {
+        run_replayed_analyzers(state, event);
+        return;
+    }
     use_timing_updates(state, event);
     use_player_updates(state, event);
     use_position_updates(state, event);
@@ -273,6 +290,38 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     check_and_promote_british(state);
     // Last: pairing reads the victims' final teams.
     use_headshot_updates(state, event);
+}
+
+/// What a replayed stretch still feeds: the clock, which keeps the demo's
+/// own times, and the entity snapshots, which later packets are deltas
+/// against. Every user message is a repeat, and dropping them all leaves
+/// the state as it was at the pause, which is where the match goes on.
+/// Objectives see the frame only to settle what the pause's own frame left
+/// pending.
+fn run_replayed_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    match event {
+        AnalyzerEvent::Frame(_) => {
+            use_timing_updates(state, event);
+            use_position_updates(state, event);
+            use_objective_updates(state, event);
+        }
+        AnalyzerEvent::EngineMessage(_) => {
+            use_timing_updates(state, event);
+            use_position_updates(state, event);
+        }
+        AnalyzerEvent::Initialization
+        | AnalyzerEvent::Finalization
+        | AnalyzerEvent::UserMessage(_) => {}
+    }
+}
+
+/// The state an analysis of `demo` starts from: empty, but for the pause
+/// replays found in it, which the frame loop needs before it reads them.
+fn initial_state(demo: &Demo) -> AnalyzerState {
+    AnalyzerState {
+        pause_replays: pause_replay::find_replays(demo),
+        ..Default::default()
+    }
 }
 
 impl Analysis {
@@ -339,7 +388,7 @@ impl Analysis {
             Err(_) => return Err("Parser panicked during demo structural decoding".to_string()),
         };
 
-        let mut state = AnalyzerState::default();
+        let mut state = initial_state(&demo);
         let process_event = run_analyzers;
 
         process_event(&mut state, &AnalyzerEvent::Initialization);
@@ -561,7 +610,7 @@ mod tests {
     pub(crate) fn assert_optimized_matches_unoptimized(file_bytes: &[u8]) {
         // Unoptimized parse
         let demo = dem::open_demo_from_bytes(file_bytes).unwrap();
-        let mut state_unopt = AnalyzerState::default();
+        let mut state_unopt = initial_state(&demo);
         let mut last_live_frame = None;
         let mut processed_frames = 0;
         let process_event = run_analyzers;
@@ -652,6 +701,7 @@ mod tests {
         assert_eq!(left.first_time_left, right.first_time_left);
         assert_eq!(left.last_time_left, right.last_time_left);
         assert_eq!(left.map_changed, right.map_changed);
+        assert_eq!(left.pause_replays, right.pause_replays);
         assert_eq!(left.initial_map_name, right.initial_map_name);
 
         // Compare team_scores
