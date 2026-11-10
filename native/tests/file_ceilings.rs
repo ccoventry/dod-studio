@@ -22,7 +22,9 @@ const CEILINGS: &[(&str, usize)] = &[
     ("studio/src-tauri/src/render_manager.rs", 2100),
     ("studio/src-tauri/src/scan_manager.rs", 1300),
     ("studio/src-tauri/src/audit_manager.rs", 850),
-    ("studio/src-tauri/src/settings_manager.rs", 820),
+    // Raised from 820 by #1293: four saved panel sizes, fields of the
+    // settings struct this file holds, so still its one job.
+    ("studio/src-tauri/src/settings_manager.rs", 850),
     // The hook DLL's biggest areas.
     ("goldsrc-hooks/src/studio_panel.rs", 3500),
     ("goldsrc-hooks/src/texture_hires.rs", 4050),
