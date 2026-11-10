@@ -12,7 +12,7 @@
 // each payload index is and the project it came from (#545). A batch with no
 // project can only be resumed while its demos are in the open queue.
 
-import { themedConfirm, isThemedConfirmOpen } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { streakUid } from './take_index.js';
 import { showToast } from './toast.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
@@ -62,7 +62,7 @@ const DIALOG_POLL_MS = 500;
 
 const defaultIo = {
   confirm: themedConfirm,
-  dialogOpen: isThemedConfirmOpen,
+  dialogOpen: () => isAnyDialogOpen(),
   wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   toast: showToast,
   showHighlights: () => {

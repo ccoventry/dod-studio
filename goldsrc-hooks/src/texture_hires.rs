@@ -640,6 +640,19 @@ fn active_style() -> String {
     chosen
 }
 
+/// The style HD files load from this session, for a report that names the
+/// style to build for (#1339): the one in force, or before any HD load the
+/// one the cvar asks for. Never fixes the style itself, as `active_style`
+/// does.
+pub(crate) fn style_in_force() -> String {
+    ACTIVE_STYLE
+        .read()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.clone())
+        .unwrap_or_else(chosen_style)
+}
+
 /// The style for reports: the one in force, or "not chosen yet".
 fn style_label() -> String {
     ACTIVE_STYLE

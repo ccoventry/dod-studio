@@ -77,6 +77,8 @@ test('Rescan all backs up, rescans and saves each session, with one bar and a li
   const after = await files(page);
   const backups = Object.keys(after).filter((p) => p.includes('.before-rescan-'));
   expect(backups).toHaveLength(2);
+  // The first save in the new format backs each one up as well.
+  expect(Object.keys(after).filter((p) => p.includes('.before-v2-'))).toHaveLength(2);
   const saved = JSON.parse(after['D:/p/wsod25.json']);
   const v = await currentVersion(page);
   expect(saved.demos.map((d) => d.highlights_version)).toEqual([v, v]);
