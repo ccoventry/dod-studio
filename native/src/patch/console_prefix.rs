@@ -118,6 +118,7 @@ mod tests {
         "map_weather",
         "player_change_name",
         "player_fix_model_flicker",
+        "sound_headshot_far",
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
         "sound_restore_gunshots",

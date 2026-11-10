@@ -14,7 +14,8 @@
 //!   from one the recording lost;
 //! - `pov_recorder_shots` the same for a POV recorder's own rounds.
 //!
-//! The sound itself is passed through untouched.
+//! The sound itself is passed through untouched, except the headshot's
+//! attenuation while `ds_sound_headshot_far` is on (`headshot_sound`).
 //!
 //! ## What this used to be
 //!
@@ -69,11 +70,17 @@ unsafe extern "C" fn hook_ev_play_sound(
             )
         };
     }
-    if !sample.is_null() && is_weapon_fire(unsafe { CStr::from_ptr(sample) }.to_bytes()) {
-        SHOTS.fetch_add(1, Ordering::Relaxed);
-        crate::anim_fix::on_weapon_fired(ent);
-        crate::missing_shots::on_shot_sound(ent);
-        crate::pov_recorder_shots::on_shot_sound(ent);
+    let mut attenuation = attenuation;
+    if !sample.is_null() {
+        let name = unsafe { CStr::from_ptr(sample) };
+        if is_weapon_fire(name.to_bytes()) {
+            SHOTS.fetch_add(1, Ordering::Relaxed);
+            crate::anim_fix::on_weapon_fired(ent);
+            crate::missing_shots::on_shot_sound(ent);
+            crate::pov_recorder_shots::on_shot_sound(ent);
+        }
+        // Safety: `origin` is the engine's, null or three floats.
+        attenuation = unsafe { crate::headshot_sound::attenuation(name, origin, attenuation) };
     }
     let real = REAL_EV_PLAY_SOUND.load(Ordering::Acquire);
     // Safety: the engine's own function, captured at install.
