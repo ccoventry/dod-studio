@@ -68,6 +68,20 @@ Every one of these passed every offline check that existed at the time. Each was
 
 `Sprite: no such frame N` (N climbing over the whole session, about 32 log lines per step) escalating unpredictably into `Bad model on beam ( not sprite )` or `Decals must hit mod_brush!`. It appears at t=5 s, before any join exists, on every build tested, and only shows with `developer 1/2`, which is why it looked new. Ruled out: HLAE (reproduces under plain `hl.exe -game dod`), the hook DLL (not loaded that session), and the demo's dead fastdl URL (patching `SvcResourceLocation`, id 56, changed nothing: the map was cached). Best guess, unconfirmed: demo playback replays the resource-verification handshake from recorded data differently from a live connection. Treat it as a known risk of that demo/map/build, not a regression.
 
+## Splicing two parts of one demo (#224)
+
+#224 asked for a watchable highlight-reel `.dem`: the highlights of a demo back to back, each cut joined to the next. It was closed unbuilt. Capture no longer needs it, since seeking (#407) skips the stretches between clips. Its findings are kept here because a deliberate splice is the same join a repair makes, with one difference: both sides are chosen, so the gap can be zero and nothing moves while the stream is away. A repair bridging a hole has leftovers a deliberate splice wouldn't.
+
+- **Entity fields can be written, not just read.** `analysis/examples/delta_rewrite_probe.rs` moves every player entity 128 units along x: 2,598 `origin[0]` fields rewritten, the same file size, a clean re-parse, the shift exact, and the analyzer decodes the whole delta chain afterwards. So `dem`'s encoder round-trips authored entity state; what to write at a join is the hard part.
+- **What a clean join needs, easiest first:**
+  1. The `delta_sequence` renumbering and a full entity snapshot at the join (`snapshot_inject`, above). Without the renumbering the engine rejects the stream within a few frames.
+  2. Every player field that differs across the cut, not only `origin`: angles, `sequence`/`gaitsequence`/`frame`/`animtime`, `health`, `weaponmodel`, `playerclass`, `team`, `body`, `colormap`, the stance hull (`mins`/`maxs`/`usehull`), `effects`, `movetype`, `velocity`. A delta may carry any subset of fields, so the join can carry all of them.
+  3. Non-player entities: dropped weapons, grenades in flight, doors, capture entities, gibs, smoke.
+  4. Time rebasing across the join, keeping the frame-ordinal rules in `CLAUDE.md` (every injected frame shifts every later ordinal).
+  5. **Unsolved: state that isn't entity data.** Team scores, the scoreboard, flag and capture status, the round timer and other HUD state arrive as user messages sent once, when they change. A cut drops them, so the HUD and objectives are wrong however exact the entities are. They would have to be replayed or rebuilt at each join.
+- **DemoPlayer's `dem_save` can't write such a demo** (#1134, tested on PRE only).
+- **A stream can jump back in time and still play.** A KTP pause makes its HLTV proxy replay the last 60 s of the match (#1365). In the demo, `svc_time` keeps counting up, no full `SvcPacketEntities` resync is sent, and the world goes back to where it was 60 s earlier, positions bit-exact. Such demos play through the replay, as viewers of KTP matches know. The proxy encodes every delta against what the client holds, so it's a working example of a splice whose deltas stay consistent.
+
 ## Traps
 
 - **"No packets discarded" is not "the packets are correct."** `flush_predict` and `snapshot_check` check sequence numbers and declared sizes, never which fields a snapshot carries. A snapshot missing the world's `modelindex` passes them all and still kills the engine.
