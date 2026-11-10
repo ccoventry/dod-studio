@@ -16,7 +16,7 @@
 //! ## When
 //!
 //! Once per change, never per frame: a state is sent once it has held for
-//! [`SETTLE_FRAMES`] frames with a level's HUD loaded, so a level load's
+//! [`SETTLE_FRAMES`] frames with a level loaded, so a level load's
 //! in-between frames (the atlas loaded, the names not read yet) never reach
 //! Studio. Before the first level the layout can't draw at all, which is no
 //! news. A batch's start ([`report_again`]) sends the state again, for the
@@ -67,7 +67,7 @@ pub(super) enum Step {
 /// frame, how many frames it had held, and what was last sent. Returns the
 /// new count with the step. `level` says whether a level is loaded; it is
 /// asked only once every [`SETTLE_FRAMES`] frames of a settled state not
-/// sent yet, since the demo player's clock it reads is not a per-frame read.
+/// sent yet, so its engine call and copy are never a per-frame cost.
 pub(super) fn settle(
     seen: u8,
     steady: u32,
@@ -230,7 +230,7 @@ mod tests {
         assert!(run(&mut s, DEFAULT, true, 100).is_empty());
     }
 
-    /// The level check is the demo player's clock, so it is asked once
+    /// The level check calls the engine, so it is asked once
     /// every [`SETTLE_FRAMES`] frames at most, and only while there is
     /// something to send.
     #[test]
