@@ -1920,6 +1920,8 @@
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
           <p id="obs-drop-rate" class="status-text" hidden></p>
+          <!-- The kill feed's even layout can't draw in the batch's game (#1339). -->
+          <p id="killfeed-layout-warning" class="status-text" hidden></p>
           <p id="disk-space-warning-banner" style="display: none; color: var(--danger); font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>

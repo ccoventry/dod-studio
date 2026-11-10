@@ -18,6 +18,7 @@ pub mod bsp;
 pub mod decal_probe;
 pub mod game_reuse;
 pub mod hook_dll;
+pub mod killfeed_layout;
 pub mod menu_scale;
 pub mod movie_copy;
 pub mod player_overrides;
