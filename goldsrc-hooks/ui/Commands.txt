@@ -112,7 +112,11 @@ SOUND
   ds_sound_headshot_farther 0/1
       Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
   ds_sound_headshot_pov_farther 0/1
-      With ds_sound_headshot_farther on, only the headshots the POV player makes carry further: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+      With ds_sound_headshot_farther on, only the headshots the POV player makes carry farther: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+  ds_sound_headshot_louder 0-3
+      Play a louder headshot: 1 a little louder, 2 louder, 3 loudest (clipped). DoD Studio makes the louder copies from the game's own helmet_hit.wav when it starts the game.
+  ds_sound_headshot_pov_louder 0/1
+      With ds_sound_headshot_louder on, only the headshots the POV player makes play louder. Everyone else's play at the game's level.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>

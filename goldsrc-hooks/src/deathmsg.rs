@@ -1048,7 +1048,7 @@ pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
     // installed while that switch is on too, with an empty block list; so
     // does the even layout, for the butt stroke's per-line icon (#1088), and
-    // the headshot sound kept to the viewed player's kills (#1353).
+    // the headshot sound kept to the POV player's kills (#1353).
     if HOOK_WANTED.load(Ordering::Relaxed)
         || crate::spectator_deathcam::enabled()
         || clear::wants_death_msg()
