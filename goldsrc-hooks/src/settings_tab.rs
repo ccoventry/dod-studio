@@ -357,6 +357,11 @@ pub const AREAS: &[Area] = &[
                 "Hear headshots further away",
                 "a headshot's sound fades half as fast with distance, so it carries twice as far.",
             ),
+            check(
+                console_name!("sound_headshot_viewed_far"),
+                "Only the viewed player's headshots",
+                "only the headshots the POV player (or the HLTV player you watch in first person) makes carry further.",
+            ),
         ],
     },
     Area {

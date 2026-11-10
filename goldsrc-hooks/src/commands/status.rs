@@ -58,6 +58,11 @@ fn status_text() -> String {
             crate::headshot_sound::status()
         ),
         format!(
+            "{} = {}",
+            crate::headshot_sound::VIEWED_FAR_NAME,
+            bit(crate::headshot_sound::VIEWED_FAR.on()),
+        ),
+        format!(
             "{CROSSHAIR_NAME} = {} -- {}",
             bit(crosshair::hidden()),
             crosshair::status()

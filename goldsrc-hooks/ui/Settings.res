@@ -688,6 +688,20 @@
 		"textAlignment"		"west"
 		"helptext"		"ds_sound_headshot_far: a headshot's sound fades half as fast with distance, so it carries twice as far."
 	}
+	"cvar_ds_sound_headshot_viewed_far"
+	{
+		"ControlName"		"CheckButton"
+		"fieldName"		"cvar_ds_sound_headshot_viewed_far"
+		"xpos"		"262"
+		"ypos"		"594"
+		"wide"		"246"
+		"tall"		"22"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Only the viewed player's headshots"
+		"textAlignment"		"west"
+		"helptext"		"ds_sound_headshot_viewed_far: only the headshots the POV player (or the HLTV player you watch in first person) makes carry further."
+	}
 	"HeadingDemo"
 	{
 		"ControlName"		"Label"

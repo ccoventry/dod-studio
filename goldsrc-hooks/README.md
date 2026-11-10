@@ -115,7 +115,9 @@ is the complete list):
 - **Headshots heard further away** (`ds_sound_headshot_far 1`): the headshot
   sound (`player/helmet_hit.wav`) fades half as fast with distance. DoD's
   client plays it from its `bodydamage` event through `EV_PlaySound`, so the
-  `fire_sounds` hook halves its attenuation. See `src/headshot_sound.rs`.
+  `fire_sounds` hook halves its attenuation. With
+  `ds_sound_headshot_viewed_far 1` only the viewed player's headshots do: the
+  kill's `DeathMsg` names the shooter (#1353). See `src/headshot_sound.rs`.
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
