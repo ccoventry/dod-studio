@@ -58,6 +58,22 @@ fn status_text() -> String {
             crate::headshot_sound::status()
         ),
         format!(
+            "{} = {}",
+            crate::headshot_sound::POV_FARTHER_NAME,
+            bit(crate::headshot_sound::POV_FARTHER.on()),
+        ),
+        format!(
+            "{} = {} -- {}",
+            crate::headshot_sound::LOUDER_NAME,
+            crate::headshot_sound::LOUDER.value().unwrap_or(0.0),
+            crate::headshot_sound::louder_status()
+        ),
+        format!(
+            "{} = {}",
+            crate::headshot_sound::POV_LOUDER_NAME,
+            bit(crate::headshot_sound::POV_LOUDER.on()),
+        ),
+        format!(
             "{CROSSHAIR_NAME} = {} -- {}",
             bit(crosshair::hidden()),
             crosshair::status()

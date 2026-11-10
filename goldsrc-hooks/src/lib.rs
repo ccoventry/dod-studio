@@ -44,7 +44,7 @@
 //!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook `anim_fix` and the gunshot
 //!   modules hear gunshots through. It changes no sound but the headshot's.
-//! - `headshot_sound`: `ds_sound_headshot_far`, the headshot sound
+//! - `headshot_sound`: `ds_sound_headshot_farther`, the headshot sound
 //!   (`player/helmet_hit.wav`) carries twice as far, through that hook.
 //! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
