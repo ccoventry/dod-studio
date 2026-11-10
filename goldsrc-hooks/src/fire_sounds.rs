@@ -15,7 +15,7 @@
 //! - `pov_recorder_shots` the same for a POV recorder's own rounds.
 //!
 //! The sound itself is passed through untouched, except the headshot's:
-//! its attenuation while `ds_sound_headshot_far` is on, and its sample while
+//! its attenuation while `ds_sound_headshot_farther` is on, and its sample while
 //! `ds_sound_headshot_louder` is (`headshot_sound`).
 //!
 //! ## What this used to be

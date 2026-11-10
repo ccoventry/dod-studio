@@ -359,14 +359,14 @@ pub const AREAS: &[Area] = &[
                 "play the gunshots a demo left silent, every player's.",
             ),
             check(
-                console_name!("sound_headshot_far"),
-                "Hear headshots further away",
+                console_name!("sound_headshot_farther"),
+                "Hear headshots farther away",
                 "a headshot's sound fades half as fast with distance, so it carries twice as far.",
             ),
             check(
-                console_name!("sound_headshot_viewed_far"),
-                "Only the viewed player's headshots",
-                "only the headshots the POV player (or the HLTV player you watch in first person) makes carry further.",
+                console_name!("sound_headshot_pov_farther"),
+                "POV player only",
+                "only the headshots the POV player (or the HLTV player you watch in first person) makes carry farther.",
             ),
             choice(
                 console_name!("sound_headshot_louder"),
@@ -375,8 +375,8 @@ pub const AREAS: &[Area] = &[
                 HEADSHOT_LOUDER,
             ),
             check(
-                console_name!("sound_headshot_viewed_louder"),
-                "Only the viewed player's louder",
+                console_name!("sound_headshot_pov_louder"),
+                "POV player only",
                 "only the headshots the POV player (or the HLTV player you watch in first person) makes play louder.",
             ),
         ],

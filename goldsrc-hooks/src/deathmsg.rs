@@ -946,7 +946,7 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
 
 /// Whether player `index` is the one whose view the demo shows: the POV
 /// recorder, or the player an HLTV demo watches in first person. Used by
-/// `clear_on death` and `ds_sound_headshot_viewed_far` (#1353).
+/// `clear_on death` and `ds_sound_headshot_pov_farther` (#1353).
 pub(crate) fn is_watched_player(index: i32) -> bool {
     if index <= 0 {
         return false;
