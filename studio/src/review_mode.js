@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
 import { buildReviewQueue, applyReviewAnswer, applyReviewEdit, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
+import { withProjectLaunchSize } from './project_settings.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -132,7 +133,8 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
         document.querySelector('#review-fast-forward-cb')?.checked === true,
         document.querySelector('#review-fast-forward-gap')?.value,
       );
-      const started = await startHighlightReview(highlights, gap, startFrom);
+      // The open project's window size, when it sets one (#1085).
+      const started = await startHighlightReview(highlights, gap, startFrom, withProjectLaunchSize(null));
       running = true;
       answers = 0;
       showToast(STRINGS.REVIEW.startedToast(started.count, started.launched, skipped), 'success', 8000, {

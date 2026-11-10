@@ -318,6 +318,11 @@ pub struct AppSettings {
     /// goes missing later opens the window again.
     #[serde(default)]
     pub setup_dismissed: bool,
+    /// This PC's id (#1085): a project keeps its folders under it, so a
+    /// project opened on another PC uses that PC's. Made by the frontend
+    /// (project_settings.js) the first time a file has none.
+    #[serde(default)]
+    pub pc_id: String,
     /// The one-time look at the pinned folders ran (#533): older builds
     /// pinned every folder + Add Folder scanned, and Studio lists them once
     /// so the user can unpin the ones they never chose.
@@ -615,6 +620,7 @@ impl Default for AppSettings {
             demo_rename_lowercase: false,
             audit_look_in_zips: false,
             setup_dismissed: false,
+            pc_id: String::new(),
             pinned_folders_reviewed: false,
             scan_include_subfolders: default_scan_include_subfolders(),
             players: native::player_overrides::PlayerTable::default(),
@@ -892,6 +898,27 @@ mod tests {
         let json = serde_json::to_string(&original).expect("settings must serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
         assert!(restored.setup_dismissed);
+    }
+
+    /// The PC id survives a save, and a file from before it has none (#1085).
+    #[test]
+    fn pc_id_roundtrip_and_default() {
+        let original = AppSettings {
+            pc_id: "3f2a".into(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.pc_id, "3f2a");
+        let mut before =
+            serde_json::to_value(AppSettings::default()).expect("settings must serialize");
+        before
+            .as_object_mut()
+            .expect("settings are an object")
+            .remove("pc_id");
+        let old: AppSettings =
+            serde_json::from_value(before).expect("a file without pc_id must deserialize");
+        assert!(old.pc_id.is_empty());
     }
 
     /// Open Recent's list survives a save, and a file from before it has none (#935).

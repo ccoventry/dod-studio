@@ -55,8 +55,8 @@ describe('openProjectText', () => {
   });
 
   it('holds the top-level keys this build does not know', () => {
-    const opened = openProjectText(JSON.stringify({ demos: [], settings: { a: 1 }, profile: 'FOTW' }));
-    expect(opened.unknownKeys).toEqual({ settings: { a: 1 }, profile: 'FOTW' });
+    const opened = openProjectText(JSON.stringify({ demos: [], futureKey: { a: 1 }, profile: 'FOTW' }));
+    expect(opened.unknownKeys).toEqual({ futureKey: { a: 1 }, profile: 'FOTW' });
   });
 
   it('does not hold the old install paths: a project carrying them switched the game on open', () => {
@@ -87,10 +87,10 @@ describe('a file from a newer build', () => {
   });
 
   it('keeps its own schema and saveNeeds on save, so the newer build runs no step twice', () => {
-    const opened = openProjectText(JSON.stringify({ schema: CURRENT_SCHEMA + 3, saveNeeds: 2, settings: { a: 1 } }));
+    const opened = openProjectText(JSON.stringify({ schema: CURRENT_SCHEMA + 3, saveNeeds: 2, futureKey: { a: 1 } }));
     const { json, schema } = buildProjectFile({ demos: [] }, opened);
     expect(schema).toBe(CURRENT_SCHEMA + 3);
-    expect(JSON.parse(json)).toMatchObject({ schema: CURRENT_SCHEMA + 3, saveNeeds: 2, settings: { a: 1 } });
+    expect(JSON.parse(json)).toMatchObject({ schema: CURRENT_SCHEMA + 3, saveNeeds: 2, futureKey: { a: 1 } });
   });
 });
 
@@ -102,9 +102,9 @@ describe('buildProjectFile', () => {
   });
 
   it('writes the held keys back after this build\'s own', () => {
-    const opened = openProjectText(JSON.stringify({ settings: { a: 1 } }));
+    const opened = openProjectText(JSON.stringify({ futureKey: { a: 1 } }));
     const data = JSON.parse(buildProjectFile({ demos: [] }, opened).json);
-    expect(Object.keys(data)).toEqual(['version', 'schema', 'saveNeeds', 'demos', 'settings']);
+    expect(Object.keys(data)).toEqual(['version', 'schema', 'saveNeeds', 'demos', 'futureKey']);
   });
 
   it('stamps over the old values of a whole file edited in place', () => {
@@ -214,7 +214,7 @@ describe('saveProjectFile', () => {
   });
 
   it('refuses a save that would lower the file: a newer build saved it after this window opened it', async () => {
-    const text = JSON.stringify({ schema: CURRENT_SCHEMA + 1, saveNeeds: 1, settings: { a: 1 } });
+    const text = JSON.stringify({ schema: CURRENT_SCHEMA + 1, saveNeeds: 1, futureKey: { a: 1 } });
     const io = fakeDisk({ [PATH]: text });
     const opened = openProjectText(JSON.stringify({ schema: CURRENT_SCHEMA, demos: [] }));
     const save = saveProjectFile(PATH, buildProjectFile({ demos: [] }, opened), io);
@@ -257,5 +257,10 @@ describe('the one-time summary', () => {
   it('leaves the takes out when the disk check failed', () => {
     expect(STRINGS.PROJECT_FILE.updatedToast({ clips: 1, takesFound: null, takesNotFound: null }, 'b'))
       .toBe('Updated: 1 clip. Backup: b');
+  });
+
+  it('says when the project\'s settings were copied from Configuration (#1085)', () => {
+    expect(STRINGS.PROJECT_FILE.updatedToast({ clips: 2, takesFound: null, takesNotFound: null, settingsCopied: true }, 'b'))
+      .toBe('Updated: 2 clips. Its settings were copied from Configuration and are now its own. Backup: b');
   });
 });

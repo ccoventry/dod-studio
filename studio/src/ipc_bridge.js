@@ -476,9 +476,11 @@ export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_ta
 /** Patches the given demo's highlights into a single `<stem>_preview.dem`
  *  (BOOKMARK/director events at each highlight, regardless of selection —
  *  reuses an existing preview instead of regenerating one) and
- *  immediately launches it in HLAE via `+viewdemo`. */
-export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
-  return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
+ *  immediately launches it in HLAE via `+viewdemo`. `size`: the window size
+ *  to start at (`resolution_width`, `resolution_height`, from
+ *  withProjectLaunchSize), else the saved one. */
+export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath, size = null) {
+  return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath, ...launchSizeArgs(size) })
     .catch((err) => {
       console.error("IPC Execution Error (launch_demo_preview):", err);
       showToast(STRINGS.IPC.previewFailed(err), 'error');
@@ -491,9 +493,10 @@ export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHook
  *  to the running game through its hook DLL's pipe instead of launching a
  *  second one. Resolves to the command sent, or `null` when no running game
  *  takes commands (not started by DoD Studio), so the caller can fall back to
- *  the "already running" prompt. */
-export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
-  return invoke("send_preview_to_running_game", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
+ *  the "already running" prompt. `size` as for launchDemoPreview: only a game
+ *  at that size is sent the preview. */
+export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, goldsrcHooksDllPath, size = null) {
+  return invoke("send_preview_to_running_game", { hlaePath, gamePath, streaks, goldsrcHooksDllPath, ...launchSizeArgs(size) })
     .catch((err) => {
       console.error("IPC Execution Error (send_preview_to_running_game):", err);
       showToast(STRINGS.IPC.previewFailed(err), 'error');
@@ -505,9 +508,10 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
  *  starts one. `fastForwardGap`: seconds between kills above which a gap
  *  plays fast, or null (#665). `startFrom`: the game starts at the first
  *  highlight at or after this demo time, or null for the first (#1142).
- *  Resolves to `{ pid, launched, count }`. */
-export async function startHighlightReview(highlights, fastForwardGap = null, startFrom = null) {
-  return invoke("start_highlight_review", { highlights, fastForwardGap, startFrom })
+ *  Resolves to `{ pid, launched, count }`. `request`: launch settings over
+ *  the saved ones, as for checkRunningGame. */
+export async function startHighlightReview(highlights, fastForwardGap = null, startFrom = null, request = null) {
+  return invoke("start_highlight_review", { highlights, fastForwardGap, startFrom, request })
     .catch((err) => {
       console.error("IPC Execution Error (start_highlight_review):", err);
       showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
@@ -595,6 +599,12 @@ export async function checkEngineProcesses() {
     });
 }
 
+/** A launch size (`{ resolution_width, resolution_height }`, or null) as a
+ *  preview command's arguments; null fields leave the saved size. */
+function launchSizeArgs(size) {
+  return { resolutionWidth: size?.resolution_width ?? null, resolutionHeight: size?.resolution_height ?? null };
+}
+
 /** Whether a game is running and was started with the launch settings a
  *  launch would use now (#666): `{ state: 'none' }`, `{ state: 'match', pid }`
  *  or `{ state: 'mismatch', pid, running, wanted, differs }`. `request`
@@ -633,9 +643,10 @@ export async function closeRunningGame(pid) {
 }
 
 /** Launches HLAE against `hl.exe` directly with no demo loaded, applying the
- *  persisted resolution/HUD/init-command settings. */
-export async function launchStandaloneGame() {
-  return invoke("launch_standalone_game")
+ *  persisted resolution/HUD/init-command settings, with `request` (as for
+ *  checkRunningGame) over them. */
+export async function launchStandaloneGame(request = null) {
+  return invoke("launch_standalone_game", { request })
     .catch((err) => {
       console.error("IPC Execution Error (launch_standalone_game):", err);
       showToast(STRINGS.IPC.launchFailed(err), 'error');

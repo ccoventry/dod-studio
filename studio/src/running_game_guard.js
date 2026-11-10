@@ -8,6 +8,7 @@
 // "already running" handling, which then sees no game.
 
 import { checkRunningGame, closeRunningGame } from './ipc_bridge.js';
+import { withProjectLaunchSize } from './project_settings.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -41,13 +42,14 @@ export function runningGameDetails(check) {
  * the user chose to close it and it has closed. False when the user kept
  * the game, or it didn't close; nothing is reused or started then.
  *
- * `request`: launch settings not saved yet (see checkRunningGame).
+ * `request`: launch settings not saved yet (see checkRunningGame). The open
+ * project's window size goes in when it sets one (#1085).
  * `button`: disabled while the game closes.
  * `switching`: asked by Configuration's install list (#931), which closes
  * the game to switch installs rather than to start it again.
  */
 export async function closeGameWithOtherSettings(request = null, { button = null, switching = false } = {}) {
-  const check = await checkRunningGame(request);
+  const check = await checkRunningGame(withProjectLaunchSize(request));
   if (!check || check.state !== 'mismatch') return true;
   const S = STRINGS.RUNNING_GAME;
   const ok = await themedConfirm(switching ? S.switchMessage(check) : S.message(check), {

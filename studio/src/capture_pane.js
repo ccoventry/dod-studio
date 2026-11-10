@@ -39,6 +39,7 @@ import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
+import { effectiveSettings, withProjectLaunchSize } from './project_settings.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -218,17 +219,31 @@ export async function refreshLaunchGuard(state) {
 
   const preRollVal = numberField('#config-pre-roll', 5.0);
   const postRollVal = numberField('#config-post-roll', 1.0);
-  const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
-  const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
-  const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
-  const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
-  const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  // The open project's own settings over the form's (#1085).
+  const own = effectiveSettings({
+    record_start_lead: numberField('#config-record-start-lead', 0.0),
+    record_stop_trail: numberField('#config-record-stop-trail', 0.0),
+    capture_fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    resolution_width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    resolution_height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    capture_mode: document.querySelector('#config-capture-mode')?.value,
+    // Empty is 0, "the same as Capture FPS".
+    agr_fps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
+    obs_capture_fps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    kill_gaps: readKillGaps(),
+    target_drives: resolvedState.targetDrives || [],
+  });
+  const recordStartLeadVal = own.record_start_lead;
+  const recordStopTrailVal = own.record_stop_trail;
+  const captureFpsVal = own.capture_fps;
+  const resWidthVal = own.resolution_width;
+  const resHeightVal = own.resolution_height;
   // AGR mode writes a few KB a frame, at its own rate, and a video take is
   // compressed (#1096) — sizing either like a frame sequence would block
   // batches that fit with room to spare.
-  const captureMode = document.querySelector('#config-capture-mode')?.value;
+  const captureMode = own.capture_mode;
   const agrMode = captureMode === 'agr';
-  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
+  const agrFpsVal = own.agr_fps || captureFpsVal;
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -249,17 +264,17 @@ export async function refreshLaunchGuard(state) {
         document.querySelector('#config-obs-recording-quality')?.value,
         resWidthVal,
         resHeightVal,
-        numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+        own.obs_capture_fps,
       )
       : undefined,
     // Long gaps between kills recorded sped up write fewer frames (#831).
-    killGaps: estimateKillGaps(readKillGaps(), document.querySelector('#config-hook-runs-batch')?.checked ?? true),
+    killGaps: estimateKillGaps(own.kill_gaps, document.querySelector('#config-hook-runs-batch')?.checked ?? true),
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
   // sole (required) source of output directories now that Primary Media Dir
-  // is gone.
-  const effectiveDrivePool = (resolvedState.targetDrives || []).filter(Boolean);
+  // is gone. The project's own folders on this PC when it has them (#1085).
+  const effectiveDrivePool = (own.target_drives || []).filter(Boolean);
 
   let availableBytes = 0;
   let problemPaths = [];
@@ -443,24 +458,36 @@ let customCommandsEditor = null;
 function currentCaptureSetup() {
   const state = (currentGetState ? currentGetState() : null) || {};
   const codecEl = document.querySelector('#config-capture-codec');
-  const mode = document.querySelector('#config-capture-mode')?.value || 'frame_sequence';
-  const lists = getCommandsState();
+  // The open project's own settings over the form's (#1085).
+  const own = effectiveSettings({
+    ...getCommandsState(),
+    capture_mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    obs_capture_fps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    // Empty is 0, "the same as Capture FPS".
+    agr_fps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
+    resolution_width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    resolution_height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    capture_fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    command_profile_active: getActiveCommandProfile(),
+    target_drives: state.targetDrives || [],
+  });
+  const mode = own.capture_mode;
   return {
     mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
-    obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    obsFps: own.obs_capture_fps,
     // An empty AGR FPS records at Capture FPS, as the batch does.
-    agrFps: numberField('#config-agr-fps', numberField('#config-capture-fps', 300, { integer: true, positive: true }), { integer: true, positive: true }),
-    width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
-    height: numberField('#config-res-height', 720, { integer: true, positive: true }),
-    fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    agrFps: own.agr_fps || own.capture_fps,
+    width: own.resolution_width,
+    height: own.resolution_height,
+    fps: own.capture_fps,
     // The same reading the Commands tab's profile row shows.
-    commandProfile: profileState(getAllCommandProfiles(), getActiveCommandProfile(), lists),
-    scheduledCount: lists.custom_commands.length,
+    commandProfile: profileState(getAllCommandProfiles(), own.command_profile_active, own),
+    scheduledCount: own.custom_commands.length,
     bannedCount: bannedCommandCount(),
     decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
     finish: finishSummary(mode),
-    destinations: (state.targetDrives || []).filter(Boolean).length > 0,
+    destinations: own.target_drives.filter(Boolean).length > 0,
   };
 }
 
@@ -520,7 +547,8 @@ async function initStandaloneLaunchButton() {
     const originalLabel = btn.textContent;
     btn.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
     try {
-      await launchStandaloneGame();
+      // The open project's window size, when it sets one (#1085).
+      await launchStandaloneGame(withProjectLaunchSize(null));
       showToast(STRINGS.HIGHLIGHTS.LAUNCHING_HLAE_TOAST, 'info');
     } catch {
       // Already toasted by ipc_bridge.js.
@@ -594,17 +622,32 @@ function initImportCfgButton() {
  * `state.targetDrives`: all but `streaks` and `session_id`. Returns `null`
  * (after toasting the reason) when a required field is missing. Shared by
  * Start Capture Batch and the OBS capture test (#646), so a test clip runs
- * with exactly the settings a real batch would.
+ * with exactly the settings a real batch would. The open project's own
+ * settings go over the form's last (#1085, project_settings.js).
  */
 export function batchSettingsPayload(state) {
-  const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
-  const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-  // Empty is 0, "the same as Capture FPS" — resolved by the backend.
-  const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
+  const own = effectiveSettings({
+    capture_fps: numberField('#config-capture-fps', 120, { integer: true, positive: true }),
+    obs_capture_fps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+    agr_fps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
+    record_start_lead: numberField('#config-record-start-lead', 5.0),
+    record_stop_trail: numberField('#config-record-stop-trail', 5.0),
+    resolution_width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    resolution_height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    capture_mode: document.querySelector("#config-capture-mode")?.value || "frame_sequence",
+    kill_gaps: readKillGaps(),
+    init_commands: initCommands,
+    custom_commands: getCommandsState().custom_commands,
+    target_drives: state.targetDrives || [],
+  });
+  const captureFpsVal = own.capture_fps;
+  const obsCaptureFpsVal = own.obs_capture_fps;
+  const agrFpsVal = own.agr_fps;
   const preRollVal = numberField('#config-pre-roll', 5.0);
   const postRollVal = numberField('#config-post-roll', 1.0);
-  const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
-  const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
+  const recordStartLeadVal = own.record_start_lead;
+  const recordStopTrailVal = own.record_stop_trail;
   const initialDelayVal = numberField('#config-initial-delay', 3.0);
   // The fast-forward step (`host_framerate`), not a setting: batches skip to
   // each clip, and fast-forward is only the fallback.
@@ -615,8 +658,8 @@ export function batchSettingsPayload(state) {
   const ffmpegOverridePathVal = document.querySelector("#ffmpeg-override-path-input")?.value?.trim() || null;
   const goldsrcHooksDllPathVal = document.querySelector("#goldsrc-hooks-dll-path-input")?.value?.trim() || null;
 
-  const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
-  const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  const resWidthVal = own.resolution_width;
+  const resHeightVal = own.resolution_height;
   // `?? true` not `|| false`: a missing element must not silently disable
   // the flush, since nothing in the captured video would show that it had.
   const decalFlushVal = document.querySelector("#config-decal-flush")?.checked ?? true;
@@ -624,7 +667,7 @@ export function batchSettingsPayload(state) {
   // the payload cannot describe two modes at once. The backend reconciles
   // both fields again in `normalise_capture_mode`, which is what keeps an
   // older frontend working against this build.
-  const captureModeVal = document.querySelector("#config-capture-mode")?.value || "frame_sequence";
+  const captureModeVal = own.capture_mode;
   const ffmpegCaptureVal = captureModeVal === "direct_to_video";
   const ffmpegCaptureCodecVal = document.querySelector("#config-capture-codec")?.value || "utvideo";
   const obsHostVal = document.querySelector("#config-obs-host")?.value?.trim() || "127.0.0.1";
@@ -639,7 +682,7 @@ export function batchSettingsPayload(state) {
   const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
 
   // Mark the fields for when the user goes to Configuration; the toast says now.
-  syncCaptureFieldErrors({ hlPath: hlPathVal, hlaePath: hlaePathVal, driveCount: (state.targetDrives || []).filter(Boolean).length });
+  syncCaptureFieldErrors({ hlPath: hlPathVal, hlaePath: hlaePathVal, driveCount: own.target_drives.filter(Boolean).length });
   if (!hlaePathVal || !hlPathVal) {
     showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
     return null;
@@ -651,8 +694,8 @@ export function batchSettingsPayload(state) {
   // output directories, NEVER state.scanPaths (the demo *source* files
   // the user added for scanning); mklinking a junction against a .dem
   // file aborts the batch. Sourced from Capture Output — required, no
-  // fallback.
-  const outputDrivePool = (state.targetDrives || []).filter(Boolean);
+  // fallback. The project's own folders on this PC when it has them (#1085).
+  const outputDrivePool = own.target_drives.filter(Boolean);
 
   if (outputDrivePool.length === 0) {
     showToast(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR, 'error');
@@ -661,13 +704,13 @@ export function batchSettingsPayload(state) {
 
   // Blank rows (added via "+ Add" but never filled in) are dropped rather
   // than sent as no-op console commands.
-  const initCommandsPayload = initCommands.map(c => c.trim()).filter(c => c.length > 0);
-  const customCommandsPayload = customCommands
+  const initCommandsPayload = own.init_commands.map(c => c.trim()).filter(c => c.length > 0);
+  const customCommandsPayload = own.custom_commands
     .filter(c => c.command && c.command.trim().length > 0)
     .map(c => ({
       command: c.command.trim(),
       relation: c.relation === 'After' ? 'After' : 'Before',
-      offset_seconds: c.offsetSeconds,
+      offset_seconds: c.offset_seconds,
     }));
 
   return {
@@ -694,12 +737,12 @@ export function batchSettingsPayload(state) {
     capture_fps: captureFpsVal,
     obs_capture_fps: obsCaptureFpsVal,
     agr_fps: agrFpsVal,
-    drives: state.targetDrives || [],
+    drives: own.target_drives,
     record_start_lead: recordStartLeadVal,
     record_stop_trail: recordStopTrailVal,
     initial_delay: initialDelayVal,
     fast_forward_speed: fastForwardSpeedVal,
-    kill_gaps: readKillGaps(),
+    kill_gaps: own.kill_gaps,
     auto_clear_logs: autoClearLogsVal,
     auto_clear_previews: autoClearPreviewsVal,
     auto_clear_temp_demos: autoClearTempDemosVal,

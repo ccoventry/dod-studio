@@ -1753,9 +1753,11 @@ export const STRINGS = {
     NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
     SAVE_COPY_DIALOG_TITLE: 'Save a copy',
     copyName: (stem) => `${stem} copy`,
-    updatedToast: ({ clips, takesFound, takesNotFound }, backup) => {
+    updatedToast: ({ clips, takesFound, takesNotFound, settingsCopied = false }, backup) => {
       const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
-      return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}. Backup: ${backup}`;
+      // #1085: an old project's own settings start as a copy of Configuration's.
+      const settings = settingsCopied ? ' Its settings were copied from Configuration and are now its own.' : '';
+      return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}.${settings} Backup: ${backup}`;
     },
     backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
     needsNewerBuild: (path) => `Not saved: ${path} needs a newer DoD Studio to save over it. Use Save a copy.`,
@@ -1764,6 +1766,15 @@ export const STRINGS = {
     CANT_CHECK: 'could not check whether the file is there',
     NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
     noMigrationStep: (schema) => `This build has no way to update a project from format ${schema}.`,
+  },
+
+  // ── A project's own settings (project_settings.js, project_install_offer.js, #1085) ──
+  PROJECT_SETTINGS: {
+    INSTALL_OFFER_TITLE: 'Switch install?',
+    installOffer: (madeWith, current) => `This project was made with ${madeWith}. ${current} is picked now. Switch?`,
+    SWITCH: 'Switch',
+    KEEP: 'Keep the one picked',
+    NO_INSTALL: 'No install',
   },
 
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──

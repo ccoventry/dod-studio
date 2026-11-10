@@ -79,9 +79,10 @@ export function projectBackedUpLine(backup, elapsedMs) {
 }
 
 /** The one-time summary of a project's first save in a newer format. */
-export function projectUpdatedLine(path, { clips, takesFound, takesNotFound }, backup) {
+export function projectUpdatedLine(path, { clips, takesFound, takesNotFound, settingsCopied = false }, backup) {
   const takes = takesFound === null ? 'takes not checked' : `${takesFound} take(s) found, ${takesNotFound} not found`;
-  return `[project] updated ${path}: ${clips} clip(s), ${takes}, backup ${backup}`;
+  const settings = settingsCopied ? ', settings copied from Configuration' : '';
+  return `[project] updated ${path}: ${clips} clip(s), ${takes}${settings}, backup ${backup}`;
 }
 
 /** A project from a newer build opened: its unknown data is kept, unused. */
@@ -92,4 +93,27 @@ export function projectNewerLine(path, schema, keptKeys) {
 /** A save refused because the file needs a newer build to save over it. */
 export function projectNeedsCopyLine(path) {
   return `[project] ${path} needs a newer build to save over it: left as it is`;
+}
+
+/** A project without its own settings opened: Configuration's were copied in
+ *  (#1085, decision 6), and are saved with it on the next save. */
+export function projectSettingsCopiedLine(path) {
+  return `[project] ${path} had no settings of its own: copied in Configuration's, saved with the next save`;
+}
+
+/** A project opened whose own settings differ from Configuration's: a
+ *  capture uses the project's. Names the settings, not their values. */
+export function projectSettingsDifferLine(path, keys) {
+  return `[project] ${path} sets ${keys.length} setting(s) other than Configuration's, used for its captures: ${keys.join(', ')}`;
+}
+
+/** Configuration edits copied into the open project (until the Project
+ *  settings page exists). */
+export function projectSettingsFollowedLine(keys) {
+  return `[project] Configuration change copied into the open project: ${keys.join(', ')}`;
+}
+
+/** The answer to "This project was made with ... Switch?". */
+export function projectInstallOfferLine(path, madeWith, answer) {
+  return `[project] ${path} was made with ${madeWith}: ${answer}`;
 }
