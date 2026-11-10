@@ -39,6 +39,10 @@
 //! `cl_particlefx` below 2 says so in the console, since the game then draws
 //! no weather at all.
 //!
+//! The first forced value also gives each snowflake a start time, which the
+//! game leaves unset: snow after rain on one map hung the game without it
+//! (#1369, `map_weather/snow_time.rs`).
+//!
 //! The patch runs from `commands::poll` on the engine thread. A frame where
 //! the cvar hasn't changed costs one float compare.
 //!
@@ -49,6 +53,8 @@
 //! `ds_map_wind` (`map_wind.rs`) sets it.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
+
+mod snow_time;
 
 use crate::engine::{self};
 use crate::names::console_name;
@@ -168,6 +174,9 @@ fn apply(level: i32) -> Result<bool, String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     let address = operand_address(base)?;
     let ours = &FORCED as *const AtomicI32 as usize as u32;
+    // Before any forced weather: rain then snow on one map, forced or the
+    // map's own after forced rain, hangs without it (#1369).
+    snow_time::ensure(base)?;
     if let Some(weather_type) = forced_type(level) {
         FORCED.store(weather_type, Ordering::Release);
     }
