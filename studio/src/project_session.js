@@ -358,7 +358,12 @@ export function createProjectSession({
       marked = markTakesRendered(getTakeIndex(), found.takeKeys, getDemos());
       if (marked > 0) onStatusChange();
       return found;
-    }, { allowed: !quiet && currentSessionPath === path });
+    }, {
+      // Asked after the read: the project may have been renamed or replaced
+      // meanwhile (Switch to .dodstudio, #528), and with nothing found the
+      // one mark since the open is someone else's.
+      madeChange: (found) => !quiet && found.added > 0 && currentSessionPath === path,
+    });
     if (saved) logFrontendEvent(rendersSavedOnOpenLine(path, result.added, marked));
   }
 
@@ -368,15 +373,17 @@ export function createProjectSession({
    * Studio did by itself (renders found on open, #1345; a batch caught up on,
    * #1344) shouldn't leave the user a save prompt for changes they never
    * made. Anything else unsaved means the project holds the user's edits too,
-   * and those stay theirs to save. `allowed: false` never saves. Resolves
-   * `{ result, saved }`.
+   * and those stay theirs to save. `madeChange(result)`, asked once `change`
+   * has finished, says whether it marked anything: when it didn't, the one
+   * mark counted is someone else's (an edit made while it awaited), so
+   * nothing is saved. Resolves `{ result, saved }`.
    */
-  async function saveIfOnlyChange(change, { allowed = true } = {}) {
+  async function saveIfOnlyChange(change, { madeChange = () => true } = {}) {
     const cleanBefore = !hasUnsavedChanges;
     const changesBefore = changeCount;
     const result = await change();
     const onlyChange = cleanBefore && changeCount === changesBefore + 1;
-    const saved = allowed && onlyChange && !!currentSessionPath && await saveProjectSession({ quiet: true });
+    const saved = onlyChange && madeChange(result) && !!currentSessionPath && await saveProjectSession({ quiet: true });
     return { result, saved: !!saved };
   }
 

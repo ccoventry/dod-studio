@@ -106,6 +106,14 @@ describe('opening a project whose take folders hold new renders', () => {
     expect(t.session.needsSavePrompt()).toBe(true);
   });
 
+  it("finding nothing new does not save someone else's change made meanwhile", async () => {
+    const t = open({ renders: [], beforePickUp: (session) => session.markProjectDirty() });
+    await t.session.openProject(PATH);
+    await settle();
+    expect(ipc.writeProjectFile).not.toHaveBeenCalled();
+    expect(t.session.needsSavePrompt()).toBe(true);
+  });
+
   it('opens saved and writes nothing when there is nothing new', async () => {
     const t = open({ renders: [] });
     await t.session.openProject(PATH);
@@ -125,6 +133,20 @@ describe('saveIfOnlyChange (#1344: a batch caught up on in the open project)', (
     expect(result).toBe('marks');
     expect(saved).toBe(true);
     expect(t.session.needsSavePrompt()).toBe(false);
+  });
+
+  it('a change that marked nothing does not save a mark made while it awaited', async () => {
+    const t = open({ renders: [] });
+    await t.session.openProject(PATH);
+    await settle();
+    ipc.writeProjectFile.mockClear();
+    const { saved } = await t.session.saveIfOnlyChange(async () => {
+      t.session.markProjectDirty();
+      return { changed: false };
+    }, { madeChange: (marks) => marks.changed });
+    expect(saved).toBe(false);
+    expect(ipc.writeProjectFile).not.toHaveBeenCalled();
+    expect(t.session.needsSavePrompt()).toBe(true);
   });
 
   it("leaves the user's own unsaved edits, and its change, for the user to save", async () => {

@@ -165,7 +165,7 @@ export function createBatchCatchUp({
       const marks = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
       if (marks.changed) onStatusChange();
       return marks;
-    });
+    }, { madeChange: (marks) => marks.changed });
     const note = saved ? ` ${STRINGS.BATCH_CATCH_UP.SAVED_OPEN_PROJECT}` : '';
     io.toast(`${STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked, result.markedRendered)}${note}`, toastKind(result));
     return result;
