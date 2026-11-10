@@ -317,29 +317,44 @@ unsafe fn draw_through(slot: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc
     }
     let real: SprDrawFn = unsafe { std::mem::transmute(real) };
     let sheet = crate::player_crosshair::Sheet::from_u8(CURRENT_SHEET.load(Ordering::Relaxed));
-    let zoom = unsafe { crate::crosshair_scale::zoom(sheet, prc) };
+    // The swap is decided once, before the zoom: the zoom fits the rect that
+    // is drawn, the table's tile when it replaces the game's.
+    let swap = if REAL_SPR_SET.load(Ordering::Acquire).is_null() {
+        None
+    } else {
+        unsafe { crate::player_crosshair::swap(sheet, prc, x, y) }
+    };
+    let drawn = match swap {
+        Some((_, rect, nx, ny)) => Some((nx, ny, rect)),
+        // Safety: the game's rect, null or valid for the call.
+        None => (!prc.is_null()).then(|| (x, y, unsafe { *prc })),
+    };
+    let zoom = drawn.and_then(|(dx, dy, rect)| unsafe {
+        crate::crosshair_scale::zoom(sheet, prc, dx, dy, &rect)
+    });
     if std::ptr::eq(slot, &REAL_SPR_DRAW_HOLES)
+        && let Some(zoom) = zoom
         && let Some(outline) = unsafe { crate::crosshair_outline::of_draw(sheet, prc) }
     {
         // Safety: a HUD draw, on the engine's GL thread.
         unsafe {
             crate::crosshair_outline::draw(outline, zoom, |tint| {
-                draw_sprite(real, sheet, frame, x, y, prc, Some(tint))
+                draw_sprite(real, swap, frame, x, y, prc, Some(tint))
             })
         };
     }
-    let draw = || unsafe { draw_sprite(real, sheet, frame, x, y, prc, None) };
-    if let Some((cx, cy, scale)) = zoom
+    let draw = || unsafe { draw_sprite(real, swap, frame, x, y, prc, None) };
+    if let Some(zoom) = zoom
         // Safety: a HUD draw, on the engine's GL thread.
-        && unsafe { crate::gl_zoom::about(cx, cy, scale, draw) }
+        && unsafe { zoom.run(draw) }
     {
         return;
     }
     draw();
 }
 
-/// The crosshair's own draw as the Players table says
-/// (`player_crosshair::swap`: the table's sprite set for this one draw, then
+/// The crosshair's own draw as the Players table says (`swap`, from
+/// `player_crosshair::swap`: the table's sprite set for this one draw, then
 /// the game's set back), anything else as asked. `tint` draws it in that
 /// colour instead of the game's, for this one draw too.
 ///
@@ -348,7 +363,7 @@ unsafe fn draw_through(slot: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc
 /// As [`draw_through`].
 unsafe fn draw_sprite(
     real: SprDrawFn,
-    sheet: crate::player_crosshair::Sheet,
+    swap: Option<(i32, Wrect, i32, i32)>,
     frame: i32,
     x: i32,
     y: i32,
@@ -364,8 +379,7 @@ unsafe fn draw_sprite(
     let [r, g, b] = CURRENT_RGB.each_ref().map(|c| c.load(Ordering::Relaxed));
     let [tr, tg, tb] = tint.unwrap_or([r, g, b]);
     let game = CURRENT_HANDLE.load(Ordering::Relaxed);
-    if let Some((handle, rect, nx, ny)) = unsafe { crate::player_crosshair::swap(sheet, prc, x, y) }
-    {
+    if let Some((handle, rect, nx, ny)) = swap {
         unsafe {
             set(handle, tr, tg, tb);
             real(0, nx, ny, &rect);

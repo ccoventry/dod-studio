@@ -2589,6 +2589,12 @@ export const STRINGS = {
       : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
   },
 
+  // ── killfeed_layout_warning.js: the even kill feed can't draw (#1339) ──
+  // The warning itself comes from the backend (native messages/killfeed_layout.rs).
+  KILLFEED_LAYOUT: {
+    LINE_TITLE: "The hook DLL said so while the batch ran: clips captured while this shows have the game's own kill-feed layout, not the even one. The activity log has the hook's own words.",
+  },
+
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
   CRASH_MAPS: {
     title: (count) => `${count} demo${count === 1 ? ' is' : 's are'} on a map the game crashed on`,
