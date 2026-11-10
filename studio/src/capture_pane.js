@@ -32,6 +32,7 @@ import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { startObsDropRate } from './obs_drop_rate.js';
+import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
@@ -745,6 +746,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   precheck = createCapturePrecheck({ startBtn, statusEl, progressContainer, refreshStart: () => refreshLaunchGuard() });
   captureProgress = createCaptureProgress({ statusEl, container: progressContainer, log: logFrontendEvent });
   startObsDropRate({ el: document.querySelector('#obs-drop-rate'), listen, toast: (text) => showToast(text, 'warning', 12000) });
+  startKillfeedLayoutWarning({ el: document.querySelector('#killfeed-layout-warning'), listen, toast: (text) => showToast(text, 'warning', 20000) });
   initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;

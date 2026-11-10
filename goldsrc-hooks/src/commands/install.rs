@@ -302,6 +302,15 @@ pub fn install() {
     if let Some(far) = register(crate::headshot_sound::NAME, "0") {
         crate::headshot_sound::CVAR.set(far);
     }
+    if let Some(pov) = register(crate::headshot_sound::POV_FARTHER_NAME, "0") {
+        crate::headshot_sound::POV_FARTHER.set(pov);
+    }
+    if let Some(louder) = register(crate::headshot_sound::LOUDER_NAME, "0") {
+        crate::headshot_sound::LOUDER.set(louder);
+    }
+    if let Some(pov) = register(crate::headshot_sound::POV_LOUDER_NAME, "0") {
+        crate::headshot_sound::POV_LOUDER.set(pov);
+    }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
         crate::map_sounds::LOG_CVAR.set(log);
     }

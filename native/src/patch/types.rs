@@ -779,6 +779,9 @@ impl PatcherConfig {
         // way the app starts the game (a batch, Launch Preview, Launch Game)
         // ships it, and from the user's own layout as it is now (#465).
         crate::demo_bar_res::prepare(&hl_exe, &game_folder);
+        // The same for the louder headshot sounds, from the install's own
+        // (#1353).
+        crate::headshot_louder::prepare(&hl_exe, &game_folder);
 
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
