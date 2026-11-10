@@ -78,6 +78,31 @@ describe('changedKeys and hasChanges', () => {
   });
 });
 
+describe('a rate typed badly under a mode that is then left', () => {
+  it('is not a change, so Apply never writes it into the project', () => {
+    const start = startingValues(form({ capture_mode: 'obs' }), null, 'pc-a');
+    const pending = { ...structuredClone(start), capture_mode: 'direct_to_video', obs_capture_fps: NaN, capture_fps: 60 };
+    expect(pendingProblems(pending)).toEqual({});
+    expect(changedKeys(start, pending)).toEqual(['capture_mode', 'capture_fps']);
+    const next = blockWithPending(block(), start, pending, 'pc-a');
+    expect(next.picture.obsCaptureFps).toBeUndefined();
+  });
+
+  it('is still a change in the mode that uses it, where it blocks Apply', () => {
+    const start = startingValues(form({ capture_mode: 'obs' }), null, 'pc-a');
+    const pending = { ...structuredClone(start), obs_capture_fps: NaN };
+    expect(changedKeys(start, pending)).toEqual(['obs_capture_fps']);
+    expect(pendingProblems(pending)).toEqual({ obs_capture_fps: S.BAD_RATE });
+  });
+});
+
+describe('pendingProblems and the AGR fallback', () => {
+  it("refuses AGR's 0 while the Capture FPS it stands for is unusable", () => {
+    const start = startingValues(form(), null, 'pc-a');
+    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: 0, capture_fps: NaN })).toEqual({ agr_fps: S.BAD_RATE });
+  });
+});
+
 describe('pendingProblems', () => {
   const ok = () => startingValues(form(), null, 'pc-a');
 

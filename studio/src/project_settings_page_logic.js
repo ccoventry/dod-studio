@@ -85,9 +85,30 @@ export function startingValues(form, block, pcId) {
   return Object.fromEntries(PROJECT_TAB_KEYS.map((key) => [key, copyOf(values[key])]));
 }
 
+const RATE_KEYS = ['capture_fps', 'obs_capture_fps', 'agr_fps'];
+
+/**
+ * `pending` with each rate that the capture mode doesn't use, and that holds
+ * something unusable (a box typed blank before the mode was changed), put
+ * back to where the page started. pendingProblems skips those, so nothing
+ * tells the user about them; Apply must not write them into the project
+ * (JSON turns NaN into null) or count them as edits.
+ */
+export function usablePending(start, pending) {
+  const used = new Set([rateKeyFor(pending.capture_mode)]);
+  if (pending.capture_mode === 'agr' && pending.agr_fps === 0) used.add('capture_fps');
+  const next = { ...pending };
+  for (const key of RATE_KEYS) {
+    const ok = isWhole(pending[key]) || (key === 'agr_fps' && pending[key] === 0);
+    if (!used.has(key) && !ok) next[key] = start[key];
+  }
+  return next;
+}
+
 /** The keys whose pending value differs from the value the page started from. */
 export function changedKeys(start, pending) {
-  return PROJECT_TAB_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(pending[key]));
+  const usable = usablePending(start, pending);
+  return PROJECT_TAB_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(usable[key]));
 }
 
 /** Whether there is anything for Apply to do. */
@@ -113,6 +134,8 @@ export function pendingProblems(pending) {
   const rate = pending[rateKey];
   // AGR's 0 means "the same as Capture FPS"; every other rate must be set.
   if (!(isWhole(rate) || (rateKey === 'agr_fps' && rate === 0))) problems[rateKey] = S.BAD_RATE;
+  // AGR's 0 reads Capture FPS, which must then be usable.
+  else if (rateKey === 'agr_fps' && rate === 0 && !isWhole(pending.capture_fps)) problems[rateKey] = S.BAD_RATE;
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};
@@ -131,7 +154,7 @@ export function pendingProblems(pending) {
  * know) left as it was. `block` itself is not changed.
  */
 export function blockWithPending(block, start, pending, pcId) {
-  return followFormEdits(block, start, pending, pcId).block;
+  return followFormEdits(block, start, usablePending(start, pending), pcId).block;
 }
 
 /** A clip-name template typed into the page: blank means the default, as

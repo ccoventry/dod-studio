@@ -145,3 +145,28 @@ test('AGR shows its own positions a second, and has nothing to finish', async ({
   await expect(pageRoot(page).locator('[data-row="agr_fps"]')).toContainText('AGR positions a second');
   await expect(pageRoot(page).locator('[data-chips="finish"]')).toHaveCount(0);
 });
+
+test('a rate left blank under a mode that is then changed away from is not written into the project', async ({ page }) => {
+  await openPage(page);
+  await chip(page, 'capture_mode', 'obs').click();
+  await chip(page, 'rate', 'custom').click();
+  await pageRoot(page).locator('[data-field="obs_capture_fps"]').fill('');
+  await expect(footer(page, 'apply')).toBeDisabled();
+  await chip(page, 'capture_mode', 'direct_to_video').click();
+  await footer(page, 'apply').click();
+  await footer(page, 'ok').click();
+  await openPage(page);
+  await chip(page, 'capture_mode', 'obs').click();
+  await expect(chip(page, 'rate', '120')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('New Session with pending edits asks once, and Discard goes on to it', async ({ page }) => {
+  await openPage(page);
+  await chip(page, 'rate', '300').click();
+  await page.locator('#file-menu-btn').click();
+  await page.locator('#new-session-btn').click();
+  await expect(pageRoot(page).locator('.ps-leave')).toHaveCount(1);
+  await pageRoot(page).locator('.ps-leave').getByRole('button', { name: 'Discard' }).click();
+  await expect(pageRoot(page)).toBeHidden();
+  await expect(page.locator('.ps-leave')).toHaveCount(0);
+});
