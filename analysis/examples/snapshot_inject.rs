@@ -13,7 +13,9 @@
 //! field set only at spawn and genuinely never resent survives too -- merging
 //! each entity's fields into one accumulated state, and writes that out as a
 //! full `SvcPacketEntities` at the join -- the message type the demo otherwise
-//! only contains at t=0.
+//! only contains at t=0. The baseline gives fields only: the snapshot lists
+//! just the entities some real packet before the join listed, since the
+//! baseline also names edicts the server never sends (trigger brushes).
 //!
 //! **Two live-crash fixes are baked into how that packet is encoded**, both
 //! found by testing in-engine rather than by offline checks (which all still
@@ -30,7 +32,7 @@ use dem::types::{
     Delta, EngineMessage, EntityState, Frame, FrameData, MessageData, NetMessage, SvcClientData,
     SvcDeltaPacketEntities, SvcPacketEntities, SvcTime, UserMessage,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A join's `incoming_sequence` gap is smoothed into at most this many synthetic
 /// no-op frames. Uncapped for `m3_h2` (gap 2000) and `m1_h1`/`m1_h2` (gaps
@@ -67,6 +69,69 @@ struct ClientAcc {
     /// fire sound over the correct one until real gameplay happened to touch
     /// it again.
     cur_weapon: Option<(u8, Vec<u8>)>,
+}
+
+/// Merges a `SvcSpawnBaseline`'s fields into `acc`.
+fn seed_baseline(acc: &mut BTreeMap<u16, EntAcc>, sb: &dem::types::SvcSpawnBaseline) {
+    for es in &sb.entities {
+        let e = acc.entry(es.entity_index).or_default();
+        for (k, v) in es.delta.iter() {
+            e.fields.insert(k.clone(), v.clone());
+        }
+    }
+}
+
+/// Removes from `state` every entity no real packet listed, and returns them
+/// for the report. Entity 0 stays: the snapshot leaves it out on its own terms.
+fn drop_never_carried(
+    state: &mut BTreeMap<u16, EntAcc>,
+    carried: &BTreeSet<u16>,
+) -> Vec<(u16, EntAcc)> {
+    let never: Vec<u16> = state
+        .keys()
+        .copied()
+        .filter(|i| *i != 0 && !carried.contains(i))
+        .collect();
+    never
+        .into_iter()
+        .filter_map(|i| state.remove(&i).map(|e| (i, e)))
+        .collect()
+}
+
+/// Precache index -> model name, from entry 0's `SvcResourceList` (`t_model`
+/// is 2 in `resourcetype_t`). Brush models read `*N`, the `"model"` key of the
+/// map's entity lump.
+fn model_names(demo: &dem::types::Demo) -> BTreeMap<u32, String> {
+    let mut models = BTreeMap::new();
+    let Some(entry0) = demo.directory.entries.first() else {
+        return models;
+    };
+    for f in &entry0.frames {
+        let FrameData::NetworkMessage(bt) = &f.frame_data else {
+            continue;
+        };
+        let MessageData::Parsed(msgs) = &bt.1.messages else {
+            continue;
+        };
+        for m in msgs {
+            if let NetMessage::EngineMessage(em) = m
+                && let EngineMessage::SvcResourceList(rl) = &**em
+            {
+                for r in rl.resources.iter().filter(|r| r.type_.to_u8() == 2) {
+                    let name = r.name.get_string();
+                    models.insert(r.index.to_u32(), name.trim_matches('\0').to_string());
+                }
+            }
+        }
+    }
+    models
+}
+
+fn modelindex(delta: &Delta) -> Option<u32> {
+    delta
+        .iter()
+        .find(|(k, _)| k.trim_matches('\0') == "modelindex")
+        .and_then(|(_, v)| (v.len() >= 4).then(|| u32::from_le_bytes([v[0], v[1], v[2], v[3]])))
 }
 
 fn main() {
@@ -164,16 +229,19 @@ fn main() {
                 let EngineMessage::SvcSpawnBaseline(sb) = &**em else {
                     continue;
                 };
-                for es in &sb.entities {
-                    let e = acc.entry(es.entity_index).or_default();
-                    for (k, v) in es.delta.iter() {
-                        e.fields.insert(k.clone(), v.clone());
-                    }
-                }
+                seed_baseline(&mut acc, sb);
             }
         }
     }
     let baseline_seeded = acc.len();
+    // Which entities some real packet in the prefix listed. The baseline seeds
+    // fields, never membership: `SvcSpawnBaseline` names every edict the map
+    // spawned, trigger brushes included (`EF_NODRAW`, so the server never sends
+    // them), and a snapshot listing one has the client draw it. `m1_h2`'s
+    // count-fixed build died 7 s after its first join on `Fatal Error: lightmap
+    // for texture aaatrigger too large` with 28 trigger brushes in its snapshot.
+    let mut carried: BTreeSet<u16> = BTreeSet::new();
+    let mut carried_at_join: Vec<BTreeSet<u16>> = Vec::new();
     let mut at_join: Vec<BTreeMap<u16, EntAcc>> = Vec::new();
     // Mirrors `acc`/`at_join`, but for the local player's own clientdata rather
     // than entity state -- the wrong-weapon-sound bug found live: for several
@@ -195,6 +263,7 @@ fn main() {
             idx += 1;
             while next_join < joins.len() && here > joins[next_join].0 {
                 at_join.push(acc.clone());
+                carried_at_join.push(carried.clone());
                 client_at_join.push(client_acc.clone());
                 next_join += 1;
             }
@@ -222,6 +291,16 @@ fn main() {
                     continue;
                 };
                 match &**em {
+                    // A level change re-sends the signon inline: the new map's
+                    // edicts replace the old map's outright. Carrying the old
+                    // map's entities into a later join's snapshot is what made
+                    // `m1_h2`'s third join (on the map after a level change)
+                    // spam "Tried to link edict 93 without model" (#15).
+                    EngineMessage::SvcSpawnBaseline(sb) => {
+                        acc.clear();
+                        carried.clear();
+                        seed_baseline(&mut acc, sb);
+                    }
                     EngineMessage::SvcClientData(cd) => {
                         for (k, v) in cd.client_data.iter() {
                             client_acc.fields.insert(k.clone(), v.clone());
@@ -238,6 +317,7 @@ fn main() {
                     }
                     EngineMessage::SvcPacketEntities(pe) => {
                         for es in &pe.entity_states {
+                            carried.insert(es.entity_index);
                             let e = acc.entry(es.entity_index).or_default();
                             e.custom = es.has_custom_delta;
                             for (k, v) in es.delta.iter() {
@@ -253,6 +333,7 @@ fn main() {
                                 continue;
                             }
                             let Some(d) = &es.delta else { continue };
+                            carried.insert(es.entity_index);
                             let e = acc.entry(es.entity_index).or_default();
                             if let Some(c) = es.has_custom_delta {
                                 e.custom = c;
@@ -274,9 +355,27 @@ fn main() {
     while client_at_join.len() < joins.len() {
         client_at_join.push(client_acc.clone())
     }
+    while carried_at_join.len() < joins.len() {
+        carried_at_join.push(carried.clone())
+    }
     println!(
         "baseline seeded {baseline_seeded} entities; replayed {updates} entity updates on top"
     );
+    let models = model_names(&demo);
+    for (n, (state, carried)) in at_join.iter_mut().zip(&carried_at_join).enumerate() {
+        let dropped = drop_never_carried(state, carried);
+        println!(
+            "  join {}: {} baseline-only entities left out (no real packet before the join listed them)",
+            n + 1,
+            dropped.len()
+        );
+        for (idx, e) in &dropped {
+            let name = modelindex(&e.fields)
+                .and_then(|mi| models.get(&mi))
+                .map_or("?", String::as_str);
+            println!("      entity {idx:>4}  model {name}");
+        }
+    }
 
     // Encode each join's state as a full snapshot. Absolute indices throughout:
     // unambiguous, and it avoids depending on the incremental index arithmetic
