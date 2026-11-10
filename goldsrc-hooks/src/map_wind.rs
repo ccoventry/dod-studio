@@ -11,7 +11,7 @@
 //! `CHud::MsgFunc_InitHUD` runs at each map load): x and y from the entity's
 //! `detect_wind_velocity_x/y`, 0 when the keys are missing. A map without
 //! the entity keeps the last map's wind. Of the movie installs' maps, 17 set
-//! 25 25 and the rest 0.
+//! a wind (25 25 on all but one) and the rest 0.
 //!
 //! Its readers add x and y to a particle's velocity once, as it is made, and
 //! never read z:
@@ -37,15 +37,18 @@
 //! never asks for a wind is never written to.
 //!
 //! The map's own wind goes into the log whenever the loaded map or its wind
-//! changes, so a log shows what the map asked for. That read is two float
-//! loads and a level-name hash a frame; the string cvar is parsed again only
-//! when the engine hands it a new string.
+//! changes and has held for half a second, so a log shows what the map asked
+//! for (a load names the new level ~0.2 s before the map's wind is read).
+//! That read is two float loads and a level-name hash a frame; the string
+//! cvar is parsed again only when the engine hands it a new string.
 //!
 //! `tools/verify_map_wind_offsets.py` checks the patterns and the variable
 //! in both installs' `client.dll`.
 
 use std::ffi::CStr;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::time::Instant;
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
@@ -87,6 +90,12 @@ static SEEN_STRING: AtomicUsize = AtomicUsize::new(0);
 /// The level-name hash and map wind last logged.
 static LOGGED_LEVEL: AtomicU32 = AtomicU32::new(0);
 static LOGGED_WIND: AtomicU64 = AtomicU64::new(u64::MAX);
+/// A level and wind seen but not logged yet, and since when (ms).
+static PENDING_LEVEL: AtomicU32 = AtomicU32::new(0);
+static PENDING_WIND: AtomicU64 = AtomicU64::new(u64::MAX);
+static PENDING_SINCE: AtomicU64 = AtomicU64::new(0);
+/// How long a new level and wind must hold before they are logged.
+const SETTLE_MS: u64 = 500;
 
 /// What a value asks for: `None` the map's own (`0` or nothing), or x and
 /// y. Anything else is an error saying why.
@@ -235,6 +244,27 @@ fn fnv1a(bytes: &[u8]) -> u32 {
     })
 }
 
+fn now_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+/// Whether a level and wind not yet logged have held long enough to log:
+/// the engine names the new level a moment before the map's
+/// `info_doddetect` is parsed, so the first frames of a load still hold the
+/// last map's wind.
+fn settled(level: u32, wind: u64, now: u64) -> bool {
+    if PENDING_LEVEL.load(Ordering::Relaxed) != level
+        || PENDING_WIND.load(Ordering::Relaxed) != wind
+    {
+        PENDING_LEVEL.store(level, Ordering::Relaxed);
+        PENDING_WIND.store(wind, Ordering::Relaxed);
+        PENDING_SINCE.store(now, Ordering::Relaxed);
+        return false;
+    }
+    now.saturating_sub(PENDING_SINCE.load(Ordering::Relaxed)) >= SETTLE_MS
+}
+
 /// Logs the map's own wind when the level or the wind changes.
 fn log_map_wind() {
     let (Some(wind), Some(name)) = (map_wind(), level_name()) else {
@@ -242,6 +272,9 @@ fn log_map_wind() {
     };
     let (bits, hash) = (pack(wind), fnv1a(name));
     if LOGGED_WIND.load(Ordering::Relaxed) == bits && LOGGED_LEVEL.load(Ordering::Relaxed) == hash {
+        return;
+    }
+    if !settled(hash, bits, now_ms()) {
         return;
     }
     LOGGED_WIND.store(bits, Ordering::Relaxed);
@@ -384,6 +417,18 @@ mod tests {
             assert_eq!(tokens[X_AT + 6], "80");
             assert_eq!(tokens[Y_AT + 6], "84");
         }
+    }
+
+    /// A load's first frames still hold the last map's wind: only a pair
+    /// that held for `SETTLE_MS` is logged.
+    #[test]
+    fn a_new_level_and_wind_are_logged_once_they_hold() {
+        assert!(!settled(7, 1, 1_000));
+        assert!(!settled(7, 1, 1_000 + SETTLE_MS - 1));
+        assert!(settled(7, 1, 1_000 + SETTLE_MS));
+        // The wind read 0.2 s into the load starts the wait again.
+        assert!(!settled(7, 2, 1_200 + SETTLE_MS));
+        assert!(settled(7, 2, 1_200 + 2 * SETTLE_MS));
     }
 
     #[test]
