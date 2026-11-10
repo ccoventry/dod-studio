@@ -250,6 +250,24 @@ export const STRINGS = {
     UNKNOWN_HIGHLIGHT: 'a highlight no longer in the queue',
     NO_RENDERS: 'not rendered',
     REVEAL_FAILED: 'Could not show that in Explorer.',
+    // The full settings a take was captured with (part of #1085).
+    capturedWith: (text) => `Captured with: ${text}`,
+    NOT_RECORDED: 'not recorded',
+    NOT_RECORDED_TITLE: 'This take was captured before Studio kept the full settings of each capture. It is never marked as different from another take.',
+    size: (width, height) => `${width}×${height}`,
+    fov: (degrees) => `FOV ${degrees}`,
+    hook: (name) => `hook ${name}`,
+    NO_HOOK: 'no hook DLL',
+    clipLength: (before, after) => `${before} s before, ${after} s after`,
+    gapsFastForward: (speed, over) => `gaps over ${over} s at ${speed}x`,
+    commandCounts: (initial, scheduled) =>
+      `${initial} Initial ${initial === 1 ? 'Command' : 'Commands'}, ${scheduled} Scheduled`,
+    INITIAL_HEADING: 'Initial Commands:',
+    SCHEDULED_HEADING: 'Scheduled Commands:',
+    NONE: '  (none)',
+    initialLine: (line) => `  ${line}`,
+    scheduledCommand: (after, seconds, command) => `  ${seconds} s ${after ? 'after the clip' : 'before the clip'}: ${command}`,
+    hash: (hash, version) => `Settings hash ${hash}${version ? ` · DoD Studio ${version}` : ''}`,
   },
 
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────

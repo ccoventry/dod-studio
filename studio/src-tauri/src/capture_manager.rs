@@ -560,6 +560,13 @@ pub struct CaptureManifest {
     /// The project file the batch was started from, when it had one.
     #[serde(default)]
     pub project_path: Option<String>,
+    /// The full settings the batch captured with and their hash (part of
+    /// #1085): written beside each take, sent with `capture_takes_verified`
+    /// for the project's take record, and kept in the manifest file so a
+    /// batch caught up after a restart records the same. `None` in
+    /// manifests from before it existed.
+    #[serde(default)]
+    pub settings: Option<native::hlcr::take_settings::CaptureSettings>,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -1034,6 +1041,8 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
                 .iter()
                 .find(|b| b.take_folder == folder)
                 .and_then(|b| b.plan.clone()),
+            // Everything else the batch captured with (part of #1085).
+            settings: manifest.settings.clone(),
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
@@ -1156,6 +1165,8 @@ fn check_takes(
             // sequence has to be encoded at the rate it was captured at.
             "outcome": outcome,
             "capture_fps": manifest.capture_fps,
+            // The project's record of each take (part of #1085).
+            "capture_settings": manifest.settings,
             // Render While Capturing (#861) queues every take itself, the
             // last ones after this goes out, so the finish step stays out.
             "rendered_while_capturing": rendered_while_capturing,
@@ -1492,7 +1503,14 @@ pub async fn start_capture_batch_impl(
                 streak_uids,
                 streak_sources,
                 project_path,
+                settings: Some(native::hlcr::take_settings::CaptureSettings::from_config(
+                    &patcher_config,
+                    env!("CARGO_PKG_VERSION"),
+                )),
             };
+            if let Some(settings) = &manifest.settings {
+                log_markdown(&crate::messages::capture::take_settings_recorded(settings));
+            }
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
             crate::manifest_file::write(&manifest, "planned", None);
@@ -2299,6 +2317,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         };
         let verified = verify_capture_takes(&manifest, &mut |_| {});
         assert!(verified[0].captured && verified[0].rendered);
@@ -2366,6 +2385,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         };
         let verified = verify_capture_takes(&manifest, &mut |_| {});
         record_capture_settings(&manifest, &verified);
@@ -2826,6 +2846,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         }
     }
 
