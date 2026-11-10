@@ -17,8 +17,9 @@
 //! server with `connect local`, run through the same command table.
 //!
 //! So the DLL wraps the four command nodes -- `connect`, `listen`, `retry`,
-//! `reconnect` -- the way `demo_reload` wraps `playdemo` (the SDK's
-//! command-list functions, no per-build address), and [`decide`] picks:
+//! `reconnect` -- through [`cmd_list`], as `demo_reload` wraps `playdemo`
+//! (the SDK's command-list functions, no per-build address), and [`decide`]
+//! picks:
 //!
 //! - `connect <address>` and `listen <address>`: held back while
 //!   [`server_query`](crate::server_query) asks the address what it is, off
@@ -51,12 +52,13 @@
 // Only the 32-bit build installs anything; a host check still compiles it.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::engine::{self, ClEngineFuncsPartial, ConsoleCommandFn};
+use crate::cmd_list;
+use crate::engine::{self, ConsoleCommandFn};
 use crate::server_query::{self, QueryError, ServerInfo};
 
 /// `GOLDSRC_HOOKS_ALLOW_CONNECT=1` sets this false, and nothing is wrapped.
@@ -65,21 +67,8 @@ pub static ENABLED: AtomicBool = AtomicBool::new(true);
 /// The environment variable that turns the guard off.
 pub const ALLOW_ENV: &str = "GOLDSRC_HOOKS_ALLOW_CONNECT";
 
-/// `cl_enginefunc_t` slot, from the public SDK's `APIProxy.h`.
-const SLOT_GET_FIRST_CMD_FUNCTION_HANDLE: usize = 102;
-
-/// A node of the engine's command list, as `Cmd_AddCommand` builds it.
-#[repr(C)]
-struct CmdFunction {
-    next: *mut CmdFunction,
-    name: *const c_char,
-    function: Option<ConsoleCommandFn>,
-    flags: i32,
-}
-
-type GetFirstCmdFn = unsafe extern "C" fn() -> *mut CmdFunction;
-
-/// The engine's own handlers, called when a command is allowed.
+/// The handlers beneath the guard's (the engine's, or HLAE's for `connect`),
+/// called when a command is allowed.
 static REAL_CONNECT: AtomicUsize = AtomicUsize::new(0);
 static REAL_LISTEN: AtomicUsize = AtomicUsize::new(0);
 static REAL_RETRY: AtomicUsize = AtomicUsize::new(0);
@@ -131,9 +120,6 @@ static APPROVED: Mutex<Option<(Command, String)>> = Mutex::new(None);
 /// How many more frames `poll` retries a wrap that found nothing.
 static RETRIES_LEFT: AtomicU32 = AtomicU32::new(300);
 
-/// The list is a few hundred nodes; this only stops a corrupted one looping.
-const MAX_NODES: usize = 8192;
-
 /// Wraps the four commands. Called once engfuncs are captured.
 pub fn install() {
     if !ENABLED.load(Ordering::Relaxed) {
@@ -173,48 +159,25 @@ fn try_wrap() -> bool {
     if WRAPPED.load(Ordering::Relaxed) {
         return true;
     }
-    let Some(engfuncs) = engine::engfuncs() else {
-        return false;
-    };
-    // Safety: slot 102 of the engine's own table, checked in both builds by
-    // tools/verify_cmd_list_slots.py.
-    let first = unsafe {
-        let slot = *(engfuncs as *const ClEngineFuncsPartial as *const usize)
-            .add(SLOT_GET_FIRST_CMD_FUNCTION_HANDLE);
-        if slot == 0 {
-            return false;
-        }
-        let get_first: GetFirstCmdFn = std::mem::transmute(slot);
-        get_first()
-    };
-
     let mut wrapped = Vec::new();
-    let mut node = first;
-    let mut seen = 0;
-    while !node.is_null() && seen < MAX_NODES {
-        seen += 1;
-        // Safety: a live node of the engine's list; see demo_reload's module doc.
-        let entry = unsafe { &mut *node };
-        if !entry.name.is_null() {
-            let name = unsafe { CStr::from_ptr(entry.name) }.to_bytes();
-            let target = match Command::from_name(name) {
-                Some(Command::Connect) => {
-                    Some((&REAL_CONNECT, wrapped_connect as ConsoleCommandFn))
-                }
-                Some(Command::Listen) => Some((&REAL_LISTEN, wrapped_listen as ConsoleCommandFn)),
-                Some(Command::Retry) => Some((&REAL_RETRY, wrapped_retry as ConsoleCommandFn)),
-                Some(Command::Reconnect) => {
-                    Some((&REAL_RECONNECT, wrapped_reconnect as ConsoleCommandFn))
-                }
-                None => None,
-            };
-            if let Some((real, wrapper)) = target
-                && wrap(entry, real, wrapper)
-            {
-                wrapped.push(String::from_utf8_lossy(name).into_owned());
+    let listed = cmd_list::for_each(|name, entry| {
+        let target = match Command::from_name(name) {
+            Some(Command::Connect) => Some((&REAL_CONNECT, wrapped_connect as ConsoleCommandFn)),
+            Some(Command::Listen) => Some((&REAL_LISTEN, wrapped_listen as ConsoleCommandFn)),
+            Some(Command::Retry) => Some((&REAL_RETRY, wrapped_retry as ConsoleCommandFn)),
+            Some(Command::Reconnect) => {
+                Some((&REAL_RECONNECT, wrapped_reconnect as ConsoleCommandFn))
             }
+            None => None,
+        };
+        if let Some((real, wrapper)) = target
+            && cmd_list::wrap(entry, real, wrapper)
+        {
+            wrapped.push(String::from_utf8_lossy(name).into_owned());
         }
-        node = entry.next;
+    });
+    if !listed {
+        return false;
     }
     // `connect` is the one every route ends in; the rest are wrapped as found.
     let found = REAL_CONNECT.load(Ordering::Relaxed) != 0;
@@ -229,19 +192,6 @@ fn try_wrap() -> bool {
         };
     }
     found
-}
-
-/// Points `entry` at `wrapper`, keeping its handler in `real`.
-fn wrap(entry: &mut CmdFunction, real: &AtomicUsize, wrapper: ConsoleCommandFn) -> bool {
-    let Some(current) = entry.function else {
-        return false;
-    };
-    if current as usize == wrapper as usize {
-        return true;
-    }
-    real.store(current as usize, Ordering::Relaxed);
-    entry.function = Some(wrapper);
-    true
 }
 
 /// The commands the guard wraps.
@@ -378,11 +328,7 @@ unsafe fn guard(command: Command, real: &AtomicUsize) {
         }
         _ => {}
     }
-    let address = real.load(Ordering::Relaxed);
-    if address != 0 {
-        let real: ConsoleCommandFn = unsafe { std::mem::transmute(address) };
-        unsafe { real() };
-    }
+    unsafe { cmd_list::call_real(real) };
 }
 
 /// Whether `poll` reissued exactly this command; used up either way.
@@ -718,17 +664,5 @@ mod tests {
         // The developer's env var stays out of a player's console.
         assert!(!message.contains(ALLOW_ENV));
         assert!(message.ends_with('\n'));
-    }
-
-    #[test]
-    fn a_node_is_laid_out_as_cmd_add_command_builds_it() {
-        assert_eq!(
-            std::mem::size_of::<CmdFunction>(),
-            4 * std::mem::size_of::<usize>()
-        );
-        assert_eq!(
-            std::mem::offset_of!(CmdFunction, function),
-            2 * std::mem::size_of::<usize>()
-        );
     }
 }
