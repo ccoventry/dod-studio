@@ -1,5 +1,6 @@
 //! The primary screen's size, for the capture resolution a new install starts
-//! at (Studio's `settings_manager::default_resolution`).
+//! at (Studio's `settings_manager::default_resolution`) and for whether the
+//! game's window fits the screen with a title bar (#1337).
 //!
 //! Read with `GetDeviceCaps(DESKTOPHORZRES/DESKTOPVERTRES)` rather than
 //! `GetSystemMetrics(SM_CXSCREEN)`: the latter is scaled by Windows' display
@@ -56,9 +57,59 @@ pub fn default_capture_resolution(size: Option<(i32, i32)>) -> (i32, i32) {
     }
 }
 
+/// Rows a titled window's frame needs beyond its client area: the caption
+/// and borders took 39 at 100 % display scaling (#1337), with room for a
+/// bigger scaling's taller caption.
+const TITLED_FRAME_ROWS: i32 = 64;
+/// Columns the same frame needs: 16 at 100 %.
+const TITLED_FRAME_COLUMNS: i32 = 32;
+
+/// Whether the game's window needs `-noborder` to get a client area of
+/// `size` on a screen of `screen`. The pre-Anniversary build opens a
+/// resizable window, which Windows caps at about the screen's size plus 20
+/// rows; with its 39-row frame, a 2560x1440 capture on a 1440-row screen got
+/// a 2560x1421 client area, so PRE drew 1421 rows of a 1440-row frame: 19
+/// black rows on top and the picture 9 px low (#1337). The Anniversary
+/// build's window isn't resizable and isn't capped. A borderless window has
+/// no frame to subtract on either. `None` (the size can't be read) keeps the
+/// title bar.
+pub fn needs_borderless_window(size: (i32, i32), screen: Option<(i32, i32)>) -> bool {
+    let Some((screen_width, screen_height)) = screen else {
+        return false;
+    };
+    let (width, height) = size;
+    width.saturating_add(TITLED_FRAME_COLUMNS) > screen_width
+        || height.saturating_add(TITLED_FRAME_ROWS) > screen_height
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_as_tall_as_the_screen_goes_borderless() {
+        // The case #1337 measured: 2560x1440 on a 3440x1440 screen.
+        assert!(needs_borderless_window((2560, 1440), Some((3440, 1440))));
+        assert!(needs_borderless_window((1920, 1080), Some((1920, 1080))));
+        assert!(needs_borderless_window((1920, 1050), Some((1920, 1080))));
+    }
+
+    #[test]
+    fn a_window_as_wide_as_the_screen_goes_borderless() {
+        assert!(needs_borderless_window((3440, 1080), Some((3440, 1440))));
+    }
+
+    #[test]
+    fn a_window_that_fits_with_its_title_bar_keeps_it() {
+        assert!(!needs_borderless_window((1280, 720), Some((3440, 1440))));
+        assert!(!needs_borderless_window((1920, 1080), Some((2560, 1440))));
+        assert!(!needs_borderless_window((2560, 1440), Some((3840, 2160))));
+    }
+
+    #[test]
+    fn an_unknown_screen_keeps_the_title_bar() {
+        assert!(!needs_borderless_window((2560, 1440), None));
+    }
 
     #[test]
     fn full_hd_only_when_the_screen_holds_it() {

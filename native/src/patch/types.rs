@@ -887,9 +887,23 @@ impl PatcherConfig {
         // was on the command line once and fell off when the launchers were
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
+        //
+        // `-noborder` only when the window wouldn't fit the screen with its
+        // title bar: the pre-Anniversary build's client area then loses the
+        // caption's rows and every frame gets a black band on top (#1337).
+        let window_args = if crate::sys::screen::needs_borderless_window(
+            (width, height),
+            crate::sys::screen::primary_screen_size(),
+        ) {
+            crate::log_markdown(&crate::messages::game_window_borderless(width, height));
+            "-windowed -noborder"
+        } else {
+            "-windowed"
+        };
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
+            "-game {} -insecure -addons -demoedit {} -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
             game_folder,
+            window_args,
             width,
             height,
             crate::sys::studio_pipe::launch_arg(),
@@ -1164,6 +1178,25 @@ mod launch_args_tests {
             .position(|a| a == "-cmdLine")
             .expect("build_hlae_process must pass -cmdLine");
         args[at + 1].clone()
+    }
+
+    #[test]
+    fn the_window_goes_borderless_only_when_it_would_not_fit_the_screen() {
+        let screen = crate::sys::screen::primary_screen_size();
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let cfg = PatcherConfig {
+                resolution_width: width,
+                resolution_height: height,
+                ..Default::default()
+            };
+            let line = cmd_line_of(&cfg, "");
+            assert!(line.contains("-windowed"), "{line}");
+            assert_eq!(
+                line.contains("-noborder"),
+                crate::sys::screen::needs_borderless_window((width, height), screen),
+                "{width}x{height} on {screen:?}: {line}"
+            );
+        }
     }
 
     #[test]
