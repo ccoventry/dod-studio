@@ -1428,6 +1428,19 @@ button.danger-btn {
   font-weight: 600;
 }
 
+/* The kill feed's even layout can't draw (#1339), under the status line. */
+#killfeed-layout-warning {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+#killfeed-layout-warning[hidden] {
+  display: none;
+}
+
 #export-pool-free-indicator,
 #render-footer-pool-free,
 #footer-audit-summary {

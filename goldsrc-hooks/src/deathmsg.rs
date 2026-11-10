@@ -81,6 +81,7 @@ mod clear;
 mod colour;
 mod even;
 mod font;
+mod layout_report;
 mod name_cap;
 mod replace;
 mod scale;
@@ -89,6 +90,7 @@ mod scale;
 #[cfg(target_arch = "x86")]
 pub(crate) use backdrop::fill as fill_box;
 pub(crate) use clear::on_round_state;
+pub(crate) use layout_report::report_again as report_layout_again;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
