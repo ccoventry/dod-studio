@@ -1,0 +1,386 @@
+/* The Project settings page (project_settings_page.js, #1085). Its own file,
+   imported by the page's module, so styles.css (which web-analyzer copies by
+   hand) doesn't grow for a page the website never shows. Colours are the
+   tokens styles.css defines. */
+
+/* Over everything under the menu bar; under the menus (500), modals (1000)
+   and toasts, which still open on top. `top` is set from the menu bar's
+   height when the page opens. */
+.ps-page {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 52px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-dark);
+  outline: none;
+}
+
+.ps-page[hidden] {
+  display: none;
+}
+
+.ps-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 24px;
+  padding: 20px 24px 0;
+}
+
+.ps-side {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ps-kicker {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-title {
+  font-size: 1.9em;
+  line-height: 1.15;
+  color: var(--text-strong);
+  margin-bottom: 10px;
+}
+
+.ps-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ps-section-link {
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ps-section-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+
+.ps-side-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.ps-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ps-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ps-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ps-tab-on {
+  color: var(--text-strong);
+  border-bottom-color: var(--accent-line);
+}
+
+.ps-banner {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--info-border);
+  background: var(--surface-inset);
+  color: var(--text-bright);
+}
+
+.ps-banner[hidden] {
+  display: none;
+}
+
+.ps-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.ps-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 900px;
+  padding-bottom: 20px;
+}
+
+.ps-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px 18px;
+}
+
+.ps-card-title {
+  font-size: 1.25em;
+  color: var(--text-strong);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ps-card-sub {
+  margin-left: 10px;
+  font-size: 0.72em;
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.ps-row {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.ps-row:last-child {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.ps-row-title {
+  font-weight: 600;
+  color: var(--text-emphasis);
+}
+
+.ps-row-hint {
+  margin-top: 2px;
+  font-size: 0.88em;
+  color: var(--text-muted);
+}
+
+.ps-row-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ps-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-mid);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ps-chip:hover {
+  border-color: var(--border-accent);
+  color: var(--text-strong);
+}
+
+.ps-chip-on,
+.ps-chip-on:hover {
+  background: var(--primary-accent);
+  border-color: var(--accent-line);
+  color: var(--text-strong);
+  cursor: default;
+}
+
+.ps-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ps-grow {
+  align-self: stretch;
+}
+
+.ps-grow .ps-text {
+  flex: 1;
+  min-width: 240px;
+}
+
+.ps-unit {
+  color: var(--text-muted);
+}
+
+.ps-number,
+.ps-text,
+.ps-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+
+.ps-mono {
+  font-family: monospace;
+}
+
+.ps-select:disabled {
+  opacity: 0.5;
+}
+
+.ps-invalid {
+  border-color: var(--danger-light);
+}
+
+.ps-problem {
+  color: var(--danger-light);
+  font-size: 0.9em;
+}
+
+.ps-note,
+.ps-muted {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.ps-warn {
+  color: var(--warn);
+  font-size: 0.9em;
+  white-space: pre-line;
+}
+
+.ps-link-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 2px;
+  color: var(--link);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ps-placeholders {
+  margin: 0;
+}
+
+.ps-folder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ps-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-control);
+  word-break: break-all;
+}
+
+.ps-chip-x {
+  background: transparent;
+  border: none;
+  padding: 0 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1em;
+}
+
+.ps-chip-x:hover {
+  color: var(--danger-hot);
+}
+
+.ps-install-name {
+  color: var(--text-emphasis);
+}
+
+.ps-state {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.88em;
+  border: 1px solid;
+}
+
+.ps-state-ok {
+  color: var(--ok-light);
+  border-color: var(--ok-border);
+}
+
+.ps-state-warn {
+  color: var(--warn);
+  border-color: var(--warn-border);
+}
+
+.ps-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-panel);
+}
+
+.ps-footer button {
+  min-width: 88px;
+}
+
+/* Apply, Discard or Stay, over the page only. */
+.ps-leave {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  z-index: 1;
+}
+
+.ps-leave-box {
+  max-width: 440px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ps-leave-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
