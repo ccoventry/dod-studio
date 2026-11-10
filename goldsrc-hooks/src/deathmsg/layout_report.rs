@@ -65,14 +65,22 @@ pub(super) enum Step {
 
 /// What to do with `now`, this frame's state, given the state seen last
 /// frame, how many frames it had held, and what was last sent. Returns the
-/// new count with the step. `level` is whether a level's HUD has loaded.
-pub(super) fn settle(seen: u8, steady: u32, sent: u8, now: u8, level: bool) -> (u32, Step) {
+/// new count with the step. `level` says whether a level is loaded; it is
+/// asked only once every [`SETTLE_FRAMES`] frames of a settled state not
+/// sent yet, since the demo player's clock it reads is not a per-frame read.
+pub(super) fn settle(
+    seen: u8,
+    steady: u32,
+    sent: u8,
+    now: u8,
+    level: impl FnOnce() -> bool,
+) -> (u32, Step) {
     let steady = if now == seen {
         steady.saturating_add(1)
     } else {
         0
     };
-    if !level || steady < SETTLE_FRAMES || now == sent {
+    if steady < SETTLE_FRAMES || steady % SETTLE_FRAMES != 0 || now == sent || !level() {
         return (steady, Step::Wait);
     }
     if sent == AGAIN && now == DEFAULT {
@@ -83,7 +91,11 @@ pub(super) fn settle(seen: u8, steady: u32, sent: u8, now: u8, level: bool) -> (
 
 /// Follows the layout's state, every frame. `why` gives a `waiting` state's
 /// reason word and the hook's own words; it runs only on a change.
-pub(super) fn follow(now: u8, level: bool, why: impl FnOnce() -> (&'static str, String)) {
+pub(super) fn follow(
+    now: u8,
+    level: impl FnOnce() -> bool,
+    why: impl FnOnce() -> (&'static str, String),
+) {
     let seen = SEEN.swap(now, Ordering::Relaxed);
     let (steady, step) = settle(
         seen,
@@ -158,7 +170,7 @@ mod tests {
     fn run(state: &mut (u8, u32, u8), now: u8, level: bool, frames: u32) -> Vec<Step> {
         let mut steps = Vec::new();
         for _ in 0..frames {
-            let (steady, step) = settle(state.0, state.1, state.2, now, level);
+            let (steady, step) = settle(state.0, state.1, state.2, now, || level);
             *state = (now, steady, state.2);
             match step {
                 Step::Wait => {}
@@ -205,12 +217,44 @@ mod tests {
 
     #[test]
     fn a_new_batch_hears_the_state_again_but_not_a_default_layout() {
-        let mut s = (HD_OFF, 10_000, HD_OFF);
-        s.2 = AGAIN;
-        assert_eq!(run(&mut s, HD_OFF, true, 1), vec![Step::Send(HD_OFF)]);
+        let mut s = (HD_OFF, 10_000, AGAIN);
+        assert_eq!(
+            run(&mut s, HD_OFF, true, SETTLE_FRAMES),
+            vec![Step::Send(HD_OFF)]
+        );
         let mut s = (DEFAULT, 10_000, AGAIN);
-        assert_eq!(run(&mut s, DEFAULT, true, 1), vec![Step::Note(DEFAULT)]);
+        assert_eq!(
+            run(&mut s, DEFAULT, true, SETTLE_FRAMES),
+            vec![Step::Note(DEFAULT)]
+        );
         assert!(run(&mut s, DEFAULT, true, 100).is_empty());
+    }
+
+    /// The level check is the demo player's clock, so it is asked once
+    /// every [`SETTLE_FRAMES`] frames at most, and only while there is
+    /// something to send.
+    #[test]
+    fn the_level_is_asked_rarely_and_only_with_something_to_send() {
+        let mut asked = 0;
+        let (mut seen, mut steady, sent) = (DEFAULT, 0, DEFAULT);
+        for _ in 0..SETTLE_FRAMES * 10 {
+            let now = WAITING + 1;
+            let (s, step) = settle(seen, steady, sent, now, || {
+                asked += 1;
+                false
+            });
+            assert_eq!(step, Step::Wait);
+            (seen, steady) = (now, s);
+        }
+        assert_eq!(asked, 9);
+        let mut asked = 0;
+        for _ in 0..SETTLE_FRAMES * 3 {
+            let _ = settle(DEFAULT, steady, DEFAULT, DEFAULT, || {
+                asked += 1;
+                true
+            });
+        }
+        assert_eq!(asked, 0, "nothing to send");
     }
 
     #[test]

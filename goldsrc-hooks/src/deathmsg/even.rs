@@ -472,12 +472,18 @@ fn report_state(want_even: bool, wait: Wait) -> u8 {
     }
 }
 
-/// Tells Studio the state once it settles (`layout_report`).
+/// Tells Studio the state once it settles (`layout_report`), with a level
+/// loaded: the HUD has loaded its sheets since the hooks went in, or a demo
+/// is playing. A batch's first demo can load its sheets before the hooks
+/// are in (measured on POST), so the sheet count alone can miss it.
 fn report_to_studio(state: u8) {
-    #[cfg(target_arch = "x86")]
-    let level = crate::hud_sprites::hud_generation() > 0;
-    #[cfg(not(target_arch = "x86"))]
-    let level = false;
+    let level = || {
+        #[cfg(target_arch = "x86")]
+        return crate::hud_sprites::hud_generation() > 0
+            || crate::demo_seek::clock().is_some_and(|c| c.active && !c.loading);
+        #[cfg(not(target_arch = "x86"))]
+        false
+    };
     super::layout_report::follow(state, level, || {
         let wait = Wait::from_u8(WAIT.load(Ordering::Relaxed));
         (wait.code(), why_waiting())
