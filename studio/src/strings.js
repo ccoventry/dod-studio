@@ -1737,6 +1737,7 @@ export const STRINGS = {
       + (marked > rendered ? ` ${marked - rendered} highlight(s) marked Captured.` : '')
       + (rendered > 0 ? ` ${rendered} highlight(s) marked Rendered: their clips were finished before it closed.` : ''),
     projectUpdated: (name) => `Marked them in the project ${name}.`,
+    SAVED_OPEN_PROJECT: 'Saved them in the open project.',
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
     // The game is open, so the batch may still be capturing in it (#20).

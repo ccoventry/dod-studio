@@ -10,8 +10,9 @@
 // Rendered: its clip is done, and that mark was lost with the unsaved project.
 //
 // A batch started from a project file is marked in that file, unless it is
-// the project open right now: then it is marked in the open queue, which
-// leaves it unsaved like any other status change. A batch with no project is
+// the project open right now: then it is marked in the open queue and saved
+// with it, unless the project already had unsaved edits, which stay the
+// user's to save (#1344). A batch with no project is
 // marked in the open queue, which matches only if those demos are loaded.
 
 import { listen } from '@tauri-apps/api/event';
@@ -116,11 +117,13 @@ const defaultIo = {
  *   getTakeIndex(), getSessionPath() the open project file or null,
  *   onStatusChange() to re-render and mark the project unsaved, and for the
  *   offer to capture the rest (batch_resume.js) openProject(path) and
- *   startCapture(). `io` swaps the IPC and toasts out in tests, `resume` the
- *   offer.
+ *   startCapture(). saveIfOnlyChange(change) from project_session.js saves
+ *   the open project when the marks are its only change. `io` swaps the IPC
+ *   and toasts out in tests, `resume` the offer.
  */
 export function createBatchCatchUp({
   getDemos, getTakeIndex, getSessionPath, onStatusChange, openProject, startCapture, io = defaultIo,
+  saveIfOnlyChange = async (change) => ({ result: await change(), saved: false }),
   resume = createBatchResume({ openProject, getSessionPath, getDemos, onSelectionChange: onStatusChange, startCapture }),
 }) {
   /** Marks `batch` in the project file it came from. Returns a note for the toast. */
@@ -158,9 +161,13 @@ export function createBatchCatchUp({
         failed ? 'error' : toastKind(result));
       return failed ? null : result;
     }
-    const result = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
-    if (result.changed) onStatusChange();
-    io.toast(STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked, result.markedRendered), toastKind(result));
+    const { result, saved } = await saveIfOnlyChange(() => {
+      const marks = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
+      if (marks.changed) onStatusChange();
+      return marks;
+    }, { madeChange: (marks) => marks.changed });
+    const note = saved ? ` ${STRINGS.BATCH_CATCH_UP.SAVED_OPEN_PROJECT}` : '';
+    io.toast(`${STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked, result.markedRendered)}${note}`, toastKind(result));
     return result;
   }
 
