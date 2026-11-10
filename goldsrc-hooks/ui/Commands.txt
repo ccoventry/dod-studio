@@ -109,10 +109,10 @@ SOUND
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
   ds_sound_restore_gunshots 0/1
       HLTV and POV demos: play the gunshots a demo left silent, every player's, the recorder's too (on by default).
-  ds_sound_headshot_far 0/1
+  ds_sound_headshot_farther 0/1
       Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
-  ds_sound_headshot_viewed_far 0/1
-      With ds_sound_headshot_far on, only the headshots the viewed player makes carry further: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+  ds_sound_headshot_pov_farther 0/1
+      With ds_sound_headshot_farther on, only the headshots the POV player makes carry further: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
