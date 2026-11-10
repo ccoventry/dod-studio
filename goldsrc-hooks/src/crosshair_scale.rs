@@ -11,16 +11,17 @@
 //!
 //! ## Pixel for pixel
 //!
-//! The engine's sprite draw does not draw a rect at its own pixels: it maps
-//! `w - 1` texels of a `w`-px rect over `w` px with linear filtering
-//! (measured on both builds, `docs/goldsrc_crosshair.md` §4). Pixel `px` of a
-//! draw at `x` samples texel coordinate `(px + 0.5 - x) * (w - 1) / w`, so the
-//! art comes out a pixel bigger than it is, about every second pixel is a
-//! half-and-half blend, and a 64x64 tile's middle sits half a pixel down and
-//! right of where the game centred it. So every crosshair draw, at the game's
-//! size too, is zoomed by [`fit`] about its own top-left first: texel `j` then
-//! lands on the middle of pixel `x + j`, and the art draws at exactly its own
-//! pixels. At any other scale the same fit is folded into the scale's zoom.
+//! The engine's sprite draw does not draw a rect at its own pixels: it draws
+//! a `w`-px quad half a pixel in from the draw's `(x, y)`, textured from half a
+//! texel inside the rect's edge to half a texel inside the other, so `w - 1`
+//! texels cover `w` px with linear filtering (measured on both builds,
+//! `docs/goldsrc_crosshair.md` §4). The art comes out a pixel bigger than it
+//! is, about every second pixel is a half-and-half blend, and a 64x64 tile's
+//! middle sits half a pixel down and right of where the game centred it. So
+//! every crosshair draw, at the game's size too, is zoomed by [`fit`] about
+//! the quad's own corner `(x + 0.5, y + 0.5)` first: texel `j` then lands on
+//! the middle of pixel `x + j`, and the art draws at exactly its own pixels.
+//! At any other scale the same fit is folded into the scale's zoom.
 //!
 //! One number for every crosshair on screen: the Players table's, the game's
 //! `customXHair.spr` tile, the spectator's stock `crosshairs.spr` rect and the
@@ -167,16 +168,27 @@ fn fit(size: i32) -> f32 {
     }
 }
 
+/// How far in from a draw's `(x, y)` the engine puts its quad's corner, in
+/// pixels, across and down. Measured, not read from the engine: a fit about
+/// `(x, y)` itself drew every colour texel exactly but left each texel's
+/// sample `1 / (2 w)` of a texel right of its middle, and the alpha test lets
+/// that sliver through, so every left and top edge of the art grew a black
+/// pixel. Nudging the fit's point right showed no extra pixel on any side
+/// only at 1/128 px for a 64-px tile, which is `0.5 * (1 - 63/64)`: the zoom
+/// about a point half a pixel in.
+const QUAD_INSET: f32 = 0.5;
+
 /// The zoom for a crosshair draw of `rect` at `(x, y)`: [`fit`] about the
-/// draw's own top-left, then, at a `scale` other than 1, that scale about the
-/// screen's centre corner `centre`. Without a centre it draws at its own size.
+/// engine's quad corner (`QUAD_INSET` in from the draw's top-left), then, at
+/// a `scale` other than 1, that scale about the screen's centre corner
+/// `centre`. Without a centre it draws at its own size.
 ///
 /// The fit puts a tile's middle (texel 32, the corner the creator draws the
 /// crosshair about) exactly on the centre corner the game centred the tile
 /// on, so zooming about that same corner keeps it there at any scale, and the
 /// crosshair mirrors about a pixel corner both ways (#1348).
 fn zoom_for(x: i32, y: i32, rect: &Wrect, scale: f32, centre: Option<(i32, i32)>) -> Zoom {
-    let from = (x as f32, y as f32);
+    let from = (x as f32 + QUAD_INSET, y as f32 + QUAD_INSET);
     let fit = (fit(rect.right - rect.left), fit(rect.bottom - rect.top));
     match centre {
         Some((cx, cy)) if scale != 1.0 => {
@@ -259,17 +271,29 @@ mod tests {
         bottom: 24,
     };
 
-    /// Where texel coordinate `u` of a rect `size` px across, drawn by the
-    /// engine at `x`, lands on screen under `zoom`'s x axis. The engine puts
-    /// it at `x + u * size / (size - 1)` (the measured stretch).
+    /// Where the engine draws texel coordinate `u` (texel `j`'s middle is
+    /// `j + 0.5`) of a rect `size` px across drawn at `x`: its quad starts
+    /// half a pixel in, at texel 0.5, and ends at texel `size - 0.5` (the
+    /// measured draw).
+    fn engine(x: i32, size: i32, u: f32) -> f32 {
+        x as f32 + 0.5 + (u - 0.5) * size as f32 / (size - 1) as f32
+    }
+
+    /// Where texel coordinate `u` lands on screen under `zoom`'s x axis.
     fn on_screen_x(zoom: &Zoom, x: i32, size: i32, u: f32) -> f32 {
-        let engine = x as f32 + u * size as f32 / (size - 1) as f32;
-        zoom.to.0 + zoom.scale.0 * (engine - zoom.from.0)
+        zoom.to.0 + zoom.scale.0 * (engine(x, size, u) - zoom.from.0)
     }
 
     fn on_screen_y(zoom: &Zoom, y: i32, size: i32, u: f32) -> f32 {
-        let engine = y as f32 + u * size as f32 / (size - 1) as f32;
-        zoom.to.1 + zoom.scale.1 * (engine - zoom.from.1)
+        zoom.to.1 + zoom.scale.1 * (engine(y, size, u) - zoom.from.1)
+    }
+
+    #[test]
+    fn unfitted_the_engine_draws_a_tile_a_pixel_big_and_off_centre() {
+        // The measured picture this module undoes: texel 32's middle half a
+        // pixel past the centre corner, the art 64 px across for 63 texels.
+        assert!((engine(1248, 64, 32.5) - 1281.0).abs() < 0.01);
+        assert!((engine(1248, 64, 63.5) - engine(1248, 64, 0.5) - 64.0).abs() < 1e-3);
     }
 
     #[test]
