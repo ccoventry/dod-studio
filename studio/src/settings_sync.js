@@ -420,5 +420,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
-  setRenderWhileCapturing(settings.render_while_capturing);
+  setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
 }

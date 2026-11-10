@@ -8,7 +8,7 @@
 // defaults to `.dodstudio`.
 
 import { STRINGS } from './strings.js';
-import { fileNameOf } from './path_display.js';
+import { fileNameOf, folderOf } from './path_display.js';
 
 export const PROJECT_EXTENSION = 'dodstudio';
 export const DEFAULT_PROJECT_NAME = `dod_project.${PROJECT_EXTENSION}`;
@@ -23,6 +23,18 @@ export function projectSaveDialogOptions(projectsDir) {
       { name: STRINGS.MAIN.PROJECT_FILTER_NAME, extensions: [PROJECT_EXTENSION] },
       { name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] },
     ],
+  };
+}
+
+/** Options for Save a copy's dialog, the only way to save a project that
+ *  needs a newer build to save over it: `<name> copy.dodstudio` beside it. */
+export function projectCopyDialogOptions(path) {
+  const stem = (fileNameOf(path) || '').replace(/\.(json|dodstudio)$/i, '');
+  const name = `${STRINGS.PROJECT_FILE.copyName(stem)}.${PROJECT_EXTENSION}`;
+  return {
+    ...projectSaveDialogOptions(null),
+    title: STRINGS.PROJECT_FILE.SAVE_COPY_DIALOG_TITLE,
+    defaultPath: `${folderOf(path)}\\${name}`,
   };
 }
 
