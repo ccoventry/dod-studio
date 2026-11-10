@@ -473,10 +473,8 @@ fn report_state(want_even: bool, wait: Wait) -> u8 {
 }
 
 /// Tells Studio the state once it settles (`layout_report`), with a level
-/// loaded: the engine names one. Not the HUD's sheet count
-/// (`hud_generation`), which stayed 0 through a whole demo on POST, nor the
-/// demo player's `IsActive`, which read false there while the demo played
-/// (both measured, #1339).
+/// loaded: the engine names one, on either build. At the menu before the
+/// first demo the layout can't draw at all, which is no news.
 fn report_to_studio(state: u8) {
     let level = || crate::map_text::level_name().is_some();
     super::layout_report::follow(state, level, || {
