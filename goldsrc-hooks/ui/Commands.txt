@@ -27,6 +27,12 @@ HUD
       Stop a POV demo's recorded TAB presses showing the scoreboard.
   ds_hud_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
+  ds_hud_crosshair_scale <n>
+      Draw the crosshair n times bigger, for movies at high resolutions (default 1, at most 8).
+  ds_hud_crosshair_outline_size <px>
+      Draw a border this many pixels thick around the crosshair (default 0, off; at most 8).
+  ds_hud_crosshair_outline_color "R G B"
+      The crosshair border's colour, three whole numbers 0-255 (default "0 0 0", black).
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   ds_hud_hide_hints 0/1
@@ -105,6 +111,8 @@ SOUND
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
   ds_sound_restore_gunshots 0/1
       HLTV and POV demos: play the gunshots a demo left silent, every player's, the recorder's too (on by default).
+  ds_sound_headshot_far 0/1
+      Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>

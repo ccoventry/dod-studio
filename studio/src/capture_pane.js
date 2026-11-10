@@ -60,6 +60,12 @@ export function isCaptureRunning() {
   return capturingInFlight;
 }
 
+/** Whether Start Capture's checks are running, before the batch's first
+ *  report (#1085: the project can't change under them). */
+export function isCaptureStarting() {
+  return !!precheck?.isChecking();
+}
+
 // Start Capture Batch's click, once initCaptureUI has wired it.
 let startCaptureClick = null;
 

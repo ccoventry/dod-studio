@@ -149,6 +149,7 @@ pub fn install() {
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
+    let crosshair_scale_cvar = register(CROSSHAIR_SCALE_NAME, "1");
     let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
     // Defaults to the engine's own ceiling, so registering it changes nothing
     // until someone asks for more.
@@ -267,7 +268,14 @@ pub fn install() {
         crate::spec_xray::XRAY.set_cvar(xray);
     }
     {
+        use crate::crosshair_outline as outline;
         use crate::spec_xray::colour;
+        if let Some(size) = register(outline::SIZE_NAME, "0") {
+            outline::SIZE.set(size);
+        }
+        if let Some(colour) = register(outline::COLOR_NAME, outline::COLOR_DEFAULT) {
+            outline::COLOR.set(colour);
+        }
         if let Some(allies) = register(colour::ALLIES_NAME, colour::ALLIES_DEFAULT) {
             colour::ALLIES.set(allies);
         }
@@ -290,6 +298,9 @@ pub fn install() {
         if let Some(mute) = register(family.setting(), "0") {
             family.cvar().set(mute);
         }
+    }
+    if let Some(far) = register(crate::headshot_sound::NAME, "0") {
+        crate::headshot_sound::CVAR.set(far);
     }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
         crate::map_sounds::LOG_CVAR.set(log);
@@ -329,6 +340,7 @@ pub fn install() {
         (&CVAR_CROSSHAIR, crosshair_cvar),
         (&CVAR_HAND_SIGNALS, hand_signals_cvar),
         (&CVAR_EX_INTERP, ex_interp_cvar),
+        (&CVAR_CROSSHAIR_SCALE, crosshair_scale_cvar),
         (&CVAR_TEXTURE_HIRES_LOG, texture_hires_log_cvar),
     ] {
         match registered {

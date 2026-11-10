@@ -1,7 +1,8 @@
 # The crosshair: hiding it, and matching it while spectating
 
 `ds_hud_hide_crosshair`, the crosshair half of `ds_spec_match_pov`,
-and each player's crosshair from Studio's Players table (§3).
+each player's crosshair from Studio's Players table (§3),
+`ds_hud_crosshair_scale` (§4) and the drawn border (§5).
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -406,3 +407,65 @@ table's crosshair does not appear.
 
 The draw path reads three atomics; the decision (the player, their row, the
 handle) is made once a frame in `HUD_Frame`.
+
+---
+
+## 4. `ds_hud_crosshair_scale` (#1335)
+
+Every crosshair draw is exact pixels from a small rect, and a `customXHair.spr`
+tile is 64x64, so at 2560x1440 no crosshair can pass 4% of the frame's height.
+Vertex's creator stops at the tile too: fully cranked, the arms reach the
+tile's edge and leave no room for a border.
+
+`crosshair_scale.rs` wraps each of the crosshair's draws in `gl_zoom`, the
+modelview zoom the kill feed's scale uses, about the screen's centre. Both
+paths in §1's fork centre on that point, so one centre serves the tile, the
+spectator rect and all five pieces of the red crosshair, whose gap scales with
+it. The zoom sits in `hud_sprites::draw_through`, around §3's swap, so what is
+drawn and when are decided as before, and §1's hide and §2's gate still win.
+
+The zoom point is chosen so the crosshair's middle lands exactly on the
+screen's centre corner (W/2, H/2) at any scale (#1348). At the game's size a
+`customXHair.spr` tile's pixels mirror about the middle of pixel
+(W/2, H/2), half a pixel down and right of that corner (measured at
+2560x1440: the blended pixels 7 and 15 px either side of pixel 1280 match,
+39% and 73%; the engine maps a 64-px quad onto texels 0.5 to 63.5). Zooming
+about the corner itself moved the crosshair's middle `0.5 * (S - 1)` px
+further, onto no pixel's middle or edge, so its two sides were sampled at
+different phases: at 1.25 a sheet's 1-texel border came out 1.5 px on the
+top and left and 2.3 px on the bottom and right, though the art is a mirror
+image centred in its tile. On a pixel corner the crosshair mirrors both
+ways, and since the creator draws its crosshairs about a texel corner,
+every edge of the border comes out alike: 1.7 to 1.85 px at 1.25 measured
+on both builds. Zooming about the pixel's middle also mirrored it, but left
+each arm's two ends 1.5 and 2.4 px.
+
+The bars and any border in the sheet scale with the crosshair. A thin border
+on a big crosshair is §5's job.
+
+---
+
+## 5. `ds_hud_crosshair_outline_size` and `_color`
+
+The kill-feed icons' outline is part of their art. A crosshair sheet has no room
+for one, and a border in a sheet doubles with §4's scale, so `crosshair_outline.rs`
+draws it: the crosshair's own `SPR_DrawHoles`, once for each pixel offset out to
+the size, then the crosshair on top. The offsets are applied outside §4's zoom,
+so the border stays that many of the frame's pixels at any scale, and a 128 px
+crosshair can have a 2 px edge.
+
+They fill the whole square, not its rim: an arm thinner than the border would
+otherwise leave a gap to its copy. That makes corners square, like the borders
+in the creator's sheets.
+
+`SPR_Set`'s tint multiplies the sprite, so it can make a tile black but not
+white. A `GL_COMBINE` texture stage set before the draw changes nothing: the
+engine's draw sets the stage itself (measured on both builds). So the copies
+draw under GL fog at full strength, which replaces a fragment's colour after
+texturing and leaves its alpha, the crosshair's shape, alone.
+
+`SPR_Draw` and `SPR_DrawAdditive` draws get no border: `SPR_DrawAdditive` has no
+mask, so a copy would be the whole rect.
+
+Each of the red crosshair's five pieces gets its own border, so a border wider
+than half the gap covers the piece next to it where the two meet.
