@@ -888,18 +888,24 @@ impl PatcherConfig {
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         //
-        // `-noborder` only when the window wouldn't fit the screen with its
-        // title bar: the pre-Anniversary build's client area then loses the
-        // caption's rows and every frame gets a black band on top (#1337).
-        let window_args = if crate::sys::screen::needs_borderless_window(
-            (width, height),
-            crate::sys::screen::primary_screen_size(),
-        ) {
-            crate::log_markdown(&crate::messages::game_window_borderless(width, height));
-            "-windowed -noborder"
-        } else {
-            "-windowed"
-        };
+        // `-noborder` only on the pre-Anniversary build, and only when the
+        // window wouldn't fit the screen with its title bar: its client area
+        // then loses the caption's rows and every frame gets a black band on
+        // top (#1337). The Anniversary build's window isn't capped, and this
+        // line also serves Launch Game, Review and Launch Preview, where a
+        // borderless window would only lose its title bar.
+        let window_args =
+            if !crate::sys::packet_limit::is_anniversary(std::path::Path::new(&hl_exe))
+                && crate::sys::screen::needs_borderless_window(
+                    (width, height),
+                    crate::sys::screen::primary_screen_size(),
+                )
+            {
+                crate::log_markdown(&crate::messages::game_window_borderless(width, height));
+                "-windowed -noborder"
+            } else {
+                "-windowed"
+            };
         let cmd_line_str = format!(
             "-game {} -insecure -addons -demoedit {} -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
             game_folder,
@@ -1180,22 +1186,49 @@ mod launch_args_tests {
         args[at + 1].clone()
     }
 
+    /// A config whose `hl.exe` sits beside a `hw.dll` holding `hw_dll`, at
+    /// `width`x`height`.
+    fn config_in(
+        dir: &crate::test_support::Scratch,
+        hw_dll: &[u8],
+        width: i32,
+        height: i32,
+    ) -> PatcherConfig {
+        std::fs::write(dir.join("hw.dll"), hw_dll).unwrap();
+        PatcherConfig {
+            game_path: dir.join("hl.exe").display().to_string(),
+            resolution_width: width,
+            resolution_height: height,
+            ..Default::default()
+        }
+    }
+
     #[test]
-    fn the_window_goes_borderless_only_when_it_would_not_fit_the_screen() {
+    fn a_pre_anniversary_window_goes_borderless_only_when_it_would_not_fit_the_screen() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_pre");
         let screen = crate::sys::screen::primary_screen_size();
         for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
-            let cfg = PatcherConfig {
-                resolution_width: width,
-                resolution_height: height,
-                ..Default::default()
-            };
-            let line = cmd_line_of(&cfg, "");
+            let line = cmd_line_of(&config_in(&dir, b"MAX_PACKET_ENTITIES", width, height), "");
             assert!(line.contains("-windowed"), "{line}");
             assert_eq!(
                 line.contains("-noborder"),
                 crate::sys::screen::needs_borderless_window((width, height), screen),
                 "{width}x{height} on {screen:?}: {line}"
             );
+        }
+    }
+
+    #[test]
+    fn an_anniversary_window_keeps_its_title_bar_at_any_size() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_post");
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let cfg = config_in(&dir, b"MAX_PACKET_ENTITIES sv_allow_shaders", width, height);
+            let line = cmd_line_of(&cfg, "");
+            assert!(
+                line.contains(&format!("-windowed -w {width} -h {height}")),
+                "{line}"
+            );
+            assert!(!line.contains("-noborder"), "{line}");
         }
     }
 

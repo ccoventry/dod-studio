@@ -64,8 +64,9 @@ const TITLED_FRAME_ROWS: i32 = 64;
 /// Columns the same frame needs: 16 at 100 %.
 const TITLED_FRAME_COLUMNS: i32 = 32;
 
-/// Whether the game's window needs `-noborder` to get a client area of
-/// `size` on a screen of `screen`. The pre-Anniversary build opens a
+/// Whether the pre-Anniversary game's window needs `-noborder` to get a
+/// client area of `size` on a screen of `screen` (the caller checks the
+/// build). The pre-Anniversary build opens a
 /// resizable window, which Windows caps at about the screen's size plus 20
 /// rows; with its 39-row frame, a 2560x1440 capture on a 1440-row screen got
 /// a 2560x1421 client area, so PRE drew 1421 rows of a 1440-row frame: 19

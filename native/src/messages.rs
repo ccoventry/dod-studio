@@ -1651,7 +1651,7 @@ pub fn demo_bar_skipped(why: impl std::fmt::Display) -> String {
 
 pub fn game_window_borderless(width: i32, height: i32) -> String {
     format!(
-        "Game window: {width}x{height} doesn't fit the screen with a title bar, so it opens borderless (-noborder) and every frame is whole"
+        "Game window: {width}x{height} doesn't fit the screen with a title bar on the pre-Anniversary build, so it opens borderless (-noborder) and every frame is whole"
     )
 }
 
