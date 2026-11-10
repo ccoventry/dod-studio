@@ -16,6 +16,7 @@ test("a new project's first save defaults to a .dodstudio file", async ({ page }
   await page.evaluate(() => {
     window.__mockInvokeHandlers.default_projects_dir = () => 'D:\\projects';
     window.__mockInvokeHandlers['plugin:dialog|save'] = () => 'D:\\projects\\monday.dodstudio';
+    window.__missing.push('D:\\projects\\monday.dodstudio');
     window.__markDirty();
   });
   await page.locator('#file-menu-btn').click();
@@ -41,7 +42,12 @@ test('a project opened from .json keeps saving to that .json, with no dialog', a
   await page.locator('#save-project-btn').click();
   await expect(page.locator('#session-file-indicator')).toHaveText('old.json');
   expect(await calls(page, 'plugin:dialog|save')).toEqual([]);
-  expect((await calls(page, 'save_project_session')).map((a) => a.path)).toEqual(['D:/projects/old.json']);
+  // The file had no format number yet, so its first save backs it up first.
+  const [backup, saved, ...rest] = (await calls(page, 'save_project_session')).map((a) => a.path);
+  expect(backup).toMatch(/^D:\/projects\/old\.before-v2-.*\.dodstudio$/);
+  expect(saved).toBe('D:/projects/old.json');
+  expect(rest).toEqual([]);
+  await expect(page.locator('#toast-container')).toContainText(`Backup: ${backup}`);
 });
 
 test('Load Project lists .dodstudio and .json projects together', async ({ page }) => {
@@ -100,7 +106,8 @@ test('Switch with unsaved changes saves them into the renamed file', async ({ pa
   await openRecentJson(page, { dirtyAtOffer: true });
   await page.locator('#themed-confirm-ok-btn').click();
   await expect(page.locator('#session-file-indicator')).toHaveText('old.dodstudio');
-  expect((await calls(page, 'save_project_session')).map((a) => a.path)).toEqual(['D:/projects/old.dodstudio']);
+  await expect.poll(async () => (await calls(page, 'save_project_session')).map((a) => a.path).at(-1))
+    .toBe('D:/projects/old.dodstudio');
 });
 
 test('Keep as .json is remembered: the same project never asks again', async ({ page }) => {

@@ -21,6 +21,21 @@ export function projectFailedLine(action, path, err) {
 /** A new, empty session replaced the open one. */
 export const NEW_SESSION_LINE = '[project] new session';
 
+/** A batch started: the project stays open until it ends. */
+export function batchHeldLine() {
+  return '[project] a batch started: holding Open, New, Clear and Restart until it ends';
+}
+
+/** The batch ended: how long it held the project, and what was turned away. */
+export function batchReleasedLine(elapsedMs, refused) {
+  return `[project] the batch ended after ${elapsedMs} ms: released, ${refused} attempt(s) refused`;
+}
+
+/** A project change was turned away during a batch. */
+export function batchRefusedLine() {
+  return '[project] refused a project change: a batch is running';
+}
+
 /** What the search for a project's missing demos found. */
 export function missingDemosLine(checked, missing, foundElsewhere) {
   if (missing === 0) return `[project] all ${checked} demo(s) are where the project says`;
@@ -42,6 +57,12 @@ export function rendersPickedUpLine(takes, added, elapsedMs) {
   return `[project] read the render history of ${takes} take folder(s): ${added} video(s) new to the project (${elapsedMs} ms)`;
 }
 
+/** The renders opening found were the only change, so they were saved with
+ *  the open (#1345). */
+export function rendersSavedOnOpenLine(path, added, marked) {
+  return `[project] saved ${path} with the ${added} video(s) found in its take folders; ${marked} highlight(s) now Rendered`;
+}
+
 /** The take folders' render histories could not be read. */
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
@@ -55,4 +76,30 @@ export function projectEdlStartLine(total, chosen, scope) {
 /** The whole-project VEGAS export finished. */
 export function projectEdlExportedLine(count, scope, missing, skipped, ms) {
   return `[project] exported VEGAS EDL of ${count} video(s) (${scope}): ${missing} missing, ${skipped} left out, ${ms} ms`;
+}
+
+/** A save is about to raise a project's format: the backup comes first. */
+export function projectBackupStartedLine(path, fromSchema, toSchema) {
+  return `[project] updating ${path} from format ${fromSchema} to ${toSchema}: backing it up first`;
+}
+
+/** The backup before a format change is on disk. */
+export function projectBackedUpLine(backup, elapsedMs) {
+  return `[project] backed up to ${backup} (${elapsedMs} ms)`;
+}
+
+/** The one-time summary of a project's first save in a newer format. */
+export function projectUpdatedLine(path, { clips, takesFound, takesNotFound }, backup) {
+  const takes = takesFound === null ? 'takes not checked' : `${takesFound} take(s) found, ${takesNotFound} not found`;
+  return `[project] updated ${path}: ${clips} clip(s), ${takes}, backup ${backup}`;
+}
+
+/** A project from a newer build opened: its unknown data is kept, unused. */
+export function projectNewerLine(path, schema, keptKeys) {
+  return `[project] ${path} is format ${schema}, newer than this build: keeping ${keptKeys} unknown key(s)`;
+}
+
+/** A save refused because the file needs a newer build to save over it. */
+export function projectNeedsCopyLine(path) {
+  return `[project] ${path} needs a newer build to save over it: left as it is`;
 }

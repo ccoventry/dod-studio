@@ -415,6 +415,13 @@ body {
   background: transparent;
 }
 
+/* Held by a running batch (batch_guard.js, #1085): not `disabled`, which the
+   queue's footer and Load's dialog wait set for their own reasons. */
+.batch-held {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* A file/folder dialog is on its way (dialog_wait.js): the busy cursor
    everywhere, over each element's own cursor, until the dialog returns. */
 html.picking-path,
@@ -538,6 +545,11 @@ html.picking-path * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Room for "Made with a newer DoD Studio" after the file name (#1085). */
+.session-file-indicator.newer-project {
+  max-width: 420px;
 }
 
 /* Notification settings tab (issue #98) — two columns where they fit,
@@ -1087,6 +1099,23 @@ button.danger-btn {
 
 #master-demo-table .count-slash {
   color: var(--text-dim);
+}
+
+/* The totals row under the header (queue_totals.js): each total under its
+   column, set apart from the demos' rows below it. */
+#master-demo-table tr.queue-totals-row td {
+  font-weight: 600;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border-color);
+}
+
+#master-demo-table tr.queue-totals-row td.col-center {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#master-demo-table tr.queue-totals-row td.queue-totals-name {
+  color: var(--text-subtle);
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of

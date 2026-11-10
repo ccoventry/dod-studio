@@ -198,6 +198,11 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // The totals row under the queue's header (queue_totals.js).
+    totalsLabel: (shown, queued) => (shown === queued
+      ? `Total: ${shown} demo${shown === 1 ? '' : 's'}`
+      : `Total: ${shown} of ${queued} demos`),
+    TOTALS_TITLE: 'Totals of the demos listed below, with the search and filters applied. Hover Status or Review for the numbers in words.',
     // #21: a project demo that is not at its saved path.
     MISSING_BADGE: 'missing',
     missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
@@ -1160,7 +1165,11 @@ export const STRINGS = {
   RENDER_WHILE_CAPTURING: {
     LABEL: 'Render while capturing',
     TITLE:
-        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+        'Each clip renders as soon as the batch has recorded it, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    AT_ONCE_LABEL: 'Renders at once:',
+    atOnceOption: (renders, percent) => `${renders} (about ${percent}% of the CPU)`,
+    AT_ONCE_TITLE:
+        'How many clips render at the same time while the batch captures, never more than the Render tab\'s own number. Each takes the share of the CPU one of the Render tab\'s renders gets (a quarter at 4 at once), so this is also how much of the CPU the renders take from the capture. One leaves most of the CPU idle, so the renders fall behind the capture; more keep up better but slow the capture down. The capture never drops frames, it only takes longer.',
     HINT_OFF: 'Clips render after the batch.',
     HINT_ON_KEEP:
         'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
@@ -1725,15 +1734,45 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── What a running batch holds back (batch_guard.js, #1085) ──
+  BATCH_GUARD: {
+    HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
+    REFUSED_TOAST: 'A capture batch is running: this project stays open until it ends.',
+  },
+
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked, rendered = 0) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.`
+      + (marked > rendered ? ` ${marked - rendered} highlight(s) marked Captured.` : '')
+      + (rendered > 0 ? ` ${rendered} highlight(s) marked Rendered: their clips were finished before it closed.` : ''),
     projectUpdated: (name) => `Marked them in the project ${name}.`,
+    SAVED_OPEN_PROJECT: 'Saved them in the open project.',
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
     // The game is open, so the batch may still be capturing in it (#20).
     WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
     STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── The project file's format, backup and newer-build notes (project_file.js, #1085) ──
+  PROJECT_FILE: {
+    MADE_WITH_NEWER: 'Made with a newer DoD Studio',
+    NEWER_TITLE: 'This project was saved by a newer DoD Studio. Its new settings are kept when you save here, but not used.',
+    NEEDS_COPY_TITLE: 'This project was saved by a newer DoD Studio that asks older builds not to save over it. Save makes a copy instead.',
+    NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
+    SAVE_COPY_DIALOG_TITLE: 'Save a copy',
+    copyName: (stem) => `${stem} copy`,
+    updatedToast: ({ clips, takesFound, takesNotFound }, backup) => {
+      const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
+      return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}. Backup: ${backup}`;
+    },
+    backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
+    needsNewerBuild: (path) => `Not saved: ${path} needs a newer DoD Studio to save over it. Use Save a copy.`,
+    newerOnDisk: (path) => `Not saved: a newer DoD Studio saved ${path} after you opened it, and saving here would erase what it added. Save a copy, or open the file again.`,
+    writeFailed: (path, err) => `Not saved: could not write ${path}: ${err}`,
+    CANT_CHECK: 'could not check whether the file is there',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    noMigrationStep: (schema) => `This build has no way to update a project from format ${schema}.`,
   },
 
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
@@ -2998,6 +3037,8 @@ export const STRINGS = {
     AVAILABLE_TITLE: 'A new version of DoD Studio is out. Click to download and install it.',
     READY: 'Restart to update',
     READY_TITLE: 'The update has downloaded. Click, then Restart to Apply.',
+    RESTART_AFTER_BATCH: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'The update has downloaded. A capture batch is running, so it waits for the batch to end.',
   },
 
   // ── About modal (issue #122) ─────────────────────────────────────────────
@@ -3050,6 +3091,9 @@ export const STRINGS = {
     CHECK_NOW_BUTTON: 'Check for Updates Now',
     DOWNLOAD_INSTALL_BUTTON: 'Download & Install',
     RESTART_BUTTON: 'Restart to Apply',
+    RESTART_AFTER_BATCH_BUTTON: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'A capture batch is running: restarting now would stop Studio watching it.',
+    INSTALL_AFTER_BATCH_TITLE: 'A capture batch is running: installing closes DoD Studio, so this waits for the batch to end.',
     CLOSE_BUTTON: 'Close',
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',
@@ -3141,7 +3185,6 @@ export const STRINGS = {
     SCAN_FAILED: 'the scan failed',
     SAVE_FAILED: "the session wasn't saved",
     SESSION_CHANGED: 'another session was opened while it scanned',
-    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
     SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
