@@ -71,6 +71,10 @@ pub fn install() {
     );
     add_command(crate::position::NAME, crate::position::command);
     add_command(crate::debug_texture::NAME, crate::debug_texture::command);
+    add_command(
+        crate::map_light::RELOAD_NAME,
+        crate::map_light::reload_command,
+    );
 
     // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll.
@@ -298,8 +302,14 @@ pub fn install() {
     if let Some(far) = register(crate::headshot_sound::NAME, "0") {
         crate::headshot_sound::CVAR.set(far);
     }
-    if let Some(viewed) = register(crate::headshot_sound::POV_FARTHER_NAME, "0") {
-        crate::headshot_sound::POV_FARTHER.set(viewed);
+    if let Some(pov) = register(crate::headshot_sound::POV_FARTHER_NAME, "0") {
+        crate::headshot_sound::POV_FARTHER.set(pov);
+    }
+    if let Some(louder) = register(crate::headshot_sound::LOUDER_NAME, "0") {
+        crate::headshot_sound::LOUDER.set(louder);
+    }
+    if let Some(pov) = register(crate::headshot_sound::POV_LOUDER_NAME, "0") {
+        crate::headshot_sound::POV_LOUDER.set(pov);
     }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
         crate::map_sounds::LOG_CVAR.set(log);

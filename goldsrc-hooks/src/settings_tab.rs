@@ -90,6 +90,12 @@ const OVERVIEW_PLAYERS: &[(&str, &str)] = &[
     ("4", "Nobody"),
 ];
 const XRAY: &[(&str, &str)] = &[("0", "Off"), ("1", "Through walls"), ("2", "And outlines")];
+const HEADSHOT_LOUDER: &[(&str, &str)] = &[
+    ("0", "The game's own"),
+    ("1", "A little louder"),
+    ("2", "Louder"),
+    ("3", "Loudest (clipped)"),
+];
 const OVERVIEW_MARKER: &[(&str, &str)] = &[
     ("0", "The game's own"),
     ("1", "HLTV: team icon"),
@@ -361,6 +367,17 @@ pub const AREAS: &[Area] = &[
                 console_name!("sound_headshot_pov_farther"),
                 "POV player only",
                 "only the headshots the POV player (or the HLTV player you watch in first person) makes carry farther.",
+            ),
+            choice(
+                console_name!("sound_headshot_louder"),
+                "Headshot volume",
+                "plays a louder copy of the headshot sound, made from the game's own when DoD Studio starts the game.",
+                HEADSHOT_LOUDER,
+            ),
+            check(
+                console_name!("sound_headshot_pov_louder"),
+                "POV player only",
+                "only the headshots the POV player (or the HLTV player you watch in first person) makes play louder.",
             ),
         ],
     },

@@ -98,7 +98,9 @@ MAP
   ds_map_run_cfgs 0/1
       Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
   ds_map_apply_lighting 0/1
-      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius). 0 then 1 re-reads the file.
+      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius).
+  ds_map_reload_lighting
+      Read the map's _light.txt again and apply it now, for trying a new scale without reloading the demo.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
@@ -112,7 +114,11 @@ SOUND
   ds_sound_headshot_farther 0/1
       Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
   ds_sound_headshot_pov_farther 0/1
-      With ds_sound_headshot_farther on, only the headshots the POV player makes carry further: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+      With ds_sound_headshot_farther on, only the headshots the POV player makes carry farther: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+  ds_sound_headshot_louder 0-3
+      Play a louder headshot: 1 a little louder, 2 louder, 3 loudest (clipped). DoD Studio makes the louder copies from the game's own helmet_hit.wav when it starts the game.
+  ds_sound_headshot_pov_louder 0/1
+      With ds_sound_headshot_louder on, only the headshots the POV player makes play louder. Everyone else's play at the game's level.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>

@@ -180,12 +180,17 @@ export function updateStreakVisuals(streak) {
  *  each of those became its own chained demo: one 15-row table produced five
  *  passes over the same file. */
 function selectAllVisibleStreaks() {
-  if (!currentDemo || !currentDemo.streaks) return;
+  if (!currentDemo || !currentDemo.streaks) return 0;
+  let changed = 0;
   currentDemo.streaks.forEach(s => {
     // A Skip row stays unticked: it's locked out of every batch (#44).
-    if (isVisibleStreak(currentDemo, s) && !isSkipped(s)) s.selected = true;
+    if (isVisibleStreak(currentDemo, s) && !isSkipped(s) && !s.selected) {
+      s.selected = true;
+      changed += 1;
+    }
   });
   renderDetailView(currentDemo, currentDemoIdx);
+  return changed;
 }
 
 /** Deselects every streak in `currentDemo` — the header checkbox's
@@ -194,9 +199,16 @@ function selectAllVisibleStreaks() {
  *  not show, this is what clears it. Erring wide costs nothing here; erring
  *  narrow leaves a capture running that nobody asked for. */
 function deselectAllStreaks() {
-  if (!currentDemo || !currentDemo.streaks) return;
-  currentDemo.streaks.forEach(s => { s.selected = false; });
+  if (!currentDemo || !currentDemo.streaks) return 0;
+  let changed = 0;
+  currentDemo.streaks.forEach(s => {
+    if (s.selected) {
+      s.selected = false;
+      changed += 1;
+    }
+  });
   renderDetailView(currentDemo, currentDemoIdx);
+  return changed;
 }
 
 // Initialize event listeners for detail pane buttons
@@ -668,8 +680,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
     selectAllHeaderCb.checked = visibleStreaks.length > 0 && selectedVisible === visibleStreaks.length;
     selectAllHeaderCb.indeterminate = selectedVisible > 0 && selectedVisible < visibleStreaks.length;
     selectAllHeaderCb.addEventListener('change', (e) => {
-      if (e.target.checked) selectAllVisibleStreaks();
-      else deselectAllStreaks();
+      const changed = e.target.checked ? selectAllVisibleStreaks() : deselectAllStreaks();
+      // Ticks are saved in the project, so they mark it unsaved as a row's
+      // own checkbox does; without this a quiet save (#1346, #1347) wrote
+      // them with no "unsaved" shown first.
+      if (changed > 0 && currentOnDirty) currentOnDirty();
     });
   }
 
