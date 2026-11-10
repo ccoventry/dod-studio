@@ -1,7 +1,8 @@
 //! `ds_sound_headshot_far`: the headshot sound (`player/helmet_hit.wav`)
 //! falls off half as fast with distance, so a headshot is heard twice as far
 //! away. No `.wav` file or demo is touched. `ds_sound_headshot_viewed_far`
-//! keeps that to the headshots the viewed player makes (#1353).
+//! keeps that to the headshots the viewed player makes, and
+//! `ds_sound_headshot_louder` plays a louder copy of the sound (#1353).
 //!
 //! ## Where the sound comes from
 //!
@@ -59,9 +60,23 @@
 //! headshot kills, and a frame later for the other 9, which play at the
 //! game's distance. A head hit that doesn't kill has no `DeathMsg` and counts
 //! as someone else's.
+//!
+//! ## Louder (#1353)
+//!
+//! The engine can't play a sound above full volume, so
+//! `ds_sound_headshot_louder 1-3` plays a louder file instead: the hook hands
+//! `EV_PlaySound` one of [`LOUDER_SAMPLES`], which Studio writes into
+//! `<game>_addon\sound\dodstudio\` at every launch from the install's own
+//! `helmet_hit.wav` (`native/src/headshot_louder.rs` says how each step is
+//! made). The engine loads a client event's sound on first play, so the
+//! files need no precache. A step whose file isn't there (a launch without
+//! Studio or without `-addons`) plays the game's sound, and `ds_debug_status`
+//! says so. `ds_sound_headshot_viewed_louder` keeps it to the viewed
+//! player's headshots, the same pairing as `viewed_far`, so someone can have
+//! everyone's louder and only their own carry far, or the other way round.
 
-use std::ffi::CStr;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::ffi::{CStr, c_char};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use crate::engine::{self, ClEntityS};
 use crate::names::console_name;
@@ -71,9 +86,20 @@ pub const NAME: &str = console_name!("sound_headshot_far");
 pub static CVAR: Cvar = Cvar::new();
 pub const VIEWED_FAR_NAME: &str = console_name!("sound_headshot_viewed_far");
 pub static VIEWED_FAR: Cvar = Cvar::new();
+pub const LOUDER_NAME: &str = console_name!("sound_headshot_louder");
+pub static LOUDER: Cvar = Cvar::new();
+pub const VIEWED_LOUDER_NAME: &str = console_name!("sound_headshot_viewed_louder");
+pub static VIEWED_LOUDER: Cvar = Cvar::new();
 
 /// The sample DoD plays for a head hit.
 const SAMPLE: &[u8] = b"player/helmet_hit.wav";
+/// Steps 1-3 of `ds_sound_headshot_louder`, under `sound\`: the names
+/// `native::headshot_louder` writes (a test there checks they agree).
+const LOUDER_SAMPLES: [&CStr; 3] = [
+    c"dodstudio/helmet_hit_louder1.wav",
+    c"dodstudio/helmet_hit_louder2.wav",
+    c"dodstudio/helmet_hit_louder3.wav",
+];
 /// How much of its attenuation a headshot keeps with the setting on.
 const FAR_SCALE: f32 = 0.5;
 
@@ -95,6 +121,14 @@ static PLAYED: AtomicU32 = AtomicU32::new(0);
 static STRETCHED: AtomicU32 = AtomicU32::new(0);
 /// Headshots left at the game's distance because the viewed player didn't make them.
 static NOT_VIEWED: AtomicU32 = AtomicU32::new(0);
+static LOUDER_PLAYED: AtomicU32 = AtomicU32::new(0);
+/// Headshots left at the game's level because the viewed player didn't make them.
+static NOT_VIEWED_LOUDER: AtomicU32 = AtomicU32::new(0);
+/// Headshots that wanted a louder file that isn't there.
+static LOUDER_MISSING: AtomicU32 = AtomicU32::new(0);
+/// Per step, two bits: looked for its file, and found it. Files are written
+/// before the game starts, so one look each is enough.
+static LOUDER_FILES: AtomicU8 = AtomicU8::new(0);
 /// The last headshot's distance from the local player, in whole units.
 static LAST_DISTANCE: AtomicU32 = AtomicU32::new(u32::MAX);
 
@@ -134,15 +168,47 @@ fn killer_of(kills: impl Iterator<Item = (i32, i32, f32)>, victim: i32, now: f32
         .map(|(k, _, _)| k)
 }
 
-/// Whether a headshot carries further: the setting is on, and either it's for
+/// Whether a setting changes this headshot: it is on, and either it's for
 /// every headshot or the viewed player made this one.
-fn carries_far(far: bool, viewed_only: bool, by_viewed: impl FnOnce() -> bool) -> bool {
-    far && (!viewed_only || by_viewed())
+fn applies(on: bool, viewed_only: bool, by_viewed: impl FnOnce() -> bool) -> bool {
+    on && (!viewed_only || by_viewed())
+}
+
+/// `ds_sound_headshot_louder`'s value as a step, 0 (off) to 3; a value
+/// between steps rounds, one past them is the loudest.
+fn louder_step(value: f32) -> usize {
+    if value.is_nan() || value < 0.5 {
+        0
+    } else {
+        (value.round() as usize).min(LOUDER_SAMPLES.len())
+    }
 }
 
 /// Whether the `DeathMsg` hook must stay installed for [`note_kill`].
 pub fn wants_kills() -> bool {
-    CVAR.on() && VIEWED_FAR.on()
+    (CVAR.on() && VIEWED_FAR.on())
+        || (louder_step(LOUDER.value().unwrap_or(0.0)) > 0 && VIEWED_LOUDER.on())
+}
+
+/// Whether step `step`'s file is where the engine will look: `dod_addon`
+/// with `-addons`, or the game folder.
+fn louder_file_found(step: usize) -> bool {
+    let (looked, found) = (1u8 << (step * 2), 2u8 << (step * 2));
+    let bits = LOUDER_FILES.load(Ordering::Relaxed);
+    if bits & looked != 0 {
+        return bits & found != 0;
+    }
+    let file = LOUDER_SAMPLES[step - 1].to_string_lossy();
+    let root = crate::game_folder::game_root();
+    let mut folders = vec![crate::game_folder::mod_dir()];
+    if crate::texture_hires::addons_on() {
+        folders.insert(0, root.join(crate::game_folder::addon_name()));
+    }
+    let there = folders
+        .iter()
+        .any(|dir| dir.join("sound").join(&*file).is_file());
+    LOUDER_FILES.fetch_or(looked | if there { found } else { 0 }, Ordering::Relaxed);
+    there
 }
 
 /// Called by the `DeathMsg` hook for every kill as it was recorded, before
@@ -166,15 +232,21 @@ fn by_viewed_player(victim: i32) -> bool {
     killer_of(kills, victim, now).is_some_and(crate::deathmsg::is_watched_player)
 }
 
-/// Called by `fire_sounds` for every `EV_PlaySound`, on the engine thread.
-/// `ent` is the event's entity: for the headshot, the player hit.
+/// Called by `fire_sounds` for every `EV_PlaySound`, on the engine thread:
+/// the attenuation to play `sample` with, and the sample to play instead of
+/// it, if any. `ent` is the event's entity: for the headshot, the player hit.
 ///
 /// # Safety
 /// `origin` is null or three floats, as the engine passes it.
-pub unsafe fn attenuation(sample: &CStr, ent: i32, origin: *const f32, attenuation: f32) -> f32 {
+pub unsafe fn adjust(
+    sample: &CStr,
+    ent: i32,
+    origin: *const f32,
+    attenuation: f32,
+) -> (f32, Option<*const c_char>) {
     let sample = sample.to_bytes();
     if sample != SAMPLE {
-        return attenuation;
+        return (attenuation, None);
     }
     PLAYED.fetch_add(1, Ordering::Relaxed);
     if !origin.is_null()
@@ -188,14 +260,32 @@ pub unsafe fn attenuation(sample: &CStr, ent: i32, origin: *const f32, attenuati
             LAST_DISTANCE.store(d as u32, Ordering::Relaxed);
         }
     }
-    let viewed_only = VIEWED_FAR.on();
-    let far = carries_far(CVAR.on(), viewed_only, || by_viewed_player(ent));
+    // Asked at most once, for whichever setting needs it first.
+    let mut viewed = None;
+    let mut by_viewed = || *viewed.get_or_insert_with(|| by_viewed_player(ent));
+
+    let far = applies(CVAR.on(), VIEWED_FAR.on(), &mut by_viewed);
     if far {
         STRETCHED.fetch_add(1, Ordering::Relaxed);
-    } else if CVAR.on() && viewed_only {
+    } else if CVAR.on() && VIEWED_FAR.on() {
         NOT_VIEWED.fetch_add(1, Ordering::Relaxed);
     }
-    scaled(sample, attenuation, far)
+
+    let step = louder_step(LOUDER.value().unwrap_or(0.0));
+    let louder = applies(step > 0, VIEWED_LOUDER.on(), &mut by_viewed);
+    let swap = if !louder {
+        if step > 0 {
+            NOT_VIEWED_LOUDER.fetch_add(1, Ordering::Relaxed);
+        }
+        None
+    } else if louder_file_found(step) {
+        LOUDER_PLAYED.fetch_add(1, Ordering::Relaxed);
+        Some(LOUDER_SAMPLES[step - 1].as_ptr())
+    } else {
+        LOUDER_MISSING.fetch_add(1, Ordering::Relaxed);
+        None
+    };
+    (scaled(sample, attenuation, far), swap)
 }
 
 fn local_player() -> Option<&'static ClEntityS> {
@@ -217,6 +307,29 @@ pub fn status() -> String {
         PLAYED.load(Ordering::Relaxed),
         STRETCHED.load(Ordering::Relaxed),
         NOT_VIEWED.load(Ordering::Relaxed),
+    )
+}
+
+/// `ds_sound_headshot_louder`'s line in `ds_debug_status`.
+pub fn louder_status() -> String {
+    let step = louder_step(LOUDER.value().unwrap_or(0.0));
+    let file = match step {
+        0 => String::new(),
+        s if louder_file_found(s) => format!(
+            "; step {s} plays sound/{}",
+            LOUDER_SAMPLES[s - 1].to_string_lossy()
+        ),
+        s => format!(
+            "; step {s}'s sound/{} is missing (DoD Studio writes it into {} at launch, and the engine reads it there only with -addons), so the game's own plays",
+            LOUDER_SAMPLES[s - 1].to_string_lossy(),
+            crate::game_folder::addon_name(),
+        ),
+    };
+    format!(
+        "{} headshot sounds played louder, {} at the game's level because the viewed player didn't make them, {} at the game's because the file was missing{file}",
+        LOUDER_PLAYED.load(Ordering::Relaxed),
+        NOT_VIEWED_LOUDER.load(Ordering::Relaxed),
+        LOUDER_MISSING.load(Ordering::Relaxed),
     )
 }
 
@@ -254,11 +367,25 @@ mod tests {
     }
 
     #[test]
-    fn viewed_only_keeps_far_to_the_viewed_players_headshots() {
-        assert!(carries_far(true, false, || false));
-        assert!(carries_far(true, true, || true));
-        assert!(!carries_far(true, true, || false));
-        assert!(!carries_far(false, true, || true));
-        assert!(!carries_far(false, false, || true));
+    fn viewed_only_keeps_a_setting_to_the_viewed_players_headshots() {
+        assert!(applies(true, false, || false));
+        assert!(applies(true, true, || true));
+        assert!(!applies(true, true, || false));
+        assert!(!applies(false, true, || true));
+        assert!(!applies(false, false, || true));
+    }
+
+    #[test]
+    fn the_louder_value_is_a_step() {
+        assert_eq!(louder_step(0.0), 0);
+        assert_eq!(louder_step(0.4), 0);
+        assert_eq!(louder_step(-2.0), 0);
+        assert_eq!(louder_step(f32::NAN), 0);
+        assert_eq!(louder_step(1.0), 1);
+        assert_eq!(louder_step(2.0), 2);
+        assert_eq!(louder_step(2.6), 3);
+        assert_eq!(louder_step(3.0), 3);
+        assert_eq!(louder_step(9.0), 3);
+        assert_eq!(louder_step(f32::INFINITY), 3);
     }
 }

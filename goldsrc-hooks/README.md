@@ -117,7 +117,11 @@ is the complete list):
   client plays it from its `bodydamage` event through `EV_PlaySound`, so the
   `fire_sounds` hook halves its attenuation. With
   `ds_sound_headshot_viewed_far 1` only the viewed player's headshots do: the
-  kill's `DeathMsg` names the shooter (#1353). See `src/headshot_sound.rs`.
+  kill's `DeathMsg` names the shooter (#1353). `ds_sound_headshot_louder 1-3`
+  plays a louder copy instead (and `ds_sound_headshot_viewed_louder 1` only
+  for the viewed player), which Studio writes into
+  `dod_addon\sound\dodstudio\` at every launch from the install's own sound
+  (`native/src/headshot_louder.rs`). See `src/headshot_sound.rs`.
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.

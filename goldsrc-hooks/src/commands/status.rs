@@ -63,6 +63,17 @@ fn status_text() -> String {
             bit(crate::headshot_sound::VIEWED_FAR.on()),
         ),
         format!(
+            "{} = {} -- {}",
+            crate::headshot_sound::LOUDER_NAME,
+            crate::headshot_sound::LOUDER.value().unwrap_or(0.0),
+            crate::headshot_sound::louder_status()
+        ),
+        format!(
+            "{} = {}",
+            crate::headshot_sound::VIEWED_LOUDER_NAME,
+            bit(crate::headshot_sound::VIEWED_LOUDER.on()),
+        ),
+        format!(
             "{CROSSHAIR_NAME} = {} -- {}",
             bit(crosshair::hidden()),
             crosshair::status()
