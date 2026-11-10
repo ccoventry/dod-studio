@@ -104,7 +104,9 @@ fn read_wav(bytes: &[u8]) -> Result<Pcm, String> {
     ) else {
         return Err(msg::NO_FORMAT.to_string());
     };
-    if tag != 1 || channels == 0 {
+    // GoldSrc plays mono or stereo; a header outside that, or a rate no sound
+    // has, is a broken file, and would overflow the header written back.
+    if tag != 1 || !(1..=2).contains(&channels) || !(1..=192_000).contains(&rate) {
         return Err(msg::not_pcm(tag, channels, bits));
     }
     let samples = match bits {
@@ -251,7 +253,9 @@ pub fn install(game_root: &Path, game_folder: &str) -> Result<Outcome, String> {
 
 /// What every launch does before the game starts, beside the demo bar's
 /// layout: [`install`], with one activity-log line when files were written
-/// or could not be. An empty `hl_exe` does nothing.
+/// or could not be. An empty `hl_exe` does nothing, and so does a game folder
+/// with no headshot sound of its own (a mod without one), rather than log a
+/// skip at every launch for a setting nobody can use there.
 pub fn prepare(hl_exe: &str, game_folder: &str) {
     let Some(game_root) = Path::new(hl_exe)
         .parent()
@@ -259,6 +263,9 @@ pub fn prepare(hl_exe: &str, game_folder: &str) {
     else {
         return;
     };
+    if !source_in(game_root, game_folder).is_file() {
+        return;
+    }
     let started = std::time::Instant::now();
     match install(game_root, game_folder) {
         Ok(Outcome::Written { count, dir }) => crate::log_markdown(
@@ -339,6 +346,13 @@ mod tests {
         let mut adpcm = write_wav(&knock(22050));
         adpcm[20] = 2;
         assert!(read_wav(&adpcm).is_err());
+        // A header claiming more channels than GoldSrc plays, or no rate.
+        let mut many = write_wav(&knock(22050));
+        many[22..24].copy_from_slice(&40000u16.to_le_bytes());
+        assert!(read_wav(&many).is_err());
+        let mut no_rate = write_wav(&knock(22050));
+        no_rate[24..28].copy_from_slice(&0u32.to_le_bytes());
+        assert!(read_wav(&no_rate).is_err());
     }
 
     #[test]

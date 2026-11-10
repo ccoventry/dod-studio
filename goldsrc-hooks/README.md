@@ -112,7 +112,7 @@ is the complete list):
   the rules the demo patcher uses), plus two lists surveyed over the installed
   maps (`native/examples/map_sound_table.rs`). See the module doc in
   `src/map_sounds.rs` (#284).
-- **Headshots heard further away** (`ds_sound_headshot_farther 1`): the headshot
+- **Headshots heard farther away** (`ds_sound_headshot_farther 1`): the headshot
   sound (`player/helmet_hit.wav`) fades half as fast with distance. DoD's
   client plays it from its `bodydamage` event through `EV_PlaySound`, so the
   `fire_sounds` hook halves its attenuation. With

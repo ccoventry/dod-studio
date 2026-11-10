@@ -18,22 +18,22 @@
 //! ```
 //!
 //! so it passes `fire_sounds`' `EV_PlaySound` hook, which asks
-//! [`attenuation`] what to play it with. `client.dll` is byte-identical across
+//! [`adjust`] what to play it with. `client.dll` is byte-identical across
 //! installs and the hook is on the event API table, so this needs no per-build
 //! table. (`events/effects/helmet.sc`, the helmet flying off, plays no sound.)
 //!
-//! ## What "further" means
+//! ## What "farther" means
 //!
 //! GoldSrc fades a sound linearly with distance: the gain is
 //! `1 - distance * attenuation / 1000`, so at `ATTN_NORM` (0.8) the headshot
-//! is silent from 1250 units on, and many are further than that: half the
+//! is silent from 1250 units on, and many are farther than that: half the
 //! 26 headshots the kill feed shows in `ktps8w9-stealth_gskill_rr2_h1` are
 //! over 1000 units from the killer. Halving the attenuation stretches the
 //! silence to 2500 units: at 570 units the gain goes from 0.54 to 0.77
 //! (+3 dB), at 1500 from nothing to 0.4. Volume cannot be raised past 1.0 in
 //! the engine, so distance is the only thing to give; `ATTN_NONE` (0) would
 //! play every headshot across the map at full volume, which is more than
-//! "carries further".
+//! "carries farther".
 //!
 //! ## Whose headshot
 //!
@@ -41,7 +41,7 @@
 //! from the view entity in space (measured: the POV recorder's own head hit
 //! plays at full level in both ears, setting on or off), so in a POV demo the
 //! recorder's own headshot deaths are unchanged; every head hit he sees or
-//! hears someone else take, his own kills included, carries further.
+//! hears someone else take, his own kills included, carries farther.
 //!
 //! ## The POV player's headshots (#1353)
 //!
@@ -49,7 +49,7 @@
 //! WSOD25 project's Keep clips, 8 of the recorder's own against 91 of someone
 //! else's at 1250-2500 units, the band only this setting makes heard. With
 //! `ds_sound_headshot_pov_farther` on, only a head hit the POV player made
-//! carries further: the POV recorder, or the player an HLTV demo watches in
+//! carries farther: the POV recorder, or the player an HLTV demo watches in
 //! first person (`deathmsg::is_watched_player`).
 //!
 //! The event names the victim, not the shooter. The kill's `DeathMsg` names
@@ -58,8 +58,12 @@
 //! has usually seen the kill by the time the sound asks: over 40 WSOD25 POV
 //! demos the `DeathMsg` came in the same frame as 188 of the recorder's 197
 //! headshot kills, and a frame later for the other 9, which play at the
-//! game's distance. A head hit that doesn't kill has no `DeathMsg` and counts
-//! as someone else's.
+//! game's distance. An HLTV demo is measured only in the game so far: in
+//! `wsod25_grp5_h1_hltv` 1088-1099 s, watched in first person, all three
+//! headshot kills paired (#1355). If an HLTV proxy turns out to send the
+//! event a frame before the `DeathMsg` more often, the watched player's
+//! headshots it misses play as the game's. A head hit that doesn't kill has
+//! no `DeathMsg` and counts as someone else's.
 //!
 //! ## Louder (#1353)
 //!
@@ -120,10 +124,10 @@ static NEXT_KILL: AtomicUsize = AtomicUsize::new(0);
 static PLAYED: AtomicU32 = AtomicU32::new(0);
 static STRETCHED: AtomicU32 = AtomicU32::new(0);
 /// Headshots left at the game's distance because the POV player didn't make them.
-static NOT_VIEWED: AtomicU32 = AtomicU32::new(0);
+static NOT_POV: AtomicU32 = AtomicU32::new(0);
 static LOUDER_PLAYED: AtomicU32 = AtomicU32::new(0);
 /// Headshots left at the game's level because the POV player didn't make them.
-static NOT_VIEWED_LOUDER: AtomicU32 = AtomicU32::new(0);
+static NOT_POV_LOUDER: AtomicU32 = AtomicU32::new(0);
 /// Headshots that wanted a louder file that isn't there.
 static LOUDER_MISSING: AtomicU32 = AtomicU32::new(0);
 /// Per step, two bits: looked for its file, and found it. Files are written
@@ -170,8 +174,8 @@ fn killer_of(kills: impl Iterator<Item = (i32, i32, f32)>, victim: i32, now: f32
 
 /// Whether a setting changes this headshot: it is on, and either it's for
 /// every headshot or the POV player made this one.
-fn applies(on: bool, viewed_only: bool, by_viewed: impl FnOnce() -> bool) -> bool {
-    on && (!viewed_only || by_viewed())
+fn applies(on: bool, pov_only: bool, by_pov: impl FnOnce() -> bool) -> bool {
+    on && (!pov_only || by_pov())
 }
 
 /// `ds_sound_headshot_louder`'s value as a step, 0 (off) to 3; a value
@@ -222,7 +226,7 @@ pub fn note_kill(killer: i32, victim: i32) {
 }
 
 /// Whether the POV player killed `victim` this frame.
-fn by_viewed_player(victim: i32) -> bool {
+fn by_pov_player(victim: i32) -> bool {
     let Some(now) = engine::engine_client_time() else {
         return false;
     };
@@ -261,21 +265,21 @@ pub unsafe fn adjust(
         }
     }
     // Asked at most once, for whichever setting needs it first.
-    let mut viewed = None;
-    let mut by_viewed = || *viewed.get_or_insert_with(|| by_viewed_player(ent));
+    let mut pov = None;
+    let mut by_pov = || *pov.get_or_insert_with(|| by_pov_player(ent));
 
-    let far = applies(CVAR.on(), POV_FARTHER.on(), &mut by_viewed);
+    let far = applies(CVAR.on(), POV_FARTHER.on(), &mut by_pov);
     if far {
         STRETCHED.fetch_add(1, Ordering::Relaxed);
     } else if CVAR.on() && POV_FARTHER.on() {
-        NOT_VIEWED.fetch_add(1, Ordering::Relaxed);
+        NOT_POV.fetch_add(1, Ordering::Relaxed);
     }
 
     let step = louder_step(LOUDER.value().unwrap_or(0.0));
-    let louder = applies(step > 0, POV_LOUDER.on(), &mut by_viewed);
+    let louder = applies(step > 0, POV_LOUDER.on(), &mut by_pov);
     let swap = if !louder {
         if step > 0 {
-            NOT_VIEWED_LOUDER.fetch_add(1, Ordering::Relaxed);
+            NOT_POV_LOUDER.fetch_add(1, Ordering::Relaxed);
         }
         None
     } else if louder_file_found(step) {
@@ -306,7 +310,7 @@ pub fn status() -> String {
         "{} headshot sounds, {} played with half the falloff, {} at the game's because the POV player didn't make them; the last {last}",
         PLAYED.load(Ordering::Relaxed),
         STRETCHED.load(Ordering::Relaxed),
-        NOT_VIEWED.load(Ordering::Relaxed),
+        NOT_POV.load(Ordering::Relaxed),
     )
 }
 
@@ -328,7 +332,7 @@ pub fn louder_status() -> String {
     format!(
         "{} headshot sounds played louder, {} at the game's level because the POV player didn't make them, {} at the game's because the file was missing{file}",
         LOUDER_PLAYED.load(Ordering::Relaxed),
-        NOT_VIEWED_LOUDER.load(Ordering::Relaxed),
+        NOT_POV_LOUDER.load(Ordering::Relaxed),
         LOUDER_MISSING.load(Ordering::Relaxed),
     )
 }
@@ -367,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn viewed_only_keeps_a_setting_to_the_viewed_players_headshots() {
+    fn pov_only_keeps_a_setting_to_the_pov_players_headshots() {
         assert!(applies(true, false, || false));
         assert!(applies(true, true, || true));
         assert!(!applies(true, true, || false));
