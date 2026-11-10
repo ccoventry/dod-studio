@@ -231,7 +231,7 @@ struct Walk {
 /// Every pause replay in the demo, oldest first. Empty for a demo with no
 /// `showpause 0`, which costs one look at each message.
 pub(crate) fn find_replays(demo: &Demo) -> Vec<PauseReplay> {
-    if !frames(demo).any(|frame| messages(frame).any(|m| is_seam(m))) {
+    if !frames(demo).any(|frame| messages(frame).any(is_seam)) {
         return Vec::new();
     }
     let walk = walk(demo);
