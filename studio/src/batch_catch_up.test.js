@@ -3,6 +3,7 @@ import { capturedTakes, applyCaughtUpBatch, createBatchCatchUp, isBatchStillRunn
 import { streakUid } from './take_index.js';
 import { captureOf } from './take_record.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { STRINGS } from './strings.js';
 
 const streak = (player, first, last, extra = {}) => ({
   player_index: player,
@@ -53,10 +54,26 @@ describe('applyCaughtUpBatch', () => {
     const d = demos();
     const takeIndex = {};
     const result = applyCaughtUpBatch(batch(d), d, takeIndex);
-    expect(result).toEqual({ captured: 1, total: 2, marked: 2, changed: true });
+    expect(result).toEqual({ captured: 1, total: 2, marked: 2, markedRendered: 0, changed: true });
     expect(d[0].streaks.map((s) => s.status)).toEqual([HIGHLIGHT_STATUS.CAPTURED, HIGHLIGHT_STATUS.CAPTURED, undefined]);
     expect(d[1].streaks[0].status).toBeUndefined();
     expect(Object.keys(takeIndex)).toEqual(['session_x/chain_01_b0']);
+  });
+
+  it('marks Rendered a take whose clip was rendered and deleted before Studio closed (#861)', () => {
+    const d = demos();
+    const b = batch(d);
+    b.blocks[0].rendered = true;
+    const result = applyCaughtUpBatch(b, d, {});
+    expect(d[0].streaks.map((s) => s.status)).toEqual([HIGHLIGHT_STATUS.RENDERED, HIGHLIGHT_STATUS.RENDERED, undefined]);
+    expect(result).toMatchObject({ marked: 2, markedRendered: 2 });
+  });
+
+  it('says how many were marked each way', () => {
+    const say = STRINGS.BATCH_CATCH_UP.caughtUp;
+    expect(say(129, 342, 129, 35)).toContain('94 highlight(s) marked Captured. 35 highlight(s) marked Rendered');
+    expect(say(2, 2, 2)).toContain('2 highlight(s) marked Captured.');
+    expect(say(2, 2, 2)).not.toContain('Rendered');
   });
 
   it('keeps a verified Rendered and overrules a hand-set one', () => {
@@ -163,6 +180,28 @@ describe('createBatchCatchUp', () => {
     expect(io.readProject).not.toHaveBeenCalled();
     expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
     expect(onStatusChange).toHaveBeenCalled();
+  });
+
+  it('saves the open project when the marks are its only change, and says so (#1344)', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const onStatusChange = vi.fn();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: true }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange, saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(saveIfOnlyChange).toHaveBeenCalledTimes(1);
+    expect(onStatusChange).toHaveBeenCalled();
+    expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
+    expect(io.toast.mock.calls[0][0]).toContain('Saved them in the open project.');
+  });
+
+  it('says nothing of saving when the open project had other unsaved edits', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: false }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange: vi.fn(), saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(io.toast.mock.calls[0][0]).not.toContain('Saved');
   });
 
   it('says so when the project file cannot be read', async () => {

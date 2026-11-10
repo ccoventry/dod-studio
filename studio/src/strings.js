@@ -198,6 +198,11 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // The totals row under the queue's header (queue_totals.js).
+    totalsLabel: (shown, queued) => (shown === queued
+      ? `Total: ${shown} demo${shown === 1 ? '' : 's'}`
+      : `Total: ${shown} of ${queued} demos`),
+    TOTALS_TITLE: 'Totals of the demos listed below, with the search and filters applied. Hover Status or Review for the numbers in words.',
     // #21: a project demo that is not at its saved path.
     MISSING_BADGE: 'missing',
     missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
@@ -1151,7 +1156,11 @@ export const STRINGS = {
   RENDER_WHILE_CAPTURING: {
     LABEL: 'Render while capturing',
     TITLE:
-        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+        'Each clip renders as soon as the batch has recorded it, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    AT_ONCE_LABEL: 'Renders at once:',
+    atOnceOption: (renders, percent) => `${renders} (about ${percent}% of the CPU)`,
+    AT_ONCE_TITLE:
+        'How many clips render at the same time while the batch captures, never more than the Render tab\'s own number. Each takes the share of the CPU one of the Render tab\'s renders gets (a quarter at 4 at once), so this is also how much of the CPU the renders take from the capture. One leaves most of the CPU idle, so the renders fall behind the capture; more keep up better but slow the capture down. The capture never drops frames, it only takes longer.',
     HINT_OFF: 'Clips render after the batch.',
     HINT_ON_KEEP:
         'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
@@ -1724,8 +1733,11 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked, rendered = 0) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.`
+      + (marked > rendered ? ` ${marked - rendered} highlight(s) marked Captured.` : '')
+      + (rendered > 0 ? ` ${rendered} highlight(s) marked Rendered: their clips were finished before it closed.` : ''),
     projectUpdated: (name) => `Marked them in the project ${name}.`,
+    SAVED_OPEN_PROJECT: 'Saved them in the open project.',
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
     // The game is open, so the batch may still be capturing in it (#20).
@@ -2564,6 +2576,12 @@ export const STRINGS = {
     fix: (fps) => (fps > 60
       ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
       : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
+  },
+
+  // ── killfeed_layout_warning.js: the even kill feed can't draw (#1339) ──
+  // The warning itself comes from the backend (native messages/killfeed_layout.rs).
+  KILLFEED_LAYOUT: {
+    LINE_TITLE: "The hook DLL said so while the batch ran: clips captured while this shows have the game's own kill-feed layout, not the even one. The activity log has the hook's own words.",
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────

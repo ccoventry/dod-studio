@@ -211,6 +211,22 @@ export function resolveTake(takeIndex, takeKey) {
 }
 
 /**
+ * Marks Rendered every highlight in `demos` the takes `takeKeys` cover, as a
+ * render finishing does (render_pane.js): a verified status, so a hand-set
+ * one is overruled. For renders found in the take folders when a project
+ * opens (#1345). Returns how many changed status.
+ */
+export function markTakesRendered(takeIndex, takeKeys, demos) {
+  const uids = new Set((takeKeys || []).flatMap((key) => resolveTake(takeIndex, key)));
+  if (uids.size === 0) return 0;
+  let changed = 0;
+  (demos || []).forEach((demo) => (demo.streaks || []).forEach((streak) => {
+    if (uids.has(streakUid(demo.path, streak)) && setVerifiedStatus(streak, HIGHLIGHT_STATUS.RENDERED)) changed += 1;
+  }));
+  return changed;
+}
+
+/**
  * Drops index entries for uids no longer present in the current highlight
  * set (a demo removed from the queue, say), so the index doesn't grow
  * forever across a project's lifetime. Entries left with zero surviving

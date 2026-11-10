@@ -155,6 +155,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
     refuseDuringBatch: batchGuard.refuseDuringBatch,
+    onStatusChange: () => { queue.renderQueue(); queue.redrawSelected(); },
   });
   const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
@@ -435,7 +436,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // and offer to capture the ones it never got to (#20).
   createBatchCatchUp({ getDemos: queue.getDemos, getTakeIndex: () => takeIndex,
     getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange,
-    openProject, startCapture: startCaptureFromOffer }).start();
+    openProject, startCapture: startCaptureFromOffer, saveIfOnlyChange: projectSession.saveIfOnlyChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
@@ -520,4 +521,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Ctrl+N/O/S, swallowed reload keys, no browser context menu: app_shortcuts.js.
   startAppShortcuts();
+  // The boot ran: public/boot_watchdog.js stops waiting for it.
+  window.dodStudioBoot?.done();
 });

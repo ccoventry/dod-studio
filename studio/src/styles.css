@@ -1101,6 +1101,23 @@ button.danger-btn {
   color: var(--text-dim);
 }
 
+/* The totals row under the header (queue_totals.js): each total under its
+   column, set apart from the demos' rows below it. */
+#master-demo-table tr.queue-totals-row td {
+  font-weight: 600;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border-color);
+}
+
+#master-demo-table tr.queue-totals-row td.col-center {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#master-demo-table tr.queue-totals-row td.queue-totals-name {
+  color: var(--text-subtle);
+}
+
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of
    truncating so multi-kill timelines remain fully readable without relying
    on the title="" hover tooltip. */
@@ -1409,6 +1426,19 @@ button.danger-btn {
 #obs-drop-rate.lagging {
   color: var(--warn);
   font-weight: 600;
+}
+
+/* The kill feed's even layout can't draw (#1339), under the status line. */
+#killfeed-layout-warning {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+#killfeed-layout-warning[hidden] {
+  display: none;
 }
 
 #export-pool-free-indicator,
