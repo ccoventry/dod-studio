@@ -40,6 +40,7 @@ mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod project_convert;
+mod project_settings_snapshot;
 mod render_manager;
 mod review_library;
 mod review_manager;
@@ -1075,6 +1076,7 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
+            demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,
             cancel_audit,
@@ -1148,6 +1150,7 @@ pub fn run() {
             dem_open_with::set_dem_open_with,
             project_convert::project_convert_offer,
             project_convert::convert_project_file,
+            project_settings_snapshot::keep_project_settings_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

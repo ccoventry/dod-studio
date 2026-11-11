@@ -323,6 +323,11 @@ pub struct AppSettings {
     /// (project_settings.js) the first time a file has none.
     #[serde(default)]
     pub pc_id: String,
+    /// The "New UI" switch (#1085): the facelift's new pages (File ›
+    /// Project Settings… first) show only while it is on. Off by default,
+    /// and per PC, not per project (new_ui.js).
+    #[serde(default)]
+    pub new_ui: bool,
     /// The one-time look at the pinned folders ran (#533): older builds
     /// pinned every folder + Add Folder scanned, and Studio lists them once
     /// so the user can unpin the ones they never chose.
@@ -621,6 +626,7 @@ impl Default for AppSettings {
             audit_look_in_zips: false,
             setup_dismissed: false,
             pc_id: String::new(),
+            new_ui: false,
             pinned_folders_reviewed: false,
             scan_include_subfolders: default_scan_include_subfolders(),
             players: native::player_overrides::PlayerTable::default(),
@@ -919,6 +925,28 @@ mod tests {
         let old: AppSettings =
             serde_json::from_value(before).expect("a file without pc_id must deserialize");
         assert!(old.pc_id.is_empty());
+    }
+
+    /// The New UI switch survives a save, and a file from before it has it
+    /// off (#1085).
+    #[test]
+    fn new_ui_roundtrip_and_default_off() {
+        let original = AppSettings {
+            new_ui: true,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert!(restored.new_ui);
+        let mut before =
+            serde_json::to_value(AppSettings::default()).expect("settings must serialize");
+        before
+            .as_object_mut()
+            .expect("settings are an object")
+            .remove("new_ui");
+        let old: AppSettings =
+            serde_json::from_value(before).expect("a file without new_ui must deserialize");
+        assert!(!old.new_ui);
     }
 
     /// Open Recent's list survives a save, and a file from before it has none (#935).

@@ -59,8 +59,9 @@ import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
-import { inEffect } from './project_settings.js';
+import { inEffect, startProjectSettingsSnapshot } from './project_settings.js';
 import { createProjectSettingsPage } from './project_settings_page.js';
+import { createNewUi } from './new_ui.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
@@ -237,6 +238,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
+      startProjectSettingsSnapshot(); // What older projects start from (#1085): Configuration as it is now, once.
     }
   } catch (err) {
     console.error("Error loading startup settings:", err);
@@ -282,6 +284,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  createNewUi({ persist: () => persistAppSettings() }); // The New UI switch (#1085): new pages show only while it is on.
   // Configuration > Players (#428): players_ui.js.
   createPlayersUi({
     getDemos: queue.getDemos,

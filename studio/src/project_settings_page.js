@@ -11,6 +11,9 @@
 // The Project tab (project_settings_project_tab.js) and the Clip settings
 // tab (clip_settings_tab.js) are built; Players and sprays arrives with build
 // plan step 7 and shows greyed until then.
+//
+// Hidden behind the New UI switch (new_ui.js) until the whole rework ships:
+// with it off there is no menu item and open() does nothing.
 
 import './project_settings_page.css';
 import { logFrontendEvent } from './ipc_bridge.js';
@@ -29,6 +32,7 @@ import {
   projectSettingsPageOpenedLine, projectSettingsPageAppliedLine, projectSettingsPageClosedLine, clipPresetSavedLine, clipSettingsAppliedLine,
 } from './project_log.js';
 import { fileNameOf } from './path_display.js';
+import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.PROJECT_SETTINGS_PAGE;
@@ -189,7 +193,8 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
   }
 
   function open() {
-    if (state) return;
+    // Hidden behind the New UI switch until the rework ships (new_ui.js).
+    if (state || !isNewUiOn()) return;
     const { form, block, pcId } = blockForPage();
     if (!form) return; // settings not loaded yet: nothing to start from
     if (!root) build();
@@ -323,7 +328,16 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     leave(how).then((left) => { if (left) target.click(); });
   }
 
-  addMenuItem(open);
+  // File › Project Settings… is there only while the New UI switch is on;
+  // turning it off closes the page, dropping edits not applied.
+  onNewUiChange((on) => {
+    if (on) {
+      addMenuItem(open);
+    } else {
+      close('New UI turned off');
+      removeMenuItem();
+    }
+  });
   // A project opened or closed: the page's edits were for the one that was
   // open (the paths that ask first, leaveProjectSettingsPage, have closed it
   // already), and the capture summary must show the new one's settings.
@@ -336,6 +350,11 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
 }
 
 const MENU_ITEM_ID = 'project-settings-menu-btn';
+
+/** Takes File › Project Settings… out of the menu (the New UI switch off). */
+function removeMenuItem() {
+  document.querySelector(`#${MENU_ITEM_ID}`)?.remove();
+}
 
 /** File › Project Settings…, after Save Session. Made here rather than in
  *  index.html, so the page is one module. */

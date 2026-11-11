@@ -79,9 +79,10 @@ export function projectBackedUpLine(backup, elapsedMs) {
 }
 
 /** The one-time summary of a project's first save in a newer format. */
-export function projectUpdatedLine(path, { clips, takesFound, takesNotFound, settingsCopied = false }, backup) {
+export function projectUpdatedLine(path, { clips, takesFound, takesNotFound, settingsCopied = false, snapshotTakenAt = null }, backup) {
   const takes = takesFound === null ? 'takes not checked' : `${takesFound} take(s) found, ${takesNotFound} not found`;
-  const settings = settingsCopied ? ', settings copied from Configuration' : '';
+  let settings = '';
+  if (settingsCopied) settings = snapshotTakenAt ? `, settings from the snapshot taken ${snapshotTakenAt}` : ', settings copied from Configuration';
   return `[project] updated ${path}: ${clips} clip(s), ${takes}${settings}, backup ${backup}`;
 }
 
@@ -99,6 +100,19 @@ export function projectNeedsCopyLine(path) {
  *  (#1085, decision 6), and are saved with it on the next save. */
 export function projectSettingsCopiedLine(path) {
   return `[project] ${path} had no settings of its own: copied in Configuration's, saved with the next save`;
+}
+
+/** A project without its own settings opened and took the one snapshot of
+ *  Configuration every older project starts from (#1085, decision 6). */
+export function projectSettingsFromSnapshotLine(path, { takenAt, appVersion }) {
+  const version = appVersion ? ` by ${appVersion}` : '';
+  return `[project] ${path} had no settings of its own: took the snapshot of Configuration taken ${takenAt}${version}, saved with the next save`;
+}
+
+/** The snapshot older projects start from couldn't be kept or read: they
+ *  take Configuration as it is when they open instead. */
+export function projectSnapshotFailedLine(err) {
+  return `[project] the settings snapshot older projects start from is not available (${err}): an older project takes Configuration as it is when it opens`;
 }
 
 /** A project opened whose own settings differ from Configuration's: a

@@ -13,6 +13,8 @@ test.beforeEach(async ({ page }) => {
     window.__mockInvokeHandlers = {
       get_settings: () => ({
         setup_dismissed: true,
+        // The page shows only with the New UI switch on (new_ui.js).
+        new_ui: true,
         target_drives: ['E:/caps'],
         render_export_dirs: ['F:/clips'],
         resolution_width: 1920,

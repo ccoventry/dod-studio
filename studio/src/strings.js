@@ -214,8 +214,12 @@ export const STRINGS = {
     // #217: a queued demo that recorded more than one map.
     multiMapSplitButton: (count) => `${count} maps · Split`,
     multiMapSplitTitle: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'The game stops playing it at the first map change, so nothing past it can be captured, and its highlights cover one map only. '
+      + 'Its highlights and captures use the first map only; the maps after it are left out. '
       + 'Click to split it: each map of a minute or more becomes a demo of its own in the queue, in place of this one. The file itself is kept.',
+    MULTI_MAP_ALREADY_SPLIT: 'Already split',
+    multiMapAlreadySplitTitle: (maps, files) => `This demo recorded ${maps.length} maps (${maps.join(', ')}), already split next to it: `
+      + `${files.join(', ')}. This row uses the first map only.`,
+    MULTI_MAP_SPLITTING: 'This demo is being split.',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
@@ -1471,7 +1475,10 @@ export const STRINGS = {
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
     multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'Only the first is analysed: the game stops playing it at the map change. Split it to use the rest.',
+      + 'Only the first is analysed, and highlights and captures use it too. Split it to use the rest.',
+    multiMapAlreadySplit: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}) and was already split. `
+      + 'This report covers the first.',
+    multiMapAlreadySplitTitle: (files) => `Split next to it into: ${files.join(', ')}`,
     MULTI_MAP_SPLIT_BUTTON: 'Split now',
     MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
       + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
@@ -1753,10 +1760,17 @@ export const STRINGS = {
     NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
     SAVE_COPY_DIALOG_TITLE: 'Save a copy',
     copyName: (stem) => `${stem} copy`,
-    updatedToast: ({ clips, takesFound, takesNotFound, settingsCopied = false }, backup) => {
+    updatedToast: ({ clips, takesFound, takesNotFound, settingsCopied = false, snapshotDay = '' }, backup) => {
       const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
-      // #1085: an old project's own settings start as a copy of Configuration's.
-      const settings = settingsCopied ? ' Its settings were copied from Configuration and are now its own.' : '';
+      // #1085: an old project's own settings start as the one snapshot of
+      // Configuration every older project gets, or, when there is none, a
+      // copy of Configuration as it was when the project opened.
+      let settings = '';
+      if (settingsCopied) {
+        settings = snapshotDay
+          ? ` Its settings are the ones Configuration had on ${snapshotDay}, the same for every older project, and are now its own.`
+          : ' Its settings were copied from Configuration and are now its own.';
+      }
       return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}.${settings} Backup: ${backup}`;
     },
     backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
@@ -1775,6 +1789,13 @@ export const STRINGS = {
     SWITCH: 'Switch',
     KEEP: 'Keep the one picked',
     NO_INSTALL: 'No install',
+  },
+
+  // ── The New UI switch (new_ui.js, #1085) ──
+  NEW_UI: {
+    LABEL: 'Show the new pages (work in progress)',
+    TITLE: "Shows the pages of the new DoD Studio as they are built, starting with Project Settings in the File menu. They are not finished. Turn this off to hide them and get today's app back; a project keeps any settings you changed there.",
+    switchedLine: (on) => `[settings] New UI switch turned ${on ? 'on: the new pages show' : 'off: the new pages are hidden'}`,
   },
 
   // ── The Project settings page (project_settings_page.js, #1085) ──
@@ -2334,14 +2355,20 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
-    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    // The queue's line while a split runs (#951).
+    queueSplitHead: (name) => `Splitting ${name}`,
     QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
-    queueSplitDoneLine: (elapsed, demos) => `Done in ${elapsed}: split ${demos} demo${demos === 1 ? '' : 's'}`,
-    MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
-    MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
-    MULTI_MAP_PICKED_SPLIT: 'Split Them',
+    queueSplitDoneLine: (elapsed) => `Done in ${elapsed}: split 1 demo`,
+    // #217: the activity log's lines when picks are in demos with several
+    // maps: one per demo naming what is captured and what is left out, or
+    // one count when there are more than queue_split.js's FIRST_MAP_LINES_MAX.
+    captureFirstMapOnlyDemo: (name, maps) => {
+      const rest = maps.slice(1);
+      return `[capture] ${name} recorded ${maps.length} maps: capturing ${maps[0]} only; `
+        + `${rest.join(', ')} ${rest.length === 1 ? 'is' : 'are'} left out (split the demo to capture ${rest.length === 1 ? 'it' : 'them'})`;
+    },
+    captureFirstMapOnly: (n) => `[capture] Capturing only the first map of ${n} demos that recorded more than one map; `
+      + 'split them to capture the maps after it',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
@@ -2822,6 +2849,12 @@ export const STRINGS = {
     fix: (fps) => (fps > 60
       ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
       : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
+  },
+
+  // ── killfeed_layout_warning.js: the even kill feed can't draw (#1339) ──
+  // The warning itself comes from the backend (native messages/killfeed_layout.rs).
+  KILLFEED_LAYOUT: {
+    LINE_TITLE: "The hook DLL said so while the batch ran: clips captured while this shows have the game's own kill-feed layout, not the even one. The activity log has the hook's own words.",
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────

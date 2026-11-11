@@ -32,6 +32,7 @@ import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { startObsDropRate } from './obs_drop_rate.js';
+import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
@@ -789,6 +790,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   precheck = createCapturePrecheck({ startBtn, statusEl, progressContainer, refreshStart: () => refreshLaunchGuard() });
   captureProgress = createCaptureProgress({ statusEl, container: progressContainer, log: logFrontendEvent });
   startObsDropRate({ el: document.querySelector('#obs-drop-rate'), listen, toast: (text) => showToast(text, 'warning', 12000) });
+  startKillfeedLayoutWarning({ el: document.querySelector('#killfeed-layout-warning'), listen, toast: (text) => showToast(text, 'warning', 20000) });
   initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
@@ -1238,8 +1240,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // A demo may have moved since the queue was loaded (#21). main.js looks
       // for it the same way Load Project does and offers the match; a demo
       // still missing after that stops the batch, since its highlights
-      // cannot be captured. A picked demo with more than one map stops it
-      // too (#217); main.js has said why then ('handled').
+      // cannot be captured. A picked demo with more than one map goes ahead
+      // on its first map (#217).
       precheck.step('demos');
       const demosReady = pickedDemosPresent
         ? await pickedDemosPresent({ onProgress: (p) => precheck.step('demos', p?.done, p?.total) })

@@ -2028,6 +2028,13 @@ pub async fn start_capture_batch_impl(
                         EngineEvent::GameClosed => {
                             game_closed = true;
                         }
+                        // Once per change in the game (#1339): no throttle.
+                        EngineEvent::KillfeedLayout(warning) => {
+                            let _ = app_emitter.emit(
+                                "capture_killfeed_layout",
+                                serde_json::json!({ "warning": warning }),
+                            );
+                        }
                         EngineEvent::ObsStartedLate(late) => {
                             if let Some(room) = &room {
                                 room.clip_started_late(&late.take_folder);

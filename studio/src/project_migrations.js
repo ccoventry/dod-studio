@@ -18,9 +18,10 @@ import { STRINGS } from './strings.js';
 function v1ToV2() {}
 
 /** Schema 3 adds `settings`, the project's own settings (#1085). Nothing here
- *  can fill it: what goes in is this PC's Configuration (decision 6), which
- *  only a window knows, so project_settings.js copies it in where a project
- *  opens in one, and the next save writes it. A file a batch catch-up raised
+ *  can fill it: what goes in is this PC's snapshot of Configuration (decision
+ *  6, project_settings_snapshot.js), which only a window has, so
+ *  project_settings.js puts it in where a project opens in one, and the next
+ *  save writes it. A file a batch catch-up raised
  *  (batch_catch_up.js) gets it at its next open the same way. */
 function v2ToV3() {}
 
