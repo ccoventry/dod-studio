@@ -539,8 +539,10 @@ mod installed {
         // Safety: `report` only appends to the hook log.
         unsafe {
             crate::debug::report(&format!(
-                "demo_next_map: the next map is playing; its clock runs from {:.2} s, {:.2} s loaded so far",
-                clock.start, clock.end
+                "demo_next_map: map change {} played into: the next map's clock runs from {:.2} s, {:.2} s loaded so far",
+                RELEASED_COUNT.load(Ordering::Relaxed),
+                clock.start,
+                clock.end
             ))
         };
     }
