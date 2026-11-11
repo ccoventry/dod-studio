@@ -399,7 +399,11 @@ mod installed {
         unsafe {
             crate::debug::report(&format!(
                 "demo_next_map: {} -- a demo's reconnect {}",
-                if written { "set" } else { "could not write the call" },
+                if written {
+                    "set"
+                } else {
+                    "could not write the call"
+                },
                 if want == CALL_RECONNECT {
                     "holds the loader until playback gets there, then plays the next map"
                 } else {
@@ -501,13 +505,16 @@ mod installed {
         HELD_SERVER.store(0, Ordering::Release);
         WAITING_FROM_END.store(end.to_bits().max(1), Ordering::Relaxed);
         let count = RELEASED_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        let reconnected =
-            mode == Mode::OnWithReconnect && crate::engine::client_cmd(c"reconnect");
+        let reconnected = mode == Mode::OnWithReconnect && crate::engine::client_cmd(c"reconnect");
         // Safety: `report` only appends to the hook log.
         unsafe {
             crate::debug::report(&format!(
                 "demo_next_map: playback reached the end of the map at {end:.2} s; loading the demo's next map ({count} this session){}",
-                if reconnected { ", after the engine's reconnect" } else { "" }
+                if reconnected {
+                    ", after the engine's reconnect"
+                } else {
+                    ""
+                }
             ))
         };
     }

@@ -210,6 +210,8 @@ DEBUG
       Log every sound the server sends, and whether ds_sound_mute_victory_music or ds_sound_mute_flag_capture muted it.
   ds_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
+  ds_debug_demo_play_next_map 0/1
+      R&D: viewdemo plays on into a demo's next map instead of stopping at the map change (set it before loading the demo).
   ds_debug_cloak_instead 0/1
       While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.
   ds_debug_record_frame_times 0/1
