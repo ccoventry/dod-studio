@@ -13,6 +13,7 @@ import { switchNavTab } from './nav.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { demoMenuItems } from './demo_menu_items.js';
+import { splitBlockedReason } from './queue_multimap.js';
 
 /** What clicking the row's own button for an action does, or null when the row has none. */
 function rowButton(row, selector) {
@@ -53,6 +54,7 @@ export function startDemoContextMenu({ startReview }) {
         revealInExplorer(demo.path).catch(() => {});
       },
       split: rowButton(row, '.multimap-split-btn'),
+      splitBlocked: splitBlockedReason(row),
       useFound: rowButton(row, '.use-found-copy-btn'),
       locate: rowButton(row, '.locate-demo-btn'),
       copyName: () => copyText(demo.name || '', STRINGS.CONTEXT_MENU.WHAT_NAME, demo),

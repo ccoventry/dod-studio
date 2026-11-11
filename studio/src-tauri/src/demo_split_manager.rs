@@ -11,6 +11,7 @@ use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
 use native::demo_split::{
     Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_cancellable,
 };
+use native::demo_split_status::{SplitStatus, split_status};
 use tauri::{AppHandle, Emitter};
 
 use crate::settings_manager::SettingsManager;
@@ -86,6 +87,21 @@ pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> 
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         // Frame headers only; a full parse when the walk can't read a frame.
         quick_demo_segments(Path::new(&path))
+    }))
+    .await
+}
+
+/// Whether the multi-map demo at `path` was already split next to it, for the
+/// queue row and the Demo Analyzer's notice. Asked each time they are shown,
+/// so a split made, or pieces deleted, since the scan count.
+#[tauri::command]
+pub async fn demo_split_status(
+    path: String,
+    maps: Vec<String>,
+    min_seconds: f32,
+) -> Result<SplitStatus, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        split_status(Path::new(&path), &maps, min_seconds)
     }))
     .await
 }

@@ -47,6 +47,9 @@ pub mod demo_maps_scan;
 /// Splitting a demo that recorded more than one map (#624).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
+/// Whether a demo's maps were already split next to it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split_status;
 
 /// The Demo Auditor's renamer: facts, renames and the undo log (#469).
 #[cfg(not(target_arch = "wasm32"))]
