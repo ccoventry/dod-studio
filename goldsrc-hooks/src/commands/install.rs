@@ -101,6 +101,9 @@ pub fn install() {
     if let Some(cvar) = register(crate::demo_next_map::NAME, "0") {
         crate::demo_next_map::SETTING.set_cvar(cvar);
     }
+    if let Some(cvar) = register(crate::demo_next_map::START_NAME, "0") {
+        crate::demo_next_map::START_AT.set_cvar(cvar);
+    }
     if let Some(cvar) = register(demo_list_folders::SHOW_COUNTS.name, "0") {
         demo_list_folders::SHOW_COUNTS.set_cvar(cvar);
     }

@@ -53,12 +53,26 @@
 //! lets go, as `playdemo` does at that point (loading plaque, `cls.signon`
 //! reset), to compare.
 //!
+//! ## Starting at a later map: `ds_debug_demo_start_at_map <n>`
+//!
+//! The same two pieces skip maps. While the loader is on a map before the
+//! `n`th, the `Reconnect` wrap doesn't hold it, so it reads straight on, and
+//! `DemoPlayer::NewGame` (vftable slot 15, which the world's "new map is
+//! ready" signal calls) is swallowed, so the player stays where a demo that
+//! has just been opened leaves it and hands the engine nothing. The first
+//! `NewGame` that goes through is the `n`th map's: the engine loads that map
+//! and no other. The earlier maps cost only the loader's reading.
+//! [`demo_started`] (from the `viewdemo` wrap) starts the count of maps at 1
+//! for each demo. A value of 2 or more turns the play-on setting on by
+//! itself.
+//!
 //! ## What it doesn't do
 //!
 //! The world drops the map it leaves, so the clock, the demo bar and
 //! `ds_demo_seek_to` cover one map at a time, and going back to an earlier
-//! map means loading the demo again. A level change with no `reconnect`
-//! before its `svc_serverinfo` still stops at `ParseServerinfo`'s check.
+//! map means loading the demo again (with `ds_debug_demo_start_at_map`, at
+//! that map). A level change with no `reconnect` before its `svc_serverinfo`
+//! still stops at `ParseServerinfo`'s check.
 //!
 //! `tools/verify_demo_next_map_offsets.py` checks every address, slot and
 //! field here against both builds' `Core.dll` and `DemoPlayer.dll`.
@@ -77,6 +91,34 @@ pub const NAME: &str = console_name!("debug_demo_play_next_map");
 /// Off by default: R&D, and it changes what a multi-map demo does at the end
 /// of its first map.
 pub static SETTING: Setting = Setting::new(NAME, false);
+
+pub const START_NAME: &str = console_name!("debug_demo_start_at_map");
+
+/// `ds_debug_demo_start_at_map <n>`: the next `viewdemo` plays from the
+/// demo's `n`th map (1, or 0, is the first, as the engine has it).
+pub static START_AT: Setting = Setting::new(START_NAME, false);
+
+/// More maps than any demo holds; a larger value is taken as this.
+const MAX_START_MAP: u32 = 64;
+
+/// The map a cvar value asks a demo to start at, 1 for the first.
+fn start_map(value: Option<f32>) -> u32 {
+    match value {
+        // `as` saturates, and the value is at least 2 here.
+        Some(v) if v.is_finite() && v >= 2.0 => (v as u32).min(MAX_START_MAP),
+        _ => 1,
+    }
+}
+
+fn wanted_start_map() -> u32 {
+    start_map(START_AT.value())
+}
+
+/// Whether the loader, on its `loader_map`th map of the demo, is still
+/// before the one playback starts at.
+fn before_start(loader_map: u32, start_map: u32) -> bool {
+    loader_map < start_map
+}
 
 /// One `Core.dll` build's `reconnect` branch in `Server::ParseStuffText`.
 struct Build {
@@ -121,6 +163,8 @@ const SERVER_SLOT_RECONNECT: usize = 17;
 const SERVER_SLOT_IS_DEMO_FILE: usize = 24;
 /// `IDemoPlayer::IsLoading`.
 const PLAYER_SLOT_IS_LOADING: usize = 28;
+/// `DemoPlayer::NewGame(IWorld *, IProxy *)`.
+const PLAYER_SLOT_NEW_GAME: usize = 15;
 /// `DemoPlayer::m_Server`, the same in both builds.
 const PLAYER_FIELD_SERVER: usize = 0x150;
 
@@ -150,8 +194,13 @@ fn mode(value: Option<f32>, fallback_on: bool) -> Mode {
     }
 }
 
+/// The setting's mode; starting at a later map needs the play-on patch, so
+/// it turns it on.
 fn wanted() -> Mode {
-    mode(SETTING.value(), SETTING.on())
+    match mode(SETTING.value(), SETTING.on()) {
+        Mode::Off if wanted_start_map() > 1 => Mode::On,
+        mode => mode,
+    }
 }
 
 /// The vftable offset the `reconnect` branch should call for `mode`.
@@ -183,6 +232,7 @@ static BUILD_NAME: std::sync::Mutex<&str> = std::sync::Mutex::new("");
 /// The handlers beneath the wraps, and the vftables they are in.
 static REAL_RECONNECT: AtomicUsize = AtomicUsize::new(0);
 static REAL_IS_LOADING: AtomicUsize = AtomicUsize::new(0);
+static REAL_NEW_GAME: AtomicUsize = AtomicUsize::new(0);
 static WRAPPED_SERVER_VFTABLE: AtomicUsize = AtomicUsize::new(0);
 static WRAPPED_PLAYER_VFTABLE: AtomicUsize = AtomicUsize::new(0);
 
@@ -196,6 +246,17 @@ static RELEASED_COUNT: AtomicU32 = AtomicU32::new(0);
 /// The player's end time (`f64` bits) when the loader was last let go, until
 /// the next map's clock shows; 0 while not waiting.
 static WAITING_FROM_END: AtomicU64 = AtomicU64::new(0);
+/// Which of the demo's maps the loader is reading (1 for the first), and
+/// which the player was last handed (0 before the first).
+static LOADER_MAP: AtomicU32 = AtomicU32::new(1);
+static PLAYING_MAP: AtomicU32 = AtomicU32::new(0);
+
+/// Called by the `viewdemo` wrap before the engine opens the demo: its maps
+/// are counted from 1 again.
+pub fn demo_started() {
+    LOADER_MAP.store(1, Ordering::Relaxed);
+    PLAYING_MAP.store(0, Ordering::Relaxed);
+}
 
 /// `ds_debug_status`'s line, while a `viewdemo` demo is in the player or
 /// once the patch is in.
@@ -228,9 +289,11 @@ pub fn status_line() -> Option<String> {
         _ => String::new(),
     };
     Some(format!(
-        "demo next map: {state} ({build}); {} map changes reached, {} played into{}{clock}",
+        "demo next map: {state} ({build}); {} map changes reached, {} played into; playing map {} of the demo, the loader on map {}{}{clock}",
         HELD_COUNT.load(Ordering::Relaxed),
         RELEASED_COUNT.load(Ordering::Relaxed),
+        PLAYING_MAP.load(Ordering::Relaxed),
+        LOADER_MAP.load(Ordering::Relaxed),
         if HELD_SERVER.load(Ordering::Relaxed) != 0 {
             "; the loader is waiting at one now"
         } else {
@@ -263,6 +326,7 @@ mod installed {
     // An MSVC `bool` return sets only `al`; read all of `eax` and keep the
     // low byte, as `demo_seek` does.
     type ByteFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
+    type NewGameFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *mut c_void);
 
     fn core_dll() -> usize {
         // Safety: a plain lookup of a loaded module by name.
@@ -329,6 +393,11 @@ mod installed {
                 let ours = is_loading as ByteFn as usize;
                 if *(slot as *const usize) != ours {
                     crate::patch::swap_vftable_slot(slot, ours, &REAL_IS_LOADING)?;
+                }
+                let slot = vftable_slot(player, PLAYER_SLOT_NEW_GAME);
+                let ours = new_game as NewGameFn as usize;
+                if *(slot as *const usize) != ours {
+                    crate::patch::swap_vftable_slot(slot, ours, &REAL_NEW_GAME)?;
                 }
                 WRAPPED_PLAYER_VFTABLE.store(player_vftable, Ordering::Relaxed);
             }
@@ -438,6 +507,20 @@ mod installed {
             if is_demo_file(server) & 0xff == 0 {
                 return;
             }
+        }
+        let ended = LOADER_MAP.fetch_add(1, Ordering::Relaxed);
+        let start = wanted_start_map();
+        if before_start(ended, start) {
+            // Safety: `report` only appends to the hook log.
+            unsafe {
+                crate::debug::report(&format!(
+                    "demo_next_map: read past map {ended} of the demo (playback starts at map {start})"
+                ))
+            };
+            return;
+        }
+        // Safety: as above.
+        unsafe {
             let file = demo_file(server);
             (file.add(DEMO_FILE_NEXT_READ_TIME) as *mut f32).write_unaligned(f32::MAX);
             file.add(DEMO_FILE_CONTINUOUS).write(1);
@@ -451,6 +534,26 @@ mod installed {
                 "demo_next_map: map change {count} in the demo after {end:.2} s of this map; the loader waits there until playback reaches it"
             ))
         };
+    }
+
+    /// `DemoPlayer::NewGame`, called when a map's first frame is in the
+    /// world: swallowed for a map before the one playback starts at, so the
+    /// player hands the engine nothing of it.
+    unsafe extern "thiscall" fn new_game(
+        player: *mut c_void,
+        world: *mut c_void,
+        proxy: *mut c_void,
+    ) {
+        let loader_map = LOADER_MAP.load(Ordering::Relaxed);
+        if before_start(loader_map, wanted_start_map()) {
+            return;
+        }
+        PLAYING_MAP.store(loader_map, Ordering::Relaxed);
+        let real = REAL_NEW_GAME.load(Ordering::Acquire);
+        if real != 0 {
+            // Safety: the slot's own handler, saved before the swap.
+            unsafe { std::mem::transmute::<usize, NewGameFn>(real)(player, world, proxy) };
+        }
     }
 
     /// `IDemoPlayer::IsLoading`: no while the loader is held, since the map
@@ -562,6 +665,28 @@ mod tests {
         // Unregistered: the setting's own default.
         assert_eq!(mode(None, false), Mode::Off);
         assert_eq!(mode(None, true), Mode::On);
+    }
+
+    #[test]
+    fn a_start_map_of_two_or_more_is_taken_and_anything_else_is_the_first() {
+        assert_eq!(start_map(None), 1);
+        assert_eq!(start_map(Some(0.0)), 1);
+        assert_eq!(start_map(Some(1.0)), 1);
+        assert_eq!(start_map(Some(-3.0)), 1);
+        assert_eq!(start_map(Some(f32::NAN)), 1);
+        assert_eq!(start_map(Some(2.0)), 2);
+        assert_eq!(start_map(Some(3.9)), 3);
+        assert_eq!(start_map(Some(1e9)), MAX_START_MAP);
+    }
+
+    #[test]
+    fn maps_before_the_start_map_are_read_past() {
+        assert!(before_start(1, 2));
+        assert!(before_start(2, 3));
+        assert!(!before_start(2, 2));
+        assert!(!before_start(3, 2));
+        // With no start map every map plays.
+        assert!(!before_start(1, 1));
     }
 
     #[test]

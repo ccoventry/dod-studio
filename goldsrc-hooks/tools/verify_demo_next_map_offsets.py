@@ -32,7 +32,9 @@ patch relies on:
      (`PLAYER_FIELD_SERVER`) -> its vftable offset 0x5c" (`IsConnected`).
      `ReadDemoMessage` (slot 45) switches on `FIELD_PLAYER_STATE`, zeroes the
      last sent frame number on the way to `PLAYER_STATE_RUNNING`, and
-     `NewGame` (slot 15) sets the state to 2. (The last two constants are
+     `NewGame` (`PLAYER_SLOT_NEW_GAME`) sets the state to 2, pops its two
+     arguments, and is called through the vftable by `ReceiveSignal` (slot
+     3), so a wrap of the slot sees every call. (The two state constants are
      `demo_seek.rs`'s, added for `played_to_end`.)
 
 Usage:
@@ -66,7 +68,7 @@ SERVER_SLOTS = 26
 DEMOPLAYER_SLOTS = 47
 SLOT_DISCONNECT = 18
 SLOT_IS_CONNECTED = 23
-SLOT_NEW_GAME = 15
+SLOT_RECEIVE_SIGNAL = 3
 SLOT_READ_DEMO_MESSAGE = 45
 SERVER_RUNNING = 7
 SERVER_CONNECTED = 6
@@ -360,9 +362,18 @@ def main() -> int:
               and any(to_connected < k < to_running for k in zeroed),
               f"it zeroes the last sent frame number (+{last_seq:#x}) between setting the state to "
               f"{running - 1} and to {running}")
-        new_game = [t for _, t in player.body(entries[SLOT_NEW_GAME], 0x100)]
+        slot_new_game = const("PLAYER_SLOT_NEW_GAME")
+        new_game = [t for _, t in player.body(entries[slot_new_game], 0x100)]
         check(f"mov dword ptr [esi + {state:#x}], 2" in new_game,
-              f"NewGame (slot {SLOT_NEW_GAME}, +{entries[SLOT_NEW_GAME]:#x}) sets the state to 2 (CONNECTING)")
+              f"NewGame (slot {slot_new_game}, +{entries[slot_new_game]:#x}) sets the state to 2 (CONNECTING)")
+        first_ret = next((t for t in new_game if t.startswith("ret")), "?")
+        check(first_ret == "ret 8", f"NewGame pops two arguments: `{first_ret}`")
+        signal = [t for _, t in player.lines(entries[SLOT_RECEIVE_SIGNAL], 0x140)]
+        via = [k for k, t in enumerate(signal)
+               if re.fullmatch(rf"call dword ptr \[e.x \+ {slot_new_game * 4:#x}\]", t)]
+        check(len(via) == 1 and sum(1 for t in signal[via[0] - 5 : via[0]] if t.startswith("push")) == 2,
+              f"ReceiveSignal (slot {SLOT_RECEIVE_SIGNAL}) calls NewGame through the vftable (offset "
+              f"{slot_new_game * 4:#x}) with two arguments pushed")
 
     print("\nOFFSETS VERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

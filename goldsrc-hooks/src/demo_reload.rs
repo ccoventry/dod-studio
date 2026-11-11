@@ -134,6 +134,8 @@ unsafe extern "C" fn wrapped_viewdemo() {
     if let Some(name) = remember("viewdemo") {
         crate::map_cfgs::before_demo(&name);
     }
+    // Its maps are counted from the first again (#1372).
+    crate::demo_next_map::demo_started();
     unsafe { call_real(&REAL_VIEWDEMO) };
     // A seek later on this command line waits for this demo to load (#928).
     crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Viewdemo);
