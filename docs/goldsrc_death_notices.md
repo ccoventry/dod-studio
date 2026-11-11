@@ -321,7 +321,7 @@ included.
 
 > **"Spectator mode" above is the wrong name, established later.** The call at
 > `+0x2aeba` is `client.dll+0x228e0`, which returns `_cl_minimap`'s value — and
-> only while a spectator predicate holds and `gHUD`'s FOV field is still 90. So
+> only while the renderer is hardware (`IsHardware`) and `gHUD`'s FOV field is still 90. So
 > "mode 2" is **the minimap** (`_cl_minimap 2`, top right), not a spectator
 > mode: the kill feed starts `round(2 * ScreenHeight / 480)` below the
 > minimap's bottom edge while it is up. (An earlier version of this note said
