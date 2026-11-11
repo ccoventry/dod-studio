@@ -89,7 +89,9 @@ pub async fn find_damaged_demos_cmd(
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let folder = PathBuf::from(&folder);
         if !folder.is_dir() {
-            return Err(crate::messages::repair::not_a_folder(&folder.display().to_string()));
+            return Err(crate::messages::repair::not_a_folder(
+                &folder.display().to_string(),
+            ));
         }
         let started = Instant::now();
         native::log_markdown(&crate::messages::repair::damaged_scan_started(
@@ -231,7 +233,9 @@ fn repair_with_events(
                 .iter()
                 .map(hl_demo_auditor::messages::refusal)
                 .collect();
-            native::log_markdown(&crate::messages::repair::repair_refused(&shown, &reasons, &took));
+            native::log_markdown(&crate::messages::repair::repair_refused(
+                &shown, &reasons, &took,
+            ));
             RepairResult {
                 reasons,
                 ..RepairResult::from_report(RepairVerdict::Refused, &report)

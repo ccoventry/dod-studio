@@ -19,7 +19,13 @@ pub fn repair_started(path: &str) -> String {
     format!("[repair] started: {path}")
 }
 
-pub fn repair_done(path: &str, written: &str, holes: usize, seconds_lost: f32, took: &str) -> String {
+pub fn repair_done(
+    path: &str,
+    written: &str,
+    holes: usize,
+    seconds_lost: f32,
+    took: &str,
+) -> String {
     format!(
         "[repair] done in {took}: {path} -> {written}, {holes} gap(s) cut out, {seconds_lost:.0} s of recording lost"
     )

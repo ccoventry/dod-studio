@@ -65,7 +65,13 @@ fn summarise(demo: &Demo) -> Summary {
         flushed: 0,
         count_disagreements: 0,
     };
-    for f in demo.directory.entries.iter().skip(1).flat_map(|e| e.frames.iter()) {
+    for f in demo
+        .directory
+        .entries
+        .iter()
+        .skip(1)
+        .flat_map(|e| e.frames.iter())
+    {
         if is_breadcrumb(f) {
             s.breadcrumbs += 1;
             continue;
@@ -101,11 +107,16 @@ fn summarise(demo: &Demo) -> Summary {
             let (declared, carried) = match &**em {
                 EngineMessage::SvcPacketEntities(pe) => (
                     pe.entity_count.to_u32() as usize,
-                    carry.full(seq, pe.entity_states.iter().map(|e| e.entity_index)).len(),
+                    carry
+                        .full(seq, pe.entity_states.iter().map(|e| e.entity_index))
+                        .len(),
                 ),
                 EngineMessage::SvcDeltaPacketEntities(d) => {
-                    let entries: Vec<(u16, bool)> =
-                        d.entity_states.iter().map(|e| (e.entity_index, e.remove_entity)).collect();
+                    let entries: Vec<(u16, bool)> = d
+                        .entity_states
+                        .iter()
+                        .map(|e| (e.entity_index, e.remove_entity))
+                        .collect();
                     match carry.delta(seq, d.delta_sequence.to_u8(), &entries) {
                         Some(set) => (d.entity_count.to_u32() as usize, set.len()),
                         None => continue,
@@ -126,16 +137,21 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let usage = "usage: repair_compare <a.dem> <b.dem>";
     let (a, b) = (args.next().expect(usage), args.next().expect(usage));
-    let sa = summarise(&open_demo_from_bytes(&std::fs::read(&a).expect("read a")).expect("parse a"));
-    let sb = summarise(&open_demo_from_bytes(&std::fs::read(&b).expect("read b")).expect("parse b"));
+    let sa =
+        summarise(&open_demo_from_bytes(&std::fs::read(&a).expect("read a")).expect("parse a"));
+    let sb =
+        summarise(&open_demo_from_bytes(&std::fs::read(&b).expect("read b")).expect("parse b"));
     for (name, s) in [(&a, &sa), (&b, &sb)] {
         println!("{name}");
         println!(
             "  {} playback frames (+{} breadcrumbs), {} discarded entity packets, {} count disagreements",
             s.frames, s.breadcrumbs, s.flushed, s.count_disagreements
         );
-        let snaps: Vec<String> =
-            s.snapshots.iter().map(|(t, n)| format!("{t:.1}s:{n}")).collect();
+        let snaps: Vec<String> = s
+            .snapshots
+            .iter()
+            .map(|(t, n)| format!("{t:.1}s:{n}"))
+            .collect();
         println!("  full snapshots (time:entities): {}", snaps.join(" "));
     }
     let only = |x: &Summary, y: &Summary| -> Vec<(Key, usize)> {

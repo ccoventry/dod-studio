@@ -258,7 +258,10 @@ pub(crate) fn inject(demo: &mut Demo, joins: &[Join], states: &[JoinState]) -> V
                     client: &states[ramped].client,
                 });
                 reports[ramped].ramp_frames = ramp_frames.len();
-                let at = ramp_position(&frames, ramp_frames.get(ramp_frames.len() / 2).map(|f| f.time));
+                let at = ramp_position(
+                    &frames,
+                    ramp_frames.get(ramp_frames.len() / 2).map(|f| f.time),
+                );
                 frames.splice(at..at, ramp_frames);
                 ramped += 1;
             }
