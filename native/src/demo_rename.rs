@@ -31,6 +31,9 @@ pub struct DemoFacts {
     pub demo_type: String,
     /// The recording player, in a POV demo whose recorder was found.
     pub name: Option<String>,
+    /// The recording player's SteamID64, for the Players tab's Use as name
+    /// (#686). `None` when the demo carries none (a bot, a LAN server).
+    pub steam_id: Option<String>,
     pub kills: Option<i32>,
     pub deaths: Option<i32>,
     /// The recording player's side: "Allies", "British" or "Axis".
@@ -97,6 +100,7 @@ pub fn apply_grouping(facts: &mut [DemoFacts], analyses: &[Option<Analysis>]) {
 struct PlayerFacts<'a> {
     client_id: Option<u8>,
     name: &'a str,
+    steam_id: Option<String>,
     team: Option<Team>,
     kills: i32,
     deaths: i32,
@@ -134,6 +138,7 @@ pub fn facts_from(path: &Path, analysis: &Analysis) -> DemoFacts {
                 analysis::Connection::Disconnected => None,
             },
             name: &p.name,
+            steam_id: analysis::steam_id_of(&p.id.to_string()),
             team: p.team.clone(),
             kills: p.stats.1,
             deaths: p.stats.2,
@@ -153,6 +158,7 @@ pub fn facts_from(path: &Path, analysis: &Analysis) -> DemoFacts {
         modified_unix_secs: modified_unix_secs(path),
         demo_type: if hltv { "hltv" } else { "pov" }.to_string(),
         name: own.map(|p| p.name.to_string()).filter(|n| !n.is_empty()),
+        steam_id: own.and_then(|p| p.steam_id.clone()),
         kills: own.map(|p| p.kills),
         deaths: own.map(|p| p.deaths),
         side: own
@@ -440,6 +446,7 @@ mod tests {
         PlayerFacts {
             client_id,
             name,
+            steam_id: None,
             team,
             kills: 7,
             deaths: 3,
@@ -482,6 +489,18 @@ mod tests {
         // A slot nobody connected holds, and an HLTV demo's missing slot.
         assert_eq!(recorder(Some(9), &players), None);
         assert_eq!(recorder(None, &players), None);
+    }
+
+    #[test]
+    fn the_recorders_steam_id_is_kept_when_the_demo_has_one() {
+        let mut me = player(Some(4), "me", Some(Team::Allies));
+        me.steam_id = analysis::steam_id_of("76561197961831029");
+        assert_eq!(
+            recorder(Some(4), &[me]).unwrap().steam_id.as_deref(),
+            Some("76561197961831029")
+        );
+        // A bot's or a LAN server's id names nobody.
+        assert_eq!(analysis::steam_id_of("PLAYER_3"), None);
     }
 
     #[test]

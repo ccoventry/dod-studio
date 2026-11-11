@@ -8,7 +8,7 @@
 //! the **`HudText` user message**. `svc_temp_entity`/`TE_TEXTMESSAGE` and
 //! `svc_centerprint` carry none of it. (`TE_TEXTMESSAGE` does carry server
 //! plugins' HUD messages in the newer match demos -- KTP's ready lists --
-//! which `server_hud_text` hides, #677.) Three kinds were seen:
+//! which `plugin_text` hides, #677.) Three kinds were seen:
 //!
 //! - `dod_score_ent`'s `message` -- the round result (`MAP_ALLIED_VICTORY2`),
 //!   at the frames the win music plays;
@@ -61,10 +61,11 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_map_text");
 
@@ -77,14 +78,14 @@ pub(crate) const MESSAGE: &str = "HudText";
 /// one on `HudText`, but a string it declares is still the map's own. It
 /// arrives as a `TE_TEXTMESSAGE`, whose `HudText` the engine hands to every
 /// record rather than the newest, so this module's hook can't drop it; the
-/// list still tells `server_hud_text` to leave it alone (#677).
+/// list still tells `plugin_text` to leave it alone (#677).
 const TEXT_CLASSES: [&[u8]; 3] = [b"dod_score_ent", b"env_message", b"game_text"];
 
 /// Largest entity lump read. The biggest in a 249-map install is ~440 KB
 /// (`dod_lennon4`); anything past this is not an entity lump.
 const MAX_ENTITY_LUMP: usize = 2 * 1024 * 1024;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what the message handler reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Hash of the level [`TEXT`] was read for, or 0 before the first read.
@@ -100,11 +101,6 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 struct MapText {
     map: String,
     strings: BTreeSet<Vec<u8>>,
-}
-
-/// Called by `commands.rs` once `ds_hud_hide_map_text` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 // ── Pure parsing ─────────────────────────────────────────────────────────────
@@ -340,7 +336,7 @@ pub(crate) fn hide(payload: &[u8]) -> bool {
 }
 
 /// Whether `text`, a `TE_TEXTMESSAGE`'s resolved text, is one the loaded map
-/// declares -- a `game_text`'s line -- so `server_hud_text` leaves it alone.
+/// declares -- a `game_text`'s line -- so `plugin_text` leaves it alone.
 /// The strings are read while either cvar is on.
 pub(crate) fn declares_sent_text(text: &[u8]) -> bool {
     TEXT.read()
@@ -383,11 +379,9 @@ fn install_hook() {
 /// Called every frame from `commands::poll`. Follows the cvar, reads the
 /// map's strings once per level while it is on, and keeps the hook in place.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
@@ -402,9 +396,9 @@ pub fn poll() {
     }
     // Off leaves any installed record in place: it forwards everything while
     // WANTED is false, and there is no unhook to ask the engine for. The
-    // map's strings are still read while ds_hud_hide_server_text is
+    // map's strings are still read while ds_hud_hide_plugin_text is
     // on, which keeps a map's own game_text (#677).
-    if !wanted && !crate::server_hud_text::wanted() {
+    if !wanted && !crate::plugin_text::wanted() {
         return;
     }
     let Some(level) = level_name() else {
@@ -421,11 +415,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let hidden = HIDDEN.load(Ordering::Relaxed);
     if !wanted && hidden == 0 {
         return None;

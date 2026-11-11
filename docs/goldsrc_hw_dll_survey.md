@@ -36,7 +36,7 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 > | the 64-byte command limit (§3.1) | not reachable | — | #256 |
 > | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
 > | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
-> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207, open |
+> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207: Studio plays a trimmed copy of the demo instead |
 >
 > ### Read this before §1
 >
@@ -459,7 +459,7 @@ both builds by `tools/verify_engine_text_offsets.py`:
   `"HudText"` **by name** (`+0x1a7c0` / `+0x1a9260`). Unlike the by-number
   dispatcher every server message uses, the by-name one calls every record
   with that name, so a `pfnHookUserMsg` hook cannot drop these:
-  `client.dll`'s own record runs after it. `server_hud_text.rs` points the
+  `client.dll`'s own record runs after it. `plugin_text.rs` points the
   `CL_HudMessage` call (`+0x23da4` / `+0x1b0a0d`) at a filter instead.
 - The user-message list itself is freed only where the engine unloads
   `client.dll` (`+0xbda0`: `HUD_Shutdown`, then `FreeLibrary`), and
@@ -542,6 +542,18 @@ CL_UPDATE_MASK     hw+0x13afcc = 63
 
 That is why the predicate is checkable offline at all, and it is what
 `survey_hw_dll.py entities` re-checks.
+
+### The new frame is sized by the declared count
+
+The new frame's entity array is allocated from the packet's `entity_count`,
+and carried entities are copied into it with no check against that size:
+`hw+0x13453` is a `rep movsd` of 0x55 dwords (one 340-byte `entity_state_t`)
+to `frame[+0x24] + newindex * 0x154`. The `newindex == MAX_PACKET_ENTITIES`
+message just before it only prints. A packet that declares fewer entities than
+the client's carried set overruns the heap: #15's salvaged `m1_h1` faults there
+writing an 11th entry into a block declared for 10, and others corrupt the heap and fault
+later. Any rewrite of packet entities has to state the count the client will
+actually build (`analysis/examples/shared/entity_carry.rs`).
 
 ---
 
@@ -834,7 +846,7 @@ same location in three places:
 | `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
 
 In every one, **both sides save the slot's current value and call through it**
-— `hook_import` stores `*slot` as the real function, `connect_guard`'s `wrap`
+— `hook_import` stores `*slot` as the real function, `cmd_list::wrap`
 keeps the handler it replaces, and HLAE's three writers do the same — so either
 install order gives a working chain. *Inferred, not traced:* that neither side
 restores its saved value while the other's hook is above it. Restoring would
@@ -1197,7 +1209,7 @@ code runs. This search does not list those.
 Every HLAE hook therefore lasts for the life of the process. That turns §12.5's
 *inferred* "neither side restores its saved value" into a proven one for HLAE;
 `goldsrc-hooks` has no restore path for the three shared slots either
-(`hook_import`, `connect_guard`'s `wrap` and `swap_slot` only ever install).
+(`hook_import`, `cmd_list::wrap` and `swap_slot` only ever install).
 So the three shared slots are chain-safe in either install order, and stay so.
 
 One detail of the swapper: for `startmovie` and `endmovie` HLAE throws the old

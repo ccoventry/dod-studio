@@ -33,7 +33,8 @@
 //!   it sent (`this+0x3d8`) up to the new one.
 //!
 //! A backward seek runs nothing: both walks start past their end. So "events
-//! between the old and new position do not fire" holds only going back.
+//! between the old and new position do not fire" holds only going back
+//! (an HLTV demo goes back differently, see below).
 //!
 //! By default these commands do exactly what the engine does. Set
 //! `ds_demo_seek_skip_between 1` to make a seek land clean instead: it moves
@@ -66,6 +67,19 @@
 //! only one of those a frame, so a POV demo's key presses from the whole jump
 //! would play on for tens of seconds after the landing. A stepped seek drops
 //! them and lets go of the keys once it lands (`filtered_commands.rs`, #702).
+//!
+//! ## A backward seek in an HLTV demo starts over (#830)
+//!
+//! Going back replays nothing, so the client keeps what the later position
+//! left it. In an HLTV demo that includes each player's zoom, which only the
+//! `HLTV` user message carries (`hltv_fov.rs`): a sniper scoped in at the
+//! landing showed unzoomed after Review's Replay. So a backward seek in an
+//! HLTV demo ([`rewinds`]) clears the client's zoom table, sets the clock to
+//! the demo's start, waits for that frame to be sent, and steps forward to
+//! the target like a long forward seek. Every message before the landing
+//! arrives in order, so teams, scores and names are right too. It costs a
+//! step per 5 s of the demo before the landing. POV demos, which record the
+//! zoom in every frame, and skip seeks still jump back at once.
 //!
 //! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
@@ -140,11 +154,12 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::ffi::{CStr, c_char};
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::Ordering;
 
 use crate::commands::console_print;
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
 pub const SEEK_BY_NAME: &str = console_name!("demo_seek_by");
@@ -166,6 +181,10 @@ struct Pending {
     landed: bool,
     /// The clock value the last step set.
     last_set: f64,
+    /// A backward seek in an HLTV demo first goes back to the start
+    /// ([`rewinds`]): `m_LastFrameTime` before it, until the player has sent
+    /// the start frame.
+    rewind_from: Option<f64>,
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
     steps: u32,
@@ -188,6 +207,20 @@ fn sent(last_frame_time: f64, last_set: f64) -> bool {
 
 static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
 
+/// Drops a seek still on its way, returning its target. A newly loaded demo
+/// must not inherit the last one's steps: they would move the clock of a demo
+/// still loading, where a seek is refused, and run the old seek's follow-up
+/// in it. An HLTV backward seek steps for a second or two (#830), so a review
+/// moving on to another demo can land inside one. `try_lock`: only `poll` and
+/// a seek starting hold it, both on this thread and never across this call.
+fn cancel_pending() -> Option<f64> {
+    PENDING
+        .try_lock()
+        .ok()
+        .and_then(|mut p| p.take())
+        .map(|p| p.target)
+}
+
 /// One frame of a stepped seek: move the clock to `To`, or set it to the
 /// target and land.
 #[derive(Debug, PartialEq)]
@@ -209,38 +242,32 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
     !skip_between && to - now > STEP_SECONDS
 }
 
+/// Whether a seek from `now` to `to` goes back to the demo's start first and
+/// steps forward from there (#830): a backward seek in an HLTV demo, whose
+/// zoom per player comes only from the `HLTV` messages a backward jump never
+/// replays (`hltv_fov.rs`). Stepping from the start replays them all, in
+/// order, along with every team, score and name change before the landing.
+/// A POV demo carries its zoom in every frame, and a
+/// `ds_demo_seek_skip_between` seek skips the in-between on purpose.
+fn rewinds(now: f64, to: f64, skip_between: bool, hltv: bool) -> bool {
+    hltv && !skip_between && to < now
+}
+
+/// Whether the player has sent the frame a rewind set the clock to: it
+/// records the clock it sent at, which falls below where it was.
+fn rewound(last_frame_time: f64, from: f64) -> bool {
+    last_frame_time < from - 0.001
+}
+
 /// `ds_demo_seek_skip_between`: 1 lands a seek without running the director
 /// events and console commands it jumps over. Off by default, so a seek does
 /// what the engine's own Goto does until asked otherwise.
 ///
-/// Read from the cvar when a seek runs, so it needs no per-frame poll. The flag
-/// is the fallback path's, set by a plain toggle command when cvars could not
-/// be registered.
-pub static SKIP_BETWEEN: AtomicBool = AtomicBool::new(false);
-static SKIP_BETWEEN_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once `ds_demo_seek_skip_between` is registered.
-pub fn set_skip_between_cvar(cvar: *mut CvarSPartial) {
-    SKIP_BETWEEN_CVAR.store(cvar, Ordering::Release);
-}
+/// Read from the cvar when a seek runs, so it needs no per-frame poll.
+pub static SKIP_BETWEEN: Setting = Setting::new(SKIP_BETWEEN_NAME, false);
 
 fn skip_between() -> bool {
-    let cvar = SKIP_BETWEEN_CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        SKIP_BETWEEN.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
-
-/// For the fallback toggle command's bare-name query.
-pub fn status() -> String {
-    if skip_between() {
-        "seeks skip the events and commands between the old and new position".to_string()
-    } else {
-        "seeks run the events and commands they jump over, like the editor's Goto".to_string()
-    }
+    SKIP_BETWEEN.on()
 }
 
 /// One `DemoPlayer.dll` build this module was checked against.
@@ -510,6 +537,15 @@ pub enum DemoCommand {
 /// a seek later on this line waits for this one.
 pub fn demo_started(command: DemoCommand) {
     cancel_queued("you loaded another demo");
+    if let Some(target) = cancel_pending() {
+        say(&format!(
+            "{SEEK_TO_NAME}: stopped the seek to {} (you loaded another demo)",
+            clock_text(target)
+        ));
+    }
+    // The client keeps the last demo's zooms otherwise (#830); none of this
+    // demo's messages have arrived yet.
+    crate::hltv_fov::clear_logged("a demo was loaded");
     let armed = match command {
         DemoCommand::Viewdemo => ARMED_VIEWDEMO,
         DemoCommand::Playdemo => ARMED_PLAYDEMO,
@@ -1094,13 +1130,20 @@ mod player {
                 return Err("the demo stopped".into());
             }
             // One step per datagram: two steps sent together could overflow.
+            // A rewind's start frame goes first, or the first step would be
+            // a backward jump that replays nothing.
             let last_frame_time =
                 ((player as *const u8).add(FIELD_LAST_FRAME_TIME) as *const f64).read_unaligned();
-            if !sent(last_frame_time, seek.last_set) && seek.waited < MAX_WAIT_FRAMES {
+            let ready = match seek.rewind_from {
+                Some(from) => rewound(last_frame_time, from),
+                None => sent(last_frame_time, seek.last_set),
+            };
+            if !ready && seek.waited < MAX_WAIT_FRAMES {
                 seek.waited += 1;
                 return Ok(false);
             }
             seek.waited = 0;
+            seek.rewind_from = None;
             if seek.landed {
                 return Ok(true);
             }
@@ -1150,6 +1193,29 @@ mod player {
 
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
             let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            let hltv = engine::engfuncs().is_some_and(|e| (e.is_spectate_only)() != 0);
+            if rewinds(now, to, skip_between, hltv) {
+                // Cleared first: a player with no `HLTV` message before the
+                // landing has no zoom there.
+                crate::hltv_fov::clear_logged("a backward seek");
+                let from = ((player as *const u8).add(FIELD_LAST_FRAME_TIME) as *const f64)
+                    .read_unaligned();
+                set_world_time(player, start, 0);
+                *pending = Some(Pending {
+                    target: to,
+                    then,
+                    landed: false,
+                    last_set: start,
+                    rewind_from: Some(from),
+                    waited: 0,
+                    steps: 0,
+                    dropped: 0,
+                    started: std::time::Instant::now(),
+                });
+                return Ok(format!(
+                    "{now:.2} -> {to:.2} s, an HLTV demo going back: from the start ({start:.2}) in steps of {STEP_SECONDS} s, so each player's zoom is right (demo runs {start:.2} to {end:.2})"
+                ));
+            }
             if stepped(now, to, skip_between) {
                 // Each frame from here moves the clock one step (`step`).
                 *pending = Some(Pending {
@@ -1157,6 +1223,7 @@ mod player {
                     then,
                     landed: false,
                     last_set: now,
+                    rewind_from: None,
                     waited: 0,
                     steps: 0,
                     dropped: 0,
@@ -1174,6 +1241,7 @@ mod player {
                 then: Some(then),
                 landed: true,
                 last_set: to,
+                rewind_from: None,
                 waited: 0,
                 steps: 0,
                 dropped: 0,
@@ -1442,6 +1510,61 @@ mod tests {
             !stepped(90.0, 1335.3, true),
             "the skip jumps at once on purpose"
         );
+    }
+
+    /// #830: stealth scoped at 940 s of `wsod25_grp2_h1_hltv`, seeked back to
+    /// from 1000 s.
+    #[test]
+    fn only_backward_seeks_in_hltv_demos_go_back_to_the_start() {
+        assert!(rewinds(1000.0, 940.0, false, true));
+        assert!(
+            !rewinds(1000.0, 940.0, false, false),
+            "a POV demo records its zoom"
+        );
+        assert!(
+            !rewinds(1000.0, 940.0, true, true),
+            "the skip lands at once on purpose"
+        );
+        assert!(
+            !rewinds(900.0, 940.0, false, true),
+            "forward replays the messages"
+        );
+        assert!(!rewinds(940.0, 940.0, false, true));
+    }
+
+    /// The player records the clock it sent at: once the start frame is out,
+    /// it is far below where playback was.
+    #[test]
+    fn a_rewind_counts_as_sent_once_the_clock_it_sent_at_falls() {
+        assert!(rewound(0.02, 1000.0));
+        assert!(
+            !rewound(1000.0, 1000.0),
+            "still the frame before the rewind"
+        );
+        assert!(
+            !rewound(1000.3, 1000.0),
+            "a frame sent before the rewind took"
+        );
+    }
+
+    /// A review moving on to another demo mid-rewind: the new demo gets none
+    /// of the old seek's steps or follow-up.
+    #[test]
+    fn loading_another_demo_drops_a_seek_still_on_its_way() {
+        *PENDING.lock().unwrap() = Some(Pending {
+            target: 939.0,
+            then: Some("spec_mode 4".into()),
+            landed: false,
+            last_set: 300.0,
+            rewind_from: None,
+            waited: 0,
+            steps: 60,
+            dropped: 0,
+            started: std::time::Instant::now(),
+        });
+        assert_eq!(cancel_pending(), Some(939.0));
+        assert!(!seeking());
+        assert_eq!(cancel_pending(), None);
     }
 
     /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the

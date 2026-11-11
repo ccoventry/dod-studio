@@ -33,9 +33,27 @@ permissions:
   contents: read
 
 jobs:
-  rust-tests:
-    name: Rust workspace tests
+  # The workspace's tests in three jobs side by side. As one job they took
+  # ~5.5 minutes, the longest in CI, and ~3m40s of that was compiling: the
+  # crates on the path analysis -> native -> native's tests, and the Tauri
+  # app's lib and tests, all on one 4-core runner. Split by what each part
+  # compiles: `native` and `studio` are the two long builds, `rest` is every
+  # other crate (by exclusion, so a new crate is tested without a CI change).
+  # Each part keeps its own Rust cache (`key` below).
+  rust-tests-part:
+    name: Rust tests (${{ matrix.part }})
     runs-on: windows-latest
+    strategy:
+      # Let every part finish, so one red run shows every failing part.
+      fail-fast: false
+      matrix:
+        include:
+          - part: native
+            packages: -p native
+          - part: studio
+            packages: -p desktop-studio
+          - part: rest
+            packages: --workspace --exclude goldsrc-hooks --exclude native --exclude desktop-studio
     env:
       # No debug info in test builds: nothing here reads it, and on Windows
       # generating and linking it is a real share of the build. Panic messages
@@ -49,6 +67,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.part }}
           save-if: ${{ github.ref == 'refs/heads/dev' }}
 
       # studio's build script (tauri-build) checks that every
@@ -57,24 +76,40 @@ jobs:
       # the whole workspace fails to build. Only its existence is checked and
       # no test reads it, so an empty file does: building the real release DLL
       # here cost 1-2 minutes per job. Hooks 32-bit builds and tests the real
-      # one, and the release workflows build what ships.
+      # one, and the release workflows build what ships. Only the studio part
+      # builds the app.
       - name: Placeholder for the 32-bit hook DLL
+        if: matrix.part == 'studio'
         shell: bash
         run: mkdir -p target/i686-pc-windows-msvc/release && touch target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll
 
-      # goldsrc-hooks is left out: Hooks 32-bit runs every one of its tests as
-      # 32-bit, the build that ships, so compiling them again as 64-bit here
-      # only lengthened the slowest job.
+      # goldsrc-hooks is left out of every part: Hooks 32-bit runs every one of
+      # its tests as 32-bit, the build that ships, so compiling them again as
+      # 64-bit here only lengthened the slowest job.
       #
       # --lib --bins --tests: a plain `cargo test` also builds and links every
       # example (114 R&D probes in native/ and analysis/), which run no tests;
       # Clippy's --all-targets still checks that they compile. The doc tests
       # (only dem-patch has any) run in a step of their own.
-      - name: cargo test --workspace
-        run: cargo test --workspace --exclude goldsrc-hooks --lib --bins --tests --locked
+      - name: cargo test (${{ matrix.part }})
+        run: cargo test ${{ matrix.packages }} --lib --bins --tests --locked
 
       - name: cargo test --doc (dem-patch)
+        if: matrix.part == 'rest'
         run: cargo test -p dem --doc --locked
+
+  # The check the rulesets require by this name: green only when every part
+  # passed. Keeping the name means no ruleset change; a part that failed or
+  # was cancelled turns it red.
+  rust-tests:
+    name: Rust workspace tests
+    needs: rust-tests-part
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part passed
+        shell: bash
+        run: test "${{ needs.rust-tests-part.result }}" = "success"
 
   clippy:
     name: Clippy
@@ -162,6 +197,28 @@ jobs:
       - run: npx playwright install chromium
 
       - run: npm run test:e2e
+
+  # ESLint over studio/src (#1179): no-unused-vars as an error, max-params as a
+  # warning. Its own parallel job on ubuntu (no Windows code involved), so it
+  # adds no wall-clock time; npm is cached the way the e2e job does.
+  frontend-lint:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: studio/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
 
   # The hook DLL ships as 32-bit, so its tests run here, as 32-bit, and only
   # here; Clippy above lints it as 64-bit too (it is a workspace member).

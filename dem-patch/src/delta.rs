@@ -2,18 +2,19 @@ use std::str::from_utf8;
 
 use crate::{
     bit::{BitReader, BitSlice, BitSliceCast, BitWriter},
-    types::{Delta, DeltaDecoder, DeltaDecoderS, DeltaType},
+    types::{Delta, DeltaDecoder, DeltaDecoderS, DeltaType, DeltaValue},
 };
 
 pub fn parse_delta(dd: &DeltaDecoder, br: &mut BitReader) -> Delta {
-    let mut res: Delta = Delta::new();
-
+    // At most 7 mask bytes (3 bits of count), read up front onto the stack.
     let mask_byte_count = br.read_n_bit(3).to_u8() as usize;
-    let mask_bytes: Vec<u8> = (0..mask_byte_count)
-        .map(|_| br.read_n_bit(8).to_u8())
-        .collect();
+    let mut mask_bytes = [0u8; 8];
+    for mask_byte in mask_bytes.iter_mut().take(mask_byte_count) {
+        *mask_byte = br.read_n_bit(8).to_u8();
+    }
+    let set_fields: u32 = mask_bytes.iter().map(|b| b.count_ones()).sum();
+    let mut res = Delta::with_capacity((set_fields as usize).min(dd.len()));
 
-    // for i in 0..mask_byte_count {
     for (i, mask_byte) in mask_bytes.iter().enumerate().take(mask_byte_count) {
         for j in 0..8 {
             let index = j + i * 8;
@@ -24,12 +25,11 @@ pub fn parse_delta(dd: &DeltaDecoder, br: &mut BitReader) -> Delta {
 
             if (mask_byte & (1 << j)) != 0 {
                 let description = &dd[index];
-                // A decoder table built from a corrupted delta_description
-                // can carry a non-UTF-8 field name. Lossy rather than
-                // `unwrap`, because the release profile aborts on panic. #225.
-                let key = String::from_utf8_lossy(&description.name).into_owned();
                 let value = parse_delta_field(description, br);
-                res.insert(key, value);
+                // `insert`, not a plain push: a corrupted description can
+                // name two fields alike, and the later one wins, as it did
+                // when this was a hash map.
+                res.insert(description.key.clone(), value);
             }
         }
     }
@@ -56,7 +56,7 @@ macro_rules! div_or_zero {
     };
 }
 
-fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8> {
+fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> DeltaValue {
     let lhs = description.flags;
 
     let is_signed = flag!(lhs, DeltaType::Signed);
@@ -75,11 +75,11 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
             let value = br.read_n_bit(signed_bits(description)).to_u8();
             let res_value =
                 div_or_zero!(sign * value as i8, description.divisor as i8).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u8();
             let res_value = div_or_zero!(value, description.divisor as u8).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         }
     } else if is_short {
         if is_signed {
@@ -87,11 +87,11 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
             let value = (br.read_n_bit(signed_bits(description))).to_u16();
             let res_value =
                 div_or_zero!(sign * value as i16, description.divisor as i16).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u16();
             let res_value = div_or_zero!(value, description.divisor as u16).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         }
     } else if is_integer {
         if is_signed {
@@ -99,22 +99,22 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
             let value = (br.read_n_bit(signed_bits(description))).to_u32();
             let res_value =
                 div_or_zero!(sign * value as i32, description.divisor as i32).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u32();
             let res_value = div_or_zero!(value, description.divisor as u32).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         }
     } else if is_some_float {
         if is_signed {
             let sign = if br.read_1_bit() { -1 } else { 1 };
             let value = (br.read_n_bit(signed_bits(description))).to_u32();
             let res_value = (((sign * value as i32) as f32) / (description.divisor)).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u32();
             let res_value = ((value as f32) / (description.divisor)).to_le_bytes();
-            res_value.to_vec()
+            res_value.into()
         }
     } else if is_angle {
         let value = (br.read_n_bit(description.bits as usize)).to_u32();
@@ -122,15 +122,15 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
         // description can carry. #225.
         let multiplier = 360f32 / (1u32.checked_shl(description.bits).unwrap_or(u32::MAX) as f32);
         let res_value = (value as f32 * multiplier).to_le_bytes();
-        res_value.to_vec()
+        res_value.into()
     } else if is_string {
-        bitslice_to_u8_vec(br.read_string())
+        bitslice_to_u8_vec(br.read_string()).into()
     } else {
         // Was `unreachable!`. It is reachable: `flags` is read off disk, and a
         // corrupted description can name no type at all. Flag the read so the
         // caller rejects the message rather than aborting the process. #225.
         br.flag_bad_read();
-        Vec::new()
+        DeltaValue::default()
     }
 }
 

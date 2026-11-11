@@ -10,6 +10,7 @@
 
 import { parseTemplate, buildName, halfWord } from './clip_name.js';
 import { nameWithoutTag, sideTag, sideTeams } from './project_teams.js';
+import { useAsName } from './player_alias.js';
 import { placeholderGroups, placeholderNames, WITH_FALLBACK } from './placeholder_catalogue.js';
 import { fromCacheText, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
@@ -124,7 +125,7 @@ function localDate(unixSecs) {
 const isAxis = (side) => side === 'Axis';
 
 /** Every placeholder's value for one demo. `null` means missing. */
-export function demoValues(facts, projectTeams) {
+export function demoValues(facts, projectTeams, useAsFor = useAsName) {
   const { allies, axis, team1, team2 } = sideTeams(facts, projectTeams);
   const known = facts?.side === 'Allies' || facts?.side === 'British' || isAxis(facts?.side);
   const number = (n) => (n === null || n === undefined ? null : String(n));
@@ -133,9 +134,11 @@ export function demoValues(facts, projectTeams) {
     : isAxis(facts.side)
       ? ((facts.teams || []).find((t) => t.side === 'British') ? 'British' : 'Allies')
       : 'Axis';
+  // The Players tab's Use as name (#686), for the recording player.
+  const useAs = useAsFor(facts?.steam_id);
   return {
-    name: nameWithoutTag(facts?.name || null, sideTag(facts, facts?.side)),
-    full_name: facts?.name || null,
+    name: useAs || nameWithoutTag(facts?.name || null, sideTag(facts, facts?.side)),
+    full_name: useAs || facts?.name || null,
     kills: number(facts?.kills),
     deaths: number(facts?.deaths),
     faction: known ? facts.side : null,

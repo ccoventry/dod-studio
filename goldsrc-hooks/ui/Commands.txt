@@ -1,6 +1,6 @@
 SPECTATING (HLTV demos)
   ds_spec_match_pov 0/1
-      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone eye height, the gun lowering.
+      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone and crouch eye height, the gun lowering.
   ds_spec_lock 0/1
       Keep the camera on the player you are watching when they die.
   ds_spec_deathcam 0/1
@@ -13,30 +13,44 @@ SPECTATING (HLTV demos)
       Hide the camera mode's name ('Free Look', ...) and the green 'Press DUCK for Spectator Menu' (POV deaths too).
   ds_spec_hide_hltv_messages 0/1
       Hide the HLTV proxy's on-screen messages.
+  ds_spec_show_player_info 0-3
+      What to show over each player's head while an HLTV demo plays (nothing in POV demos) (the players the game draws, so through walls too): 0 off, 1 the name, 2 a health bar, 3 both.
+  ds_spec_xray_show 0-2
+      X-ray, like CS:GO's GOTV, while a demo plays: 0 off, 1 players behind walls glow in their team's colour, 2 and players in view get an outline too (HLTV demos: everyone; POV demos: the players the recording carries).
+  ds_spec_xray_allies_color "R G B"
+      X-ray's colour for the Allies, three numbers 0-255 (default "50 145 50", green).
+  ds_spec_xray_axis_color "R G B"
+      X-ray's colour for the Axis, three numbers 0-255 (default "160 40 40", red).
 
 HUD
   ds_hud_hide_scoreboard 0/1
       Stop a POV demo's recorded TAB presses showing the scoreboard.
   ds_hud_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
+  ds_hud_crosshair_scale <n>
+      Draw the crosshair n times bigger, for movies at high resolutions (default 1, at most 8).
+  ds_hud_crosshair_outline_size <px>
+      Draw a border this many pixels thick around the crosshair (default 0, off; at most 8).
+  ds_hud_crosshair_outline_color "R G B"
+      The crosshair border's colour, three whole numbers 0-255 (default "0 0 0", black).
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   ds_hud_hide_hints 0/1
-      Hide the auto-help hint box in the top-left corner (on by default).
-  ds_hud_hide_element <name> 0/1
-      Hide one HUD element; the bare command lists them.
+      Hide the auto-help hint box in the top-left corner and the machine gun's 'Deploy... to Reload!' prompt (on by default).
+  ds_hud_hide_teammate_info 0/1
+      Hide the teammate's name and health under the crosshair in POV demos.
   ds_hud_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
   ds_hud_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
   ds_hud_hide_center_text 0/1
       Hide the text the server prints in the middle of the screen (plugin countdowns and notices), the engine's own centre print too.
-  ds_hud_hide_server_text 0/1
-      Hide server plugins' coloured HUD messages (match status, ready lists, banners); the map's own text stays.
+  ds_hud_hide_plugin_text 0/1
+      Hide what server plugins put on screen: coloured HUD messages (match status, ready lists, banners) and their menus and votes; the map's own text stays.
   ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_hud_deathmsg
-      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], scale <1..8>, layout even|default, gap <0..64>|default (px between each name and the icon, with layout even), outline <0..4> [colour], background <alpha> [colour]|team <alpha>, clear (empty it now), clear_on restart|death <0|1> [delay] (empty it at each new round, or when the watched player dies) (all live; a colour is r g b or #rrggbb). The bare command shows the options.
+      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], fallback <face>...|default (faces to try for characters the font lacks, before Tahoma), scale <1..8>, layout even|default, gap <0..64>|default (px between each name and the icon, with layout even), outline <0..4> [colour], background <alpha> [colour]|team <alpha>, clear (empty it now), clear_on restart|death <0|1> [delay] (empty it at each new round, or when the watched player dies) (all live; a colour is r g b or #rrggbb). The bare command shows the options.
   ds_hud_objectives
       Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
@@ -79,6 +93,14 @@ MAP
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_map_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
+  ds_map_weather 0-3
+      Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
+  ds_map_run_cfgs 0/1
+      Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
+  ds_map_apply_lighting 0/1
+      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius).
+  ds_map_reload_lighting
+      Read the map's _light.txt again and apply it now, for trying a new scale without reloading the demo.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
@@ -89,6 +111,14 @@ SOUND
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
   ds_sound_restore_gunshots 0/1
       HLTV and POV demos: play the gunshots a demo left silent, every player's, the recorder's too (on by default).
+  ds_sound_headshot_farther 0/1
+      Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
+  ds_sound_headshot_pov_farther 0/1
+      With ds_sound_headshot_farther on, only the headshots the POV player makes carry farther: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+  ds_sound_headshot_louder 0-3
+      Play a louder headshot: 1 a little louder, 2 louder, 3 loudest (clipped). DoD Studio makes the louder copies from the game's own helmet_hit.wav when it starts the game.
+  ds_sound_headshot_pov_louder 0/1
+      With ds_sound_headshot_louder on, only the headshots the POV player makes play louder. Everyone else's play at the game's level.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
@@ -99,7 +129,7 @@ DEMO PLAYBACK
   ds_demo_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
   ds_demo_fast_load 0/1/<ms>
-      viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
+      How long viewdemo loads the demo each frame: 8 ms (1, the default) loads it about twice as fast as the game's own pace (0) and stays smooth. More ms (<ms>) loads barely faster and plays choppy until the demo has loaded.
   ds_demo_other_drives 0/1
       viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
   ds_demo_show_load_progress 0/1
@@ -108,11 +138,15 @@ DEMO PLAYBACK
       Play the last demo again.
   ds_demo_review yes|maybe|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  ds_demo_review form
+      The kill range and note form over the demo, as E opens it during a review highlight.
+  ds_demo_review ask start|here
+      With no review running, ask DoD Studio to review the demo playing, from its first highlight or from the next one from here (the Review tab's From the start and From here).
   ds_demo_ex_interp_max <ms>
       Raise the engine's 100 ms ceiling on ex_interp.
 
 CAPTURE
-  ds_capture_batch start "<file>"|away|hold|go|stop
+  ds_capture_batch start "<file>"|away|hold|go|recording|stop
       Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
   ds_capture_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
@@ -140,6 +174,10 @@ DOD STUDIO WINDOW
       A folder's demo count includes its subfolders.
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
+  ds_ui_review_keys 0/1
+      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; ESC opens the Review tab. 0: the Review tab opens at each end.
+  ds_ui_review_info 0/1
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
@@ -152,6 +190,8 @@ DEBUG
       Print everything DoD Studio's hook is doing to the console.
   ds_debug_position
       Print where the view and the watched player are.
+  ds_debug_texture
+      Print the map texture in the middle of the screen: its name, its HD file name and its line in the map's _detail.txt.
   ds_debug_msglog <name>...
       Log chosen game messages to the hook log.
   ds_debug_hd_misses

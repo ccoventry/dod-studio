@@ -52,7 +52,8 @@
 //!    line's height is known in time to centre both names on it
 //!    ([`name_draw_y`], used by `font`'s name draws). It also stores the
 //!    sprite index itself in [`ICON_INDEX`], so the icon draw knows exactly
-//!    which `hud.txt` entry it is drawing.
+//!    which `hud.txt` entry it is drawing, and the line's slot offset (`edi`)
+//!    in [`ICON_SLOT`], so it knows which notice (#1088's butt strokes).
 //!
 //! `layout even` (#1022, [`super::even`]) puts a box of DoD Studio's own atlas
 //! in the copy for each kill-feed icon the atlas holds, 26 rows tall at
@@ -271,6 +272,13 @@ static ICON_TALL: AtomicI32 = AtomicI32::new(0);
 /// like [`ICON_TALL`].
 static ICON_INDEX: AtomicI32 = AtomicI32::new(-1);
 
+/// The byte offset into the notice array of the line `Draw` is on (`edi`,
+/// `slot * 156`, whatever array `max` moved it to), as the line-start stub
+/// stored it; -1 until the stub ran. The even layout picks a butt stroke's
+/// icon by it (#1088, [`super::even::line_box`]). Written by game code,
+/// like [`ICON_TALL`].
+static ICON_SLOT: AtomicI32 = AtomicI32::new(-1);
+
 /// The y `font`'s name draws use on a line that starts at `y`, for text
 /// `text_tall` px tall: the game's own `y` while the layout is the game's
 /// (stock top-aligned names), else [`name_y`] on the current line.
@@ -320,6 +328,7 @@ pub(super) fn line_height(text_tall: i32) -> i32 {
 /// The line-start stub, hand-assembled:
 ///
 /// ```asm
+/// mov [ICON_SLOT], edi         ; the line's byte offset into the notice array
 /// mov [ICON_INDEX], ebx        ; the line's sprite index, before the shift
 /// shl ebx, 4                   ; stolen: the sprite index as a byte offset
 /// mov edx, [ebx+eax+0xc]       ; rect.bottom, from the array Draw reads
@@ -330,10 +339,14 @@ pub(super) fn line_height(text_tall: i32) -> i32 {
 /// ```
 ///
 /// The rect is the one `Draw` reads at `[ebx+eax]` and `[ebx+eax+4]` right
-/// after, so the stub reads nothing the game would not.
-fn line_stub(icon_index: usize, icon_tall: usize, resume: usize) -> Vec<u8> {
+/// after, so the stub reads nothing the game would not. `edi` is the slot
+/// offset `Draw` indexes the notice with (`[edi + &list[0].iSuicide]` at
+/// `+0x2b037`, right after the stolen bytes).
+fn line_stub(icon_slot: usize, icon_index: usize, icon_tall: usize, resume: usize) -> Vec<u8> {
     let (shl, add) = LINE_STOLEN.split_at(3);
-    let mut code = vec![0x89, 0x1d]; // mov [abs32], ebx
+    let mut code = vec![0x89, 0x3d]; // mov [abs32], edi
+    code.extend_from_slice(&(icon_slot as u32).to_le_bytes());
+    code.extend_from_slice(&[0x89, 0x1d]); // mov [abs32], ebx
     code.extend_from_slice(&(icon_index as u32).to_le_bytes());
     code.extend_from_slice(shl);
     code.extend_from_slice(&[0x8b, 0x54, 0x03, 0x0c]); // mov edx, [ebx+eax+0xc]
@@ -674,7 +687,7 @@ mod hook {
             line_entry(ICON_INDEX.load(Ordering::Relaxed), drawn, copy).map(|i| (i, stock[i]))
         });
         if let Some((i, game)) = line
-            && let Some(b) = super::super::even::box_for(i)
+            && let Some(b) = super::super::even::line_box(i, ICON_SLOT.load(Ordering::Relaxed))
         {
             let y = icon_y(y, drawn.bottom - drawn.top, font::tall());
             // Safety: inside the HUD draw, on the engine's thread.
@@ -805,6 +818,7 @@ mod hook {
             }
             LINE_RESUME.store(at + LINE_STOLEN.len(), Ordering::Release);
             let stub = line_stub(
+                ICON_SLOT.as_ptr() as usize,
                 ICON_INDEX.as_ptr() as usize,
                 ICON_TALL.as_ptr() as usize,
                 LINE_RESUME.as_ptr() as usize,
@@ -1119,7 +1133,13 @@ mod tests {
 
     #[test]
     fn the_line_stub_reproduces_the_stolen_bytes_around_the_height_store() {
-        let code = line_stub(0x3333_3333, 0x1111_1111, 0x2222_2222);
+        let code = line_stub(0x4444_4444, 0x3333_3333, 0x1111_1111, 0x2222_2222);
+        assert_eq!(
+            &code[..6],
+            &[0x89, 0x3d, 0x44, 0x44, 0x44, 0x44],
+            "mov [ICON_SLOT], edi: the line's slot offset"
+        );
+        let code = &code[6..];
         assert_eq!(
             &code[..6],
             &[0x89, 0x1d, 0x33, 0x33, 0x33, 0x33],

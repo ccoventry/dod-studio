@@ -470,6 +470,7 @@ mod hook {
     /// The `"%d/%d"` player count under a flag: its top-left corner where
     /// the row's zoom puts it, on a whole pixel, and the text `count_scale`
     /// times its size from there (see the module's "The player count").
+    // A detour: must match the engine function's signature.
     #[allow(clippy::too_many_arguments)]
     unsafe extern "thiscall" fn row_text(
         this: *mut c_void,

@@ -77,7 +77,8 @@ pub async fn overview_flag_icons(
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let install = Path::new(&install);
         let bsp = native::overview::files::bsp_path(install, &map);
-        let level = native::overview::level::Level::from_file(&bsp)?;
+        let level = native::overview::level::Level::from_file(&bsp)
+            .map_err(crate::messages::failed_to_read_map_for_flags)?;
         Ok(native::overview::flag_icons::flag_icons(install, &level))
     }))
     .await
@@ -128,11 +129,13 @@ pub fn overview_load_edits(map: String, install: Option<String>) -> Option<serde
 #[tauri::command(async)]
 pub fn overview_save_edits(map: String, edits: serde_json::Value) -> Result<(), String> {
     files::save_edits(&map, &edits)
+        .inspect(|_| native::log_markdown(&crate::messages::overview::edits_saved(&map)))
 }
 
 #[tauri::command(async)]
 pub fn overview_reset_edits(map: String) -> Result<(), String> {
     files::remove_edits(&map)
+        .inspect(|_| native::log_markdown(&crate::messages::overview::edits_reset(&map)))
 }
 
 /// Writes the high-quality copy (`<map>_hd.tga`). The pixels come as the raw
@@ -142,7 +145,7 @@ pub fn overview_reset_edits(map: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(rgba) = request.body() else {
-        return Err("the high-quality image did not arrive as raw bytes".to_string());
+        return Err(crate::messages::OVERVIEW_IMAGE_NOT_RAW_BYTES.to_string());
     };
     let header = request
         .headers()
@@ -170,6 +173,14 @@ pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<Stri
             meta.height,
             &rgba,
         )
+        .inspect(|path| {
+            native::log_markdown(&crate::messages::overview::hd_saved(
+                &meta.map,
+                meta.width,
+                meta.height,
+                Path::new(path).display(),
+            ));
+        })
     }))
     .await
 }
@@ -180,6 +191,40 @@ pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<Stri
 pub async fn overview_export(request: Export) -> Result<Saved, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         files::export(&request)
+            .inspect(|saved| native::log_markdown(&export_log(&request.map, saved)))
     }))
     .await
+}
+
+/// The activity log's line for an exported overview.
+fn export_log(map: &str, saved: &Saved) -> String {
+    let mut line = format!("[overview] exported {map}: {} file(s)", saved.written.len());
+    if !saved.backed_up.is_empty() {
+        line.push_str(&format!(
+            ", {} of your own backed up",
+            saved.backed_up.len()
+        ));
+    }
+    if !saved.removed.is_empty() {
+        line.push_str(&format!(", {} older one(s) removed", saved.removed.len()));
+    }
+    line
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn the_export_line_counts_files_backups_and_removals() {
+        let saved = Saved {
+            written: vec!["a.tga".into(), "a.txt".into()],
+            backed_up: vec!["old.tga".into()],
+            removed: vec![],
+        };
+        assert_eq!(
+            export_log("dod_anzio", &saved),
+            "[overview] exported dod_anzio: 2 file(s), 1 of your own backed up"
+        );
+    }
 }

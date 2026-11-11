@@ -2,8 +2,9 @@
 // Asks before DoD Studio closes while a capture batch is running (#545,
 // part 1). The game keeps capturing without Studio -- the schedule is already
 // in the patched demos, or the hook runs it -- but nothing checks the takes
-// at the end until Studio next opens, and a local `tauri dev` build takes the
-// game down with it (cargo's job object). Stopping the batch stays Cancel
+// at the end until Studio next opens. A local `tauri dev` build starts the game
+// outside cargo's job object, so it survives that Studio closing too
+// (`native::sys::launcher`, #545 part 4). Stopping the batch stays Cancel
 // Batch's job.
 //
 // The game only keeps capturing once the batch's start has reached it: after
@@ -21,12 +22,6 @@ import { STRINGS } from './strings.js';
 export const START_WAIT_MS = 30000;
 /** How long a close waits for a cancelled batch to stop. */
 export const CANCEL_WAIT_MS = 15000;
-
-/** The prompt's text: the note about local builds only where it applies. */
-export function batchCloseMessage(isLocalBuild) {
-  const s = STRINGS.BATCH_CLOSE_MODAL;
-  return isLocalBuild ? `${s.MESSAGE}\n\n${s.LOCAL_BUILD_NOTE}` : s.MESSAGE;
-}
 
 /** Whether a start state from `waitForStart` means the game runs the batch
  *  without Studio. */
@@ -98,7 +93,7 @@ export async function confirmCloseDuringBatch(args) {
 let asking = false;
 
 async function askBeforeClose({
-  isRunning, isLocalBuild, waitForStart = waitForBatchStart, cancelBatch = cancelCaptureBatch,
+  isRunning, waitForStart = waitForBatchStart, cancelBatch = cancelCaptureBatch,
 }) {
   const s = STRINGS.BATCH_CLOSE_MODAL;
 
@@ -117,7 +112,7 @@ async function askBeforeClose({
   if (state === 'not_running' || !isRunning()) return true;
 
   if (batchRunsWithoutStudio(state)) {
-    return themedConfirm(batchCloseMessage(await isLocalBuild()), {
+    return themedConfirm(s.MESSAGE, {
       title: s.TITLE,
       confirmLabel: s.CLOSE_BUTTON,
       cancelLabel: s.KEEP_OPEN_BUTTON,

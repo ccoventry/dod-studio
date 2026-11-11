@@ -5,17 +5,47 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log_markdown/eprintln!
-// diagnostics stay inline at their call site, same as strings.js leaves
-// console.log/console.error alone. Issue #33, track 2 — a parallel catalog
+// as a toast/dialog string, and, since #237's decision, the activity-log
+// lines too (moved area by area, e.g. `messages/capture.rs`). Per-item
+// eprintln! diagnostics stay inline. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
 // Covers every Tauri command file's error/status strings: lib.rs,
 // capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
 // hd_manager.rs, updater_manager.rs, settings_manager.rs, and
-// dir_browser.rs. Not covered: native/analysis errors that bubble straight
-// through Tauri commands unwrapped (a separate crate — see issue #650).
+// dir_browser.rs. Errors built in `native` and `analysis` are wrapped here
+// too, as `failed_to_<action>(err)` around the lower crate's text (#650).
+// Where the frontend already names the action around the error
+// (`STRINGS.IPC.hdBuildFailed` and the like), the command passes the cause
+// through unwrapped rather than stacking two prefixes: the demo split and its
+// map read (`SPLIT.splitFailed`, `detailsFailed`, `queueSplitFailed`), the
+// menu size (`menuScaleFailed`), HLAE's FFmpeg link
+// (`HLAE_FFMPEG_LINK_FAILED`), the demo links list (`listFailed`), the map
+// download (`downloadFailedToast`), the take checks, previews and deletion
+// (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
+// `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
+// caller before wrapping.
+
+pub mod batch;
+pub mod blender;
+pub mod capture;
+pub mod catch_up;
+pub mod combine;
+pub mod game_process;
+pub mod hd;
+pub mod open_with;
+pub mod overview;
+pub mod preview;
+pub mod preview_start;
+pub mod render;
+pub mod review;
+pub mod scan;
+pub mod settings;
+pub mod take_cleanup;
+pub mod take_delete;
+pub mod update;
+pub mod vegas;
 
 use std::fmt::Display;
 use std::path::Path;
@@ -275,6 +305,14 @@ pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
     format!("Reading {demo} again for its clip times ({index} of {total})")
 }
 
+/// A batch that was to run in the open game (#725) but has to be patched,
+/// which only a fresh game can play. `why` says why it can't seek.
+pub fn batch_needs_fresh_game(why: &str) -> String {
+    format!(
+        "This batch has to be patched ({why}), and a patched batch needs a fresh game. Close Day of Defeat and start the batch again."
+    )
+}
+
 /// The activity-log line when a Seek Between Clips batch falls back to
 /// patching and some of its Initial or Scheduled Commands are ones the
 /// game's demo filter drops (#679), or `None` when there are none.
@@ -311,6 +349,10 @@ pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
 // ── review_manager.rs (#623) ────────────────────────────────────────────────
 pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
     format!("Could not send the review to the game: {e}")
+}
+/// The game asked for a review, and the page could not be told (#1142).
+pub fn game_review_not_handed_on(e: impl std::fmt::Display) -> String {
+    format!("DoD Studio's window could not take the request: {e}")
 }
 pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
     format!("Could not save the list of highlights to review: {e}")
@@ -403,6 +445,16 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_preview_manager.rs (#1069) ─────────────────────────────────────
+
+pub fn take_not_listed_for_preview(take_folder: &str) -> String {
+    format!("{take_folder} isn't in the Render tab's list, so no pictures were made")
+}
+
+pub fn take_preview_empty(take_folder: &str) -> String {
+    format!("No pictures were made from {take_folder}")
+}
+
 // ── take_delete_manager.rs (#644) ───────────────────────────────────────
 
 pub fn take_not_listed(take_folder: &str) -> String {
@@ -440,6 +492,56 @@ pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
 
 pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
     "Capture cancelled while making room. Nothing was captured.";
+
+// ── trimmed_demos.rs (#207) ──────────────────────────────────────────────
+
+pub const CAPTURE_CANCELLED_WHILE_TRIMMING: &str =
+    "Capture cancelled while making a trimmed copy. Nothing was captured.";
+
+/// The status line while Studio learns whether a demo is over the engine's
+/// entity limit, or makes its trimmed copy.
+pub fn trimming_demo(demo: &str, step: native::patch::trimmed_copies::Progress) -> String {
+    use native::patch::trimmed_copies::Progress;
+    let percent = |f: f32| (f.clamp(0.0, 1.0) * 100.0).round() as u32;
+    match step {
+        Progress::Counting(f) => format!(
+            "Checking whether {demo} has more entities than the game takes ({}%)",
+            percent(f)
+        ),
+        Progress::Reading(f) => format!(
+            "Making a trimmed copy of {demo}: reading it ({}%)",
+            percent(f)
+        ),
+        Progress::Writing => format!("Making a trimmed copy of {demo}: writing it"),
+        Progress::Checking(f) => format!(
+            "Making a trimmed copy of {demo}: checking it ({}%)",
+            percent(f)
+        ),
+    }
+}
+
+/// Why a demo over the engine's entity limit can't be played: no trimmed copy
+/// could be made safely.
+pub fn demo_cannot_be_trimmed(
+    demo: &str,
+    engine: &native::patch::trimmed_copies::Engine,
+    why: &native::patch::entity_trim::TrimError,
+) -> String {
+    format!(
+        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}. \
+         Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights.",
+        engine.name(),
+        engine.limit
+    )
+}
+
+/// What a Launch Preview says when it plays a trimmed copy.
+pub fn preview_plays_trimmed_copy(engine: &native::patch::trimmed_copies::Engine) -> String {
+    format!(
+        "This demo has more entities than the {} engine takes, so the preview plays a trimmed copy: fog, invisible hulls and a few far decorations are left out. The original is unchanged.",
+        engine.name()
+    )
+}
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
@@ -586,6 +688,70 @@ pub fn failed_to_serialize_settings(err: impl Display) -> String {
 
 pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) -> String {
     format!("Failed to write settings file {}: {}", path.display(), err)
+}
+
+// ── native / analysis errors, named at the command boundary (#650) ──────────
+//
+// A `native` or `analysis` function returns its error as plain text, so a
+// command that passed it through showed the toast a bare cause ("Permission
+// denied") with no hint of what failed. Each function here puts the action
+// first and leaves the lower crate's text as the cause, so the crates keep
+// their wording for `preview_cli`, `dod-studio-cli` and the web analyzer.
+
+/// A stop the user asked for comes back as native's cancelled error, which
+/// the frontend matches exactly (`'cancelled'`), so it is never given a prefix.
+fn failed_to(action: &str, err: impl Display) -> String {
+    let cause = err.to_string();
+    if native::hlcr::take_frames::is_cancelled(&cause) {
+        return cause;
+    }
+    format!("Failed to {action}: {cause}")
+}
+
+pub fn failed_to_forget_crash_map(err: impl Display) -> String {
+    failed_to("forget the crashed map", err)
+}
+
+pub fn failed_to_set_blender_exe(err: impl Display) -> String {
+    failed_to("use that Blender", err)
+}
+
+pub fn failed_to_check_demo_sources(err: impl Display) -> String {
+    failed_to("check the demos against the scan", err)
+}
+
+pub fn failed_to_copy_demos_for_batch(err: impl Display) -> String {
+    failed_to("copy the demos for the batch", err)
+}
+
+pub fn failed_to_read_map_for_flags(err: impl Display) -> String {
+    failed_to("read the map's flags", err)
+}
+
+pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
+    failed_to("discard the saved render queue", err)
+}
+
+// ── menu_scale_manager.rs, movie_copy_manager.rs, overview_manager.rs, players_tab.rs ──
+
+pub fn menu_size_check_stopped(err: impl Display) -> String {
+    format!("menu size check stopped: {err}")
+}
+
+pub fn menu_size_change_stopped(err: impl Display) -> String {
+    format!("menu size change stopped: {err}")
+}
+
+pub fn could_not_list_to_copy(source: impl Display, err: impl Display) -> String {
+    format!("Couldn't list {source} to copy it: {err}")
+}
+
+pub const MOVIE_COPY_ALREADY_RUNNING: &str = "A movie copy is already running";
+
+pub const OVERVIEW_IMAGE_NOT_RAW_BYTES: &str = "the high-quality image did not arrive as raw bytes";
+
+pub fn not_a_sprite_file_name(sprite: &str) -> String {
+    format!("{sprite:?} is not a sprite file name")
 }
 
 /// Pins every function/constant above against the exact `format!`/literal it
@@ -892,6 +1058,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lower_crate_errors_name_the_action_then_the_cause() {
+        assert_eq!(
+            failed_to_copy_demos_for_batch("no room on D:"),
+            "Failed to copy the demos for the batch: no room on D:"
+        );
+        assert_eq!(
+            failed_to_set_blender_exe("not found"),
+            "Failed to use that Blender: not found"
+        );
+    }
+
+    #[test]
+    fn a_cancellation_is_never_given_an_action_prefix() {
+        // The frontend compares it to the bare word.
+        let cancelled = native::hlcr::take_frames::cancelled_error();
+        assert_eq!(failed_to(".", &cancelled), cancelled);
+        assert_eq!(cancelled, "cancelled");
+    }
+
     // Every non-panicking call site's spawn_blocking wrapping was already
     // exercised implicitly by the crate's existing capture_manager/map_manager
     // tests once this PR rewired them through these two helpers — what's
@@ -905,6 +1091,28 @@ mod tests {
         assert!(
             err.starts_with("Background task crashed: "),
             "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn small_manager_messages_match_their_original_inline_text() {
+        assert_eq!(menu_size_check_stopped("x"), "menu size check stopped: x");
+        assert_eq!(menu_size_change_stopped("x"), "menu size change stopped: x");
+        assert_eq!(
+            could_not_list_to_copy("D:/dod", "denied"),
+            "Couldn't list D:/dod to copy it: denied"
+        );
+        assert_eq!(
+            MOVIE_COPY_ALREADY_RUNNING,
+            "A movie copy is already running"
+        );
+        assert_eq!(
+            OVERVIEW_IMAGE_NOT_RAW_BYTES,
+            "the high-quality image did not arrive as raw bytes"
+        );
+        assert_eq!(
+            not_a_sprite_file_name("a.spr"),
+            "\"a.spr\" is not a sprite file name"
         );
     }
 

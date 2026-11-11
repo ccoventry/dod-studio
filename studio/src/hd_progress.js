@@ -7,11 +7,12 @@
 // Each view is `{ text, bar }`, `bar` as `step_bar.js`'s `drawBar` takes it.
 import { STRINGS } from './strings.js';
 import { durationText } from './time_format.js';
+import { BYTES_PER_KB, BYTES_PER_MB, BYTES_PER_GB } from './byte_size.js';
 
 export function formatSize(bytes) {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  if (bytes >= BYTES_PER_MB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / BYTES_PER_KB))} KB`;
 }
 
 /// The moment Set up is clicked: the backend first checks what's there.

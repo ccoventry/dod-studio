@@ -1,23 +1,34 @@
-use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
-use std::time::{Duration, UNIX_EPOCH};
 
 pub mod archive;
 pub mod backup;
+mod duplicates;
 mod key_cache;
+mod keys;
+mod lanes;
+mod walk;
+mod zips;
+/// The demo key's hash, defined once in `analysis` (#1107).
+pub use analysis::fnv1a::{Fnv1a, fnv1a_hash};
 pub use archive::{ZipDemoEntry, ZipRef};
 pub use backup::{ArchiveListing, ArchivedCopy, Backup, BackupIndex};
 pub use key_cache::{ArchiveEntry, KeyCache, KeyEntry};
+pub use keys::{ContentHashes, Stamp, content_hashes, get_file_key, stamp, tail_hash};
+pub use walk::{
+    SYSTEM_FOLDERS, collect_demos, comparable_path, is_windows_folder, is_windows_folder_in,
+    scan_dir, scan_roots, scan_roots_and_zips, shown_path, windows_folder,
+};
+
+use duplicates::find_duplicates_with;
+use lanes::Readers;
 
 /// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
 ///
 /// The one definition in the workspace. The Demo Auditor groups duplicates
-/// by it; Studio's scan (`capture_manager::demo_file_key`) uses its text form
+/// by it; Studio's scan (`scan_manager::demo_file_key`) uses its text form
 /// to skip demos already queued and unchanged, and saves that text in project
 /// files, so [`FileKey::to_text`] must never change shape. Reads 64 KB, not
 /// the whole demo, so keying a folder of hundreds costs milliseconds.
@@ -94,624 +105,6 @@ pub enum AuditProgress {
     Done(Vec<DuplicateGroup>, usize, u64),
 }
 
-/// Deterministic FNV-1a 64-bit hashing.
-pub fn fnv1a_hash(data: &[u8]) -> u64 {
-    let mut hash = Fnv1a::new();
-    hash.update(data);
-    hash.finish()
-}
-
-/// [`fnv1a_hash`] fed in pieces: the same result as one call over them all.
-#[derive(Clone, Copy, Debug)]
-pub struct Fnv1a(u64);
-
-impl Default for Fnv1a {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Fnv1a {
-    pub const fn new() -> Self {
-        Self(0xcbf29ce484222325)
-    }
-
-    pub fn update(&mut self, data: &[u8]) {
-        for &byte in data {
-            self.0 ^= byte as u64;
-            self.0 = self.0.wrapping_mul(0x100000001b3);
-        }
-    }
-
-    pub fn finish(self) -> u64 {
-        self.0
-    }
-}
-
-/// Threads a walk or key pass shares between the SSDs: separate drives list
-/// and read at once, and an SSD answers several requests at a time even on
-/// one drive. A hard disk gets one of its own ([`Readers`]).
-fn worker_threads() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .clamp(2, 8)
-}
-
-/// The drive a path is on, as `c:`, for sharing reads out by drive (#941).
-/// `None` for a network share or a relative path.
-fn drive_of(path: &Path) -> Option<String> {
-    let text = comparable_path(path);
-    let bytes = text.as_bytes();
-    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-        .then(|| text[..2].to_string())
-}
-
-/// Whether Windows says `drive` (`c:`) has a seek penalty: a spinning hard
-/// disk. `false` when it can't say, and off Windows, so an unknown drive
-/// keeps the pool, as before #941.
-fn drive_seeks(drive: &str) -> bool {
-    seek_penalty::query(drive).unwrap_or(false)
-}
-
-/// `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceSeekPenaltyProperty` on
-/// `\\.\X:`, opened with no access rights, which needs no admin.
-#[cfg(windows)]
-mod seek_penalty {
-    use std::ffi::c_void;
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn CreateFileW(
-            file_name: *const u16,
-            desired_access: u32,
-            share_mode: u32,
-            security_attributes: *const c_void,
-            creation_disposition: u32,
-            flags_and_attributes: u32,
-            template_file: *mut c_void,
-        ) -> *mut c_void;
-        fn DeviceIoControl(
-            device: *mut c_void,
-            io_control_code: u32,
-            in_buffer: *const c_void,
-            in_buffer_size: u32,
-            out_buffer: *mut c_void,
-            out_buffer_size: u32,
-            bytes_returned: *mut u32,
-            overlapped: *mut c_void,
-        ) -> i32;
-        fn CloseHandle(handle: *mut c_void) -> i32;
-    }
-
-    const FILE_SHARE_READ: u32 = 1;
-    const FILE_SHARE_WRITE: u32 = 2;
-    const OPEN_EXISTING: u32 = 3;
-    const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
-    const STORAGE_DEVICE_SEEK_PENALTY_PROPERTY: u32 = 7;
-    const PROPERTY_STANDARD_QUERY: u32 = 0;
-
-    /// `STORAGE_PROPERTY_QUERY`.
-    #[repr(C)]
-    struct Query {
-        property_id: u32,
-        query_type: u32,
-        additional: [u8; 1],
-    }
-
-    /// `DEVICE_SEEK_PENALTY_DESCRIPTOR`.
-    #[repr(C)]
-    #[derive(Default)]
-    struct SeekPenalty {
-        _version: u32,
-        _size: u32,
-        incurs_seek_penalty: u8,
-    }
-
-    /// `None` when the drive can't be opened or doesn't answer (a volume
-    /// spread over several disks, a virtual drive).
-    pub fn query(drive: &str) -> Option<bool> {
-        let name: Vec<u16> = format!(r"\\.\{drive}")
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        // SAFETY: `name` is NUL-terminated and outlives the call.
-        let handle = unsafe {
-            CreateFileW(
-                name.as_ptr(),
-                0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                0,
-                std::ptr::null_mut(),
-            )
-        };
-        if handle.is_null() || handle as isize == -1 {
-            return None;
-        }
-        let query = Query {
-            property_id: STORAGE_DEVICE_SEEK_PENALTY_PROPERTY,
-            query_type: PROPERTY_STANDARD_QUERY,
-            additional: [0],
-        };
-        let mut answer = SeekPenalty::default();
-        let mut returned = 0u32;
-        // SAFETY: both buffers are live, sized as passed, and the handle is
-        // open until the CloseHandle below.
-        let ok = unsafe {
-            DeviceIoControl(
-                handle,
-                IOCTL_STORAGE_QUERY_PROPERTY,
-                (&raw const query).cast(),
-                size_of::<Query>() as u32,
-                (&raw mut answer).cast(),
-                size_of::<SeekPenalty>() as u32,
-                &mut returned,
-                std::ptr::null_mut(),
-            )
-        };
-        // SAFETY: opened above and closed once.
-        unsafe { CloseHandle(handle) };
-        // The answer is in byte 8, after `version` and `size`.
-        (ok != 0 && returned >= 9).then_some(answer.incurs_seek_penalty != 0)
-    }
-}
-
-#[cfg(not(windows))]
-mod seek_penalty {
-    pub fn query(_drive: &str) -> Option<bool> {
-        None
-    }
-}
-
-/// One share of a pass's items: their indices, and how many are read at once.
-#[derive(Debug, PartialEq, Eq)]
-struct Lane {
-    threads: usize,
-    items: Vec<usize>,
-}
-
-/// Items shared out by drive (#941): each hard disk (`seeks` says so) gets a
-/// lane of its own with one reader, so its head never seeks back and forth
-/// between two files; every other item (SSDs, unknown drives, shares) is in
-/// one lane of `threads` readers, as before. [`Readers::map`] runs the lanes
-/// side by side, so a hard disk doesn't hold up the SSDs. In item order: the
-/// shared lane first, then the hard disks by drive.
-fn plan_lanes(
-    drives: impl Iterator<Item = Option<String>>,
-    threads: usize,
-    seeks: &dyn Fn(&str) -> bool,
-) -> Vec<Lane> {
-    let mut known: HashMap<String, bool> = HashMap::new();
-    let mut shared = Vec::new();
-    let mut disks: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
-    for (i, drive) in drives.enumerate() {
-        match drive {
-            Some(drive) if *known.entry(drive.clone()).or_insert_with(|| seeks(&drive)) => {
-                disks.entry(drive).or_default().push(i)
-            }
-            _ => shared.push(i),
-        }
-    }
-    let mut lanes = Vec::new();
-    if !shared.is_empty() {
-        lanes.push(Lane {
-            threads: threads.max(1),
-            items: shared,
-        });
-    }
-    lanes.extend(disks.into_values().map(|items| Lane { threads: 1, items }));
-    lanes
-}
-
-/// How a pass reads: `threads` at once over the SSDs, one per hard disk.
-struct Readers<'a> {
-    threads: usize,
-    /// Whether a drive (`c:`) is a hard disk; [`drive_seeks`] outside tests.
-    seeks: &'a (dyn Fn(&str) -> bool + Sync),
-}
-
-impl Readers<'static> {
-    fn system() -> Self {
-        Readers {
-            threads: worker_threads(),
-            seeks: &drive_seeks,
-        }
-    }
-}
-
-impl Readers<'_> {
-    /// [`par_map`] with the items shared out by drive ([`plan_lanes`]);
-    /// `drive` says which drive an item reads from.
-    fn map<T: Sync, R: Send>(
-        &self,
-        items: &[T],
-        drive: impl Fn(&T) -> Option<String>,
-        cancel: &AtomicBool,
-        f: impl Fn(&T) -> R + Sync,
-    ) -> Vec<Option<R>> {
-        let lanes = plan_lanes(items.iter().map(drive), self.threads, self.seeks);
-        if let [lane] = lanes.as_slice() {
-            return par_map(items, lane.threads, cancel, f);
-        }
-        let mut out: Vec<Option<R>> = std::iter::repeat_with(|| None).take(items.len()).collect();
-        let f = &f;
-        let done: Vec<Vec<Option<R>>> = std::thread::scope(|scope| {
-            let workers: Vec<_> = lanes
-                .iter()
-                .map(|lane| {
-                    scope.spawn(move || {
-                        par_map(&lane.items, lane.threads, cancel, |&i| f(&items[i]))
-                    })
-                })
-                .collect();
-            workers
-                .into_iter()
-                .map(|w| w.join().unwrap_or_default())
-                .collect()
-        });
-        for (lane, results) in lanes.iter().zip(done) {
-            for (&i, r) in lane.items.iter().zip(results) {
-                out[i] = r;
-            }
-        }
-        out
-    }
-}
-
-/// Recursively scans a directory for `.dem` files with cancellation and progress reporting.
-pub fn scan_dir(
-    dir: &Path,
-    files: &mut Vec<PathBuf>,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) {
-    scan_dir_to_depth(dir, files, cancel, progress, 0);
-}
-
-/// Folder levels [`scan_dir`] reads below the folder it is given.
-const SCAN_MAX_DEPTH: usize = 32;
-
-/// Folders [`scan_dir`] never enters, by name at any depth: a demo in the
-/// Recycle Bin is a deleted copy, not a duplicate to clean up (#843), System
-/// Volume Information is usually unreadable, and `node_modules`, `.git`,
-/// `__pycache__` and `site-packages` (Python's own) are tens of thousands of
-/// folders that never hold a demo (#888). The same list as
-/// `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used here
-/// (`native` depends on this crate); a test there checks they agree.
-pub const SYSTEM_FOLDERS: [&str; 6] = [
-    "$RECYCLE.BIN",
-    "System Volume Information",
-    "node_modules",
-    ".git",
-    "__pycache__",
-    "site-packages",
-];
-
-fn is_system_folder(path: &Path) -> bool {
-    path.file_name().is_some_and(|name| {
-        let name = name.to_string_lossy();
-        SYSTEM_FOLDERS.iter().any(|s| name.eq_ignore_ascii_case(s))
-    })
-}
-
-/// A path as text for comparing: no `\\?\` prefix, backslashes, lower case,
-/// no trailing separator.
-pub fn comparable_path(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('/', "\\");
-    let text = match text.strip_prefix(r"\\?\UNC\") {
-        Some(rest) => format!(r"\\{rest}"),
-        None => text.strip_prefix(r"\\?\").unwrap_or(&text).to_string(),
-    };
-    text.trim_end_matches('\\').to_lowercase()
-}
-
-/// A path for a message: a canonical path's `\\?\` prefix dropped
-/// (`\\?\UNC\nas\d` is `\\nas\d`), as `audit_duplicates.js`'s `shownPath`.
-pub fn shown_path(path: &Path) -> String {
-    let text = path.display().to_string();
-    match text.strip_prefix(r"\\?\UNC\") {
-        Some(rest) => format!(r"\\{rest}"),
-        None => text.strip_prefix(r"\\?\").unwrap_or(&text).to_string(),
-    }
-}
-
-/// The Windows folder as [`comparable_path`] writes it, from `%SystemRoot%`
-/// (what `GetWindowsDirectoryW` reports), so a PC that installed Windows
-/// somewhere other than `C:\Windows` is still matched. `None` off Windows.
-pub fn windows_folder() -> Option<&'static str> {
-    static FOLDER: OnceLock<Option<String>> = OnceLock::new();
-    FOLDER
-        .get_or_init(|| {
-            std::env::var_os("SystemRoot")
-                .or_else(|| std::env::var_os("windir"))
-                .map(|dir| comparable_path(Path::new(&dir)))
-                .filter(|dir| !dir.is_empty())
-        })
-        .as_deref()
-}
-
-/// Whether `path` is the folder `windows` names ([`windows_folder`]'s form).
-/// Only a folder found inside a walked one is ever checked, so a walk from a
-/// drive root skips the Windows folder (about 5 s of C:'s 20 s, and no demos,
-/// #888), while a folder the user picks inside it is still read.
-pub fn is_windows_folder_in(path: &Path, windows: Option<&str>) -> bool {
-    let Some(windows) = windows else {
-        return false;
-    };
-    let last = windows.rsplit('\\').next().unwrap_or(windows);
-    path.file_name()
-        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(last))
-        && comparable_path(path) == windows
-}
-
-/// [`is_windows_folder_in`] this PC's Windows folder.
-pub fn is_windows_folder(path: &Path) -> bool {
-    is_windows_folder_in(path, windows_folder())
-}
-
-/// A folder found inside a walked one that the walk leaves out.
-fn skips_folder(path: &Path, windows: Option<&str>) -> bool {
-    is_system_folder(path) || is_windows_folder_in(path, windows)
-}
-
-/// `file_type` never follows a junction or symlink, so a link is never
-/// entered; with the depth cap, no folder layout can make this loop (#376).
-fn scan_dir_to_depth(
-    dir: &Path,
-    files: &mut Vec<PathBuf>,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-    depth: usize,
-) {
-    if cancel.load(Ordering::Relaxed) {
-        return;
-    }
-    let mut subdirs = Vec::new();
-    list_dir(
-        dir,
-        depth,
-        windows_folder(),
-        cancel,
-        progress,
-        &mut subdirs,
-        files,
-        None,
-    );
-    for (sub, sub_depth) in subdirs {
-        scan_dir_to_depth(&sub, files, cancel, progress, sub_depth);
-    }
-}
-
-fn has_extension(path: &Path, wanted: &str) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case(wanted))
-}
-
-/// One folder's listing: its demos into `demos`, its archives (`.zip`,
-/// `.7z`, `.rar`) into `zips` when given, the folders to walk next into `subdirs`.
-#[allow(clippy::too_many_arguments)]
-fn list_dir(
-    dir: &Path,
-    depth: usize,
-    windows: Option<&str>,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-    subdirs: &mut Vec<(PathBuf, usize)>,
-    demos: &mut Vec<PathBuf>,
-    mut zips: Option<&mut Vec<PathBuf>>,
-) {
-    if let Some(tx) = progress {
-        let _ = tx.send(AuditProgress::Scanning(dir.to_string_lossy().into_owned()));
-    }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        let path = entry.path();
-        if entry.file_type().is_ok_and(|t| t.is_dir()) {
-            if depth < SCAN_MAX_DEPTH && !skips_folder(&path, windows) {
-                subdirs.push((path, depth + 1));
-            }
-        } else if has_extension(&path, "dem") {
-            demos.push(path);
-        } else if let Some(zips) = zips.as_deref_mut()
-            && archive::is_archive(&path)
-        {
-            zips.push(path);
-        }
-    }
-}
-
-/// [`scan_dir`] over several roots at once, several folders listed at a
-/// time (#888): every drive's walk runs alongside the others, and a big SSD
-/// (C:) is shared out between the threads, while a hard disk is listed one
-/// folder at a time (#941). Finds the same demos as calling [`scan_dir`] on
-/// each root, in no particular order.
-pub fn scan_roots(
-    roots: &[PathBuf],
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> Vec<PathBuf> {
-    scan_roots_with(
-        roots,
-        &Readers::system(),
-        windows_folder(),
-        cancel,
-        progress,
-    )
-}
-
-/// [`scan_roots`] that also lists every archive it passes (`.zip`, `.7z`,
-/// `.rar`, #929): the demos, then the archives.
-pub fn scan_roots_and_zips(
-    roots: &[PathBuf],
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    walk_roots(
-        roots,
-        &Readers::system(),
-        windows_folder(),
-        true,
-        cancel,
-        progress,
-    )
-}
-
-fn scan_roots_with(
-    roots: &[PathBuf],
-    readers: &Readers,
-    windows: Option<&str>,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> Vec<PathBuf> {
-    walk_roots(roots, readers, windows, false, cancel, progress).0
-}
-
-/// The roots walked in [`plan_lanes`]'s lanes, side by side: a folder found
-/// inside a root is on the root's drive, since a junction is never entered.
-fn walk_roots(
-    roots: &[PathBuf],
-    readers: &Readers,
-    windows: Option<&str>,
-    want_zips: bool,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let lanes = plan_lanes(
-        roots.iter().map(|r| drive_of(r)),
-        readers.threads,
-        readers.seeks,
-    );
-    if let [lane] = lanes.as_slice() {
-        return walk_pool(roots, lane.threads, windows, want_zips, cancel, progress);
-    }
-    let walked: Vec<(Vec<PathBuf>, Vec<PathBuf>)> = std::thread::scope(|scope| {
-        let workers: Vec<_> = lanes
-            .iter()
-            .map(|lane| {
-                let roots: Vec<PathBuf> = lane.items.iter().map(|&i| roots[i].clone()).collect();
-                scope.spawn(move || {
-                    walk_pool(&roots, lane.threads, windows, want_zips, cancel, progress)
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .map(|w| w.join().unwrap_or_default())
-            .collect()
-    });
-    let mut found = (Vec::new(), Vec::new());
-    for (demos, zips) in walked {
-        found.0.extend(demos);
-        found.1.extend(zips);
-    }
-    found
-}
-
-/// `roots` walked by `threads` threads sharing one queue of folders.
-fn walk_pool(
-    roots: &[PathBuf],
-    threads: usize,
-    windows: Option<&str>,
-    want_zips: bool,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    /// Folders waiting to be listed, and how many are being listed now: the
-    /// walk is over when both are none.
-    struct Work {
-        pending: Vec<(PathBuf, usize)>,
-        busy: usize,
-    }
-    let work = Mutex::new(Work {
-        pending: roots.iter().rev().map(|r| (r.clone(), 0)).collect(),
-        busy: 0,
-    });
-    let ready = Condvar::new();
-    let found = Mutex::new((Vec::new(), Vec::new()));
-    std::thread::scope(|scope| {
-        for _ in 0..threads.max(1) {
-            scope.spawn(|| {
-                let mut demos = Vec::new();
-                let mut zips = Vec::new();
-                loop {
-                    let next = {
-                        let mut w = work.lock().unwrap_or_else(PoisonError::into_inner);
-                        loop {
-                            if cancel.load(Ordering::Relaxed) {
-                                break None;
-                            }
-                            if let Some(item) = w.pending.pop() {
-                                w.busy += 1;
-                                break Some(item);
-                            }
-                            if w.busy == 0 {
-                                break None;
-                            }
-                            // Timed, so a cancel is seen while others list.
-                            w = ready
-                                .wait_timeout(w, Duration::from_millis(50))
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .0;
-                        }
-                    };
-                    let Some((dir, depth)) = next else {
-                        break;
-                    };
-                    let mut subdirs = Vec::new();
-                    list_dir(
-                        &dir,
-                        depth,
-                        windows,
-                        cancel,
-                        progress,
-                        &mut subdirs,
-                        &mut demos,
-                        want_zips.then_some(&mut zips),
-                    );
-                    let mut w = work.lock().unwrap_or_else(PoisonError::into_inner);
-                    w.pending.extend(subdirs.into_iter().rev());
-                    w.busy -= 1;
-                    drop(w);
-                    ready.notify_all();
-                }
-                ready.notify_all();
-                let mut found = found.lock().unwrap_or_else(PoisonError::into_inner);
-                found.0.extend(demos);
-                found.1.extend(zips);
-            });
-        }
-    });
-    found.into_inner().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// The demos named on a command line: each file as given, each folder walked
-/// with [`scan_dir`]. Sorted, so a run over the same folder prints in the same
-/// order. Paths that are neither come back in the second list.
-pub fn collect_demos(paths: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let cancel = AtomicBool::new(false);
-    let mut demos = vec![];
-    let mut missing = vec![];
-    for path in paths {
-        if path.is_file() {
-            demos.push(path.clone());
-        } else if path.is_dir() {
-            scan_dir(path, &mut demos, &cancel, &None);
-        } else {
-            missing.push(path.clone());
-        }
-    }
-    demos.sort();
-    demos.dedup();
-    (demos, missing)
-}
-
 /// One demo's delta-continuity verdict (#41) as `--integrity` prints it:
 /// whether it is OK, and `<path>: <verdict>`. A file that cannot be read or
 /// parsed is not OK either.
@@ -724,81 +117,6 @@ pub fn integrity_line(path: &Path) -> (bool, String) {
         Err(e) => (false, format!("cannot read the file: {e}")),
     };
     (ok, format!("{}: {verdict}", path.display()))
-}
-
-/// Generates a `FileKey` for a file based on its size and an FNV-1a hash of its first 64KB.
-pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
-    let size = fs::metadata(path)?.len();
-    Ok(FileKey {
-        size,
-        header_hash: head_hash(path, size)?,
-    })
-}
-
-/// An FNV-1a hash of a file's first [`KEY_BYTES`] (all of it when shorter).
-fn head_hash(path: &Path, size: u64) -> Result<u64, std::io::Error> {
-    let mut file = fs::File::open(path)?;
-    let mut buffer = vec![0; std::cmp::min(size, KEY_BYTES) as usize];
-    file.read_exact(&mut buffer)?;
-    Ok(fnv1a_hash(&buffer))
-}
-
-/// An FNV-1a hash of a file's last [`KEY_BYTES`], or 0 when the file is no
-/// longer than that (its key already covers all of it).
-pub fn tail_hash(path: &Path, size: u64) -> Result<u64, std::io::Error> {
-    use std::io::{Seek, SeekFrom};
-    if size <= KEY_BYTES {
-        return Ok(0);
-    }
-    let mut file = fs::File::open(path)?;
-    file.seek(SeekFrom::Start(size - KEY_BYTES))?;
-    let mut buffer = vec![0; KEY_BYTES as usize];
-    file.read_exact(&mut buffer)?;
-    Ok(fnv1a_hash(&buffer))
-}
-
-/// A file's size and modified time, which say whether a remembered key
-/// still holds. `modified_ns` is 0 when the system can't say, and such a
-/// file is never remembered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Stamp {
-    pub size: u64,
-    pub modified_ns: u64,
-}
-
-/// `path`'s [`Stamp`], or `None` when it can't be read.
-pub fn stamp(path: &Path) -> Option<Stamp> {
-    let meta = fs::metadata(path).ok()?;
-    let modified_ns = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos().min(u64::MAX as u128) as u64)
-        .unwrap_or(0);
-    Some(Stamp {
-        size: meta.len(),
-        modified_ns,
-    })
-}
-
-/// Everything the audit hashes in a file, from one read of all of it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ContentHashes {
-    pub size: u64,
-    /// [`FileKey::header_hash`].
-    pub head: u64,
-    /// [`tail_hash`].
-    pub tail: u64,
-    /// FNV-1a over every byte.
-    pub full: u64,
-}
-
-/// [`ContentHashes`] for `path`, read in 1 MiB pieces. An error when the
-/// file changes size while it is read.
-pub fn content_hashes(path: &Path) -> Result<ContentHashes, std::io::Error> {
-    let mut file = fs::File::open(path)?;
-    let size = file.metadata()?.len();
-    archive::hashes_from_reader(&mut file, size)
 }
 
 /// How many files each step of a key pass had to open: the rest were
@@ -878,14 +196,6 @@ fn par_map<T: Sync, R: Send>(
     out
 }
 
-/// A group of its own for a file that can't be read, as when keying fails.
-fn unreadable_key(path: &Path) -> FileKey {
-    FileKey {
-        size: 0,
-        header_hash: fnv1a_hash(path.to_string_lossy().as_bytes()),
-    }
-}
-
 /// Identifies duplicates within a list of file paths.
 /// Returns unique files, structured duplicate groups, total duplicates count, and total wasted space in bytes.
 pub fn find_duplicates(
@@ -918,160 +228,6 @@ pub fn find_duplicates_cached(
     find_duplicates_in(files, Vec::new(), cancel, progress, cache)
 }
 
-/// A `.dem` entry of one of the pass's archives.
-struct ZipDemo {
-    zip: usize,
-    entry: ZipDemoEntry,
-}
-
-impl ZipDemo {
-    fn at(&self, zips: &[(PathBuf, Option<Stamp>)]) -> ZipRef {
-        ZipRef {
-            zip: zips[self.zip].0.clone(),
-            entry: self.entry.name.clone(),
-        }
-    }
-}
-
-/// Paths resolved to their canonical form with their stamps, each once,
-/// sorted.
-fn resolve_paths(
-    paths: &[PathBuf],
-    readers: &Readers,
-    cancel: &AtomicBool,
-) -> Vec<(PathBuf, Option<Stamp>)> {
-    // Canonicalizing opens each file, so it runs in parallel.
-    let resolved = readers.map(
-        paths,
-        |p| drive_of(p),
-        cancel,
-        |path| {
-            let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-            let stamp = stamp(&canonical);
-            (canonical, stamp)
-        },
-    );
-    let mut by_path: HashMap<PathBuf, Option<Stamp>> = HashMap::new();
-    for (path, stamp) in resolved.into_iter().flatten() {
-        by_path.entry(path).or_insert(stamp);
-    }
-    let mut out: Vec<(PathBuf, Option<Stamp>)> = by_path.into_iter().collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-/// Each archive's `.dem` entries (#929): remembered while the archive's
-/// size and modified time hold, else read from its listing. An archive that
-/// can't be read lists none and is named in `skipped`.
-fn list_zips(
-    zips: &[(PathBuf, Option<Stamp>)],
-    readers: &Readers,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-    cache: &mut KeyCache,
-    reads: &mut Reads,
-    skipped: &mut Vec<String>,
-) -> Vec<ZipDemo> {
-    let reading = |path: &Path| {
-        if let Some(tx) = progress {
-            let _ = tx.send(AuditProgress::ReadingArchive(
-                path.to_string_lossy().into_owned(),
-            ));
-        }
-    };
-    let mut listings: Vec<Option<Result<Vec<ZipDemoEntry>, String>>> = vec![None; zips.len()];
-    let mut to_read = Vec::new();
-    for (i, (path, stamp)) in zips.iter().enumerate() {
-        match stamp.and_then(|s| cache.archive(path, s)) {
-            Some(entry) => {
-                listings[i] = Some(match &entry.error {
-                    Some(e) => Err(e.clone()),
-                    None => Ok(entry.demos.clone()),
-                });
-                reading(path);
-            }
-            None => to_read.push(i),
-        }
-    }
-    let read = readers.map(
-        &to_read,
-        |&i| drive_of(&zips[i].0),
-        cancel,
-        |&i| {
-            let path = &zips[i].0;
-            let listing = archive::list_archive_demos(path);
-            reading(path);
-            listing
-        },
-    );
-    for (&i, listing) in to_read.iter().zip(read) {
-        let Some(listing) = listing else { continue };
-        reads.zips += 1;
-        let (path, stamp) = &zips[i];
-        if let Some(stamp) = stamp {
-            cache.put_archive(path, *stamp, listing.clone());
-        }
-        listings[i] = Some(listing);
-    }
-    let mut demos = Vec::new();
-    for (i, listing) in listings.into_iter().enumerate() {
-        let path = &zips[i].0;
-        match listing {
-            None => {}
-            Some(Err(e)) => skipped.push(format!("{}: {e}", shown_path(path))),
-            Some(Ok(entries)) => {
-                for entry in entries {
-                    match &entry.error {
-                        Some(e) => {
-                            let at = ZipRef {
-                                zip: path.clone(),
-                                entry: entry.name.clone(),
-                            };
-                            skipped.push(format!("{}: {e}", at.shown()));
-                        }
-                        None => demos.push(ZipDemo { zip: i, entry }),
-                    }
-                }
-            }
-        }
-    }
-    demos
-}
-
-/// Reads each of `picks` (indices into `demos`) in full, one archive per
-/// thread at a time and each archive opened once; sends one `Hashing` per
-/// demo.
-fn read_zip_demos(
-    picks: &[usize],
-    demos: &[ZipDemo],
-    zips: &[(PathBuf, Option<Stamp>)],
-    readers: &Readers,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-) -> Vec<(usize, Result<ContentHashes, String>)> {
-    let mut by_zip: HashMap<usize, Vec<usize>> = HashMap::new();
-    for &j in picks {
-        by_zip.entry(demos[j].zip).or_default().push(j);
-    }
-    let mut jobs: Vec<(usize, Vec<usize>)> = by_zip.into_iter().collect();
-    jobs.sort();
-    let drive = |(zip, _): &(usize, Vec<usize>)| drive_of(&zips[*zip].0);
-    let done = readers.map(&jobs, drive, cancel, |(zip, members)| {
-        let names: Vec<String> = members
-            .iter()
-            .map(|&j| demos[j].entry.name.clone())
-            .collect();
-        let found = archive::hash_archive_entries(&zips[*zip].0, &names);
-        if let Some(tx) = progress {
-            for &j in members {
-                let _ = tx.send(AuditProgress::Hashing(demos[j].at(zips).display()));
-            }
-        }
-        members.iter().copied().zip(found).collect::<Vec<_>>()
-    });
-    done.into_iter().flatten().flatten().collect()
-}
-
 /// [`find_duplicates_cached`] that also looks inside `zips` (`.zip`, `.7z`,
 /// `.rar`; #929). An archive is a backup: its demos never join a duplicate
 /// group, so the groups are the ones the loose demos alone make. Each loose
@@ -1091,369 +247,14 @@ pub fn find_duplicates_in(
     find_duplicates_with(files, zips, &Readers::system(), cancel, progress, cache)
 }
 
-/// [`find_duplicates_in`] reading as `readers` says: every read below, the
-/// first and last 64 KiB and the archives, one at a time on a hard disk.
-fn find_duplicates_with(
-    files: Vec<PathBuf>,
-    zips: Vec<PathBuf>,
-    readers: &Readers,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-    cache: &mut KeyCache,
-) -> Audit {
-    let mut reads = Reads::default();
-    let mut skipped = Vec::new();
-    let send = |msg: AuditProgress| {
-        if let Some(tx) = progress {
-            let _ = tx.send(msg);
-        }
-    };
-    let hashing = |path: &Path| send(AuditProgress::Hashing(path.to_string_lossy().into_owned()));
-
-    // Canonicalize and deduplicate paths to prevent counting/grouping a file
-    // with itself.
-    let files = resolve_paths(&files, readers, cancel);
-    let zips = resolve_paths(&zips, readers, cancel);
-    if cancel.load(Ordering::Relaxed) {
-        return Audit::default();
-    }
-    for (path, _) in files.iter().chain(&zips) {
-        cache.mark_seen(path);
-    }
-    let mut zip_demos = Vec::new();
-    if !zips.is_empty() {
-        send(AuditProgress::Archives(zips.len()));
-        zip_demos = list_zips(
-            &zips,
-            readers,
-            cancel,
-            progress,
-            cache,
-            &mut reads,
-            &mut skipped,
-        );
-        if cancel.load(Ordering::Relaxed) {
-            return Audit::default();
-        }
-    }
-    send(AuditProgress::Keying(files.len() + zip_demos.len()));
-
-    let mut loose_sizes: HashMap<u64, usize> = HashMap::new();
-    for (_, stamp) in &files {
-        if let Some(s) = stamp {
-            *loose_sizes.entry(s.size).or_default() += 1;
-        }
-    }
-    let archived_sizes: HashSet<u64> = zip_demos.iter().map(|z| z.entry.size).collect();
-    // A loose demo is opened only when another loose demo, or a demo in an
-    // archive, has its size: otherwise it can't be a copy or backed up.
-    let worth_keying = |size: u64| {
-        loose_sizes.get(&size).copied().unwrap_or(0) >= 2 || archived_sizes.contains(&size)
-    };
-    let mut keys: Vec<Option<FileKey>> = vec![None; files.len()];
-    let mut to_read = Vec::new();
-    for (i, (path, stamp)) in files.iter().enumerate() {
-        match stamp {
-            None => {
-                keys[i] = Some(unreadable_key(path));
-                hashing(path);
-            }
-            Some(s) if !worth_keying(s.size) => hashing(path),
-            Some(s) => match cache.entry(path, *s) {
-                Some(entry) => {
-                    keys[i] = Some(FileKey {
-                        size: s.size,
-                        header_hash: entry.head,
-                    });
-                    hashing(path);
-                }
-                None => to_read.push(i),
-            },
-        }
-    }
-    let heads = readers.map(
-        &to_read,
-        |&i| drive_of(&files[i].0),
-        cancel,
-        |&i| {
-            let (path, stamp) = &files[i];
-            hashing(path);
-            head_hash(path, stamp.map_or(0, |s| s.size))
-        },
-    );
-    for (&i, head) in to_read.iter().zip(heads) {
-        let Some(head) = head else { continue };
-        reads.heads += 1;
-        let (path, stamp) = &files[i];
-        let Some(stamp) = *stamp else { continue };
-        keys[i] = Some(match head {
-            Ok(head) => {
-                cache.put(path, stamp, head);
-                FileKey {
-                    size: stamp.size,
-                    header_hash: head,
-                }
-            }
-            Err(_) => unreadable_key(path),
-        });
-    }
-
-    // A demo in an archive is read in full or not at all: deflate, LZMA and
-    // RAR can't seek to its last 64 KiB. Only an entry a loose demo shares a
-    // size with is read, and each such entry is read itself, so every
-    // archive holding a demo is listed: a size and CRC-32 in a header say
-    // nothing about the data behind them, and a damaged archive listing the
-    // same header must not show as a backup.
-    let mut needed = Vec::new();
-    for (j, z) in zip_demos.iter().enumerate() {
-        if z.entry.hashes.is_some() || !loose_sizes.contains_key(&z.entry.size) {
-            send(AuditProgress::Hashing(z.at(&zips).display()));
-        } else {
-            needed.push(j);
-        }
-    }
-    if !needed.is_empty() && !cancel.load(Ordering::Relaxed) {
-        for (j, read) in read_zip_demos(&needed, &zip_demos, &zips, readers, cancel, progress) {
-            reads.zip_demos += 1;
-            let (path, stamp) = &zips[zip_demos[j].zip];
-            if let Some(stamp) = stamp {
-                cache.set_archive_hashes(path, *stamp, &zip_demos[j].entry.name, read.clone());
-            }
-            match read {
-                Ok(h) => zip_demos[j].entry.hashes = Some(h),
-                Err(e) => {
-                    skipped.push(format!("{}: {e}", zip_demos[j].at(&zips).shown()));
-                    zip_demos[j].entry.error = Some(e);
-                }
-            }
-        }
-    }
-    let index = BackupIndex::new(zip_demos.iter().filter_map(|z| {
-        let hashes = z.entry.hashes.filter(|_| z.entry.error.is_none())?;
-        Some(ArchivedCopy {
-            at: z.at(&zips),
-            hashes,
-        })
-    }));
-
-    let mut groups: HashMap<FileKey, Vec<usize>> = HashMap::new();
-    let mut singles: Vec<usize> = Vec::new();
-    for (i, key) in keys.iter().enumerate() {
-        match key {
-            Some(key) => groups.entry(key.clone()).or_default().push(i),
-            None => singles.push(i),
-        }
-    }
-
-    // The key reads only the start, so two cuts of one recording can share
-    // it. Files that end differently are different demos: split each group
-    // by its last bytes too. Only grouped files, and files an archive holds
-    // a demo with the same key, pay the extra read. The key itself stays as
-    // it is, since project files save its text.
-    let mut tails: Vec<Option<u64>> = vec![None; files.len()];
-    let mut tail_reads = Vec::new();
-    for (key, members) in &groups {
-        if members.len() < 2 && !index.has_key(key) {
-            continue;
-        }
-        for &i in members {
-            let (path, stamp) = &files[i];
-            match stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.tail)
-            {
-                Some(tail) => tails[i] = Some(tail),
-                None => tail_reads.push((i, key.size)),
-            }
-        }
-    }
-    let drive = |&(i, _): &(usize, u64)| drive_of(&files[i].0);
-    let read_tails = readers.map(&tail_reads, drive, cancel, |&(i, size)| {
-        tail_hash(&files[i].0, size)
-    });
-    for (&(i, _), tail) in tail_reads.iter().zip(read_tails) {
-        let Some(tail) = tail else { continue };
-        reads.tails += 1;
-        let (path, stamp) = &files[i];
-        // Unreadable here: a group of its own, as when keying fails.
-        tails[i] = Some(match tail {
-            Ok(tail) => {
-                if let Some(s) = stamp {
-                    cache.set_tail(path, *s, tail);
-                }
-                tail
-            }
-            Err(_) => fnv1a_hash(path.to_string_lossy().as_bytes()),
-        });
-    }
-
-    let mut backups = Vec::new();
-    if !index.is_empty() {
-        for (i, key) in keys.iter().enumerate() {
-            let (Some(key), Some(tail)) = (key, tails[i]) else {
-                continue;
-            };
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            let (path, stamp) = &files[i];
-            // Read in full once, then remembered while its size and
-            // modified time hold.
-            let known = stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.full);
-            let copies = index.copies_of(key, tail, || {
-                known.or_else(|| read_full(path, *stamp, cache, &mut reads))
-            });
-            if !copies.is_empty() {
-                backups.push(Backup {
-                    demo: path.clone(),
-                    copies,
-                });
-            }
-        }
-    }
-
-    let mut split: Vec<(FileKey, Vec<usize>)> = Vec::new();
-    for (key, members) in groups {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        if members.len() < 2 {
-            split.push((key, members));
-            continue;
-        }
-        let mut by_tail: HashMap<u64, Vec<usize>> = HashMap::new();
-        for i in members {
-            if let Some(tail) = tails[i] {
-                by_tail.entry(tail).or_default().push(i);
-            }
-        }
-        for (_, same_tail) in by_tail {
-            for part in split_by_full_hash(same_tail, &files, cache, &mut reads) {
-                split.push((key.clone(), part));
-            }
-        }
-    }
-    for i in singles {
-        split.push((
-            FileKey {
-                size: files[i].1.map_or(0, |s| s.size),
-                header_hash: 0,
-            },
-            vec![i],
-        ));
-    }
-
-    let mut listings: Vec<ArchiveListing> = zips
-        .iter()
-        .map(|(path, _)| ArchiveListing {
-            archive: path.clone(),
-            demos: Vec::new(),
-        })
-        .collect();
-    for z in &zip_demos {
-        if z.entry.error.is_none() {
-            listings[z.zip].demos.push(z.entry.clone());
-        }
-    }
-    let mut audit = Audit {
-        reads,
-        backups,
-        archives: listings,
-        zips: zips.len(),
-        zip_demos: zip_demos.len(),
-        skipped,
-        ..Audit::default()
-    };
-    for (key, members) in split {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        // Sorted, so original vs duplicate selection is stable.
-        let mut paths: Vec<PathBuf> = members.iter().map(|&i| files[i].0.clone()).collect();
-        paths.sort();
-        if let Some(first) = paths.first() {
-            audit.unique_files.push(first.clone());
-        }
-        if paths.len() > 1 {
-            let group = DuplicateGroup { key, files: paths };
-            audit.copies += group.copies();
-            audit.wasted_bytes += group.wasted_bytes();
-            audit.groups.push(group);
-        }
-    }
-    // Sort unique files alphabetically so traversal is deterministic
-    audit.unique_files.sort();
-    // Most wasted space first; then by path, so the order is stable.
-    audit.groups.sort_by(|a, b| {
-        b.wasted_bytes()
-            .cmp(&a.wasted_bytes())
-            .then_with(|| a.first_name().cmp(&b.first_name()))
-    });
-    audit
-}
-
-/// `path`'s whole-file hash, read now and remembered in `cache` while its
-/// size holds; `None` when it can't be read.
-fn read_full(
-    path: &Path,
-    stamp: Option<Stamp>,
-    cache: &mut KeyCache,
-    reads: &mut Reads,
-) -> Option<u64> {
-    reads.fulls += 1;
-    let hashes = content_hashes(path).ok()?;
-    if let Some(s) = stamp
-        && s.size == hashes.size
-    {
-        cache.remember_contents(path, s, hashes);
-    }
-    Some(hashes.full)
-}
-
-/// One group (same key and tail) split by whole-file hash, but only when the
-/// cache already proves two of its files differ: two remembered full hashes
-/// that don't match. Its other files are then read in full to see which side
-/// they belong to; a file that can't be read goes on its own. Without that
-/// proof the group stays whole, as it was before the cache.
-fn split_by_full_hash(
-    members: Vec<usize>,
-    files: &[(PathBuf, Option<Stamp>)],
-    cache: &mut KeyCache,
-    reads: &mut Reads,
-) -> Vec<Vec<usize>> {
-    if members.len() < 2 {
-        return vec![members];
-    }
-    let known: Vec<Option<u64>> = members
-        .iter()
-        .map(|&i| {
-            let (path, stamp) = &files[i];
-            stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.full)
-        })
-        .collect();
-    let distinct: HashSet<u64> = known.iter().flatten().copied().collect();
-    if distinct.len() < 2 {
-        return vec![members];
-    }
-    let mut parts: HashMap<u64, Vec<usize>> = HashMap::new();
-    let mut alone = Vec::new();
-    for (&i, full) in members.iter().zip(known) {
-        let (path, stamp) = &files[i];
-        match full.or_else(|| read_full(path, *stamp, cache, reads)) {
-            Some(full) => parts.entry(full).or_default().push(i),
-            None => alone.push(vec![i]),
-        }
-    }
-    parts.into_values().chain(alone).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lanes::{Lane, drive_of, plan_lanes, seek_penalty};
+    use crate::walk::{scan_roots_with, walk_roots};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::Duration;
 
     #[test]
     fn the_text_form_round_trips_and_keeps_its_shape() {
@@ -1502,14 +303,46 @@ mod tests {
         assert_eq!(names, ["a.dem", "b.dem"]);
     }
 
+    /// Two files whose starts match and whose ends can't be read are not
+    /// proof of a copy: an unreadable tail must key the file by its own path
+    /// (a constant would group them, and the user could delete one, #1233).
+    /// The heads come from the cache so only the tail read hits the lock.
+    #[cfg(windows)]
     #[test]
-    fn fnv_matches_the_reference_vectors() {
-        assert_eq!(fnv1a_hash(b""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a_hash(b"a"), 0xaf63_dc4c_8601_ec8c);
-        let mut pieces = Fnv1a::new();
-        pieces.update(b"ab");
-        pieces.update(b"c");
-        assert_eq!(pieces.finish(), fnv1a_hash(b"abc"));
+    fn files_with_matching_heads_and_unreadable_tails_are_not_grouped() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("auditor_badtail_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = vec![7u8; 3 * KEY_BYTES as usize];
+        let mut cache = KeyCache::default();
+        let mut paths = Vec::new();
+        for name in ["a.dem", "b.dem"] {
+            let p = dir.join(name);
+            fs::write(&p, &bytes).unwrap();
+            let p = fs::canonicalize(&p).unwrap();
+            let head = crate::keys::head_hash(&p, bytes.len() as u64).unwrap();
+            cache.put(&p, crate::keys::stamp(&p).unwrap(), head);
+            paths.push(p);
+        }
+        // Exclusive handles: opening to read the tail now fails.
+        let _locks: Vec<_> = paths
+            .iter()
+            .map(|p| {
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(p)
+                    .unwrap()
+            })
+            .collect();
+        assert!(crate::keys::tail_hash(&paths[0], bytes.len() as u64).is_err());
+        let audit =
+            find_duplicates_cached(paths.clone(), &AtomicBool::new(false), &None, &mut cache);
+        drop(_locks);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(audit.groups.is_empty(), "{:?}", audit.groups);
+        assert_eq!(audit.copies, 0);
     }
 
     fn fixture_path() -> PathBuf {
@@ -1994,6 +827,150 @@ mod tests {
         let audit = key_pass(&[a, b], &mut cache);
         assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
         assert_eq!(audit.reads.fulls, 0);
+    }
+
+    #[test]
+    fn groups_come_biggest_waste_first_then_by_path_and_the_first_path_is_kept() {
+        let d = Demos::new("order");
+        // Wasted space: big 2 x 262144, mid 1 x 5, tiny pair 1 x 3 and 1 x 3.
+        let files = [
+            d.file("z_big.dem", &long_demo(1)),
+            d.file("y_big.dem", &long_demo(1)),
+            d.file("x_big.dem", &long_demo(1)),
+            d.file("b_mid.dem", b"12345"),
+            d.file("a_mid.dem", b"12345"),
+            d.file("d_tiny.dem", b"abc"),
+            d.file("c_tiny.dem", b"abc"),
+            d.file("solo.dem", b"nobody else"),
+        ];
+        let audit = key_pass(&files, &mut KeyCache::default());
+        let names: Vec<Vec<String>> = audit
+            .groups
+            .iter()
+            .map(|g| {
+                g.files
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                vec!["x_big.dem", "y_big.dem", "z_big.dem"],
+                vec!["a_mid.dem", "b_mid.dem"],
+                vec!["c_tiny.dem", "d_tiny.dem"],
+            ]
+        );
+        assert_eq!(audit.copies, 4);
+        assert_eq!(audit.wasted_bytes, 2 * 4 * KEY_BYTES + 5 + 3);
+        // One path per demo, the first of its group, sorted.
+        let kept: Vec<_> = audit
+            .unique_files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(kept, ["a_mid.dem", "c_tiny.dem", "solo.dem", "x_big.dem"]);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_a_demo_of_its_own_and_still_counted() {
+        let d = Demos::new("unreadable");
+        let a = d.file("a.dem", b"same size A");
+        let b = d.file("b.dem", b"same size A");
+        let gone = d.0.join("gone.dem");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            vec![a, b, gone.clone()],
+            &AtomicBool::new(false),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
+        assert_eq!(audit.unique_files.len(), 2);
+        assert!(
+            audit
+                .unique_files
+                .iter()
+                .any(|p| p.file_name().is_some_and(|n| n == "gone.dem"))
+        );
+        let messages: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(messages.first(), Some(AuditProgress::Keying(3))));
+        let hashed = messages
+            .iter()
+            .filter(|m| matches!(m, AuditProgress::Hashing(_)))
+            .count();
+        assert_eq!(hashed, 3, "{messages:?}");
+    }
+
+    #[test]
+    fn a_cancel_before_the_pass_returns_nothing_and_says_nothing() {
+        let d = Demos::new("cancel_first");
+        let files = [d.file("a.dem", b"same"), d.file("b.dem", b"same")];
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            files.to_vec(),
+            &AtomicBool::new(true),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert!(audit.groups.is_empty() && audit.unique_files.is_empty());
+        assert_eq!(audit.reads, Reads::default());
+        assert_eq!(rx.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn the_key_pass_reports_in_a_fixed_order_on_one_reader() {
+        let d = Demos::new("events");
+        let files = [
+            d.file("a.dem", b"same size A"),
+            d.file("b.dem", b"same size A"),
+            d.file("lone.dem", b"a size of its own"),
+        ];
+        let one = Readers {
+            threads: 1,
+            seeks: &|_| false,
+        };
+        let run = |cache: &mut KeyCache| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            find_duplicates_with(
+                files.to_vec(),
+                vec![],
+                &one,
+                &AtomicBool::new(false),
+                &Some(tx),
+                cache,
+            );
+            rx.try_iter()
+                .map(|m| match m {
+                    AuditProgress::Keying(n) => format!("keying {n}"),
+                    AuditProgress::Hashing(p) => format!(
+                        "hashing {}",
+                        Path::new(&p).file_name().unwrap().to_string_lossy()
+                    ),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut cache = KeyCache::default();
+        // The lone size needs no key and reports first; the two to read follow.
+        let expected = [
+            "keying 3",
+            "hashing lone.dem",
+            "hashing a.dem",
+            "hashing b.dem",
+        ];
+        assert_eq!(run(&mut cache), expected);
+        // Remembered keys report ahead of reads, in file order.
+        assert_eq!(
+            run(&mut cache),
+            [
+                "keying 3",
+                "hashing a.dem",
+                "hashing b.dem",
+                "hashing lone.dem"
+            ]
+        );
     }
 
     #[test]

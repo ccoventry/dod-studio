@@ -55,6 +55,19 @@ fn appdata_base() -> PathBuf {
     dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
+/// `%LOCALAPPDATA%\dod-studio`, created if absent: files that belong to this
+/// PC and have no reason to travel with a roaming Windows profile, such as
+/// the hook DLL copies the game launches from (#1146).
+pub fn get_local_appdata_dir() -> PathBuf {
+    let path = local_appdata_base().join(APPDATA_DIR_NAME);
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
+fn local_appdata_base() -> PathBuf {
+    dirs::data_local_dir().unwrap_or_else(appdata_base)
+}
+
 /// What a migration run did, for the caller to log.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AppDataMigration {
@@ -535,8 +548,9 @@ pub fn clear_capture_scratch(
         // happened.
         let primer_demo = format!("{PRIMER_DEMO_STEM}.dem");
         if let Some(e) = remove_file_retrying(&dod_dir.join(&primer_demo)) {
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove {primer_demo} after retrying: {e} (auto_clear_temp_demos left it behind; hl.exe may still have had it open)"
+            crate::log_markdown(&crate::messages::cleanup_primer_demo_failed(
+                &primer_demo,
+                e,
             ));
         }
         if let Ok(entries) = std::fs::read_dir(&dod_dir) {
@@ -609,8 +623,8 @@ fn remove_scratch_file(path: &Path, setting: &str) -> bool {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove {name} after retrying: {e} ({setting} left it behind; something may still have had it open)"
+            crate::log_markdown(&crate::messages::cleanup_scratch_file_failed(
+                &name, e, setting,
             ));
             false
         }

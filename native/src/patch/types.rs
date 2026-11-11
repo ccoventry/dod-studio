@@ -245,6 +245,17 @@ pub struct CaptureBlock {
     /// any end-of-demo clamp.
     #[serde(default)]
     pub record_stop_tick: i32,
+    /// How many gaps between kills this take records sped up (#831,
+    /// `builder::kill_gaps`): its frames are fewer than its record window's.
+    /// 0 for a take recorded at real time throughout, which is every take of
+    /// a patched batch.
+    #[serde(default)]
+    pub ramped_gaps: usize,
+    /// What this recording is planned to hold, in seconds on the `viewdemo` clock (#1084):
+    /// written beside the take so its length and kills can be checked.
+    /// `None` when the highlight's kills have no `viewdemo` times to plan from.
+    #[serde(default)]
+    pub plan: Option<crate::hlcr::take_plan::TakePlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -336,6 +347,67 @@ impl CaptureMode {
     /// with `mirv_agr` instead and writes no frames.
     pub fn hlae_records(self) -> bool {
         matches!(self, Self::FrameSequence | Self::DirectToVideo)
+    }
+}
+
+/// What a capture does with a long gap between two kills inside one clip
+/// (#831): Configuration's "Gaps between kills over N s".
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KillGapMode {
+    /// Recorded at real time, like the rest of the clip.
+    #[default]
+    Keep,
+    /// Recorded at `KillGaps::speed` (`dem_speed`), so the clip plays the
+    /// gap sped up. Seek Between Clips only: a patched demo has no demo
+    /// player clock to speed up (`builder::kill_gaps`).
+    FastForward,
+}
+
+/// Configuration's "Gaps between kills over [N] s: Keep / Fast-forward [4]x"
+/// (#831). Off (`Keep`) unless the user picks Fast-forward.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct KillGaps {
+    pub mode: KillGapMode,
+    /// A gap counts when two kills are more than this far apart.
+    pub over_seconds: f32,
+    /// How many times real time a fast-forwarded gap plays at.
+    pub speed: f32,
+}
+
+/// Review's own "Fast-forward gaps over 8 s" default (#665,
+/// `review_settings.js`), so the two settings start from the same idea of a
+/// long gap.
+pub const DEFAULT_KILL_GAP_SECONDS: f32 = 8.0;
+/// Review's default fast-forward speed (`review.rs`), the speed #831's
+/// capture probe measured.
+pub const DEFAULT_KILL_GAP_SPEED: f32 = 4.0;
+/// The fastest a gap may play: Review's own clamp (`review.rs` options).
+pub const MAX_KILL_GAP_SPEED: f32 = 16.0;
+
+impl Default for KillGaps {
+    fn default() -> Self {
+        Self {
+            mode: KillGapMode::Keep,
+            over_seconds: DEFAULT_KILL_GAP_SECONDS,
+            speed: DEFAULT_KILL_GAP_SPEED,
+        }
+    }
+}
+
+impl KillGaps {
+    /// The speed gaps are recorded at, or `None` when gaps are kept: mode
+    /// Keep, or a gap length or speed that can't fast-forward anything
+    /// (not a positive number, or a speed of 1x or less). Clamped to
+    /// [`MAX_KILL_GAP_SPEED`].
+    pub fn ramp_speed(&self) -> Option<f32> {
+        let usable = self.mode == KillGapMode::FastForward
+            && self.over_seconds.is_finite()
+            && self.over_seconds > 0.0
+            && self.speed.is_finite()
+            && self.speed > 1.0;
+        usable.then(|| self.speed.min(MAX_KILL_GAP_SPEED))
     }
 }
 
@@ -518,6 +590,9 @@ pub struct PatcherConfig {
     /// now, rather than refusing the batch.
     #[serde(default)]
     pub render_while_capturing: bool,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    #[serde(default)]
+    pub kill_gaps: KillGaps,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
     /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
@@ -704,6 +779,9 @@ impl PatcherConfig {
         // way the app starts the game (a batch, Launch Preview, Launch Game)
         // ships it, and from the user's own layout as it is now (#465).
         crate::demo_bar_res::prepare(&hl_exe, &game_folder);
+        // The same for the louder headshot sounds, from the install's own
+        // (#1353).
+        crate::headshot_louder::prepare(&hl_exe, &game_folder);
 
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
@@ -718,9 +796,13 @@ impl PatcherConfig {
         // env vars (GOLDSRC_HOOKS_*) are set, which nothing here sets yet --
         // see the crate's README for what it needs to do anything.
         //
-        // Resolution order: see `goldsrc_hooks_dll`.
-        let goldsrc_hooks_dll_str =
-            goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
+        // Resolution order: see `goldsrc_hooks_dll`. The game loads a copy
+        // of that file, never the file itself (#1146).
+        let goldsrc_hooks_dll_str = goldsrc_hooks_dll.map(|p| {
+            crate::sys::hook_copy::for_launch(&p)
+                .to_string_lossy()
+                .replace("/", "\\\\")
+        });
 
         let program_path_str = hl_exe.replace("/", "\\\\");
 
@@ -794,6 +876,11 @@ impl PatcherConfig {
         // The engine names the addon folder after `-game`'s, so another game
         // folder gets its own `<folder>_addon`.
         //
+        // `-dodstudio_pipe` names this Studio's own game pipe, so with two
+        // Studios open the game asks the one that started it (#1235). The
+        // engine skips a flag it doesn't know, and its value, which starts
+        // with neither `-` nor `+`.
+        //
         // `-demoedit` turns on the demo player's edit row (Master, Events,
         // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
         // GameUI, which otherwise sizes the bar so that row is cut off. It
@@ -801,8 +888,12 @@ impl PatcherConfig {
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {}",
-            game_folder, width, height, extra_engine_args
+            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
+            game_folder,
+            width,
+            height,
+            crate::sys::studio_pipe::launch_arg(),
+            extra_engine_args
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);
@@ -821,22 +912,18 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                crate::log_markdown(&format!("goldsrc-hooks: injecting {extra_dll}"));
+                crate::log_markdown(&crate::messages::hooks_injecting(extra_dll));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
             None => {
                 let shown = |p: Option<std::path::PathBuf>| {
                     p.map_or_else(|| "none".to_string(), |p| p.display().to_string())
                 };
-                crate::log_markdown(&format!(
-                    "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                     ds_* console commands will be absent this session. Tried: override={}, \
-                     bundled default={}, legacy spot beside hlae.exe={}. In a dev build only the \
-                     override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
+                crate::log_markdown(&crate::messages::hook_dll::not_found(
                     shown(
                         self.goldsrc_hooks_dll_path
                             .as_ref()
-                            .map(std::path::PathBuf::from)
+                            .map(std::path::PathBuf::from),
                     ),
                     shown(default_goldsrc_hooks_dll_path()),
                     shown(hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))),
@@ -889,6 +976,7 @@ impl Default for PatcherConfig {
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
             render_while_capturing: false,
+            kill_gaps: KillGaps::default(),
             player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
@@ -1184,5 +1272,19 @@ mod launch_args_tests {
             condebug < playdemo,
             "-condebug must come before the caller's own args, got: {line}"
         );
+    }
+
+    #[test]
+    fn every_launch_names_this_studios_pipe_ahead_of_any_command() {
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let at = line
+                .find(&crate::sys::studio_pipe::launch_arg())
+                .unwrap_or_else(|| panic!("no -dodstudio_pipe in {line}"));
+            assert!(
+                line.find('+').is_none_or(|plus| at < plus),
+                "-dodstudio_pipe must precede any +command: {line}"
+            );
+        }
     }
 }

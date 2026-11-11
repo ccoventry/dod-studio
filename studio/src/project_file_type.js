@@ -8,6 +8,7 @@
 // defaults to `.dodstudio`.
 
 import { STRINGS } from './strings.js';
+import { fileNameOf, folderOf } from './path_display.js';
 
 export const PROJECT_EXTENSION = 'dodstudio';
 export const DEFAULT_PROJECT_NAME = `dod_project.${PROJECT_EXTENSION}`;
@@ -25,13 +26,25 @@ export function projectSaveDialogOptions(projectsDir) {
   };
 }
 
+/** Options for Save a copy's dialog, the only way to save a project that
+ *  needs a newer build to save over it: `<name> copy.dodstudio` beside it. */
+export function projectCopyDialogOptions(path) {
+  const stem = (fileNameOf(path) || '').replace(/\.(json|dodstudio)$/i, '');
+  const name = `${STRINGS.PROJECT_FILE.copyName(stem)}.${PROJECT_EXTENSION}`;
+  return {
+    ...projectSaveDialogOptions(null),
+    title: STRINGS.PROJECT_FILE.SAVE_COPY_DIALOG_TITLE,
+    defaultPath: `${folderOf(path)}\\${name}`,
+  };
+}
+
 /** Load Project's filter: both kinds of project file in one. */
 export const PROJECT_OPEN_FILTERS = [
   { name: STRINGS.MAIN.PROJECT_FILTER_NAME, extensions: [PROJECT_EXTENSION, 'json'] },
 ];
 
 function extensionOf(path) {
-  const name = String(path || '').split(/[\\/]/).pop() || '';
+  const name = fileNameOf(path) || '';
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }

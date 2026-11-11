@@ -13,11 +13,11 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { clockRound } from './time_format.js';
 import { startView, combineProgressView, endText } from './combine_progress.js';
+import { fileNameOf } from './path_display.js';
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi'];
 
 const $ = (selector) => document.querySelector(selector);
-const fileName = (path) => String(path).split(/[\\/]/).pop();
 
 /** Adds `paths` to `list`, leaving out any already in it (case-insensitive). */
 export function addClips(list, paths) {
@@ -45,7 +45,7 @@ export function moveClip(list, index, delta) {
 /** Where the joined video goes by default: beside the first clip, named
  *  after it, in its container when nothing is re-encoded, else MP4. */
 export function defaultOutput(first, streamCopy) {
-  const name = fileName(first);
+  const name = fileNameOf(first);
   const dot = name.lastIndexOf('.');
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const ext = streamCopy && dot > 0 ? name.slice(dot + 1) : 'mp4';
@@ -120,7 +120,7 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
       li.className = 'combine-row';
       const name = document.createElement('span');
       name.className = 'combine-name';
-      name.textContent = fileName(path);
+      name.textContent = fileNameOf(path);
       name.title = path;
       const button = (text, title, onClick, disabled = false) => {
         const b = document.createElement('button');
@@ -206,7 +206,7 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
     try {
       await combineClips(clips, output, ffmpegPath());
       outcome = 'saved';
-      showToast(STRINGS.COMBINE.saved(fileName(output)), 'success', 6000, {
+      showToast(STRINGS.COMBINE.saved(fileNameOf(output)), 'success', 6000, {
         action: { label: STRINGS.COMBINE.SHOW_FILE, onClick: () => revealInExplorer(output).catch(() => {}) },
       });
     } catch (err) {

@@ -503,13 +503,33 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 
 /** Review highlights (#623): sends the highlights to the running game, or
  *  starts one. `fastForwardGap`: seconds between kills above which a gap
- *  plays fast, or null (#665). Resolves to `{ pid, launched, count }`. */
-export async function startHighlightReview(highlights, fastForwardGap = null) {
-  return invoke("start_highlight_review", { highlights, fastForwardGap })
+ *  plays fast, or null (#665). `startFrom`: the game starts at the first
+ *  highlight at or after this demo time, or null for the first (#1142).
+ *  Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights, fastForwardGap = null, startFrom = null) {
+  return invoke("start_highlight_review", { highlights, fastForwardGap, startFrom })
     .catch((err) => {
       console.error("IPC Execution Error (start_highlight_review):", err);
       showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
       throw err;
+    });
+}
+
+/** Tells the game what Studio is doing about its review request `id`
+ *  (#1142): `text` shows on its Review tab. */
+export async function gameReviewProgress(id, text) {
+  return invoke("game_review_progress", { id, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_progress):", err);
+    });
+}
+
+/** Tells the game its review request `id` has started (`error` null) or
+ *  why not (#1142). */
+export async function gameReviewFinished(id, error = null) {
+  return invoke("game_review_finished", { id, error })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_finished):", err);
     });
 }
 
@@ -590,6 +610,18 @@ export async function checkRunningGame(request = null) {
     });
 }
 
+/** The open game a capture batch can run in instead of Force Relaunch
+ *  (#725): its pid, or null when the batch needs a fresh game (the activity
+ *  log says why). `request` as for checkRunningGame. Resolves null when the
+ *  check itself fails, which leaves the usual Force Relaunch question. */
+export async function runningGameForBatch(request, captureMode, hookRunsBatch) {
+  return invoke("running_game_for_batch", { request, captureMode, hookRunsBatch })
+    .catch((err) => {
+      console.error("IPC Execution Error (running_game_for_batch):", err);
+      return null;
+    });
+}
+
 /** Closes game `pid` and resolves once it has gone (#666). */
 export async function closeRunningGame(pid) {
   return invoke("close_running_game", { pid })
@@ -630,6 +662,39 @@ export async function launchObs() {
   return invoke("launch_obs")
     .catch((err) => {
       console.error("IPC Execution Error (launch_obs):", err);
+      throw err;
+    });
+}
+
+/** Configuration's Test OBS Connection (#147): connects with `settings`
+ *  (`{ host, port, password, gameWidth, gameHeight, obsCaptureFps,
+ *  obsRecordingQuality }`) and resolves the report. Rejects with the
+ *  backend's reason, which the panel shows. */
+export async function obsTestConnection(settings) {
+  return invoke("obs_test_connection", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_test_connection):", err);
+      throw err;
+    });
+}
+
+/** Whether OBS is still recording a batch nobody is watching (Studio crashed
+ *  mid-batch): `{ reachable, recording, directory, ours }` for `{ host, port,
+ *  password }`. Rejects only when the check itself failed. */
+export async function obsCheckOrphan(settings) {
+  return invoke("obs_check_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_check_orphan):", err);
+      throw err;
+    });
+}
+
+/** Stops that orphaned recording and moves its file into the take folder.
+ *  Resolves the video's path, or "" when OBS had nothing left to stop. */
+export async function obsRecoverOrphan(settings) {
+  return invoke("obs_recover_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_recover_orphan):", err);
       throw err;
     });
 }
@@ -791,6 +856,28 @@ export async function removeNonRenderingRenderJobs() {
     });
 }
 
+/** Capture history (#439): per take folder, in order, whether it is still
+ *  there and its renders. Resolves to `[{ exists, renders }]`, or null when
+ *  the check failed (the list then says it couldn't look). */
+export async function takeCaptureStates(takeFolders) {
+  return invoke("take_capture_states", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_capture_states):", err);
+      return null;
+    });
+}
+
+/** The project's rendered videos (#1264): where each of `paths` is now, in
+ *  order, the path itself, the same file name found in a render export
+ *  folder, or null when missing. Resolves to null when the lookup failed. */
+export async function locateRenderedVideos(paths) {
+  return invoke("locate_rendered_videos", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_rendered_videos):", err);
+      return null;
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */
@@ -808,6 +895,58 @@ export async function deleteTakeFolders(takeFolders) {
   return invoke("delete_take_folders", { takeFolders })
     .catch((err) => {
       console.error("IPC Execution Error (delete_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Take pictures (#1069): makes a take stream's frames when they aren't
+ *  cached yet and resolves to `{ uri, cached }`, the middle frame as a data
+ *  URI. Rejects with "cancelled" when `cancelTakePreviews` stopped it. */
+export async function takePreviewThumb(takeFolder, stream, fps) {
+  return invoke("take_preview_thumb", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_preview_thumb):", err);
+      throw err;
+    });
+}
+
+/** Every frame of a take stream's contact sheet: `{ kind, duration_secs,
+ *  fps, frames: [{ uri, frame, secs }] }`. */
+export async function takePreviewSheet(takeFolder, stream, fps) {
+  return invoke("take_preview_sheet", { takeFolder, stream, fps })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_preview_sheet):", err);
+      throw err;
+    });
+}
+
+/** Stops the take-picture pass running now, if any. */
+export async function cancelTakePreviews() {
+  return invoke("cancel_take_previews")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_previews):", err);
+      throw err;
+    });
+}
+
+/** Take checks (#1084): checks a take stream's picture and sound, or reads
+ *  back the results already made, and resolves to `{ findings: [{ check,
+ *  cause, warn, at_secs, secs, count, share }], duration_secs, peak_db,
+ *  rms_db, ... }`. Rejects with "cancelled" when `cancelTakeChecks` stopped
+ *  it. */
+export async function takeChecks(takeFolder, stream, fps) {
+  return invoke("take_checks", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_checks):", err);
+      throw err;
+    });
+}
+
+/** Stops the take check running now, if any. */
+export async function cancelTakeChecks() {
+  return invoke("cancel_take_checks")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_checks):", err);
       throw err;
     });
 }
@@ -1013,35 +1152,6 @@ export async function crashMapWarnings(demoPaths) {
   return invoke("crash_map_warnings", { demoPaths })
     .catch((err) => {
       console.error("IPC Execution Error (crash_map_warnings):", err);
-      throw err;
-    });
-}
-
-/** The demo folders linked into the game folder of `hlExe` (#376). Throws
- *  the reason when it cannot read them; demo_links.js shows it. */
-export async function listDemoLinks(hlExe) {
-  return invoke("list_demo_links", { hlExe })
-    .catch((err) => {
-      console.error("IPC Execution Error (list_demo_links):", err);
-      throw err;
-    });
-}
-
-/** Links `folder` into the game folder of `hlExe` (#376). Throws why it was
- *  refused; demo_links.js shows it. */
-export async function addDemoLink(hlExe, folder) {
-  return invoke("add_demo_link", { hlExe, folder })
-    .catch((err) => {
-      console.error("IPC Execution Error (add_demo_link):", err);
-      throw err;
-    });
-}
-
-/** Removes the link `name` only; the folder it points at stays (#376). */
-export async function removeDemoLink(hlExe, name) {
-  return invoke("remove_demo_link", { hlExe, name })
-    .catch((err) => {
-      console.error("IPC Execution Error (remove_demo_link):", err);
       throw err;
     });
 }
@@ -1331,6 +1441,19 @@ export async function downloadAndInstallUpdate() {
     });
 }
 
+/** Earlier versions' release notes for the What's new window (#1013):
+ *  `{ releases, from_cache, error }`. `offline` reads only the copy saved in
+ *  the app's data folder. A failed GitHub read still resolves, with the saved
+ *  copy and the reason; this resolves to null only if the backend fails. */
+export async function releaseHistory(offline) {
+  return invoke("release_history", { offline: Boolean(offline) })
+    .catch((err) => {
+      console.error("IPC Execution Error (release_history):", err);
+      logFrontendEvent(STRINGS.WHATS_NEW.releaseListUnreadableLog(err));
+      return null;
+    });
+}
+
 /** Reads the actual compiled-in app version (Cargo.toml's `version`, stamped
  *  by the release workflows) — never hardcoded, so it always matches what
  *  was really built, whether that's a stable release, an experimental build,
@@ -1446,6 +1569,17 @@ export async function blenderStatus(gamePath) {
     .catch((err) => {
       console.error("IPC Execution Error (blender_status):", err);
       showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Copies the bundled VEGAS nameplate script into Documents\Vegas Script Menu
+ *  (#429). Resolves to the installed file's path. */
+export async function vegasInstallScript() {
+  return invoke("vegas_install_script")
+    .catch((err) => {
+      console.error("IPC Execution Error (vegas_install_script):", err);
+      showToast(STRINGS.IPC.vegasScriptFailed(err), 'error');
       throw err;
     });
 }
@@ -1719,6 +1853,16 @@ export async function splitDemoAuto(path, minSeconds) {
   return invoke("split_demo_auto", { path, minSeconds })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_auto):", err);
+      throw err;
+    });
+}
+
+// Whether a multi-map demo's maps were already split next to it:
+// `{ split, files }` (split_status.js).
+export async function demoSplitStatus(path, maps, minSeconds) {
+  return invoke("demo_split_status", { path, maps, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_split_status):", err);
       throw err;
     });
 }

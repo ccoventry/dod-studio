@@ -62,6 +62,18 @@ pub struct PlayerRow {
     /// 1..=16, the tile of the sprite's 4x4 grid; 0 for none.
     #[serde(default)]
     pub crosshair_tile: u8,
+    /// The name `{name}` and `{player}` show for this player in clip and demo
+    /// names (#686), instead of their in-game name. Empty means unset. Only a
+    /// row with a SteamID uses it. Studio-only: [`table_text`] leaves it out,
+    /// the hook has no use for it.
+    #[serde(default)]
+    pub use_as: String,
+    /// The player's nameplate picture (#429): a full path to a PNG anywhere
+    /// on disk, which the VEGAS script puts on its own track above each of
+    /// their clips. Empty means none. Only a row with a SteamID uses it, and
+    /// like [`Self::use_as`] it is Studio-only: [`table_text`] leaves it out.
+    #[serde(default)]
+    pub nameplate: String,
 }
 
 /// What a player not in the table gets for their spray.
@@ -312,10 +324,7 @@ pub fn write_table_at(path: &Path, table: &PlayerTable) -> Result<bool, String> 
         return Ok(false);
     }
     std::fs::write(path, text).map_err(|e| {
-        format!(
-            "could not write the Players table to {}: {e}",
-            path.display()
-        )
+        crate::messages::player_overrides::could_not_write_players_table(path.display(), e)
     })?;
     Ok(true)
 }
@@ -404,7 +413,7 @@ fn read_i32(bytes: &[u8], at: usize) -> Result<i32, String> {
     bytes
         .get(at..at.saturating_add(4))
         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .ok_or_else(|| "the file ends early".to_string())
+        .ok_or_else(|| crate::messages::player_overrides::SPRITE_ENDS_EARLY.to_string())
 }
 
 /// Decodes a GoldSrc sprite's first frame (version 2, `IDSP`): the 40-byte
@@ -415,25 +424,27 @@ fn read_i32(bytes: &[u8], at: usize) -> Result<i32, String> {
 /// onto the screen, so black is nothing).
 pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     if bytes.get(..4) != Some(b"IDSP") {
-        return Err("not a sprite (no IDSP header)".into());
+        return Err(crate::messages::player_overrides::SPRITE_NO_IDSP_HEADER.into());
     }
     if read_i32(bytes, 4)? != 2 {
-        return Err("not a version 2 (Half-Life) sprite".into());
+        return Err(crate::messages::player_overrides::SPRITE_NOT_VERSION_2.into());
     }
     let tex_format = read_i32(bytes, 12)?;
     if read_i32(bytes, 28)? < 1 {
-        return Err("the sprite has no frames".into());
+        return Err(crate::messages::player_overrides::SPRITE_NO_FRAMES.into());
     }
     let count = bytes
         .get(40..42)
         .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
-        .ok_or("the file ends early")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_ENDS_EARLY)?;
     if count == 0 || count > 256 {
-        return Err(format!("{count} palette colours"));
+        return Err(crate::messages::player_overrides::sprite_palette_colours(
+            count,
+        ));
     }
     let palette = bytes
         .get(42..42 + 3 * count)
-        .ok_or("the palette runs past the end")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_PALETTE_PAST_END)?;
     // Each frame starts with its type; a single frame's `dspriteframe_t`
     // (origin x, y, width, height, pixels) follows it, while a group has its
     // frame count and one interval per frame first, and its frames carry no
@@ -444,18 +455,20 @@ pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     } else {
         let n = read_i32(bytes, first + 4)?;
         if !(1..=1024).contains(&n) {
-            return Err(format!("a frame group of {n}"));
+            return Err(crate::messages::player_overrides::sprite_frame_group(n));
         }
         first + 8 + 4 * n as usize
     };
     let (width, height) = (read_i32(bytes, frame + 8)?, read_i32(bytes, frame + 12)?);
     if width < 1 || height < 1 || width as u32 > MAX_SIDE || height as u32 > MAX_SIDE {
-        return Err(format!("a {width}x{height} frame"));
+        return Err(crate::messages::player_overrides::sprite_frame_size(
+            width, height,
+        ));
     }
     let (width, height) = (width as u32, height as u32);
     let pixels = bytes
         .get(frame + 16..frame + 16 + (width * height) as usize)
-        .ok_or("the frame runs past the end")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_FRAME_PAST_END)?;
     let colour = |i: u8| {
         let i = (i as usize).min(count - 1);
         [palette[3 * i], palette[3 * i + 1], palette[3 * i + 2]]
@@ -484,9 +497,9 @@ pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 
 /// [`decode_sprite`] of a file, for the frontend.
 pub fn sprite_image(path: &Path) -> Result<SpriteImage, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| crate::messages::labeled(path.display(), e))?;
     let (width, height, rgba) =
-        decode_sprite(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        decode_sprite(&bytes).map_err(|e| crate::messages::labeled(path.display(), e))?;
     Ok(SpriteImage {
         width,
         height,
@@ -507,6 +520,8 @@ mod tests {
             png: png.into(),
             crosshair_sprite: sprite.into(),
             crosshair_tile: tile,
+            use_as: String::new(),
+            nameplate: String::new(),
         };
         PlayerTable {
             use_in_game: true,
@@ -594,6 +609,50 @@ mod tests {
         assert_eq!(partial.pov_fallback, SprayFallback::Png);
         assert_eq!(partial.crosshair_fallback, CrosshairFallback::Sprite);
         assert_eq!(partial.hltv_fallback, SprayFallback::Png);
+    }
+
+    #[test]
+    fn a_row_saved_before_use_as_loads_with_it_unset() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","png":"a.png"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].use_as, "");
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back, table);
+    }
+
+    #[test]
+    fn use_as_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].use_as = "Chris".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].use_as, "Chris");
+        assert_eq!(table_text(&table), plain);
+    }
+
+    #[test]
+    fn a_row_saved_before_nameplates_loads_with_none() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","use_as":"Chris"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].nameplate, "");
+        assert_eq!(table.players[0].use_as, "Chris");
+    }
+
+    #[test]
+    fn a_nameplate_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].nameplate = "D:/movie/nameplates/m00cat.png".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].nameplate, "D:/movie/nameplates/m00cat.png");
+        assert_eq!(table_text(&table), plain);
     }
 
     #[test]

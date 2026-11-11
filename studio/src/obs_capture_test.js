@@ -12,7 +12,8 @@ import {
   startCaptureBatch, cancelCaptureBatch, checkEngineProcesses,
   obsTestClip, obsTestWatchStart, obsTestAnalyze, obsTestCancel, obsTestDeleteTake,
 } from './ipc_bridge.js';
-import { batchSettingsPayload, runObsConnectionTest, launchObsAndRetry, isCaptureRunning } from './capture_pane.js';
+import { batchSettingsPayload, isCaptureRunning } from './capture_pane.js';
+import { runObsConnectionTest, launchObsAndRetry } from './obs_connection_ui.js';
 import { isObsConnected } from './obs_status.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { setObsTestBatch } from './obs_test_flag.js';
@@ -23,6 +24,7 @@ import {
   FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, recommendedRate, ladderSummary, stepLines, testSessionId,
   gameCell, FRAME_TIMES_ON, FRAME_TIMES_OFF,
 } from './obs_capture_test_logic.js';
+import { fileNameOf } from './path_display.js';
 
 /** How long after the batch's last status line its takes may still arrive. */
 const TAKES_GRACE_MS = 5000;
@@ -297,7 +299,7 @@ export function createObsCaptureTest({ getState, persist }) {
   const demoResetBtn = el('obs-test-demo-reset-btn');
   const showDemo = () => {
     const demo = panel.dataset.demo;
-    if (demoName) demoName.textContent = demo ? demo.split(/[\\/]/).pop() : STRINGS.OBS_TEST.DEMO_BUNDLED;
+    if (demoName) demoName.textContent = demo ? fileNameOf(demo) : STRINGS.OBS_TEST.DEMO_BUNDLED;
     if (demoName) demoName.title = demo || '';
     if (demoResetBtn) demoResetBtn.hidden = !demo;
     // The bundled demo's clip is about a minute already, so "1-minute clips"

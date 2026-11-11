@@ -14,6 +14,7 @@ import {
 } from './audit_duplicates.js';
 import { createClock, readLastRun, rememberLastRun, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
+import { BYTES_PER_MB } from './byte_size.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
@@ -190,7 +191,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       setStatus(STRINGS.AUDITOR.CANCELLING_STATUS);
       try {
         await cancelAudit();
-      } catch (e) {
+      } catch {
         // ipc_bridge already toasts; leave the in-flight audit to resolve
         // on its own and re-enable buttons via the runAuditBtn handler's
         // finally block.
@@ -228,7 +229,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
 
     tbody.innerHTML = '';
     currentAuditResults.forEach((group, groupIdx) => {
-      const sizeMb = (group.size / (1024 * 1024)).toFixed(2);
+      const sizeMb = (group.size / BYTES_PER_MB).toFixed(2);
       const hashStr = group.header_hash.toString(16);
       const isExpanded = !collapsedGroups.has(groupIdx);
 
@@ -249,7 +250,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         cell.className = 'audit-keep-changed';
         const note = document.createElement('span');
         note.textContent = STRINGS.AUDITOR.KEEP_CHANGED_NOTE;
-        note.style.color = '#f0c060';
+        note.style.color = 'var(--warn-note)';
         const reset = document.createElement('button');
         reset.type = 'button';
         reset.className = 'audit-keep-reset-btn';
@@ -270,7 +271,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
         // The kept copy stands out where it is: rows don't move when
         // another copy is picked.
-        if (kept) tr.style.background = 'rgba(90, 200, 120, 0.10)';
+        if (kept) tr.style.background = 'var(--keep-wash)';
 
         const tdCb = document.createElement('td');
         const cb = document.createElement('input');
@@ -308,7 +309,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         keepLabel.append(keepRadio, document.createTextNode(` ${status.trim()}`));
         if (notCopy) {
           keepLabel.title = STRINGS.AUDITOR.NOT_A_COPY_TITLE;
-          keepLabel.style.color = '#f0c060';
+          keepLabel.style.color = 'var(--warn-note)';
         }
         tdStatus.appendChild(keepLabel);
 
@@ -318,13 +319,13 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         const displayPath = shownPath(file.path);
         const tdPath = pathCell(file);
         if (notCopy) {
-          tdPath.style.color = '#f0c060';
+          tdPath.style.color = 'var(--warn-note)';
         } else if (fileIdx > 0) {
-          tdPath.style.color = '#ff9999';
+          tdPath.style.color = 'var(--danger-pale)';
         } else {
           tdPath.style.fontWeight = 'bold';
-          tdPath.style.color = '#8fd18f';
-          keepLabel.style.color = '#8fd18f';
+          tdPath.style.color = 'var(--ok-keep)';
+          keepLabel.style.color = 'var(--ok-keep)';
           keepLabel.style.fontWeight = 'bold';
         }
 

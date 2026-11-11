@@ -15,7 +15,7 @@
 //! touched: the take would be the only copy left.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::hlcr::scanner::{ClipData, scan_folder_background};
 use crate::hlcr::take_delete::{TakeDeletion, plan_take_deletion};
@@ -169,16 +169,12 @@ pub fn folder_key(path: &str) -> String {
         .to_string()
 }
 
-/// The drive a path is on (`d:`, or `\\server\share`), so two Destinations
-/// folders on one drive count its free space once. Empty for a path with no
-/// drive, which every such path then shares.
+/// The volume a path is on (`sys::disk::volume_key`), so two Destinations
+/// folders on one drive count its free space once, and a disk mounted as a
+/// folder counts apart (#1041). Empty for a path with no drive, which every
+/// such path then shares.
 pub fn volume_of(path: &Path) -> String {
-    match path.components().next() {
-        Some(Component::Prefix(prefix)) => {
-            prefix.as_os_str().to_string_lossy().to_ascii_lowercase()
-        }
-        _ => String::new(),
-    }
+    crate::sys::disk::volume_key(path).unwrap_or_default()
 }
 
 /// Free space on the drives a job writes to, and the pieces it writes there.
@@ -472,22 +468,21 @@ pub enum RoomPlan {
 /// `need` fits. Nothing is deleted here.
 ///
 /// `free_of` is the free-space query (`sys::disk::get_available_bytes`, whose
-/// `u64::MAX` means "can't tell"); `capture_dirs` are the Destinations
+/// `None` means "can't tell"); `capture_dirs` are the Destinations
 /// folders, the only place takes are looked for and deleted from; `progress`
 /// hears each step, and nothing at all when the drives already have room.
 pub fn plan_room(
     need: &SpaceNeed,
     capture_dirs: &[PathBuf],
     busy: &HashSet<String>,
-    free_of: impl Fn(&Path) -> u64,
+    free_of: impl Fn(&Path) -> Option<u64>,
     mut progress: impl FnMut(RoomStep),
 ) -> RoomPlan {
     let mut drives = Vec::new();
     for target in &need.targets {
-        let bytes = free_of(target);
-        if bytes == u64::MAX {
+        let Some(bytes) = free_of(target) else {
             return RoomPlan::Unknown;
-        }
+        };
         drives.push((volume_of(target), bytes));
     }
     if drives.is_empty() {
@@ -812,12 +807,15 @@ mod tests {
     }
 
     #[test]
-    fn a_volume_is_the_drive_letter() {
+    fn folders_on_one_drive_are_one_volume() {
         if cfg!(windows) {
-            let mut path = PathBuf::from("D:");
+            let mut path = PathBuf::from("C:");
             path.push("captures");
             path.push("s1");
-            assert_eq!(volume_of(&path), "d:");
+            let mut other = PathBuf::from("c:");
+            other.push("clips");
+            assert_eq!(volume_of(&path), volume_of(&other));
+            assert!(!volume_of(&path).is_empty());
         }
         assert_eq!(volume_of(Path::new("relative")), "");
     }
@@ -953,7 +951,7 @@ mod tests {
             &need(&capture, 2000),
             &dirs,
             &HashSet::new(),
-            |_| 500,
+            |_| Some(500),
             |_| {},
         );
         let RoomPlan::Delete(chosen) = plan else {
@@ -979,7 +977,7 @@ mod tests {
                 &need(&capture, 100),
                 &dirs,
                 &HashSet::new(),
-                |_| 100,
+                |_| Some(100),
                 |_| {}
             ),
             RoomPlan::Enough
@@ -989,7 +987,7 @@ mod tests {
                 &need(&capture, 100),
                 &dirs,
                 &HashSet::new(),
-                |_| u64::MAX,
+                |_| None,
                 |_| {}
             ),
             RoomPlan::Unknown
@@ -1000,7 +998,7 @@ mod tests {
             headroom_bytes: 0,
         };
         assert!(matches!(
-            plan_room(&no_targets, &dirs, &HashSet::new(), |_| 0, |_| {}),
+            plan_room(&no_targets, &dirs, &HashSet::new(), |_| Some(0), |_| {}),
             RoomPlan::Unknown
         ));
     }
@@ -1019,7 +1017,7 @@ mod tests {
             &need(&capture, 10_000),
             &dirs,
             &HashSet::new(),
-            |_| 0,
+            |_| Some(0),
             |_| {},
         );
         let RoomPlan::Short {
@@ -1065,7 +1063,13 @@ mod tests {
             vec![attempt("all", 50, RenderOutcome::Failed, "")],
         );
         let dirs = vec![capture.path().to_path_buf()];
-        let plan = plan_room(&need(&capture, 500), &dirs, &HashSet::new(), |_| 0, |_| {});
+        let plan = plan_room(
+            &need(&capture, 500),
+            &dirs,
+            &HashSet::new(),
+            |_| Some(0),
+            |_| {},
+        );
         let RoomPlan::Short {
             available_bytes,
             moved_takes,
@@ -1093,7 +1097,7 @@ mod tests {
             &need(&capture, 10),
             &dirs,
             &HashSet::new(),
-            |_| 10,
+            |_| Some(10),
             |s| steps.push(s),
         );
         assert!(steps.is_empty(), "{steps:?}");
@@ -1101,7 +1105,7 @@ mod tests {
             &need(&capture, 900),
             &dirs,
             &HashSet::new(),
-            |_| 0,
+            |_| Some(0),
             |s| steps.push(s),
         );
         assert_eq!(
@@ -1128,7 +1132,7 @@ mod tests {
             &need(&capture, 500),
             &[other.path().to_path_buf()],
             &HashSet::new(),
-            |_| 0,
+            |_| Some(0),
             |_| {},
         );
         assert!(matches!(plan, RoomPlan::Short { .. }), "{plan:?}");

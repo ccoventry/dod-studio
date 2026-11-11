@@ -3,6 +3,7 @@
 // queue's counts read. Pure, so it can be tested on its own.
 
 import { isDemoTracked } from './take_index.js';
+import { hasHeadshot } from './headshots.js';
 
 /**
  * The demo's highlights. Whose they are is decided once, by the scan
@@ -40,6 +41,8 @@ export const KILLS_FILTER = {
   WITH_KILLS: 'with_kills',
   /** At least one highlight of two or more kills. */
   MULTI_KILL: 'multi_kill',
+  /** At least one highlight with a headshot among its kills (#1128). */
+  HEADSHOT: 'headshot',
 };
 
 /**
@@ -58,5 +61,6 @@ export function matchesQuickFilters(demo, { kills = KILLS_FILTER.ALL, ownerOnly 
   const own = listedStreaks(demo);
   if (kills === KILLS_FILTER.WITH_KILLS) return own.some((s) => (s.kill_count || 0) > 0);
   if (kills === KILLS_FILTER.MULTI_KILL) return own.some((s) => (s.kill_count || 0) >= 2);
+  if (kills === KILLS_FILTER.HEADSHOT) return own.some(hasHeadshot);
   return true;
 }

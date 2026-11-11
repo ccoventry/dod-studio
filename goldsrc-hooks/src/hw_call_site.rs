@@ -1,6 +1,6 @@
 //! One `call rel32` in `hw.dll` that a setting rewrites while it is on and
 //! puts back while it is off (#677): `engine_center_print` turns it into
-//! `nop`s, `server_hud_text` points it at a filter of ours.
+//! `nop`s, `plugin_text` points it at a filter of ours.
 //!
 //! Each engine build gets its own signature ([`Build`]), and each signature
 //! pins the call's own `rel32`. A `rel32` between two functions of one module
@@ -193,7 +193,10 @@ pub(crate) fn check_builds(builds: &[Build]) {
             build.name
         );
     }
-    assert_ne!(builds[0].pattern, builds[1].pattern);
+    // A table may hold one build when the other needs no patch (#662).
+    for pair in builds.windows(2) {
+        assert_ne!(pair[0].pattern, pair[1].pattern);
+    }
 }
 
 #[cfg(test)]

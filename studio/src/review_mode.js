@@ -10,7 +10,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, applyReviewEdit, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -28,10 +28,12 @@ import { STRINGS } from './strings.js';
  *  - onChanged(): re-render and mark the project dirty after an answer
  *  - hltvPick: review_hltv_picker.js's picker, which holds the box's choice
  *    and the players "Players I pick" reviews
+ * Returns `{ startReview }`, which review_from_game.js starts the game's own
+ * requests with (#1142).
  */
 export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null }) {
   const btn = document.querySelector('#review-highlights-btn');
-  if (!btn) return;
+  if (!btn) return { startReview: async () => STRINGS.REVIEW.NOT_STARTED };
   let answers = 0;
   let running = false;
 
@@ -79,6 +81,12 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
       } else {
         console.warn('[review] answer for a highlight no longer in the queue:', e);
       }
+    } else if (e.kind === 'edit') {
+      // The game's kill range and note form (#1139): the row's Kill Range
+      // and Notes, its mark untouched; onChanged saves it to the review
+      // library too.
+      if (applyReviewEdit(getDemos(), e)) onChanged();
+      else console.warn('[review] kill range and note for a highlight no longer in the queue:', e);
     } else if (e.kind === 'ended' && running) {
       running = false;
       showToast(STRINGS.REVIEW.endedToast(e.reason, answers), 'info', 8000);
@@ -91,10 +99,17 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     }
   }).catch((err) => console.error('[review] could not listen for answers:', err));
 
-  btn.addEventListener('click', async () => {
-    const covers = document.querySelector('#review-covers-select')?.value;
-    const ticked = getCheckedPaths();
-    const paths = reviewDemoPaths(ticked, getShownPaths());
+  /**
+   * Sends the review of `paths`' highlights (those `covers` takes in, with
+   * the HLTV, order and fast-forward boxes as they stand) to the game.
+   * `tickedAny`: the paths are the ticked rows, for the "nothing covered"
+   * message. `startFrom`: the game starts at the first highlight at or after
+   * this demo time (#1142). `fromGame`: the game itself asked, so a running
+   * game with other launch settings is refused rather than offered to close
+   * (that game is the one asking). Resolves to null once the review is sent,
+   * or to why it wasn't, which has been shown too.
+   */
+  async function startReview(paths, { covers, tickedAny = false, startFrom = null, fromGame = false } = {}) {
     fillHltvSelect();
     const picked = hltvPick?.players() || [];
     const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf, picked });
@@ -104,29 +119,41 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
       if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;
       else if (notChosen > 0) why = STRINGS.REVIEW.hltvNoneChosen(hltvSelect?.value, notChosen, picked.length);
-      else if (paths.length > 0) why = STRINGS.REVIEW.nothingCovered(covers, ticked.length > 0);
+      else if (paths.length > 0) why = STRINGS.REVIEW.nothingCovered(covers, tickedAny);
       showToast(why, 'info');
-      return;
+      return why;
     }
     btn.disabled = true;
     try {
       // A game started with other launch settings is closed and started
       // again, if the user says so; otherwise nothing is sent (#666).
-      if (!(await closeGameWithOtherSettings())) return;
+      if (!fromGame && !(await closeGameWithOtherSettings())) return STRINGS.REVIEW.NOT_STARTED;
       const gap = fastForwardGap(
         document.querySelector('#review-fast-forward-cb')?.checked === true,
         document.querySelector('#review-fast-forward-gap')?.value,
       );
-      const started = await startHighlightReview(highlights, gap);
+      const started = await startHighlightReview(highlights, gap, startFrom);
       running = true;
       answers = 0;
       showToast(STRINGS.REVIEW.startedToast(started.count, started.launched, skipped), 'success', 8000, {
         action: { label: STRINGS.REVIEW.STOP, onClick: () => stopHighlightReview().catch(() => {}) },
       });
-    } catch {
+      return null;
+    } catch (err) {
       // ipc_bridge has shown the error.
+      return String(err?.message ?? err);
     } finally {
       btn.disabled = false;
     }
+  }
+
+  btn.addEventListener('click', () => {
+    const ticked = getCheckedPaths();
+    startReview(reviewDemoPaths(ticked, getShownPaths()), {
+      covers: document.querySelector('#review-covers-select')?.value,
+      tickedAny: ticked.length > 0,
+    });
   });
+
+  return { startReview };
 }

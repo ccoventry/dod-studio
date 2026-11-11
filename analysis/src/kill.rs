@@ -1,5 +1,6 @@
 use crate::{
-    AnalyzerEvent, AnalyzerState, mortality::MortalityState, player::PlayerGlobalId, time::GameTime,
+    AnalyzerEvent, AnalyzerState, mortality::MortalityState, player::PlayerGlobalId,
+    time::GameTime, wire_index::wire_slot,
 };
 use dod::{RoundState, Team, UserMessage, Weapon};
 
@@ -20,11 +21,11 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
         let current_time = state.current_time.clone();
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index(death_msg.killer_client_index)
         } else {
             None
         };
-        let victim = state.find_player_by_client_index(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index(death_msg.victim_client_index);
 
         let is_teamkill = match (killer, victim) {
             (Some(fst), Some(snd)) => fst.team == snd.team,
@@ -33,7 +34,7 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
 
         let victim_id = victim.map(|v| v.id.clone());
 
-        let victim = state.find_player_by_client_index_mut(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index_mut(death_msg.victim_client_index);
 
         if let Some(victim) = victim {
             // A life with no kills yet has no record. Give it one first, so
@@ -51,14 +52,16 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
         }
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index_mut(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index_mut(death_msg.killer_client_index)
         } else {
             None
         };
 
         if let (Some(killer), Some(v_id)) = (killer, victim_id) {
             // The killer was found by this index, so it is their slot now.
-            let killer_slot = death_msg.killer_client_index - 1;
+            let Some(killer_slot) = wire_slot(death_msg.killer_client_index) else {
+                return;
+            };
             if killer.kill_streaks.is_empty() {
                 killer.kill_streaks.push(KillStreak::default());
             }
@@ -98,11 +101,11 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
 pub fn use_weapon_breakdown_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) = event {
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index(death_msg.killer_client_index)
         } else {
             None
         };
-        let victim = state.find_player_by_client_index(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index(death_msg.victim_client_index);
 
         let is_teamkill = match (killer, victim) {
             (Some(fst), Some(snd)) => fst.team == snd.team,
@@ -110,7 +113,7 @@ pub fn use_weapon_breakdown_updates(state: &mut AnalyzerState, event: &AnalyzerE
         };
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index_mut(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index_mut(death_msg.killer_client_index)
         } else {
             None
         };
@@ -141,7 +144,7 @@ pub fn use_teamkill_and_suicide_updates(state: &mut AnalyzerState, event: &Analy
     let AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) = event else {
         return;
     };
-    let Some(victim_slot) = death_msg.victim_client_index.checked_sub(1) else {
+    let Some(victim_slot) = wire_slot(death_msg.victim_client_index) else {
         return;
     };
 
@@ -154,7 +157,9 @@ pub fn use_teamkill_and_suicide_updates(state: &mut AnalyzerState, event: &Analy
         return;
     }
 
-    let killer_slot = death_msg.killer_client_index - 1;
+    let Some(killer_slot) = wire_slot(death_msg.killer_client_index) else {
+        return;
+    };
     let team_of = |slot| {
         state
             .find_player_by_client_index(slot)

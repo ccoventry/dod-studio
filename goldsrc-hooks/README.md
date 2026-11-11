@@ -23,20 +23,28 @@ switch rather than adding a command:
   pull, the throw, and the catch and wind-up of a primed one. See
   `docs/goldsrc_hltv_animation_fix.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
-  tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
+  tile `cl_xhair_style` gives the POV view (for style 0, POV's red crosshair,
+  its gap following the watched player), instead of DoD's hardcoded 24x24
   tile of `crosshairs.spr`, and hidden when the player's own would be while
   playing: sprinting, in the air after a jump, going prone or getting up,
   crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt
   rifle, holding a knife, spade or sniper rifle, or a machine gun that is not
   deployed. Loses to `ds_hud_hide_crosshair`, which stubs the whole
   function. See `docs/goldsrc_crosshair.md` section 2.
-- **Prone eye height**: the camera drops to the ground when the spectated
-  player goes prone. The game's in-eye camera has no prone case and leaves it
-  at crouch height. See `docs/goldsrc_spectator_camera.md`.
+- **Eye height**: the camera drops to the ground when the spectated player
+  goes prone. The game's in-eye camera has no prone case and leaves it at
+  crouch height. Into a crouch it eases down over the 0.4 s their own view
+  takes and ends when theirs does, where the game drops it four times faster
+  and 0.4 s later (#1144). Starting with their view takes knowing the crouch
+  is coming, so a thread of its own reads the demo file ahead of playback
+  (`src/lookahead.rs`, #1154). See `docs/goldsrc_spectator_camera.md`.
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
   ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
-  while spectating). Same speed as the game: 55 frames down, 19 back. See
+  while spectating). Same speed as a typical POV recording, whatever the
+  capture rate: 55 steps down and 19 back at 200 steps a second, 0.28 s
+  and 0.09 s (#704). A sprint let go while running off an edge brings it
+  back up as theirs does, read ahead in the demo file too (#1154). See
   `src/spectator_gun.rs`.
 
 **Missing gunshots** (`ds_sound_restore_gunshots 1`, on by default; its own
@@ -82,7 +90,7 @@ is the complete list):
   qualifies: several DoD draws itself as an ordinary 2D HUD element (the
   crosshair, the capture-area icon) rather than a world-placed entity, and
   those never reach this command regardless of spelling --
-  `ds_hud_hide_crosshair`/`ds_hud_hide_element` reach those instead.
+  `ds_hud_hide_crosshair` and the HUD's own sprite names (below) reach those instead.
   Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't previously
   use. See the module doc in `src/hide_asset.rs`.
 - **Scoreboard** (`ds_hud_hide_scoreboard 1`): stops a POV demo's recorded TAB
@@ -104,6 +112,16 @@ is the complete list):
   the rules the demo patcher uses), plus two lists surveyed over the installed
   maps (`native/examples/map_sound_table.rs`). See the module doc in
   `src/map_sounds.rs` (#284).
+- **Headshots heard farther away** (`ds_sound_headshot_farther 1`): the headshot
+  sound (`player/helmet_hit.wav`) fades half as fast with distance. DoD's
+  client plays it from its `bodydamage` event through `EV_PlaySound`, so the
+  `fire_sounds` hook halves its attenuation. With
+  `ds_sound_headshot_pov_farther 1` only the POV player's headshots do: the
+  kill's `DeathMsg` names the shooter (#1353). `ds_sound_headshot_louder 1-3`
+  plays a louder copy instead (and `ds_sound_headshot_pov_louder 1` only
+  for the POV player), which Studio writes into
+  `dod_addon\sound\dodstudio\` at every launch from the install's own sound
+  (`native/src/headshot_louder.rs`). See `src/headshot_sound.rs`.
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
@@ -139,6 +157,12 @@ is the complete list):
   `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
   scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
   `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
+- **Names and health bars over players** (`ds_spec_show_player_info`: 1
+  name, 2 health bar, 3 both): while an HLTV demo plays (not POV), a
+  name and/or a health bar over each player the game draws, from the record
+  `client.dll` keeps per player (`g_PlayerExtraInfo`, `src/player_info.rs`).
+  A prototype (#1130); see `src/nameplates.rs` and
+  `docs/goldsrc_player_info.md`.
 - **Spectator target** (`ds_spec_target <player>`): puts the camera on
   a player by number, the one `ds_hud_deathmsg players` lists. Same doc.
 - **Spectator bars** (`ds_spec_hide_bars 1`): hides the two dark
@@ -282,11 +306,16 @@ is the complete list):
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
 - **Review highlights** (`ds_demo_review`, #623): plays each highlight
-  DoD Studio queued at normal speed, pauses at its end on the window's Review
-  tab, and sends each Yes/No, kill range and note back to Studio on the
+  DoD Studio queued at normal speed, pauses at its end for an answer, and
+  sends each Yes/Maybe/No, kill range and note back to Studio on the
   events pipe. Pause and speed go through `DemoPlayer.dll`'s `SetPaused` and
   `SetTimeScale`, checked by `tools/verify_demo_seek_offsets.py`. See
-  `src/review.rs`.
+  `src/review.rs`. The answer comes from keys on the game screen (Y M N R B Space S,
+  ESC for the Review tab), while a highlight plays (#1141) or at its end,
+  through `client.dll`'s `HUD_Key_Event`, with a box
+  drawn from `HUD_Redraw` saying which highlight plays (#660,
+  `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
+  instead.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
@@ -296,19 +325,15 @@ is the complete list):
   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
   server. Wraps the engine commands the same way as the demo reload. See
   `src/connect_guard.rs` and `docs/vac_safety.md`.
-- **Any HUD element** (`ds_hud_hide_element <name> 1`): hides one of the
-  nine elements DoD draws that the stock `cl_hud_*` cvars don't already
-  reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
-  icons, the objective icons and the rest. (The ammo counter/weapon-select
-  menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
-  no hook needed. The overview map, the mortar HUD, the spectator overlay, and
-  the sniper scope overlay are also left out -- their `Draw` functions turned
-  out not to draw anything at all in this build, hook or no hook; the scope
-  is drawn by `CHudScope::DrawTriApiScope` instead, which
-  `ds_hud_show_scope` reaches.) Run it with no
-  arguments to list them. `ds_hud_hide_element all 0` puts everything
-  back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
-  dword, no code patch -- see `docs/goldsrc_hud_elements.md`.
+- **Teammate name and health** (`ds_hud_hide_teammate_info 1`): hides the
+  line under a POV demo's crosshair naming the teammate the player aims at.
+  Writes `CHudBase::Draw` into the status bar element's vftable slot 3 -- one
+  dword, no code patch. It replaced `ds_hud_hide_element <name>` (#342),
+  whose other names went to the game's own cvars (`hud_saytext_internal 0`
+  for chat, `cl_hud_objectives 0`, `cl_hud_objtimer 0`,
+  `cl_hud_reinforcements 0`, `hud_deathnotice_time 0` for the kill feed) or
+  to settings named after what they hide; see
+  `docs/goldsrc_hud_elements.md`.
 - **Objective icons** (`ds_hud_objectives`): places the territory-flag icon
   row in the top-left corner, and the objective timer beside it. The game draws
   both ~117 pixels lower at 1080p while spectating than it does in a POV demo,
@@ -333,6 +358,12 @@ cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --lib
 Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll`.
 The crate has no binaries: it ships without an injector (#784), because a DLL
 loaded into a running game is too late to do anything (see below).
+
+`build.rs` bakes a build id into the DLL (`src/build_id.rs`): the version and
+git commit, plus `dirty` and the UTC build time when the crates it is built
+from have uncommitted changes. The hook logs it at start (`goldsrc-hooks
+build ...`), and Studio reads it from the file and from a running game's copy
+to tell two builds at one path apart before reusing the game (#1143).
 
 ## Testing manually
 
@@ -407,7 +438,10 @@ Per-feature details, and what is live-proven versus established by static
 analysis only, are in each module's `//!` doc and the linked `docs/` pages
 (listed under "The hook DLL" in the [docs index](../docs/README.md)).
 `tools/` holds a verifier per patched site, which checks the Rust constants
-against a real `client.dll` or `hw.dll`.
+against a real `client.dll` or `hw.dll`. `tools/name_client_dll.py` names
+`client.dll`'s functions from the symbols in DoD's Linux `client.so`; start
+new client-side work from its map
+([goldsrc_linux_debug_symbols.md](../docs/goldsrc_linux_debug_symbols.md)).
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites
 (world sprites and the HUD's atlases -- kill feed, weapon icons, scopes, but
@@ -453,6 +487,7 @@ crash. Set the variable to `0` to turn it off.
 | --- | --- | --- |
 | `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `ds_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
 | `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/map_file_leak.rs` | `Fatal Error: COM_LoadFile: not enough space for maps/<map>.bsp`, or a silent exit, after about 30 map loads on the pre-Anniversary build: DoD's client leaks a copy of every map's `.bsp` (#1232). `ds_debug_status` shows how many it freed. | `GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX=0` |
 | `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
 | `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |
 

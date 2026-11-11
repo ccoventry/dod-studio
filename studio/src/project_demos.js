@@ -5,7 +5,8 @@
 // there, so it's reached through getDemos() rather than held.
 
 import { pickPath } from './pick_path.js';
-import { locateMissingDemos, changedDemos } from './ipc_bridge.js';
+import { locateMissingDemos, changedDemos, logFrontendEvent } from './ipc_bridge.js';
+import { missingDemosLine, changedDemosLine } from './project_log.js';
 import { renameDemoInTakeIndex } from './take_index.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
@@ -29,7 +30,6 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // is called when the folder search is done, before any dialog (#958).
   async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
     const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
-    const nameOf = (p) => p.split(/[\\/]/).pop();
     // Nearest first: where each demo was, then the project's folder, then the
     // scan folders. The search is breadth-first in this order, so a demo moved
     // next door is found before a big scan folder uses up the search budget.
@@ -46,6 +46,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       dirs
     );
     onSearched?.();
+    logFrontendEvent(missingDemosLine(demos.length, missing.length, missing.filter((m) => m.candidate).length));
     // A demo marked missing earlier that is back where the queue says.
     const missingPaths = new Set(missing.map((m) => m.path));
     const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
@@ -72,7 +73,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       // then the folder it's in now, shortened to the drive and the last
       // folders; the full path is the entry's hover text.
       const details = found.map((m) => {
-        const oldName = nameOf(m.path);
+        const oldName = fileNameOf(m.path);
         const newName = fileNameOf(m.candidate);
         return {
           primary: oldName === newName ? oldName : STRINGS.MAIN.relocateRenamed(oldName, newName),
@@ -113,10 +114,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     refreshQueue(relocated.size > 0);
     const notFound = stillMissing.filter((m) => !m.candidate);
     if (notFound.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => nameOf(m.path))), 'warning', 10000);
+      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path))), 'warning', 10000);
     }
     if (leftFound.length > 0) {
-      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => nameOf(d.path))), 'warning', 15000, {
+      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => fileNameOf(d.path))), 'warning', 15000, {
         action: { label: STRINGS.MAIN.USE_ALL_FOUND_COPIES, onClick: () => useFoundCopies(leftFound) },
       });
     }
@@ -145,6 +146,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       details: changed.map((p) => ({ primary: fileNameOf(p), secondary: shortFolder(folderOf(p)), title: p })),
       footer: STRINGS.MAIN.CHANGED_DEMOS_QUESTION,
     });
+    logFrontendEvent(changedDemosLine(changed.length, !!rescan));
     if (rescan) await scan(changed);
     return false;
   }

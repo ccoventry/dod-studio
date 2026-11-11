@@ -2,11 +2,13 @@ import { configurePickPath } from './pick_path.js';
 import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
+import { startDemoContextMenu } from './demo_context_menu.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer, isCaptureStarting } from './capture_pane.js';
+import { createBatchGuard } from './batch_guard.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
@@ -32,6 +34,7 @@ import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
 import { initUpdater } from './updater_pane.js';
+import { startWhatsNew } from './whats_new.js';
 import { initAppMenu } from './app_menu.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
@@ -41,6 +44,7 @@ import { initRenderPresets } from './render_presets_ui.js';
 import { createFolderPools } from './folder_pools.js';
 import { readScanWorkers, startScanWorkers } from './scan_workers.js';
 import { createDemoFolders } from './demo_folders.js';
+import { createLayoutSplits } from './layout_splits.js';
 import { startNavTabs } from './nav_tabs.js';
 import { startCloseGuard } from './close_guard.js';
 import { readHlPath, startHlPathWatch } from './hl_path_watch.js';
@@ -53,6 +57,7 @@ import { createProjectRescan } from './project_rescan.js';
 import { createRescanRecent } from './rescan_recent.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
+import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
@@ -60,6 +65,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { startReviewFromGame } from './review_from_game.js';
 import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
@@ -87,6 +93,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Pinned folders (Capture Studio's scan paths), the Explorer's Recent tier
   // and its toggles: demo_folders.js.
   const demoFolders = createDemoFolders({ persist: () => persistAppSettings() });
+  const layoutSplits = createLayoutSplits({ persist: () => persistAppSettings() });
   // Set when the saved pinned list held single demo files (older builds), so
   // the cleaned list is written back once after settings load.
   let pinnedListCleaned = false;
@@ -131,6 +138,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
+  const batchGuard = createBatchGuard({ isStarting: isCaptureStarting });
   const projectSession = createProjectSession({
     getDemos: queue.getDemos,
     replaceDemos: (demos) => queue.replace(demos),
@@ -146,11 +154,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     onProjectFile: (path) => recentProjects.remember(path),
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
+    refuseDuringBatch: batchGuard.refuseDuringBatch,
+    onStatusChange: () => { queue.renderQueue(); queue.redrawSelected(); },
   });
   const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
   // File → Open Recent (#935), saved in the settings file.
-  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
+  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings(), heldReason: batchGuard.heldReason });
 
   // Initialize modular UI panes
   initThemedConfirm();
@@ -189,6 +199,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   const { persistAppSettings } = createSettingsSync({
     getState: () => ({
       ...demoFolders.settingsState(),
+      ...layoutSplits.settingsState(),
       recentProjects: recentProjects.list(),
       targetDrives: folderPools.targetDrives(),
       renderExportDirs: folderPools.renderExportDirs(),
@@ -214,6 +225,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateNotificationSettings(settings);
       applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI });
       pinnedListCleaned = demoFolders.load(settings);
+      layoutSplits.load(settings);
       recentProjects.load(settings.recent_projects);
       savedSetupDismissed = !!settings.setup_dismissed;
       folderPools.load(settings);
@@ -230,7 +242,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Wires the Updates tab's buttons regardless of whether settings loaded —
   // only the startup auto-check itself is conditional on settings being
   // present. Not awaited: a background check shouldn't block startup.
-  initUpdater(settings, persistAppSettings);
+  initUpdater(settings, persistAppSettings, batchGuard);
+  startWhatsNew();
   initAppMenu();
   if (pinnedListCleaned) persistAppSettings();
 
@@ -297,6 +310,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     renderQueue: () => queue.renderQueue(),
     regroupMatches: (opts) => regroupMatches(opts),
   });
+  createQueueSortBy({ renderQueue: () => queue.renderQueue() });
 
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
@@ -349,7 +363,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     queue.redrawSelected();
   };
 
-  initReviewMode({
+  const reviewMode = initReviewMode({
     getDemos: queue.getDemos,
     getCheckedPaths: getCheckedDemoPaths,
     getShownPaths: () => getVisibleDemos().map((d) => d.path),
@@ -358,6 +372,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChanged: onHighlightStatusChange,
     hltvPick,
   });
+  // Right-click menu on the queue's rows: demo_context_menu.js.
+  startDemoContextMenu({ startReview: reviewMode.startReview });
+  // The in-game Review tab's From the start / From here (#1142).
+  startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
+    scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
@@ -413,9 +432,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   checkObsOrphanOnStartup();
 
-  // A batch that ran while Studio was closed (#545): mark its finished clips.
+  // A batch that ran while Studio was closed (#545): mark its finished clips,
+  // and offer to capture the ones it never got to (#20).
   createBatchCatchUp({ getDemos: queue.getDemos, getTakeIndex: () => takeIndex,
-    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
+    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange,
+    openProject, startCapture: startCaptureFromOffer, saveIfOnlyChange: projectSession.saveIfOnlyChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
@@ -468,10 +489,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  }, { getProjectTeams: () => projectTeams });
+  }, { getProjectTeams: () => projectTeams, getTakeIndex: () => takeIndex });
 
   // The Demo Analyzer's Explorer shares the pinned folders with Capture Studio.
   demoFolders.startAnalyzerPane();
+  layoutSplits.start();
 
   setup = createSetup({
     getDemos: queue.getDemos,
@@ -499,4 +521,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Ctrl+N/O/S, swallowed reload keys, no browser context menu: app_shortcuts.js.
   startAppShortcuts();
+  // The boot ran: public/boot_watchdog.js stops waiting for it.
+  window.dodStudioBoot?.done();
 });

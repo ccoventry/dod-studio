@@ -1,4 +1,4 @@
-# `ds_hud_hide_element` and the CHudDoD* element notes
+# HUD elements: the vftable stub and the CHudDoD* element notes
 
 Split out of `docs/goldsrc_hud_suppression.md` (the shared pattern, voice
 muting and the per-frame re-apply loop stay there; the crosshair is in
@@ -11,7 +11,15 @@ Same method as the rest: offline `client.dll` analysis, plus
 
 ---
 
-## `ds_hud_hide_element` -- the general case
+## The vftable stub -- the general case
+
+`ds_hud_hide_element <name>` hid any of the nine elements below by name until
+#342 retired it: where a stock cvar already does the job, the docs point at
+it instead, and the rest went to settings named after what they hide (the
+table at the end; the user-facing list is `dodstudio_commands.md`'s "Hiding
+HUD parts with the game's own cvars"). The mechanism stays, in
+`goldsrc-hooks/src/hudelement.rs`, for `ds_hud_hide_teammate_info`, which
+stubs `statusbar`.
 
 The voice mute, the crosshair hide and the spectator crosshair each patch one function for one purpose, and the crosshair hide's
 own module doc says why it is not this: patching a function needs no vftable
@@ -75,9 +83,12 @@ disassembly of `client+0x28b00` (`CHudAmmo::Draw`, 2604 bytes) shows every
 stock `cl_hud_ammo` cvar already hides all of it -- unlike
 `crosshair`/`r_drawentities`/`cl_lw`, `cl_hud_ammo` is not one of the cvars
 `CHud::Redraw` forces back every frame (`goldsrc_crosshair.md` §1), so setting it from a config
-actually sticks. `objectives` and `icons` below were checked the same way and
-kept, because both draw something *before* their own `ShouldDraw` gate that no
-stock cvar reaches.
+actually sticks. `objectives` and `icons` were checked the same way and kept,
+because both draw something *before* their own `ShouldDraw` gate. #342's
+survey then found that for `objectives` that something is only "Warmup Mode",
+which `ds_hud_hide_clan_text` owns, so the stock `cl_hud_objectives`,
+`cl_hud_objtimer` and `cl_hud_reinforcements` cover the rest; `icons`' icons
+are `ds_map_hide_asset`'s by their `hud.txt` names (#808).
 
 The other five don't draw anything at all, in this build, regardless of any
 cvar or hook:
@@ -144,73 +155,70 @@ ever been seen to make it draw:
   Excluded because there is nothing left to test it against, not because it
   is proven dead the way the five above are.
 
-### `vgui2print` is narrower than its name suggests
+### `CHudVGUI2Print`: what draws through it
 
 `CHudVGUI2Print` has two queueing methods and a drawing method. Only the
-queued text goes through the vtable slot this element hides:
+queued text went through the vtable slot the old `vgui2print` hide stubbed:
 
 - `CHudDoDCommon` (key `Dod_mg_reload` -- "Deploy your machine gun to
-  Reload!") calls a *queueing* method (`client+0x3a990`) that only writes
-  text/position/color/expiry into `CHudVGUI2Print`'s own fields. The pixels
-  are drawn later, when `CHudVGUI2Print::Draw` itself runs and reads that
-  state -- the vtable-dispatched path this element's hide actually
-  intercepts. Live-confirmed.
+  Reload!") calls a *queueing* method (`client+0x3a990`, `__thiscall`, six
+  stack arguments, `ret 0x18`) that only writes text/position/color/expiry
+  into `CHudVGUI2Print`'s own fields; the pixels are drawn later, when
+  `CHudVGUI2Print::Draw` runs and reads that state. That call
+  (`client+0x3c011`) is the only one that queues `Dod_mg_reload`, so since
+  #342 `ds_hud_hide_hints` points it at a filter that drops the prompt
+  (`goldsrc-hooks/src/mg_reload_hint.rs`) and leaves the rest of the element
+  drawing.
 - A second queueing method (`client+0x3a830`, the same fields) takes every
   centre-print: each `HUD_PRINTCENTER` `TextMsg` (`MsgFunc_TextMsg`'s
   destination-4 branch, `client+0x4c3e9`), which includes the spectator
   camera mode's name (`CHudSpectator::SetMode` calls `MsgFunc_TextMsg`
   directly), and the clan-match countdown (`DrawClanTimer`,
   `client+0x2d3f7`). `CHudVGUI2Print::Draw` (`client+0x3aa10`) draws these
-  too, so hiding `vgui2print` should hide **all centre text** along with the
-  MG-reload hint. Found offline (#677), not checked in the game. The narrow
-  switches are `ds_hud_hide_center_text` (server centre text),
-  `ds_spec_hide_text` (the camera mode's name) and
+  too. The narrow switches are `ds_hud_hide_center_text` (server centre
+  text), `ds_spec_hide_text` (the camera mode's name) and
   `ds_hud_hide_clan_text` (the countdown).
 - `CObjectiveIcons` (key `clan_warmup_mode` -- "Warmup Mode") calls a
   *drawing* method (`client+0x3a3f0`) that renders immediately via a shared
   low-level helper (`client+0x3a4b0`) at a fixed address, never touching
-  `CHudVGUI2Print::Draw` or its vtable slot. Hiding `vgui2print` does not
-  hide this banner.
+  `CHudVGUI2Print::Draw` or its vtable slot.
 - `CHudMenu::Draw` calls that same low-level helper directly too, for its
   own rich-text menu list (`\`-prefixed color/newline escape codes,
-  word-wrapped one call per word). Also untouched by hiding `vgui2print` --
-  `menu`'s own vftable hide is what stops this, by not letting
-  `CHudMenu::Draw` run at all.
+  word-wrapped one call per word).
 
-So `vgui2print` only ever hides queued, timed prompts: the MG-reload message
-and every centre-print. Anything drawn immediately through the shared helper
-is a different code path this element's vtable slot cannot see.
+### Text menus
 
-### `all 1` is refused
-
-`all 0` shows everything again, which is what a way out looks like. `all 1` is
-refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
-a server's text menus (a vote) is a support question rather than a feature.
 `CHudMenu` draws only `ShowMenu` text menus: DoD's voice-command menus and
-server plugin menus. The team and class menus are VGUI2 and not on this list.
-`ds_hud_hide_voice_menus` hides only the voice menus
+server plugin menus (AMX Mod X menus, votes). The team and class menus are
+VGUI2. `dod.dll` sends no `ShowMenu` but the nine voice menus, so every other
+one is a plugin's. Both are hidden by clearing `HUD_ACTIVE` on the element
+after the game handles the message, not by stubbing `Draw`, so a recorded
+number press still goes to the menu rather than to weapon selection:
+`ds_hud_hide_voice_menus` the voice menus, `ds_hud_hide_plugin_text` the rest
 (`goldsrc-hooks/src/voice_menus.rs`).
 
-### What it reaches that nothing else did
+### Where each element went (#342)
 
-Chat, the kill feed, the status bar under the crosshair, the voice-command
-menus, the tram controls, the objective icons, and `CHudDodIcons` -- which
-owns **both** the MG-deploy icon (#288) and the capture-area icon (#289),
-along with blood and bandage. Those two were filed
-separately because the icons look unrelated; one element draws all four, so
-they are one switch, and separating them would mean patching inside a
-1507-byte `Draw`.
+| element | what it draws | hidden now by |
+| --- | --- | --- |
+| `saytext` | chat | stock `hud_saytext_internal 0`: `CHudSayText::Draw` (`+0x459e0`) tests it first and draws nothing at 0, the same reach the stub had. Registered with flags 0, so not saved |
+| `objectives` | objective icons and capture bars, the objective timer, the reinforcement clock, "Warmup Mode" | stock `cl_hud_objectives 0` (icons), `cl_hud_objtimer 0` (timer), `cl_hud_reinforcements 0` (clock, never drawn while spectating); "Warmup Mode" is `ds_hud_hide_clan_text`'s. All three are `FCVAR_ARCHIVE` |
+| `deathnotice` | the kill feed | stock `hud_deathnotice_time 0`: `MsgFunc_DeathMsg` stamps each new notice to expire that many seconds on, and `Draw` drops an expired one before drawing it. Notices already on screen keep their time. `FCVAR_ARCHIVE` |
+| `icons` | MG deploy, capture area, blood, bandage, TNT, marker arrow (`CHudDodIcons`, one 1507-byte `Draw`, which is why #288 and #289 were one switch) | `ds_map_hide_asset add icon_mg_deploy` / `icon_blood` / `icon_bandage` / `hud_mapmarker`, `sprites/tnt.spr`, and the capture area's sprite by path |
+| `message` | every `HudText` message | `ds_hud_hide_map_text`, `ds_hud_hide_plugin_text`, `ds_hud_hide_clan_text`, `ds_spec_hide_text`, `ds_spec_hide_hltv_messages` |
+| `statusbar` | the aimed-at teammate's name and health | `ds_hud_hide_teammate_info` (this mechanism). `CHudStatusBar::Draw` (`+0x477a0`) returns at once while spectating (`+0xe88d4`) or dead, so the line only ever shows for a living POV player's teammate |
+| `menu` | `ShowMenu` text menus | `ds_hud_hide_voice_menus`, `ds_hud_hide_plugin_text` (above) |
+| `train` | tram controls | nothing: no map in use has trams |
+| `vgui2print` | queued centre text and the MG reload prompt | `ds_hud_hide_center_text`, `ds_spec_hide_text`, `ds_hud_hide_hints` (above) |
 
-The objective-icons element (`objectives`) is coarser than its name suggests
-too: `CObjectiveIcons::Draw` also owns the reinforcement-wave countdown clock
-(a separate, internally-gated block inside the same function, distinct from
-`CHudDodIcons`'s own reinforcement icon), so hiding `objectives` hides that
-clock along with the flags/capture-progress row it's named for -- there is no
-way to keep one and drop the other without patching inside the function.
+The objective-icons element is coarser than its name suggests:
+`CObjectiveIcons::Draw` also owns the reinforcement-wave countdown clock (a
+separate, internally-gated block inside the same function, distinct from
+`CHudDodIcons`'s own reinforcement icon). The stock cvars split them, which
+the stub could not.
 
-It does **not** reach the VGUI2 spectator bars (`goldsrc_spectator_bars.md`) or the auto-help panel
-(#286, `ds_hud_hide_hints`). Those are not HUD elements and are not on this list. It also does not
-reach the overview map, a mortar aiming HUD, or the sniper scope -- see the
-five exclusions above, none of which turned out to be drawn by any `Draw`
-override at all.
-
+None of this reaches the VGUI2 spectator bars (`goldsrc_spectator_bars.md`)
+or the auto-help panel (#286, `ds_hud_hide_hints`): those are not HUD
+elements. Nor the overview map, a mortar aiming HUD, or the sniper scope --
+see the five exclusions above, none of which turned out to be drawn by any
+`Draw` override at all.

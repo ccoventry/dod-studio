@@ -451,7 +451,7 @@ pub async fn run_demo_audit_impl(
                     _ => continue,
                 }
                 let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-                if crate::capture_manager::progress_emit_due(&last_emit, now_ms) {
+                if crate::scan_manager::progress_emit_due(&last_emit, now_ms) {
                     let _ = ah.emit("audit_progress", event.clone());
                 }
             }
@@ -686,7 +686,7 @@ pub fn delete_audit_files_impl(
     let last_emit = AtomicU32::new(u32::MAX);
     let emit = |step: &str, done: usize, total: usize| {
         let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-        if done == total || crate::capture_manager::progress_emit_due(&last_emit, now_ms) {
+        if done == total || crate::scan_manager::progress_emit_due(&last_emit, now_ms) {
             let _ = app_handle.emit(
                 "audit_delete_progress",
                 serde_json::json!({ "step": step, "done": done, "total": total }),

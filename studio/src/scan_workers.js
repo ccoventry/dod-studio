@@ -7,6 +7,7 @@
 import { systemMemoryBytes } from './ipc_bridge.js';
 import { numberField } from './number_field.js';
 import { STRINGS } from './strings.js';
+import { BYTES_PER_GB } from './byte_size.js';
 
 /** The field's current value, clamped to 1..8. */
 export function readScanWorkers() {
@@ -21,7 +22,7 @@ export function startScanWorkers({ persist }) {
     if (hint) hint.textContent = STRINGS.CAPTURE_CONFIG.scanWorkersHint(totalMemoryGb);
   };
   systemMemoryBytes().then((bytes) => {
-    if (bytes) totalMemoryGb = Math.round(bytes / 1024 ** 3);
+    if (bytes) totalMemoryGb = Math.round(bytes / BYTES_PER_GB);
     updateHint();
   });
   const input = document.querySelector('#config-scan-workers');

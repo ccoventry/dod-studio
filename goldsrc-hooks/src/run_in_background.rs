@@ -32,11 +32,12 @@
 //! Found by a byte pattern per build, each unique in its own `hw.dll`;
 //! `tools/verify_run_in_background_offsets.py` re-derives both offline.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("capture_run_in_background");
 
@@ -67,15 +68,11 @@ const SITES: &[Site] = &[
 const JNE: u8 = 0x75;
 const JMP: u8 = 0xEB;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static BUILD: AtomicUsize = AtomicUsize::new(usize::MAX);
 static ON: AtomicBool = AtomicBool::new(false);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The `jne`, found once per session (hw.dll never reloads).
 fn jne_address() -> Result<usize, String> {
@@ -139,11 +136,9 @@ fn describe(on: bool) -> String {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     // Nothing to do until it's first turned on: the scan waits until then.
     if !wanted && !ON.load(Ordering::Acquire) && ADDRESS.load(Ordering::Acquire) == 0 {
         return;

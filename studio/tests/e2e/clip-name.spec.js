@@ -81,7 +81,7 @@ test('the chips sit in the same rows as Rename Demos, plus Highlight (#751)', as
     .toHaveText(['Player', 'Sides', 'Teams', 'Demo', 'Highlight', 'Format']);
   await expect(page.locator('.placeholder-chip-group[data-group="player"] .clip-name-chip')).toHaveText(['{name}', '{full_name}']);
   await expect(page.locator('.placeholder-chip-group[data-group="highlight"] .clip-name-chip'))
-    .toHaveText(['{kills}', '{weapons}', '{first_weapon}', '{victims}', '{first_victim}', '{row}', '{time}']);
+    .toHaveText(['{kills}', '{headshots}', '{weapons}', '{first_weapon}', '{victims}', '{first_victim}', '{row}', '{time}']);
   // {kills} counts something else in Rename Demos, and says so.
   await expect(page.locator('.clip-name-chip:text-is("{kills}")')).toHaveAttribute('title', /Rename Demos/);
   await expect(page.locator('.clip-name-chip:text-is("{player}")')).toHaveCount(0);
@@ -95,4 +95,13 @@ test('an old {player} template still works, and the side teams fill in', async (
   // Allies dicE (shown as dice on the Teams list), Axis KROD: team1 is the
   // alphabetically first of the two display names.
   await expect(page.locator('#config-clip-name-preview')).toContainText('Preview: krod_dice_v_KROD_dice_pov_01');
+});
+
+test('a bad template turns the field red, and a good one clears it (#25)', async ({ page }) => {
+  await loadHarness(page);
+  const input = page.locator('#config-clip-name-template');
+  await input.fill('{oponent}_{row}');
+  await expect(input).toHaveClass(/field-invalid/);
+  await input.fill('{map}_{name}');
+  await expect(input).not.toHaveClass(/field-invalid/);
 });

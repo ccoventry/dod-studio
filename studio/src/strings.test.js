@@ -77,6 +77,42 @@ describe('bannedCommandsWarning', () => {
   });
 });
 
+describe('takesFoundMissing (#1081)', () => {
+  it('does not call a clip Cancel cut short missing', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1)).toBe(
+      '0/1 takes found on disk — 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 1)).toBe(
+      '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2)).toBe('1/2 takes found on disk — 1 missing.');
+    // #1105: a take whose video stopped early is not blamed on Cancel.
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 0, 1)).toBe(
+      '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
+    );
+  });
+
+  it('names the game closing or the batch stopping instead of Cancel', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 1, 0, 'game_closed')).toBe(
+      '1/2 takes found on disk — 1 cut short when the game closed (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1, 0, 'stopped')).toBe(
+      '0/1 takes found on disk — 1 cut short when the batch stopped (partial take, not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
+    expect(STRINGS.BATCH_RESULTS.cutShortBy(null)).toBe(STRINGS.BATCH_RESULTS.STATUS.cut_short);
+    // An OBS recording nobody stopped, found by the catch-up after a restart (#20).
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('studio_closed')).toBe('Cut short: DoD Studio closed while OBS recorded it (not captured)');
+  });
+
+  it('says a take OBS started late is missing its opening, not missing (#1109)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, 0, 0, undefined, 1)).toBe(
+      "2/3 takes found on disk — 1 OBS started recording late (missing the clip's opening, not captured).",
+    );
+    expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
+  });
+});
+
 describe('finish step (#440)', () => {
   it('mentions clips in progress only when there are some', () => {
     expect(STRINGS.FINISH.progressStatus(3, 12, 2)).toBe('Finishing clips: 3 of 12, 2 in progress');

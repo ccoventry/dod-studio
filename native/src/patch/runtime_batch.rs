@@ -8,7 +8,8 @@
 //! - **Ticks become demo-player seconds.** The hook runs commands on the
 //!   `viewdemo` clock, the server time each kill's `viewdemo_times` entry is in.
 //!   A tick is placed by the nearest kill of the same demo: that kill's
-//!   `viewdemo` time, plus the playback time between the two frames.
+//!   `viewdemo` time, plus the playback time between the two frames
+//!   (`viewdemo_clock.rs`, which the take plan reads its seconds from too).
 //! - **Most of each fast-forward becomes a seek.** Each `sys_fast_forward`
 //!   jumps to [`SETTLE_SECONDS`] before the next `sys_normal_speed` (the next
 //!   clip's pre-roll) and fast-forwards the rest, as the patched demo does. The
@@ -30,9 +31,10 @@
 //!   only the markers Studio reads go in.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::patch::types::{CaptureStreak, PatchJob};
+use crate::patch::viewdemo_clock::clock_for;
 
 /// A batch the hook runs: its file, the copies of demos on another drive it
 /// plays from (`patch::source_copies`, for a hook DLL older than #779),
@@ -43,12 +45,15 @@ pub struct RuntimeBatch {
     pub file: PathBuf,
     pub source_copies: Vec<PathBuf>,
     pub other_drives_in_place: bool,
+    /// The open game the batch runs in instead of launching one
+    /// (`patch::batch_reuse`, #725), by PID.
+    pub reuse_game: Option<u32>,
 }
 
 /// The hook's batch file header (goldsrc-hooks `batch::HEADER`).
 pub const HEADER: &str = "dodstudio-batch 1";
 
-/// The hook DLL's decal clear (goldsrc-hooks `commands.rs`).
+/// The hook DLL's decal clear (goldsrc-hooks `decals.rs`).
 pub const CLEAR_DECALS: &str = "ds_map_clear_decals";
 
 /// How much of the run-up to each clip is fast-forwarded rather than jumped
@@ -59,109 +64,22 @@ pub const SETTLE_SECONDS: f64 = 30.0;
 /// The hook DLL's batch command.
 pub const BATCH_COMMAND: &str = "ds_capture_batch";
 
-/// One kill whose frame and `viewdemo` time are both known.
-#[derive(Debug, Clone, Copy)]
-struct Anchor {
-    tick: i32,
-    viewdemo: f64,
-}
+/// The batch line that pauses a clip's lead-in until Studio says OBS is
+/// recording (goldsrc-hooks `batch::WAIT_FOR_RECORDING_LINE`, #1109).
+pub const WAIT_FOR_RECORDING: &str = "ds_capture_batch wait_for_recording";
 
-/// How many of the nearest kills place a tick (see `Clock::seconds`).
-const NEAREST_ANCHORS: usize = 7;
-/// How far, in playback seconds, a kill may be from the tick to count.
-const NEAR_SECONDS: f64 = 30.0;
+/// Studio's go-ahead for a clip waiting at [`WAIT_FOR_RECORDING`].
+pub const RECORDING_GO: &str = "ds_capture_batch recording";
 
-/// Places ticks of one demo on the `viewdemo` clock.
-struct Clock<'a> {
-    anchors: Vec<Anchor>,
-    frame_times: &'a [f32],
-    fps: f64,
-}
+/// The marker OBS mode starts the recording on (`obs::TRIGGER_MARKER`), as
+/// the builder echoes it.
+const AUDIO_SYNC_MARKER: &str = "[dod-studio] AUDIO_SYNC - ";
 
-impl Clock<'_> {
-    fn playback(&self, tick: i32) -> Option<f64> {
-        usize::try_from(tick)
-            .ok()
-            .and_then(|t| self.frame_times.get(t))
-            .map(|&t| f64::from(t))
-    }
-
-    fn seconds(&self, tick: i32) -> f64 {
-        // With frame times, the demo clock is playback time plus an offset,
-        // and each kill gives one reading of it. One kill's reading is off by
-        // up to a network frame (the kill's server time is its packet's), so
-        // the median of the nearest few is used.
-        if let Some(at) = self.playback(tick) {
-            let mut near: Vec<(i64, f64)> = self
-                .anchors
-                .iter()
-                .filter_map(|a| {
-                    let played = self.playback(a.tick)?;
-                    // Only kills close by: the offset can step at a pause.
-                    ((played - at).abs() <= NEAR_SECONDS).then(|| {
-                        let distance = (i64::from(a.tick) - i64::from(tick)).abs();
-                        (distance, a.viewdemo - played)
-                    })
-                })
-                .collect();
-            if !near.is_empty() {
-                near.sort_by_key(|&(distance, _)| distance);
-                near.truncate(NEAREST_ANCHORS);
-                let mut offsets: Vec<f64> = near.iter().map(|&(_, o)| o).collect();
-                offsets.sort_by(f64::total_cmp);
-                return (at + offsets[offsets.len() / 2]).max(0.0);
-            }
-        }
-        let anchor = self
-            .anchors
-            .iter()
-            .min_by_key(|a| (i64::from(a.tick) - i64::from(tick)).abs())
-            .copied()
-            .expect("a clock has anchors");
-        let between = match (self.playback(tick), self.playback(anchor.tick)) {
-            (Some(t), Some(a)) => t - a,
-            _ => f64::from(tick - anchor.tick) / self.fps,
-        };
-        (anchor.viewdemo + between).max(0.0)
-    }
-}
-
-fn clock_for<'a>(demo: &str, streaks: &'a [CaptureStreak]) -> Result<Clock<'a>, String> {
-    let mine: Vec<&CaptureStreak> = streaks.iter().filter(|s| s.source_demo == demo).collect();
-    let anchors: Vec<Anchor> = mine
-        .iter()
-        .flat_map(|s| {
-            s.kills
-                .iter()
-                .zip(&s.viewdemo_times)
-                .filter(|(_, vd)| vd.is_finite() && **vd > 0.0)
-                .map(|(kill, vd)| Anchor {
-                    tick: kill.0,
-                    viewdemo: f64::from(*vd),
-                })
-        })
-        .collect();
-    if anchors.is_empty() {
-        return Err(format!(
-            "{} has no demo-player times for its kills (scan it again)",
-            Path::new(demo).display()
-        ));
-    }
-    let frame_times = mine
-        .iter()
-        .map(|s| s.frame_times.as_slice())
-        .max_by_key(|f| f.len())
-        .unwrap_or(&[]);
-    let fps = mine
-        .iter()
-        .map(|s| s.demo_fps)
-        .find(|&f| f > 0.0)
-        .unwrap_or(30.0);
-    Ok(Clock {
-        anchors,
-        frame_times,
-        fps: f64::from(fps),
-    })
+/// Whether `command` is a clip's `AUDIO_SYNC` echo. The wait goes with the
+/// marker itself rather than the `sys_sound` beside it: a clip chained to the
+/// one before (#1169) has no sound flush but still needs its recording.
+fn is_audio_sync_echo(command: &str) -> bool {
+    command.starts_with("echo") && command.contains(AUDIO_SYNC_MARKER)
 }
 
 fn clean(line: &str) -> String {
@@ -183,19 +101,22 @@ pub fn batch_file(
     streaks: &[CaptureStreak],
     clear_decals: bool,
 ) -> Result<String, String> {
-    batch_file_playing(jobs, streaks, clear_decals, &HashMap::new())
+    batch_file_playing(jobs, streaks, clear_decals, &HashMap::new(), false)
 }
 
 /// [`batch_file`], with a demo in `play_as` played from that path instead
 /// of its own: a demo on another drive than the game is copied into the
 /// game's folder for the batch when the hook DLL is older than #779
 /// (`patch::source_copies`). The highlights
-/// still belong to the original, so the clock is the original's.
+/// still belong to the original, so the clock is the original's. With
+/// `wait_for_recording` (OBS mode), each clip's lead-in pauses at its
+/// `AUDIO_SYNC` until Studio says OBS is recording (#1109).
 pub fn batch_file_playing(
     jobs: &[PatchJob],
     streaks: &[CaptureStreak],
     clear_decals: bool,
     play_as: &HashMap<String, PathBuf>,
+    wait_for_recording: bool,
 ) -> Result<String, String> {
     let mut out = vec![HEADER.to_string()];
     let mut demos = 0;
@@ -265,6 +186,11 @@ pub fn batch_file_playing(
                 out.push(format!("next\t{}", seconds_text(at)));
             } else {
                 out.push(format!("at\t{}\t{}", seconds_text(at), clean(command)));
+                // OBS mode starts the recording on the AUDIO_SYNC echo, so the
+                // clip waits right after it.
+                if wait_for_recording && is_audio_sync_echo(command) {
+                    out.push(format!("at\t{}\t{WAIT_FOR_RECORDING}", seconds_text(at)));
+                }
             }
         }
     }
@@ -368,6 +294,8 @@ mod tests {
                 end_tick: 0,
                 record_start_tick: 0,
                 record_stop_tick: 0,
+                ramped_gaps: 0,
+                plan: None,
             }],
         }
     }
@@ -430,6 +358,41 @@ mod tests {
     }
 
     #[test]
+    fn obs_mode_waits_for_the_recording_at_each_audio_sync() {
+        let streaks = [streak("a.dem", &[(3000, 330.0)], 100.0)];
+        let jobs = [job(
+            "a.dem",
+            &[
+                (2800, "sys_sound"),
+                (2800, "echo \"[dod-studio] AUDIO_SYNC - Tick 2800\""),
+                (2900, "sys_record_start"),
+                // A clip chained to the one before (#1169): its AUDIO_SYNC
+                // has no sound flush beside it, and still waits.
+                (2950, "echo \"[dod-studio] AUDIO_SYNC - Tick 2950\""),
+            ],
+        )];
+        // The hook's own names (goldsrc-hooks `batch.rs`, whose test pins
+        // the same text).
+        assert_eq!(WAIT_FOR_RECORDING, "ds_capture_batch wait_for_recording");
+        assert_eq!(RECORDING_GO, "ds_capture_batch recording");
+        let wait = format!("at\t328.000\t{WAIT_FOR_RECORDING}");
+        let obs = batch_file_playing(&jobs, &streaks, false, &HashMap::new(), true).unwrap();
+        assert!(
+            obs.contains(&format!(
+                "at\t328.000\techo \"[dod-studio] AUDIO_SYNC - Tick 2800\"\n{wait}\n"
+            )),
+            "{obs}"
+        );
+        assert!(
+            obs.contains(&format!("at\t329.500\t{WAIT_FOR_RECORDING}\n")),
+            "{obs}"
+        );
+        assert_eq!(obs.matches(WAIT_FOR_RECORDING).count(), 2);
+        let hlae = batch_file(&jobs, &streaks, false).unwrap();
+        assert!(!hlae.contains(WAIT_FOR_RECORDING), "{hlae}");
+    }
+
+    #[test]
     fn a_demo_with_no_viewdemo_times_has_to_be_patched() {
         let mut s = streak("a.dem", &[(3000, 330.0)], 100.0);
         s.viewdemo_times.clear();
@@ -445,7 +408,7 @@ mod tests {
             "D:/demos/a.dem".to_string(),
             PathBuf::from("C:/game/dod/dodstudio_src_01_a.dem"),
         )]);
-        let text = batch_file_playing(&jobs, &streaks, false, &play_as).unwrap();
+        let text = batch_file_playing(&jobs, &streaks, false, &play_as, false).unwrap();
         assert!(
             text.contains("demo\tC:/game/dod/dodstudio_src_01_a.dem\n"),
             "{text}"

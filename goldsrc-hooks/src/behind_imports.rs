@@ -201,6 +201,7 @@ unsafe extern "system" fn show_window<const M: usize>(hwnd: *mut c_void, cmd: i3
     unsafe { show(hwnd, cmd) }
 }
 
+// A detour: must match the Win32 SetWindowPos signature.
 #[allow(clippy::too_many_arguments)]
 unsafe extern "system" fn set_window_pos<const M: usize>(
     hwnd: *mut c_void,

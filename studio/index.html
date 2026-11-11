@@ -6,6 +6,8 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title data-str="NAV.APP_TITLE">DoD Studio</title>
+    <!-- Classic, not a module, and first: it notices when the modules never start. -->
+    <script src="/boot_watchdog.js"></script>
     <script type="module" src="/src/main.js" defer></script>
   </head>
 
@@ -49,6 +51,8 @@
               </button>
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
+                <!-- #1013: whats_new.js. -->
+                <button class="menu-dropdown-item" id="whats-new-menu-btn" data-str="WHATS_NEW.MENU_ITEM" data-str-title="WHATS_NEW.MENU_ITEM_TITLE">What's New</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
                 <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
@@ -114,13 +118,6 @@
               </div>
               <!-- queue_scan.js: demos done of the scan's total -->
               <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
-              <!-- demo_links.js (#376) -->
-              <details id="demo-links-section" class="demo-links">
-                <summary data-str="DEMO_LINKS.TITLE">Demo folders the game can play</summary>
-                <p class="demo-links-hint" data-str="DEMO_LINKS.HINT">The game only plays demos inside its own folder. Link a demo folder from any drive and the game plays its demos where they are, with nothing copied.</p>
-                <button id="link-folder-btn" data-str="DEMO_LINKS.LINK_BUTTON" data-str-title="DEMO_LINKS.LINK_BUTTON_TITLE">+ Link Folder to Game</button>
-                <ul id="demo-links-list" class="demo-links-list"></ul>
-              </details>
             </div>
           </div>
 
@@ -133,7 +130,7 @@
                 <!-- #685, #823: the queue in groups, a header line per group; queue_group_by.js. -->
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_TITLE">
                   <span data-str="WORKSPACE.GROUP_BY_LABEL">Group by:</span>
-                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                     <option value="none" data-str="WORKSPACE.GROUP_BY_NONE">None</option>
                     <option value="match" data-str="WORKSPACE.GROUP_BY_MATCH">Match</option>
                     <option value="player" data-str="WORKSPACE.GROUP_BY_PLAYER">Player</option>
@@ -143,9 +140,20 @@
                     <option value="type" data-str="WORKSPACE.GROUP_BY_TYPE">Demo type</option>
                   </select>
                 </label>
+                <!-- The order of the demos, inside each group when grouped; queue_sort_by.js. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.SORT_BY_TITLE">
+                  <span data-str="WORKSPACE.SORT_BY_LABEL">Sort by:</span>
+                  <select id="master-sort-by-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
+                    <option value="added" data-str="WORKSPACE.SORT_BY_ADDED">Order added</option>
+                    <option value="name" data-str="WORKSPACE.SORT_BY_NAME">Name</option>
+                    <option value="newest" data-str="WORKSPACE.SORT_BY_NEWEST">Newest first</option>
+                    <option value="oldest" data-str="WORKSPACE.SORT_BY_OLDEST">Oldest first</option>
+                    <option value="highlights" data-str="WORKSPACE.SORT_BY_HIGHLIGHTS">Most highlights</option>
+                  </select>
+                </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <!-- #661: which Review marks a review plays. -->
-                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                   <option value="all" data-str="REVIEW.COVERS_ALL">All</option>
                   <option value="unmarked" data-str="REVIEW.COVERS_UNMARKED">Unmarked</option>
                   <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
@@ -155,15 +163,15 @@
                 <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
                   <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
-                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
+                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 260px;"></select>
                 </label>
                 <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
                 <span id="review-hltv-pick" class="review-hltv-pick" hidden>
-                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
-                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
+                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 220px;"></select>
+                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 180px;"></select>
                 </span>
                 <!-- The order an HLTV demo's players' highlights play in. -->
-                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                   <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
                   <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
                 </select>
@@ -175,12 +183,12 @@
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
                   <input type="checkbox" id="review-fast-forward-cb" checked />
                   <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
-                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;" />
                   <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
                 </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
-                <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
+                <button id="clear-all-btn" disabled style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
                 <!-- #845: the picked players get a line of their own under the
                      toolbar, so adding one never moves the lists. -->
                 <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>
@@ -191,14 +199,15 @@
                  only narrow the demos. -->
             <div id="queue-filter-row" class="queue-filter-row" role="group" data-str-aria-label="WORKSPACE.FILTER_ROW_LABEL" aria-label="Filters">
               <span class="queue-filter-row-label" data-str="WORKSPACE.FILTER_ROW_LABEL">Filters</span>
-              <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
-              <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+              <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;" />
+              <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 220px;">
                 <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
               </select>
-              <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+              <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                 <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
                 <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
                 <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
+                <option value="headshot" data-str="WORKSPACE.KILLS_FILTER_HEADSHOT">With a headshot</option>
               </select>
               <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
                 <input type="checkbox" id="master-owner-only-cb" />
@@ -241,6 +250,8 @@
           </div>
         </section>
 
+        <div id="capture-split-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
+
         <!-- Right / Bottom Split Pane: Detail View & Configuration Panels -->
         <section id="pane-details-config" class="content-pane">
 
@@ -257,7 +268,7 @@
               </div>
             </div>
             <div id="detail-streaks-container">
-              <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
+              <p class="placeholder-text" style="color: var(--text-muted);" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
             <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
             <div id="batch-results" class="batch-results" hidden></div>
@@ -571,6 +582,21 @@
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>
+                <!-- Gaps between kills inside a clip (#831): kill_gaps_setting.js. -->
+                <div class="control-group control-group-stacked">
+                  <div class="control-group">
+                    <label for="config-kill-gap-seconds" data-str="CAPTURE_CONFIG.KILL_GAPS_LABEL">Gaps between kills over</label>
+                    <input type="number" step="1" min="1" id="config-kill-gap-seconds" value="8" style="width: 60px;" />
+                    <span data-str="CAPTURE_CONFIG.KILL_GAPS_UNIT">s:</span>
+                    <select id="config-kill-gap-mode">
+                      <option value="keep" data-str="CAPTURE_CONFIG.KILL_GAPS_KEEP">Keep</option>
+                      <option value="fast_forward" data-str="CAPTURE_CONFIG.KILL_GAPS_FAST_FORWARD">Fast-forward</option>
+                    </select>
+                    <input type="number" step="0.5" min="1.5" max="16" id="config-kill-gap-speed" value="4" style="width: 60px;" />
+                    <span data-str="CAPTURE_CONFIG.KILL_GAPS_SPEED_UNIT">x</span>
+                  </div>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.KILL_GAPS_HINT">Fast-forward speeds up a long wait between two kills inside the clip.</p>
+                </div>
               </div>
 
               <!-- Execution timeline (#150) — revives the pre-Tauri egui
@@ -859,6 +885,15 @@
                   <input type="checkbox" id="config-render-while-capturing" />
                   <label for="config-render-while-capturing" data-str="RENDER_WHILE_CAPTURING.LABEL" data-str-title="RENDER_WHILE_CAPTURING.TITLE">Render while capturing</label>
                 </div>
+                <div class="control-group">
+                  <label for="config-renders-while-capturing" data-str="RENDER_WHILE_CAPTURING.AT_ONCE_LABEL" data-str-title="RENDER_WHILE_CAPTURING.AT_ONCE_TITLE">Renders at once:</label>
+                  <select id="config-renders-while-capturing">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                  </select>
+                </div>
               </div>
               <p id="config-render-while-capturing-hint" class="setting-hint">Clips render after the batch.</p>
               <!-- Clip names (#441): the finished file of each highlight is
@@ -869,7 +904,7 @@
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
               <div id="config-clip-name-chips" class="placeholder-chips"></div>
-              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: var(--danger-light);"></div>
               <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
               <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
@@ -1016,6 +1051,8 @@
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
               <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
+              <button id="export-vegas-edl-btn" data-str="RENDER.EXPORT_EDL_BUTTON" data-str-title="RENDER.EXPORT_EDL_TITLE">Export VEGAS EDL…</button>
+              <button id="vegas-script-install-btn" data-str="RENDER.VEGAS_SCRIPT_BUTTON" data-str-title="RENDER.VEGAS_SCRIPT_TITLE">Add Nameplate Script to VEGAS</button>
             </div>
             <div id="render-job-container"></div>
 
@@ -1041,6 +1078,7 @@
                 <thead>
                   <tr>
                     <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
+                    <th class="col-center" data-str="RENDER.TABLE_HEADER_PICTURE" data-str-title="RENDER.TABLE_HEADER_PICTURE_TITLE" title="The middle of each take. Hover for a bigger picture, click for nine frames across the take.">Picture</th>
                     <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
                     <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
                     <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
@@ -1055,17 +1093,29 @@
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="13" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
+            <!-- #1069: the background pass that makes each take's picture. -->
+            <div id="render-take-preview-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-preview-progress-label"></span>
+            </div>
+            <!-- #1084: the background pass that checks each take's picture and sound. -->
+            <div id="render-take-checks-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-checks-progress-label"></span>
+            </div>
+            <!-- #1069: a take's picture, bigger, while the mouse is on its thumbnail. -->
+            <div id="take-preview-hover" class="take-preview-hover" hidden><img alt="" /></div>
             <!-- #644: Delete Take's steps, measuring then moving to the Recycle Bin. -->
             <div id="render-take-delete-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
               <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <span id="render-take-delete-progress-label"></span>
             </div>
 
-            <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
+            <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
               <div class="action-buttons">
                 <!-- #70: each acts on the ticked rows; render_pane.js sets the
                      label's count and the tooltip. -->
@@ -1144,10 +1194,10 @@
               <div class="row-inputs">
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="open-recycle-bin-btn" data-str="AUDITOR.OPEN_RECYCLE_BIN_BUTTON" data-str-title="AUDITOR.OPEN_RECYCLE_BIN_TITLE">Open Recycle Bin</button>
-                <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
+                <button id="delete-selected-audits-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
                 <!-- Hidden for 0.2.0, so every delete can be put back from the
                      Recycle Bin; remove `hidden` to offer it again. -->
-                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <button id="delete-permanent-audits-btn" hidden style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
             <!-- The app's table style; the list grows with the window, like the
@@ -1297,6 +1347,8 @@
                 <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
+                <!-- #1155: styles built with an older version of the app's scripts. -->
+                <div id="hd-outdated" class="hd-hint hd-outdated" hidden></div>
               </div>
             </div>
 
@@ -1764,7 +1816,7 @@
             </details>
           </div>
 
-          <div id="analyzer-explorer-resize-handle" class="analyzer-resize-handle" data-str-title="ANALYZER.RESIZE_HANDLE_TITLE" title="Drag to resize"></div>
+          <div id="analyzer-explorer-resize-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
 
           <!-- Right: Demos panel (scoped to only the selected folder, non-recursive)
                docked above the report tabs. -->
@@ -1807,6 +1859,8 @@
                 </table>
               </div>
             </div>
+
+            <div id="analyzer-demos-resize-handle" class="split-handle split-handle-row" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
 
             <div class="egui-panel analyzer-report-panel">
               <div class="panel-header flex-between">
@@ -1866,7 +1920,9 @@
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
           <p id="obs-drop-rate" class="status-text" hidden></p>
-          <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
+          <!-- The kill feed's even layout can't draw in the batch's game (#1339). -->
+          <p id="killfeed-layout-warning" class="status-text" hidden></p>
+          <p id="disk-space-warning-banner" style="display: none; color: var(--danger); font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
@@ -1925,7 +1981,7 @@
     <div id="process-detector-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="process-modal-title" data-str="PROCESS_DETECTOR_MODAL.TITLE">Half-Life Preview Detector</h2>
-        <p id="process-modal-body" style="color: #f44336; font-weight: 600;" data-str="PROCESS_DETECTOR_MODAL.BODY">
+        <p id="process-modal-body" style="color: var(--danger); font-weight: 600;" data-str="PROCESS_DETECTOR_MODAL.BODY">
           The Half-Life engine is already running (hl.exe / hlae.exe). Launching a new preview
           now can corrupt the capture session — close the running instance first, or force a relaunch.
         </p>
@@ -1947,7 +2003,7 @@
         <p id="clear-all-summary"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="clear-all-save-first-btn" class="primary-btn" data-str="CLEAR_ALL_MODAL.SAVE_SESSION_FIRST_BUTTON">Save Session First</button>
-          <button id="clear-all-confirm-btn" style="color: #ff5555; border-color: #ff5555;" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
+          <button id="clear-all-confirm-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
           <button id="clear-all-cancel-btn" data-str="CLEAR_ALL_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -1962,7 +2018,7 @@
         <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
-          <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
+          <button id="unsaved-changes-discard-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
           <button id="unsaved-changes-cancel-btn" data-str="UNSAVED_CHANGES_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -2026,10 +2082,23 @@
       </div>
     </div>
 
+    <!-- #1069: nine frames across a take, from a click on its thumbnail. -->
+    <div id="take-sheet-modal" class="modal" style="display: none;">
+      <div class="modal-content take-sheet-content">
+        <h2 class="take-sheet-title"></h2>
+        <p class="take-sheet-status status-text"></p>
+        <div class="take-sheet-grid"></div>
+        <div class="take-sheet-checks" hidden></div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button class="take-sheet-close" data-str="RENDER.TAKE_SHEET_CLOSE">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>
-        <pre id="render-error-log-body" style="max-height: 360px; overflow: auto; white-space: pre-wrap; background: #121212; padding: 10px; border-radius: 2px; border: 1px solid #333;"></pre>
+        <pre id="render-error-log-body" style="max-height: 360px; overflow: auto; white-space: pre-wrap; background: var(--bg-dark); padding: 10px; border-radius: 2px; border: 1px solid var(--border-soft);"></pre>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="render-error-log-close-btn" data-str="ERROR_LOG_MODAL.CLOSE_BUTTON">Close</button>
         </div>
@@ -2081,7 +2150,7 @@
         </div>
         <div id="clear-previews-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="CLEAR_PREVIEWS_MODAL.FOOTER_DEFAULT">Found: 0 | Reclaimable: 0.00 GB</div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
-          <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
+          <button id="clear-previews-delete-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
@@ -2157,6 +2226,11 @@
         <div id="update-progress-container" style="display: none; margin-top: 8px;">
           <progress id="update-progress-bar" max="100" value="0" style="width: 100%;"></progress>
         </div>
+        <!-- #1013: the pending update's notes, whats_new.js showPendingNotes. -->
+        <div id="update-modal-notes" class="update-modal-notes" hidden>
+          <h3 data-str="WHATS_NEW.PENDING_TITLE">What's in it</h3>
+          <div id="update-modal-notes-body" class="release-notes"></div>
+        </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="download-install-update-btn" style="display: none;" data-str="UPDATE_MODAL.DOWNLOAD_INSTALL_BUTTON">Download & Install</button>
           <button id="restart-to-apply-btn" style="display: none;" data-str="UPDATE_MODAL.RESTART_BUTTON">Restart to Apply</button>
@@ -2177,7 +2251,27 @@
           <a href="https://github.com/ccoventry/dod-studio" target="_blank" rel="noopener" data-str="ABOUT_MODAL.GITHUB_LINK">github.com/ccoventry/dod-studio</a>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
+          <button id="about-whats-new-btn" data-str="WHATS_NEW.ABOUT_BUTTON">What's new in this version</button>
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- What's new (#1013), whats_new.js: this version's notes from the
+         build, the others from GitHub's release list. -->
+    <div id="whats-new-modal" class="modal" style="display: none;">
+      <div class="modal-content whats-new-content">
+        <h2 data-str="WHATS_NEW.TITLE">What's New</h2>
+        <p id="whats-new-status" class="status-text whats-new-status" hidden></p>
+        <div class="whats-new-scroll">
+          <h3 id="whats-new-current-title" data-str="WHATS_NEW.THIS_VERSION_UNKNOWN">This version</h3>
+          <div id="whats-new-current" class="release-notes"></div>
+          <h3 id="whats-new-others-title" data-str="WHATS_NEW.OTHER_VERSIONS" hidden>Other versions</h3>
+          <div id="whats-new-others"></div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="whats-new-fetch-btn" data-str="WHATS_NEW.FETCH_BUTTON" data-str-title="WHATS_NEW.FETCH_TITLE" hidden>Read GitHub's list</button>
+          <button id="whats-new-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
     </div>

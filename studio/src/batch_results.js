@@ -15,6 +15,7 @@ import { revealInExplorer } from './ipc_bridge.js';
 import { highlightStartSeconds } from './highlight_time.js';
 import { clockFloor } from './time_format.js';
 import { STRINGS } from './strings.js';
+import { gbOrMbText } from './byte_size.js';
 
 let state = null; // { endedAt, kind, text, rows, totals } once a batch ends
 let obsClips = []; // OBS mode: each clip's closing drop-rate report, in order
@@ -38,14 +39,9 @@ function panel() {
   return document.querySelector('#batch-results');
 }
 
-/** Bytes as MB or GB. */
-export function formatBytes(bytes) {
-  const gb = bytes / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-}
-
 /** What a take covered: the first highlight's demo, player, kills and time,
- *  and how many more were merged into it. */
+ *  how many more were merged into it, and how many of its gaps between
+ *  kills it recorded sped up (#831), at the batch's speed. */
 export function takeLabel(block, dispatch) {
   const indices = block.source_streak_indices || [];
   const streak = dispatch?.streaks?.[indices[0]];
@@ -54,8 +50,12 @@ export function takeLabel(block, dispatch) {
   if (streak.target_player) parts.push(streak.target_player);
   parts.push(STRINGS.BATCH_RESULTS.kills(streak.kill_count));
   parts.push(clockFloor(highlightStartSeconds(streak)));
-  const label = parts.filter(Boolean).join(' · ');
-  return indices.length > 1 ? `${label} ${STRINGS.BATCH_RESULTS.merged(indices.length - 1)}` : label;
+  let label = parts.filter(Boolean).join(' · ');
+  if (indices.length > 1) label = `${label} ${STRINGS.BATCH_RESULTS.merged(indices.length - 1)}`;
+  if (block.ramped_gaps > 0) {
+    label = `${label} ${STRINGS.BATCH_RESULTS.rampedGaps(block.ramped_gaps, dispatch?.kill_gaps?.speed ?? 4)}`;
+  }
+  return label;
 }
 
 /** The panel's rows and totals from a capture_takes_verified payload. */
@@ -63,7 +63,14 @@ export function resultsOf(payload, dispatch) {
   const blocks = payload?.blocks || [];
   const rows = blocks.map((b) => ({
     label: takeLabel(b, dispatch),
-    status: !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    // cut_short: a partial take the batch's end left on disk (#1081), not a
+    // clip, with what ended it (`cut_by`); short: one FFmpeg stopped writing
+    // mid-clip (#1105).
+    // late: OBS started recording after the clip did (#1109).
+    status: b.started_late_ms ? 'late' : b.short_take ? 'short' : b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    short: b.short_take || null,
+    lateMs: b.started_late_ms || null,
+    cutBy: b.cut_by || null,
     bytes: b.bytes || 0,
     folder: b.take_folder,
   }));
@@ -107,7 +114,7 @@ function render() {
   summary.className = `batch-results-summary batch-results-${state.kind}`;
   const outcome = state.kind ? S.outcome(state.kind, state.text) : '';
   const totals = state.totals
-    ? S.totals(state.totals.captured, state.totals.takes, formatBytes(state.totals.bytes), state.totals.captured - state.totals.renderable)
+    ? S.totals(state.totals.captured, state.totals.takes, gbOrMbText(state.totals.bytes), state.totals.captured - state.totals.renderable)
     : S.CHECKING;
   const obs = obsForRows(state.rows || [], obsClips);
   const obsMeasured = obs.filter(Boolean);
@@ -126,11 +133,15 @@ function render() {
       const tr = document.createElement('tr');
       tr.className = `batch-results-row-${row.status}`;
       const status = document.createElement('td');
-      status.textContent = S.STATUS[row.status];
+      status.textContent = row.lateMs
+        ? S.startedLate(row.lateMs)
+        : row.short
+        ? S.shortTake(row.short.video_secs, row.short.audio_secs)
+        : row.status === 'cut_short' ? S.cutShortBy(row.cutBy) : S.STATUS[row.status];
       const label = document.createElement('td');
       label.textContent = row.label;
       const size = document.createElement('td');
-      size.textContent = row.status === 'missing' ? '—' : formatBytes(row.bytes);
+      size.textContent = row.status === 'missing' ? '—' : gbOrMbText(row.bytes);
       const open = document.createElement('td');
       if (row.status !== 'missing' && row.folder) {
         const btn = document.createElement('button');

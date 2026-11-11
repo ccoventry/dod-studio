@@ -68,7 +68,7 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
       if (item.secondary) {
         const secondary = document.createElement('div');
         secondary.textContent = item.secondary;
-        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted, #999); word-break: break-word;';
+        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted); word-break: break-word;';
         entry.append(secondary);
       }
       return entry;
@@ -107,4 +107,25 @@ export function setThemedConfirmMessage(message) {
  *  wait that ends on its own. Does nothing when no dialog is open. */
 export function dismissThemedConfirm(result) {
   if (pendingResolve) resolveAndClose(result);
+}
+
+/** Whether a dialog is open now. A second `themedConfirm` replaces the open
+ *  one and its caller never hears back, so a prompt nobody clicked for
+ *  (batch_resume.js) waits for this to clear. */
+export function isThemedConfirmOpen() {
+  return pendingResolve !== null;
+}
+
+/** Whether any dialog is on screen: this one, or one of the app's own
+ *  `.modal` windows (Render Batch Interrupted shows its own, not through
+ *  themedConfirm). Prompts that open by themselves at start-up wait for this
+ *  to clear, so they come one at a time instead of on top of each other.
+ *  `doc` and `view` are for tests. */
+export function isAnyDialogOpen(doc = globalThis.document, view = globalThis) {
+  if (isThemedConfirmOpen()) return true;
+  if (!doc?.querySelectorAll) return false;
+  return [...doc.querySelectorAll('.modal')].some((el) => {
+    const display = view?.getComputedStyle ? view.getComputedStyle(el).display : el.style?.display;
+    return display !== 'none';
+  });
 }

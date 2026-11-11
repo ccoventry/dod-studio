@@ -136,6 +136,7 @@ export function finishSkipReason({ enabled, outcome, folders, exportDirs, render
  *   queue(payload) -> Promise<number>   queue_render_batch
  *   start() -> Promise<void>            start_queued_render
  *   onWaiting(request)                  a request is waiting on a busy Render tab
+ *   onScanning(request)                 a request is looking for its takes (#954)
  *   onStarted(total)                    a request's jobs are queued and started
  *   onProgress(counts)                  an active finish's counts changed
  *   onDone(counts, jobs)                every job of the active finish ended
@@ -151,6 +152,7 @@ export function createFinishController(deps) {
 
   async function launch(request) {
     launching = true;
+    deps.onScanning?.(request);
     let count = 0;
     try {
       count = await deps.queue(request.payload);
@@ -289,16 +291,28 @@ function readSettings() {
  * status line and progress bar the capture itself used. Left alone while a
  * capture is running, which owns the footer until it ends.
  */
-function setFooter(text, pct) {
+function setFooter(text, pct, { indeterminate = false } = {}) {
   if (captureRunning) return;
   const statusEl = document.querySelector('#batch-status');
   const container = document.querySelector('#capture-progress-container');
   const bar = document.querySelector('#capture-progress-bar');
   if (statusEl) statusEl.textContent = text;
-  if (pct != null) {
+  // The sliding block (#954) for the steps that can't be measured: the wait
+  // for the Render tab and the scan for the new takes.
+  if (container) container.classList.toggle('indeterminate', indeterminate);
+  if (indeterminate) {
+    if (container) container.style.display = 'block';
+  } else if (pct != null) {
     if (container) container.style.display = 'block';
     if (bar) bar.style.width = `${Math.max(0, Math.min(100, Math.round(pct)))}%`;
   }
+}
+
+/** Hides the sliding block of a step that ended without progress to show. */
+function hideFooterBar() {
+  if (captureRunning) return;
+  const container = document.querySelector('#capture-progress-container');
+  if (container) container.style.display = 'none';
 }
 
 function openRenderTab() {
@@ -390,7 +404,8 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
     // takes it found.
     queue: (payload) => queueRenderBatch(payload).then((summary) => summary?.total ?? 0),
     start: () => startQueuedRender(),
-    onWaiting: () => setFooter(STRINGS.FINISH.WAITING_STATUS, null),
+    onWaiting: () => setFooter(STRINGS.FINISH.WAITING_STATUS, null, { indeterminate: true }),
+    onScanning: () => setFooter(STRINGS.FINISH.SCANNING_STATUS, null, { indeterminate: true }),
     onStarted: (total) => {
       setFooter(STRINGS.FINISH.progressStatus(0, total, 0), 0);
       showToast(STRINGS.FINISH.startedToast(total), 'info', 8000, {
@@ -411,9 +426,14 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
     },
     onFailed: (err) => {
       setFooter(STRINGS.FINISH.FAILED_STATUS, null);
+      hideFooterBar();
       showToast(STRINGS.FINISH.failedToast(err), 'error', 8000);
     },
-    onNothingFound: () => showToast(STRINGS.FINISH.NOTHING_FOUND, 'info'),
+    onNothingFound: () => {
+      setFooter(STRINGS.FINISH.NOTHING_FOUND, null);
+      hideFooterBar();
+      showToast(STRINGS.FINISH.NOTHING_FOUND, 'info');
+    },
   });
 
   listen('render_jobs_snapshot', (event) => {

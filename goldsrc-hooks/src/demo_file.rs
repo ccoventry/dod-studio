@@ -49,26 +49,51 @@ pub struct DemoLength {
 /// LOADING segment's frames.
 pub fn length(path: &Path) -> Option<DemoLength> {
     let mut file = std::fs::File::open(path).ok()?;
-    let mut magic = [0u8; 8];
-    file.read_exact(&mut magic).ok()?;
-    if &magic[..6] != b"HLDEMO" {
-        return None;
-    }
-    file.seek(SeekFrom::Start(DIRECTORY_OFFSET_POS)).ok()?;
-    let directory = read_i32(&mut file)?;
-    file.seek(SeekFrom::Start(u64::try_from(directory).ok()?))
-        .ok()?;
-    let count = read_i32(&mut file)?;
-    if !(1..=MAX_ENTRIES).contains(&count) {
-        return None;
-    }
-    let mut entries = vec![0u8; count as usize * ENTRY_SIZE];
-    file.read_exact(&mut entries).ok()?;
+    let entries = read_directory(&mut file)?;
     let playback = sum_playback(&entries);
     let lead_in = loading_segment(&mut file, &entries)
         .map(|bytes| lead_in(&bytes))
         .unwrap_or(0.0);
     Some(DemoLength { playback, lead_in })
+}
+
+/// The directory's entries, [`ENTRY_SIZE`] bytes each, in file order.
+/// Leaves `reader` just after them. `None` when the file isn't a demo or its
+/// directory doesn't read (a demo whose recording never finished has none).
+pub(crate) fn read_directory<R: Read + Seek>(reader: &mut R) -> Option<Vec<u8>> {
+    reader.seek(SeekFrom::Start(0)).ok()?;
+    let mut magic = [0u8; 8];
+    reader.read_exact(&mut magic).ok()?;
+    if &magic[..6] != b"HLDEMO" {
+        return None;
+    }
+    reader.seek(SeekFrom::Start(DIRECTORY_OFFSET_POS)).ok()?;
+    let directory = read_i32_from(reader)?;
+    reader
+        .seek(SeekFrom::Start(u64::try_from(directory).ok()?))
+        .ok()?;
+    let count = read_i32_from(reader)?;
+    if !(1..=MAX_ENTRIES).contains(&count) {
+        return None;
+    }
+    let mut entries = vec![0u8; count as usize * ENTRY_SIZE];
+    reader.read_exact(&mut entries).ok()?;
+    Some(entries)
+}
+
+/// Where each of [`read_directory`]'s entries has its frames in the file:
+/// (offset, length), in directory order, up to the first that can't be one.
+pub(crate) fn segments(entries: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
+    entries
+        .as_chunks::<ENTRY_SIZE>()
+        .0
+        .iter()
+        .map_while(|entry| {
+            Some((
+                u64::try_from(field_i32(entry, OFFSET_AT)).ok()?,
+                u64::try_from(field_i32(entry, LENGTH_AT)).ok()?,
+            ))
+        })
 }
 
 /// The first LOADING entry's bytes.
@@ -136,12 +161,6 @@ fn lead_in(segment: &[u8]) -> f32 {
     }
 }
 
-fn read_i32(file: &mut std::fs::File) -> Option<i32> {
-    let mut bytes = [0u8; 4];
-    file.read_exact(&mut bytes).ok()?;
-    Some(i32::from_le_bytes(bytes))
-}
-
 fn sum_playback(entries: &[u8]) -> f32 {
     entries
         .as_chunks::<ENTRY_SIZE>()
@@ -196,22 +215,7 @@ const SVC_TIME: u8 = 7;
 pub fn loaded_span(path: &Path) -> Option<f32> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
-    let mut magic = [0u8; 8];
-    reader.read_exact(&mut magic).ok()?;
-    if &magic[..6] != b"HLDEMO" {
-        return None;
-    }
-    reader.seek(SeekFrom::Start(DIRECTORY_OFFSET_POS)).ok()?;
-    let directory = read_i32_from(&mut reader)?;
-    reader
-        .seek(SeekFrom::Start(u64::try_from(directory).ok()?))
-        .ok()?;
-    let count = read_i32_from(&mut reader)?;
-    if !(1..=MAX_ENTRIES).contains(&count) {
-        return None;
-    }
-    let mut entries = vec![0u8; count as usize * ENTRY_SIZE];
-    reader.read_exact(&mut entries).ok()?;
+    let entries = read_directory(&mut reader)?;
     let mut clock = SvcClock::default();
     for entry in entries.as_chunks::<ENTRY_SIZE>().0 {
         let offset = u64::try_from(field_i32(entry, OFFSET_AT)).ok()?;

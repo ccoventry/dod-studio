@@ -87,16 +87,6 @@ pub fn injector_pids_in(sys: &System, launcher_pid: u32) -> Vec<u32> {
     children_named_in(sys, &["injector.exe"], launcher_pid)
 }
 
-/// Asks Windows to end every running game (`taskkill /F /IM hl.exe`). It
-/// returns when `taskkill` does, which can be before the game has left the
-/// process list.
-pub fn kill_game() {
-    std::process::Command::new("taskkill")
-        .args(["/F", "/IM", GAME_EXE])
-        .output()
-        .ok();
-}
-
 /// Asks Windows to end process `pid` (`taskkill /F /PID`).
 pub fn kill_pid(pid: u32) {
     std::process::Command::new("taskkill")
@@ -112,8 +102,9 @@ pub fn running_games() -> Vec<crate::patch::launch_settings::RunningGame> {
     launches_of(&[GAME_EXE])
 }
 
-/// [`running_games`] for any process names, so a test can read itself.
-fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame> {
+/// [`running_games`] for any process names: a test reads itself, and a WMI
+/// launch looks for the launcher it may have started (`sys::wmi_launch`).
+pub(crate) fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame> {
     let mut sys = snapshot();
     let pids: Vec<Pid> = pids_named_in(&sys, names)
         .into_iter()
@@ -139,6 +130,9 @@ fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame
                 .iter()
                 .map(|a| a.to_string_lossy().into_owned())
                 .collect(),
+            // Read by `launch_settings::check_running_game`, only when Studio
+            // launches with a hook DLL.
+            hook: Default::default(),
         })
         .collect()
 }
@@ -161,6 +155,10 @@ pub fn close_game(pid: u32, timeout: Duration) -> bool {
     loop {
         refresh(&mut sys);
         if !is_game(&sys) {
+            // The mouse it confined stays confined otherwise (#1095).
+            if !is_game_in(&sys) {
+                crate::sys::cursor_clip::release();
+            }
             return true;
         }
         if since.elapsed() >= timeout {

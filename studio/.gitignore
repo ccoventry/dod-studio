@@ -27,3 +27,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Written by the release workflows for the What's new window (#1013).
+/public/release_notes.md

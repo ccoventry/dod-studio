@@ -21,11 +21,17 @@ import {
   measureTakeFolders,
   deleteTakeFolders,
   logFrontendEvent,
+  takePreviewThumb,
+  takePreviewSheet,
+  cancelTakePreviews,
+  takeChecks as takeChecksIpc,
+  cancelTakeChecks,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
+import { setFieldError, clearFieldError } from './field_error.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
@@ -35,6 +41,8 @@ import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRen
 import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
+import { startVegasEdlExport } from './vegas_edl_export.js';
+import { startVegasScriptInstall } from './vegas_script_install.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
@@ -42,10 +50,16 @@ import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
+import { startTakePreview } from './take_preview.js';
+import { startTakeChecks } from './take_checks.js';
+import { renderSizeText } from './byte_size.js';
+
+/** How often the crash-recovery prompt looks again while another dialog is open. */
+const STARTUP_PROMPT_POLL_MS = 500;
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -65,6 +79,9 @@ let redrawBatchLine = () => {};
 const renderBatch = createRenderBatch({ redraw: () => redrawBatchLine(), log: logFrontendEvent });
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
+// Each take's picture (#1069), set up by initRenderUI.
+let takePreview = null;
+let takeChecks = null;
 // initRenderUI's getExportDirs, for the Start button's check.
 let exportDirsSource = null;
 
@@ -82,15 +99,16 @@ function getCustomCodecArgs() {
 function syncCustomCodecVisibility() {
   const group = document.querySelector('#render-custom-codec-group');
   if (group) group.style.display = getSelectedCodec() === 'custom' ? '' : 'none';
+  if (getSelectedCodec() !== 'custom') clearFieldError(document.querySelector('#render-custom-codec-input'));
 }
 
 function statusColor(status) {
   switch (status) {
-    case JOB_STATUS.FINISHED: return '#4caf50';
-    case JOB_STATUS.ERROR: return '#f44336';
-    case JOB_STATUS.CANCELLED: return '#ffeb3b';
-    case JOB_STATUS.RENDERING: return '#7ec8e3';
-    default: return '#ffffff';
+    case JOB_STATUS.FINISHED: return 'var(--ok)';
+    case JOB_STATUS.ERROR: return 'var(--danger)';
+    case JOB_STATUS.CANCELLED: return 'var(--warn-cancelled)';
+    case JOB_STATUS.RENDERING: return 'var(--sky)';
+    default: return 'var(--text-strong)';
   }
 }
 
@@ -288,10 +306,7 @@ function wireSettingsCell(cell) {
  *  estimate: see TABLE_HEADER_FILE_SIZE_TITLE for why. */
 function formatFileSize(bytes) {
   if (bytes == null) return STRINGS.RENDER.FILE_SIZE_UNKNOWN;
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(2))
-    : STRINGS.RENDER.fileSizeMb((bytes / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 2);
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */
@@ -300,6 +315,7 @@ function createJobRow(j, rowState) {
   row.dataset.jobId = j.id;
   row.innerHTML = `
     <td class="rj-select col-center"><input type="checkbox" class="render-job-select-cb" title="${STRINGS.RENDER.SELECT_ROW_TITLE}" /></td>
+    <td class="rj-thumb-cell col-center"><div class="rj-thumb-pic"></div><div class="rj-check"></div></td>
     <td class="rj-name"></td>
     <td class="rj-stream"></td>
     <td class="rj-frames"></td>
@@ -339,6 +355,10 @@ function updateJobRow(row, j, rowState = {}) {
   // rows (queued, finished) haven't changed; skip those outright. The row
   // state rides along: a HUD pair's other half can change this row's Delete
   // Take (#644) without this row changing.
+  // The picture changes without the job changing; it skips itself when
+  // nothing did.
+  takePreview?.fillCell(row.querySelector('.rj-thumb-pic'), j);
+  takeChecks?.fillChip(row.querySelector('.rj-check'), j);
   const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
@@ -434,7 +454,9 @@ function renderJobsTable() {
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    takePreview?.sync(jobs);
+    takeChecks?.sync(jobs);
     syncSelectionControls();
     return;
   }
@@ -472,6 +494,8 @@ function renderJobsTable() {
   // stale row would be worse than the cost of checking.
   existingRows.forEach((row) => row.remove());
   syncSelectionControls();
+  takePreview?.sync(jobs);
+  takeChecks?.sync(jobs);
 }
 
 /**
@@ -524,6 +548,10 @@ function syncSelectionControls() {
   const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
   // No export folder: the renderer refuses, so Start says where to add one.
   const noExportDir = !hasExportDir();
+  // The field itself says why Start is off; it clears when a folder is added.
+  setFieldError(document.querySelector('#render-export-dir-input'),
+    noExportDir && queued > 0 ? R.EXPORT_DIR_FIELD_EMPTY : '',
+    { autoClear: false });
   setButton('#start-render-btn', queued, R.startRenderBatch,
     noExportDir ? R.START_RENDER_NO_EXPORT_DIR_TITLE
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
@@ -593,6 +621,9 @@ export async function checkRenderRecoveryOnStartup(showRenderTab) {
 
   const modal = document.querySelector('#render-recovery-modal');
   if (!modal) return;
+  // One start-up prompt at a time: a dialog already on screen is answered
+  // first, or this one opens on top of it.
+  while (isAnyDialogOpen()) await new Promise((resolve) => { setTimeout(resolve, STARTUP_PROMPT_POLL_MS); });
   document.querySelector('#render-recovery-source').textContent = summary.source_folder || STRINGS.RENDER.UNKNOWN_SOURCE_FOLDER;
   document.querySelector('#render-recovery-completed').textContent = String(summary.completed_count);
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
@@ -691,6 +722,13 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
+  startVegasScriptInstall();
+  startVegasEdlExport({
+    getJobs: () => jobs,
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
+  });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
@@ -701,9 +739,43 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     showToast,
     formatSize: formatFileSize,
     showProgress: showTakeDeleteProgress,
-    onBusyChange: () => renderJobsTable(),
+    // FFmpeg reading a take's frames would keep it from moving.
+    onBusyChange: (busy) => {
+      if (busy) {
+        takePreview?.pause();
+        takeChecks?.pause();
+      } else {
+        takePreview?.resume();
+        takeChecks?.resume();
+      }
+      renderJobsTable();
+    },
     listen,
     getJobs: () => jobs,
+  });
+  takePreview = startTakePreview({
+    thumb: takePreviewThumb,
+    sheet: takePreviewSheet,
+    cancel: cancelTakePreviews,
+    listen,
+    getJobs: () => jobs,
+    // A frame sequence's rate, for the sheet's times: the Source FPS the
+    // take renders at.
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    afterChange: () => takeChecks?.run(),
+  });
+  // Take checks (#1084) read every frame of a take, so they wait for the
+  // pictures, and stop for any render, which reads the same disks, and for
+  // any capture batch (they watch `capture_status` themselves).
+  const rendering = () => jobs.some((j) => j.status === JOB_STATUS.RENDERING);
+  takeChecks = startTakeChecks({
+    check: takeChecksIpc,
+    cancel: cancelTakeChecks,
+    listen,
+    getJobs: () => jobs,
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    isBlocked: () => !!takePreview?.isRunning() || rendering(),
+    mustStop: rendering,
   });
 
   // A take finishing renders — advances every highlight the take index says
@@ -864,6 +936,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     scanRenderBtn.addEventListener('click', () => {
       const captureLocations = getCaptureLocations ? getCaptureLocations() : [];
       if (!captureLocations || captureLocations.length === 0) {
+        // The folder list is on Configuration, off screen here: mark its field
+        // for when the user goes there, and say so in a toast now.
+        setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.RENDER_DIR_FIELD_EMPTY,
+          { list: document.querySelector('#target-drive-list') });
         showToast(STRINGS.RENDER.ADD_RENDER_DIR_REQUIRED, 'error');
         return;
       }
@@ -871,6 +947,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const codecVal = getSelectedCodec();
       const customCodecArgsVal = getCustomCodecArgs();
       if (codecVal === 'custom' && !customCodecArgsVal) {
+        setFieldError(document.querySelector('#render-custom-codec-input'), STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED);
         showToast(STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED, 'error');
         return;
       }
@@ -934,6 +1011,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
           scanRenderBtn.disabled = false;
           scanClock.stop();
           hideBar(scanBar);
+          // The error is about the folders: show it at the folder field too.
+          setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.scanDirError(err),
+            { list: document.querySelector('#target-drive-list') });
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
         });
@@ -947,6 +1027,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
       if (!hasExportDir()) {
+        // syncSelectionControls marks the export folder field.
         showToast(STRINGS.RENDER.START_RENDER_NO_EXPORT_DIR_TITLE, 'error');
         syncSelectionControls();
         return;

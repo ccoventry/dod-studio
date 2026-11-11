@@ -429,7 +429,16 @@ mod tests {
                     std::thread::yield_now();
                 }
             });
-            for i in 1..=20_000usize {
+            // The race is a matter of timing, so keep racing until a write has
+            // been caught mid-flight (at least 20,000 rounds either way). The
+            // deadline only bounds a run where the race truly never happens.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            let mut i = 0usize;
+            while i < 20_000
+                || (REARMS_EVER.load(Ordering::Relaxed) == 0
+                    && std::time::Instant::now() < deadline)
+            {
+                i += 1;
                 let slot = (at + 64) as *mut *mut c_void;
                 assert!(unsafe { write_pointer(slot, i as *mut c_void, After::Restore) });
                 assert_eq!(page.read(64), i);

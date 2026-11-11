@@ -198,12 +198,11 @@ fn is_ours(path: &Path) -> Option<bool> {
 /// BOM stays the file's first bytes, ahead of [`MARK`]; UTF-16 is refused
 /// rather than edited as bytes.
 fn sized_copy(source: &Path) -> Result<Vec<u8>, String> {
-    let bytes =
-        std::fs::read(source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
+    let bytes = std::fs::read(source)
+        .map_err(|e| crate::messages::menu_scale::could_not_read(source.display(), e))?;
     if bytes.starts_with(b"\xff\xfe") || bytes.starts_with(b"\xfe\xff") {
-        return Err(format!(
-            "{} is UTF-16 text, which DoD Studio doesn't edit",
-            source.display()
+        return Err(crate::messages::menu_scale::scheme_is_utf16(
+            source.display(),
         ));
     }
     let (bom, body) = match bytes.strip_prefix(UTF8_BOM) {
@@ -212,7 +211,7 @@ fn sized_copy(source: &Path) -> Result<Vec<u8>, String> {
     };
     let (text, utf8) = decode(body);
     let sized = pre_sized(&text)
-        .ok_or_else(|| format!("{} has no BaseSettings block to change", source.display()))?;
+        .ok_or_else(|| crate::messages::menu_scale::no_base_settings_block(source.display()))?;
     let mut out = bom.to_vec();
     out.extend(encode(&sized, utf8));
     Ok(out)
@@ -236,30 +235,28 @@ pub fn set_in(game_dir: &Path, on: bool, applies: bool) -> Result<MenuScaleStatu
     let path = addon_scheme(game_dir);
     match is_ours(&path) {
         Some(false) => {
-            return Err(format!(
-                "{} is not DoD Studio's, so it was left alone; move it away to use this setting",
-                path.display()
-            ));
+            return Err(crate::messages::menu_scale::scheme_not_ours(path.display()));
         }
         Some(true) if !on => {
             std::fs::remove_file(&path)
-                .map_err(|e| format!("could not remove {}: {e}", path.display()))?;
+                .map_err(|e| crate::messages::menu_scale::could_not_remove(path.display(), e))?;
         }
         _ if on => {
             let source = source_scheme(game_dir).ok_or_else(|| {
-                format!(
-                    "found no {FILE} to copy in {} or valve\\resource",
-                    game_dir.join("resource").display()
+                crate::messages::menu_scale::no_scheme_to_copy(
+                    FILE,
+                    game_dir.join("resource").display(),
                 )
             })?;
             let sized = sized_copy(&source)?;
             if std::fs::read(&path).ok().as_deref() != Some(sized.as_slice()) {
                 if let Some(dir) = path.parent() {
-                    std::fs::create_dir_all(dir)
-                        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+                    std::fs::create_dir_all(dir).map_err(|e| {
+                        crate::messages::menu_scale::could_not_create(dir.display(), e)
+                    })?;
                 }
                 std::fs::write(&path, sized)
-                    .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+                    .map_err(|e| crate::messages::menu_scale::could_not_write(path.display(), e))?;
             }
         }
         _ => {}
@@ -289,9 +286,8 @@ pub fn status(hl_exe: &Path, game_dir: &Path) -> MenuScaleStatus {
 pub fn set(hl_exe: &Path, game_dir: &Path, on: bool) -> Result<MenuScaleStatus, String> {
     let applies = is_anniversary(hl_exe);
     if on && !applies {
-        return Err(format!(
-            "{} is not a 25th Anniversary install: its engine already draws the menus at this size",
-            hl_exe.display()
+        return Err(crate::messages::menu_scale::not_an_anniversary_install(
+            hl_exe.display(),
         ));
     }
     set_in(game_dir, on, applies)

@@ -7,8 +7,8 @@
 // those renders have freed the room.
 //
 // The backend follows the batch (capture_room_manager.rs): it sends
-// `capture_clip_ready` once a take stops growing, runs one render at a time
-// while the capture runs, decides when the batch holds and reports it with
+// `capture_clip_ready` once a take stops growing, runs "Renders at once" of
+// them while the capture runs, decides when the batch holds and reports it with
 // `capture_room_status`. This module is the setting, queueing each ready take
 // through the Render tab's own queue (the same payload the finish step, #440,
 // uses), and the status line while the batch holds.
@@ -21,6 +21,7 @@ import { renderPayloadFor } from './finish_clips.js';
 import { markClipCaptured, showCaptureRoomLine } from './capture_pane.js';
 import { STRINGS } from './strings.js';
 import { showToast } from './toast.js';
+import { renderSizeText } from './byte_size.js';
 
 /** The line under the setting, from it and "After a clip is finished". */
 export function settingHint(enabled, takeChoice) {
@@ -114,17 +115,25 @@ export function roomStatusLine(status, formatSize) {
 // ── Page wiring ──────────────────────────────────────────────────────────────
 
 let enabled = false;
+let rendersAtOnce = 1;
 
 function sizeText(bytes) {
-  const gb = (Number(bytes) || 0) / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(1))
-    : STRINGS.RENDER.fileSizeMb(((Number(bytes) || 0) / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 1);
 }
 
 function paint() {
   const box = document.querySelector('#config-render-while-capturing');
   if (box) box.checked = enabled;
+  const count = document.querySelector('#config-renders-while-capturing');
+  if (count) {
+    const renderTab = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10);
+    for (const option of count.options) {
+      option.textContent = rendersAtOnceLabel(Number(option.value), renderTab);
+    }
+    count.value = String(rendersAtOnce);
+    // Dimmed, not hidden, while the setting is off (it does nothing then).
+    count.disabled = !enabled;
+  }
   const hint = document.querySelector('#config-render-while-capturing-hint');
   const choice = document.querySelector('#config-take-after-finish')?.value;
   if (hint) hint.textContent = settingHint(enabled, choice);
@@ -140,14 +149,41 @@ export function rendersMakeRoom() {
   });
 }
 
+/**
+ * "Renders at once" beside the capture: a whole number from 1 to 4, and 1
+ * for anything else (settings saved before it existed have none).
+ */
+export function rendersAtOnceFrom(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 1;
+}
+
+/**
+ * The share of the CPU `renders` take beside a capture, in percent. Each one
+ * gets the threads one of the Render tab's renders would, so it is
+ * renders / the Render tab's number (1 to 8, 2 when unreadable, as the
+ * render payload reads it), and never more than all of it: the Render tab's
+ * number also caps how many run.
+ */
+export function cpuSharePercent(renders, renderTab) {
+  const tab = Number.isInteger(renderTab) && renderTab >= 1 ? Math.min(8, renderTab) : 2;
+  return Math.round((100 * Math.min(renders, tab)) / tab);
+}
+
+/** An option's text: the number and the CPU share it takes. */
+export function rendersAtOnceLabel(renders, renderTab) {
+  return STRINGS.RENDER_WHILE_CAPTURING.atOnceOption(renders, cpuSharePercent(renders, renderTab));
+}
+
 /** What settings_sync.js saves. */
 export function getRenderWhileCapturing() {
-  return { render_while_capturing: enabled };
+  return { render_while_capturing: enabled, renders_while_capturing: rendersAtOnce };
 }
 
 /** What settings_sync.js loads. */
-export function setRenderWhileCapturing(value) {
+export function setRenderWhileCapturing(value, renders) {
   enabled = !!value;
+  rendersAtOnce = rendersAtOnceFrom(renders);
   paint();
 }
 
@@ -159,7 +195,14 @@ export function initRenderWhileCapturing({ onSettingsChange } = {}) {
     paint();
     onSettingsChange?.();
   });
+  document.querySelector('#config-renders-while-capturing')?.addEventListener('change', (e) => {
+    // The batch's start line in the activity log says how many it ran.
+    rendersAtOnce = rendersAtOnceFrom(e.target.value);
+    onSettingsChange?.();
+  });
   document.querySelector('#config-take-after-finish')?.addEventListener('change', paint);
+  // Each option's CPU share follows the Render tab's own number.
+  document.querySelector('#render-max-concurrent-input')?.addEventListener('input', paint);
 
   const renders = createClipRenderQueue({
     queue: queueRenderBatch,

@@ -1,8 +1,10 @@
 // patch/builder/speed.rs
-// The helper cfg's two speed aliases: `sys_fast_forward`, which the batch
-// runs between clips, and `sys_normal_speed`, which the pre-roll runs before
-// each one. Both routes run them — the patched demo as ConsoleCommand frames,
-// the hook's batch (`runtime_batch.rs`) for the settle stretch after its seek.
+// The helper cfg's speed aliases: `sys_fast_forward`, which the batch runs
+// between clips, and `sys_normal_speed`, which the pre-roll runs before each
+// one. Both routes run them — the patched demo as ConsoleCommand frames, the
+// hook's batch (`runtime_batch.rs`) for the settle stretch after its seek.
+// Beside them, `sys_ramp_on` / `sys_ramp_off`, which speed up a gap between
+// kills inside a clip (#831), on the hook's batch only.
 
 use crate::patch::cfg_scan::{self, CfgScan};
 use crate::patch::types::PatcherConfig;
@@ -91,6 +93,26 @@ fn restored_value(
                 .and_then(numeric)
         })
         .unwrap_or_else(|| default.to_string())
+}
+
+/// The helper cfg's `sys_ramp_on` / `sys_ramp_off`, which play a long gap
+/// between two kills inside a clip sped up (#831, `kill_gaps.rs`).
+/// `dem_speed` scales the demo player's clock; HLAE goes on writing one frame
+/// per `1/fps` of engine time, so the take holds the gap at exactly that
+/// speed, and its sound stays in step (measured on both builds, #831).
+/// Defined in every batch, so the names always resolve; only a batch with
+/// Fast-forward gaps schedules them. With gaps kept the speed is the
+/// setting's default, never run.
+pub fn ramp_alias_lines(config: &PatcherConfig) -> String {
+    let speed = config
+        .kill_gaps
+        .ramp_speed()
+        .unwrap_or(crate::patch::types::DEFAULT_KILL_GAP_SPEED);
+    format!(
+        "alias {} \"dem_speed {speed}\"\nalias {} \"dem_speed 1\"\n",
+        super::kill_gaps::RAMP_ON,
+        super::kill_gaps::RAMP_OFF
+    )
 }
 
 /// The two alias lines the helper cfg carries.
@@ -206,6 +228,20 @@ mod tests {
         assert!(body.contains("fps_max 100"), "{body}");
         assert!(body.contains("gl_vsync 1"), "{body}");
         assert!(!body.contains('"'), "{body}");
+    }
+
+    #[test]
+    fn the_ramp_aliases_set_the_demo_speed_and_put_it_back() {
+        let mut config = PatcherConfig::default();
+        config.kill_gaps.mode = crate::patch::types::KillGapMode::FastForward;
+        config.kill_gaps.speed = 6.0;
+        assert_eq!(
+            ramp_alias_lines(&config),
+            "alias sys_ramp_on \"dem_speed 6\"\nalias sys_ramp_off \"dem_speed 1\"\n"
+        );
+        // Kept gaps: still defined, at the default speed.
+        config.kill_gaps.mode = crate::patch::types::KillGapMode::Keep;
+        assert!(ramp_alias_lines(&config).contains("\"dem_speed 4\""));
     }
 
     #[test]

@@ -9,9 +9,7 @@
 // a `.render_autosave.json` crash-recovery lockfile, and a wake lock held
 // for the batch's duration.
 
-use native::hlcr::autosave::{
-    RenderJob as AutosaveJob, RenderJobStatus as AutosaveJobStatus, RenderSessionData,
-};
+use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
@@ -33,6 +31,14 @@ use tauri::{AppHandle, Emitter};
 mod scan_merge;
 pub use scan_merge::ScanMergeSummary;
 use scan_merge::{NewJobSettings, ScannedTake, merge_scan};
+
+#[path = "render_autosave.rs"]
+mod autosave;
+pub use autosave::RenderAutosaveSummary;
+use autosave::{
+    RecoverySettings, autosave_entry, autosave_path, recovered_config, recovered_jobs,
+    recovery_summary, save_autosave, write_autosave,
+};
 
 /// Codec is a string id ("prores" (HQ) | "prores_422" | "prores_lt" |
 /// "prores_4444" | "dnxhr" | "h264" | "h264_nvenc" | ...) mapped
@@ -78,10 +84,6 @@ pub(crate) fn resolve_ffmpeg(override_path: Option<&String>) -> PathBuf {
         }
     }
     PathBuf::from("ffmpeg")
-}
-
-fn autosave_path() -> PathBuf {
-    native::shared::paths::get_appdata_dir().join(".render_autosave.json")
 }
 
 // ── Per-job runtime state ───────────────────────────────────────────────────
@@ -138,7 +140,7 @@ pub struct HistoryEntry {
     output_exists: bool,
 }
 
-fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
+pub(crate) fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
     native::hlcr::take_meta::read_history(std::path::Path::new(take_folder))
         .into_iter()
         .map(|attempt| HistoryEntry {
@@ -184,6 +186,9 @@ pub struct RenderJobView {
     pub id: String,
     pub name: String,
     pub stream: String,
+    /// The stream folder inside `take_folder` this job renders from (`all`,
+    /// or `hudColor` for a HUD pair): what the take preview (#1069) shows.
+    pub stream_folder: String,
     pub frames: usize,
     pub date: String,
     pub status: String,
@@ -205,6 +210,11 @@ pub struct RenderJobView {
     /// this job has rendered, so "reveal in Explorer" works pre- and
     /// post-render.
     pub take_folder: String,
+    /// The take's key in the project's take index (`session/block`, as
+    /// `render_take_finished` sends it), so the frontend can tell whose
+    /// highlight a clip is (#429's nameplates). Empty for a take outside a
+    /// session folder.
+    pub take_key: String,
     /// This job's codec as a `RenderCodec::to_str_id()` value — what
     /// `set_render_job_codec` expects back, and what the frontend checks
     /// against `"source_copy"` to show the Skip toggle as checked.
@@ -250,6 +260,7 @@ impl RenderJobRuntime {
             } else {
                 self.clip.img_folder.clone()
             },
+            stream_folder: self.clip.img_folder.clone(),
             frames: self.clip.frame_count,
             date: self.clip.date.clone(),
             status: self.status.clone(),
@@ -270,6 +281,7 @@ impl RenderJobRuntime {
             output_path: self.output_path.clone(),
             output_size_bytes: self.output_size_bytes,
             take_folder: self.clip.take_folder.clone(),
+            take_key: take_key(std::path::Path::new(&self.clip.take_folder)).unwrap_or_default(),
             codec_id: self.codec.to_str_id().to_string(),
             custom_codec_args: self.custom_codec_args.clone(),
             skip_available: clip_is_skip_eligible(&self.clip),
@@ -317,26 +329,29 @@ pub struct RenderManager {
     /// rows take ids no earlier row had. Read and written under `jobs`.
     next_job_id: AtomicUsize,
     /// Render While Capturing (#861): set while a capture batch runs with it
-    /// on. Renders then start one at a time, and each take whose clip
-    /// finished goes at once rather than when the render batch ends.
+    /// on. Renders then start up to [`Self::renders_while_capturing`] at a
+    /// time, and each take whose clip finished goes at once rather than when
+    /// the render batch ends.
     while_capturing: Arc<AtomicBool>,
+    /// How many renders run at once beside that capture (Render While
+    /// Capturing's "Renders at once"), set when the batch starts.
+    renders_while_capturing: Arc<AtomicUsize>,
     /// The capture is held between clips for space (#861): nothing records,
     /// so renders started now get the machine as they would without a capture.
     capture_held: Arc<AtomicBool>,
 }
 
-/// How many renders run at once while a capture batch runs (#861): one, so
-/// the game keeps most of the machine.
-pub(crate) const RENDERS_WHILE_CAPTURING: usize = 1;
-
-/// What the scheduler may run at once: the batch's own number, or
-/// [`RENDERS_WHILE_CAPTURING`] while a capture runs.
-fn concurrency_cap(configured: usize, while_capturing: bool) -> usize {
+/// What the scheduler may run at once: the batch's own number, or, while a
+/// capture runs, Render While Capturing's "Renders at once" (at least one, at most
+/// the batch's own number). Each of those renders still gets the threads one
+/// of the batch's usual renders would (the scheduler's `thread_share`), so
+/// the setting decides how much of the machine the renders take from the
+/// game: one render at 4 at once measured ~1/3 of a 16-thread CPU busy.
+fn concurrency_cap(configured: usize, while_capturing: Option<usize>) -> usize {
     let configured = configured.max(1);
-    if while_capturing {
-        configured.min(RENDERS_WHILE_CAPTURING)
-    } else {
-        configured
+    match while_capturing {
+        Some(renders) => configured.min(renders.max(1)),
+        None => configured,
     }
 }
 
@@ -357,6 +372,7 @@ struct SchedulerHandles {
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
     clear_on_finish: Arc<AtomicBool>,
     while_capturing: Arc<AtomicBool>,
+    renders_while_capturing: Arc<AtomicUsize>,
     capture_held: Arc<AtomicBool>,
 }
 
@@ -386,13 +402,16 @@ impl RenderManager {
             scanning: AtomicBool::new(false),
             next_job_id: AtomicUsize::new(0),
             while_capturing: Arc::new(AtomicBool::new(false)),
+            renders_while_capturing: Arc::new(AtomicUsize::new(1)),
             capture_held: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Render While Capturing (#861): a capture batch with it on started
-    /// (true) or ended (false).
-    pub(crate) fn set_while_capturing(&self, on: bool) {
+    /// (true) or ended (false), with `renders` running at once beside it.
+    pub(crate) fn set_while_capturing(&self, on: bool, renders: usize) {
+        self.renders_while_capturing
+            .store(renders.max(1), Ordering::SeqCst);
         self.while_capturing.store(on, Ordering::SeqCst);
         self.capture_held.store(false, Ordering::SeqCst);
     }
@@ -595,7 +614,7 @@ impl RenderManager {
                 *self.recovery_gap.lock().unwrap() = None;
             }
             Err(gap) => {
-                log_markdown(&format!("[render] recover_render_batch: {}", gap));
+                log_markdown(&crate::messages::render::recover_gap(&gap));
                 *self.last_config.lock().unwrap() = None;
                 *self.recovery_gap.lock().unwrap() = Some(gap);
             }
@@ -615,69 +634,9 @@ impl RenderManager {
             export_reservations: self.export_reservations.clone(),
             clear_on_finish: self.clear_on_finish.clone(),
             while_capturing: self.while_capturing.clone(),
+            renders_while_capturing: self.renders_while_capturing.clone(),
             capture_held: self.capture_held.clone(),
         }
-    }
-}
-
-fn write_autosave(
-    render_session: &Arc<Mutex<Option<RenderSessionData>>>,
-    jobs: &[RenderJobRuntime],
-    config: &RenderConfig,
-) {
-    let session = RenderSessionData {
-        source_folder: config.source_folder.clone(),
-        fps: config.fps,
-        target_codec: config.target_codec.to_str_id().to_string(),
-        target_custom_codec_args: config.custom_codec_args.clone(),
-        jobs: jobs
-            .iter()
-            .map(|j| AutosaveJob {
-                take_folder: j.clip.take_folder.clone(),
-                output_path: j.output_path.clone(),
-                // A take staged as Finished from its history (#70) comes
-                // back as Finished after a recovery too.
-                status: if j.status == "Finished" {
-                    AutosaveJobStatus::Completed
-                } else {
-                    AutosaveJobStatus::Pending
-                },
-                name: j.clip.base_name.clone(),
-                codec: Some(j.codec.to_str_id().to_string()),
-                custom_codec_args: Some(j.custom_codec_args.clone()),
-                fps: Some(j.fps),
-                clip: Some(j.clip.clone()),
-            })
-            .collect(),
-    };
-    save_autosave(&session);
-    *render_session.lock().unwrap() = Some(session);
-}
-
-/// The autosave's entry for the row rendering `clip`, found by take folder
-/// and stream rather than by job id: a scan merges into the list (#772), so
-/// an id is not the row's place in the autosave. A recovered stub saved
-/// without its clip matches on the folder alone.
-fn autosave_entry<'a>(
-    session: &'a mut RenderSessionData,
-    clip: &ClipData,
-) -> Option<&'a mut AutosaveJob> {
-    let stream = attempt_stream(clip);
-    session.jobs.iter_mut().find(|rj| {
-        rj.take_folder == clip.take_folder
-            && rj.clip.as_ref().is_none_or(|c| attempt_stream(c) == stream)
-    })
-}
-
-/// Writes `session` to `.render_autosave.json`.
-fn save_autosave(session: &RenderSessionData) {
-    if let Ok(json) = serde_json::to_string_pretty(session)
-        && let Err(e) = std::fs::write(autosave_path(), json)
-    {
-        log_markdown(&format!(
-            "[render_autosave] Failed to write lockfile: {}",
-            e
-        ));
     }
 }
 
@@ -748,6 +707,10 @@ fn apply_render_update(
             let mut just_finished = None;
             let mut just_failed = None;
             let mut attempt_ended = None;
+            // The finished attempt as the take's history now holds it, sent
+            // with `render_take_finished` so the project records the video
+            // (#1264).
+            let mut finished_attempt: Option<RenderAttempt> = None;
             let mut finished_clip: Option<ClipData> = None;
             {
                 let mut guard = jobs.lock().unwrap();
@@ -783,6 +746,9 @@ fn apply_render_update(
                             entry.attempt.output_size_bytes = size;
                             entry.attempt.error = error.clone();
                             entry.output_exists = success;
+                            if success {
+                                finished_attempt = Some(entry.attempt.clone());
+                            }
                         }
                         attempt_ended = Some((
                             job.clip.take_folder.clone(),
@@ -829,16 +795,19 @@ fn apply_render_update(
                     error,
                 )
             {
-                log_markdown(&format!(
-                    "[render-history] couldn't record how a render of {} ended: {}",
-                    take_folder, e
+                log_markdown(&crate::messages::render::history_end_not_recorded(
+                    &take_folder,
+                    &e,
                 ));
             }
             if let Some((take_folder, base_name, clip_type, _)) = &just_finished {
                 let key = take_key(std::path::Path::new(take_folder));
-                log_markdown(&format!(
-                    "[render-take-finished] job {} take_key={:?} take_folder={} base_name={} clip_type={}",
-                    id, key, take_folder, base_name, clip_type
+                log_markdown(&crate::messages::render::take_finished(
+                    &id,
+                    &key,
+                    take_folder,
+                    base_name,
+                    clip_type,
                 ));
                 let _ = app.emit(
                     "render_take_finished",
@@ -848,15 +817,15 @@ fn apply_render_update(
                         "take_folder": take_folder,
                         "base_name": base_name,
                         "clip_type": clip_type,
+                        "render": finished_attempt,
                     }),
                 );
             }
             if let Some((base_name, err_log)) = &just_failed {
-                log_markdown(&format!(
-                    "[render-take-failed] job {} base_name={} error={}",
-                    id,
+                log_markdown(&crate::messages::render::take_failed(
+                    &id,
                     base_name,
-                    err_log.as_deref().unwrap_or("(no error log)")
+                    err_log.as_deref().unwrap_or("(no error log)"),
                 ));
             }
             // Autosave only tracks success — matches dev's ui.rs exactly.
@@ -910,7 +879,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             // as they would with no capture (measured on #861: a lone ProRes
             // render is 3x faster on every core than on a quarter of them).
             let game_busy = while_capturing && !handles.capture_held.load(Ordering::SeqCst);
-            let max_concurrent = concurrency_cap(config.max_concurrent_renders, game_busy);
+            let max_concurrent = concurrency_cap(
+                config.max_concurrent_renders,
+                game_busy.then(|| handles.renders_while_capturing.load(Ordering::SeqCst)),
+            );
             let mut dirty = false;
             let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
@@ -952,7 +924,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // gives a lone job all available threads instead of only 1/max of them.
                     let effective_concurrent =
                         (active_count + jobs_starting).min(max_concurrent).max(1);
-                    // While a capture runs (#861) the one render takes the
+                    // While a capture runs (#861) each render takes the
                     // threads one of the batch's usual renders would, not
                     // every core: the game needs the rest.
                     let thread_share = if game_busy {
@@ -1030,9 +1002,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     std::path::Path::new(&take_folder),
                     &attempt,
                 ) {
-                    log_markdown(&format!(
-                        "[render-history] couldn't record the start of a render of {}: {}",
-                        take_folder, e
+                    log_markdown(&crate::messages::render::history_start_not_recorded(
+                        &take_folder,
+                        &e,
                     ));
                 }
             }
@@ -1058,9 +1030,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // render has stopped by now, so the whole list can go.
                     if handles.clear_on_finish.swap(false, Ordering::SeqCst) {
                         guard.clear();
-                        log_markdown(
-                            "[render] clear_render_queue: list emptied once the batch stopped",
-                        );
+                        log_markdown(crate::messages::render::CLEAR_QUEUE_EMPTIED);
                     }
                     handles.global_cancel.store(false, Ordering::SeqCst);
                     handles.is_rendering.store(false, Ordering::SeqCst);
@@ -1074,7 +1044,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
 
-        log_markdown("[render] scheduler loop exiting: nothing left Rendering or Queued");
+        log_markdown(crate::messages::render::SCHEDULER_EXITING);
         emit_jobs_snapshot(&app, &handles.jobs);
         let _ = app.emit("render_batch_finished", serde_json::json!({}));
         // After the batch's own end, so its summary and the finish step
@@ -1146,12 +1116,11 @@ async fn scan_and_merge(
     state: &RenderManager,
     payload: RenderBatchPayload,
 ) -> Result<ScanMergeSummary, String> {
-    log_markdown(&format!(
-        "[render] queue_render_batch starting: {} source dir(s), codec={}, fps={}, max_concurrent={}",
+    log_markdown(&crate::messages::render::queue_batch_starting(
         payload.render_directories.len(),
-        payload.codec,
+        &payload.codec,
         payload.fps,
-        payload.max_concurrent_renders
+        payload.max_concurrent_renders,
     ));
 
     // The folders of the rows already listed, to tell a take that is gone
@@ -1288,14 +1257,13 @@ async fn scan_and_merge(
         }
         (summary, guard.is_empty())
     };
-    log_markdown(&format!(
-        "[render] queue_render_batch: {} take(s) found; {} new, {} refreshed, {} kept, {} gone ({} of them queued)",
+    log_markdown(&crate::messages::render::queue_batch_found(
         summary.total,
         summary.added,
         summary.refreshed,
         summary.kept,
         summary.gone,
-        summary.gone_queued
+        summary.gone_queued,
     ));
 
     if empty {
@@ -1326,7 +1294,7 @@ pub async fn start_queued_render(
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
     if state.is_rendering.swap(true, Ordering::SeqCst) {
-        log_markdown("[render] start_queued_render rejected: a batch is already in progress");
+        log_markdown(crate::messages::render::START_REJECTED);
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
     let (config, starting) = match state.start_config() {
@@ -1358,10 +1326,7 @@ pub async fn start_queued_render(
         .await;
     }
 
-    log_markdown(&format!(
-        "[render] start_queued_render: starting scheduler on {} job(s)",
-        starting
-    ));
+    log_markdown(&crate::messages::render::scheduler_starting(starting));
     state.global_cancel.store(false, Ordering::SeqCst);
     *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
     spawn_scheduler(app, state.handles(), config);
@@ -1374,7 +1339,7 @@ pub async fn cancel_render_batch(
     app: AppHandle,
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
-    log_markdown("[render] cancel_render_batch requested");
+    log_markdown(crate::messages::render::CANCEL_BATCH_REQUESTED);
     if state.is_rendering.load(Ordering::SeqCst) {
         state.global_cancel.store(true, Ordering::SeqCst);
     } else {
@@ -1429,10 +1394,9 @@ pub async fn set_render_job_codec(
     // the frontend always sends the value that belongs with `codec` (empty
     // for every built-in codec), so there is nothing to special-case here.
     job.custom_codec_args = custom_codec_args.unwrap_or_default();
-    log_markdown(&format!(
-        "[render] set_render_job_codec {} -> {}",
-        job_id,
-        requested.to_str_id()
+    log_markdown(&crate::messages::render::job_codec_set(
+        &job_id,
+        requested.to_str_id(),
     ));
     // Into the autosave too, so a crash before this job renders recovers it
     // with the codec it was given, not the batch's (#85).
@@ -1454,10 +1418,7 @@ pub async fn cancel_render_job(
     state: tauri::State<'_, RenderManager>,
     job_id: String,
 ) -> Result<(), String> {
-    log_markdown(&format!(
-        "[render] cancel_render_job requested for {}",
-        job_id
-    ));
+    log_markdown(&crate::messages::render::cancel_job_requested(&job_id));
     let mut jobs = state.jobs.lock().unwrap();
     let mutated = if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
         job.cancel_flag.store(true, Ordering::Relaxed);
@@ -1515,7 +1476,7 @@ pub async fn remove_render_job(
     }
     jobs.remove(idx);
     drop(jobs);
-    log_markdown(&format!("[render] remove_render_job {} removed", job_id));
+    log_markdown(&crate::messages::render::job_removed(&job_id));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
@@ -1536,9 +1497,8 @@ pub async fn remove_non_rendering_render_jobs(
     if removed_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] remove_non_rendering_render_jobs removed {} job(s)",
-        removed_count
+    log_markdown(&crate::messages::render::non_rendering_removed(
+        removed_count,
     ));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
@@ -1556,15 +1516,11 @@ pub async fn remove_non_rendering_render_jobs(
 /// whatever the panel currently shows.
 fn log_requeued(state: &RenderManager, context: &str) {
     if state.is_rendering.load(Ordering::SeqCst) {
-        log_markdown(&format!(
-            "[render] {} queued; the running batch picks it up",
-            context
+        log_markdown(&crate::messages::render::requeued_into_running_batch(
+            context,
         ));
     } else {
-        log_markdown(&format!(
-            "[render] {} queued; waits for Start Render Batch",
-            context
-        ));
+        log_markdown(&crate::messages::render::requeued_waits_for_start(context));
     }
 }
 
@@ -1582,9 +1538,9 @@ pub async fn reset_render_job(
             requeue(job);
         }
     }
-    log_markdown(&format!(
-        "[render] reset_render_job {} (was {:?}) -> Queued",
-        job_id, previous_status
+    log_markdown(&crate::messages::render::job_reset(
+        &job_id,
+        &previous_status,
     ));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, &format!("reset_render_job {}", job_id));
@@ -1613,10 +1569,7 @@ pub async fn reset_all_render_jobs(
     if reset_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] reset_all_render_jobs: {} job(s) -> Queued",
-        reset_count
-    ));
+    log_markdown(&crate::messages::render::all_jobs_reset(reset_count));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, "reset_all_render_jobs");
     Ok(())
@@ -1653,10 +1606,9 @@ pub async fn cancel_render_jobs(
             }
         }
     }
-    log_markdown(&format!(
-        "[render] cancel_render_jobs: {} of {} ticked job(s) cancelled",
+    log_markdown(&crate::messages::render::ticked_jobs_cancelled(
         cancelled,
-        job_ids.len()
+        job_ids.len(),
     ));
     // A Queued job changed status outside the scheduler loop, which may not
     // be running at all; the loop handles a Rendering one's own update.
@@ -1687,10 +1639,9 @@ pub async fn reset_render_jobs(
     if reset_count == 0 {
         return Ok(());
     }
-    log_markdown(&format!(
-        "[render] reset_render_jobs: {} of {} ticked job(s) -> Queued",
+    log_markdown(&crate::messages::render::ticked_jobs_reset(
         reset_count,
-        job_ids.len()
+        job_ids.len(),
     ));
     emit_jobs_snapshot(&app, &state.jobs);
     log_requeued(&state, "reset_render_jobs");
@@ -1714,10 +1665,9 @@ pub async fn remove_render_jobs(
     if removed_count == 0 {
         return Ok(0);
     }
-    log_markdown(&format!(
-        "[render] remove_render_jobs: {} of {} ticked job(s) removed",
+    log_markdown(&crate::messages::render::ticked_jobs_removed(
         removed_count,
-        job_ids.len()
+        job_ids.len(),
     ));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
@@ -1733,7 +1683,7 @@ pub async fn clear_render_queue(
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
     if state.is_rendering.load(Ordering::SeqCst) {
-        log_markdown("[render] clear_render_queue: cancelling the running batch first");
+        log_markdown(crate::messages::render::CLEAR_QUEUE_CANCELLING);
         state.clear_on_finish.store(true, Ordering::SeqCst);
         state.global_cancel.store(true, Ordering::SeqCst);
         return Ok(());
@@ -1744,10 +1694,7 @@ pub async fn clear_render_queue(
         jobs.clear();
         count
     };
-    log_markdown(&format!(
-        "[render] clear_render_queue: {} row(s) removed",
-        count
-    ));
+    log_markdown(&crate::messages::render::queue_cleared(count));
     clear_batch_state_if_empty(&state);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
@@ -1792,21 +1739,8 @@ pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, St
 }
 
 fn export_pool_free_gb(directories: &[String]) -> f64 {
-    let mut total: u64 = 0;
-    for dir in directories {
-        let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
-        if free != u64::MAX {
-            total += free;
-        }
-    }
-    total as f64 / 1_073_741_824.0
-}
-
-#[derive(Serialize)]
-pub struct RenderAutosaveSummary {
-    pub source_folder: String,
-    pub pending_count: usize,
-    pub completed_count: usize,
+    let paths: Vec<PathBuf> = directories.iter().map(PathBuf::from).collect();
+    native::sys::disk::pool_free_bytes(&paths) as f64 / 1_073_741_824.0
 }
 
 #[tauri::command(async)]
@@ -1829,37 +1763,12 @@ pub fn check_render_autosave(
     recovery_summary(session)
 }
 
-/// What the recovery prompt offers, or `None` when every job had finished:
-/// a scan writes the autosave too, so a scan after a batch ended (or one
-/// whose takes were all rendered before) leaves a file with nothing left to
-/// render, and the prompt said "didn't finish cleanly" over "Pending: 0".
-fn recovery_summary(session: RenderSessionData) -> Option<RenderAutosaveSummary> {
-    let pending_count = session
-        .jobs
-        .iter()
-        .filter(|j| j.status == AutosaveJobStatus::Pending)
-        .count();
-    if pending_count == 0 {
-        return None;
-    }
-    let completed_count = session
-        .jobs
-        .iter()
-        .filter(|j| j.status == AutosaveJobStatus::Completed)
-        .count();
-    Some(RenderAutosaveSummary {
-        source_folder: session.source_folder,
-        pending_count,
-        completed_count,
-    })
-}
-
 #[tauri::command(async)]
 pub fn discard_render_autosave() -> Result<(), String> {
     match std::fs::remove_file(autosave_path()) {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(crate::messages::failed_to_discard_render_autosave(e)),
     }
 }
 
@@ -1895,142 +1804,21 @@ pub fn get_render_jobs(state: tauri::State<'_, RenderManager>) -> Vec<RenderJobV
     state.views()
 }
 
-/// The batch-wide settings a recovered batch takes from Settings, the same
-/// ones the Render tab puts in a scan's payload: the autosave doesn't hold
-/// them.
-struct RecoverySettings {
-    ffmpeg_path: Option<String>,
-    export_directories: Vec<String>,
-    max_concurrent_renders: i32,
-}
-
-impl From<&crate::settings_manager::AppSettings> for RecoverySettings {
-    fn from(s: &crate::settings_manager::AppSettings) -> Self {
-        Self {
-            ffmpeg_path: s.ffmpeg_path.clone(),
-            export_directories: s.render_export_dirs.clone(),
-            max_concurrent_renders: s.render_max_concurrent,
-        }
-    }
-}
-
-/// The `RenderConfig` Start needs for a recovered batch (#770): codec and
-/// fps from the autosave (each job also carries its own), FFmpeg, export
-/// pool and concurrency from current settings. A Queued job the autosave
-/// stored without its scanned take can't render, so that one needs a scan.
-fn recovered_config(
-    session: &RenderSessionData,
-    settings: &RecoverySettings,
-) -> Result<RenderConfig, String> {
-    if let Some(stub) = session
-        .jobs
-        .iter()
-        .find(|j| j.status == AutosaveJobStatus::Pending && j.clip.is_none())
-    {
-        return Err(crate::messages::recovered_batch_needs_scan(&format!(
-            "the frames and audio of {}",
-            stub.name
-        )));
-    }
-    Ok(RenderConfig {
-        ffmpeg_path: resolve_ffmpeg(settings.ffmpeg_path.as_ref())
-            .to_string_lossy()
-            .into_owned(),
-        source_folder: session.source_folder.clone(),
-        export_directories: settings
-            .export_directories
-            .iter()
-            .filter(|d| !d.trim().is_empty())
-            .map(PathBuf::from)
-            .collect(),
-        fps: session.fps.max(1),
-        target_codec: RenderCodec::from_str_id(&session.target_codec),
-        custom_codec_args: session.target_custom_codec_args.clone(),
-        // The Render tab's own range for this field.
-        max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
-    })
-}
-
-/// The autosave's jobs as rows: Completed ones Finished, Pending ones Queued.
-/// Each job recovers with its own codec/fps (#85): the snapshot records them
-/// per job, and `set_render_job_codec` updates it when a job's Skip toggle
-/// changes. A snapshot from before that falls back to the batch's.
-fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
-    session
-        .jobs
-        .iter()
-        .enumerate()
-        .map(|(i, rj)| {
-            let settings = session.job_settings(rj);
-            let (status, progress) = if rj.status == AutosaveJobStatus::Completed {
-                ("Finished".to_string(), 100u32)
-            } else {
-                ("Queued".to_string(), 0u32)
-            };
-            // Only worth a stat for a job that actually finished and has a real
-            // path recorded — a re-queued job has neither yet.
-            let output_size_bytes = (rj.status == AutosaveJobStatus::Completed
-                && !rj.output_path.is_empty())
-            .then(|| std::fs::metadata(&rj.output_path).ok().map(|m| m.len()))
-            .flatten();
-            RenderJobRuntime {
-                id: i.to_string(),
-                // The scanned clip when the autosave has it; otherwise a stub
-                // that a re-scan fills in.
-                clip: rj.clip.clone().unwrap_or_else(|| ClipData {
-                    clip_name: None,
-                    take_folder: rj.take_folder.clone(),
-                    clip_type: "single".to_string(),
-                    img_folder: String::new(),
-                    // The autosave snapshot stores take_folder/name/status only, so
-                    // this reconstruction cannot know which kind of take it was —
-                    // wav-and-frames or OBS-shaped — the same reason `img_folder`
-                    // and `video_file` are blank below. Guessing `Some("sound.wav")`
-                    // here used to be harmless when every take had one; now that an
-                    // OBS take legitimately has none, guessing would misrepresent
-                    // it. `None` matches the rest of this stub's "unknown, a
-                    // re-scan is what fills it in" treatment, and fails at
-                    // `run_render_job`'s clear "no audio source" guard instead of a
-                    // misleading "sound.wav not found" if resumed without a rescan.
-                    wav_file: None,
-                    base_name: rj.name.clone(),
-                    frame_count: 0,
-                    width: 0,
-                    height: 0,
-                    date: String::new(),
-                    video_file: None,
-                    alpha_folder: None,
-                }),
-                status,
-                speed: String::new(),
-                progress,
-                error_log: None,
-                output_path: rj.output_path.clone(),
-                output_size_bytes,
-                cancel_flag: Arc::new(AtomicBool::new(false)),
-                codec: RenderCodec::from_str_id(&settings.codec),
-                custom_codec_args: settings.custom_codec_args,
-                fps: settings.fps,
-                take_fps: native::hlcr::take_meta::recorded_fps(std::path::Path::new(
-                    &rj.take_folder,
-                )),
-                history: history_for(&rj.take_folder),
-                current_attempt: None,
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
+    use super::autosave::fixtures::{autosave_job, session, settings};
     use super::*;
 
     #[test]
-    fn renders_run_one_at_a_time_while_a_capture_runs() {
-        assert_eq!(concurrency_cap(4, false), 4);
-        assert_eq!(concurrency_cap(4, true), 1);
-        assert_eq!(concurrency_cap(0, false), 1);
-        assert_eq!(concurrency_cap(0, true), 1);
+    fn renders_while_a_capture_runs_follow_the_setting_within_the_batchs_own_number() {
+        assert_eq!(concurrency_cap(4, None), 4);
+        assert_eq!(concurrency_cap(4, Some(1)), 1);
+        assert_eq!(concurrency_cap(4, Some(3)), 3);
+        // Never more than the Render tab's own number, never none.
+        assert_eq!(concurrency_cap(2, Some(4)), 2);
+        assert_eq!(concurrency_cap(4, Some(0)), 1);
+        assert_eq!(concurrency_cap(0, None), 1);
+        assert_eq!(concurrency_cap(0, Some(1)), 1);
     }
 
     #[test]
@@ -2095,70 +1883,6 @@ mod tests {
         ];
         assert_eq!(last_finished_output(&history, "all"), None);
         assert_eq!(last_finished_output(&[], "all"), None);
-    }
-
-    fn clip(take_folder: &str) -> ClipData {
-        ClipData {
-            clip_name: None,
-            take_folder: take_folder.to_string(),
-            clip_type: "single".to_string(),
-            img_folder: "all".to_string(),
-            wav_file: Some("sound.wav".to_string()),
-            base_name: "take".to_string(),
-            frame_count: 300,
-            width: 1920,
-            height: 1080,
-            date: String::new(),
-            video_file: None,
-            alpha_folder: None,
-        }
-    }
-
-    fn autosave_job(name: &str, status: AutosaveJobStatus, with_clip: bool) -> AutosaveJob {
-        let take_folder = format!("Z:/no-such-takes/{}", name);
-        AutosaveJob {
-            output_path: String::new(),
-            status,
-            name: name.to_string(),
-            codec: Some("h264".to_string()),
-            custom_codec_args: Some(String::new()),
-            fps: Some(60),
-            clip: with_clip.then(|| clip(&take_folder)),
-            take_folder,
-        }
-    }
-
-    fn session(jobs: Vec<AutosaveJob>) -> RenderSessionData {
-        RenderSessionData {
-            source_folder: "Z:/no-such-takes".to_string(),
-            fps: 300,
-            target_codec: "prores".to_string(),
-            target_custom_codec_args: String::new(),
-            jobs,
-        }
-    }
-
-    fn settings() -> RecoverySettings {
-        RecoverySettings {
-            ffmpeg_path: None,
-            export_directories: vec!["E:/exports".to_string(), "  ".to_string()],
-            max_concurrent_renders: 3,
-        }
-    }
-
-    #[test]
-    fn the_recovery_prompt_needs_a_job_left_to_render() {
-        let done = session(vec![
-            autosave_job("a", AutosaveJobStatus::Completed, true),
-            autosave_job("b", AutosaveJobStatus::Completed, true),
-        ]);
-        assert!(recovery_summary(done).is_none());
-        let summary = recovery_summary(session(vec![
-            autosave_job("a", AutosaveJobStatus::Completed, true),
-            autosave_job("b", AutosaveJobStatus::Pending, true),
-        ]))
-        .expect("a pending job is worth recovering");
-        assert_eq!((summary.pending_count, summary.completed_count), (1, 1));
     }
 
     #[test]

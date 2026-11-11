@@ -275,6 +275,23 @@ test('the install\'s gl_max_size names where it comes from, and warns below the 
   await expect(line).toContainText('Copy the gl_max_size line above into movie.cfg');
 });
 
+test('a style built with an older version says so, and only that style (#1155)', async ({ page }) => {
+  const outdated = [{ style: 'ultrasharp', step: 'killfeed_icons' }];
+  await loadHarness(page, { status: { ...STATUS, outdated } });
+  await page.click('#hd-refresh-btn');
+  const box = page.locator('#hd-outdated');
+  await expect(box).toHaveJSProperty('hidden', false);
+  await expect(box.locator('p')).toHaveCount(1);
+  await expect(box).toContainText('ultrasharp was built with an older version');
+  await expect(box).toContainText('the new kill-feed icons (about 5 minutes)');
+  await expect(box).not.toContainText('plain');
+
+  // Built up to date (or an older backend with no report): no line.
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-outdated')).toHaveJSProperty('hidden', true);
+});
+
 test('build progress, the finished line, and cancel', async ({ page }) => {
   await loadHarness(page, { status: STATUS });
   await page.click('#hd-refresh-btn');

@@ -80,3 +80,26 @@ test('a matching game, no game, or a failed check asks nothing', async ({ page }
   await page.evaluate(() => window.__guard(null));
   await expect(page.locator('#result')).toHaveText('true');
 });
+
+test('another hook DLL is named, with both paths and builds in the list (#1143)', async ({ page }) => {
+  const hookA = 'C:/Repos/dod-studio/local/test-660/dodstudio_goldsrc_hooks.dll';
+  const hookB = 'C:/Repos/dod-studio/local/test-660b/dodstudio_goldsrc_hooks.dll';
+  await loadHarness(page, {
+    ...MISMATCH,
+    running: { ...MISMATCH.running, hook_dll: hookA, hook_label: 'test-660', hook_build: '0.10.0+aaa' },
+    wanted: { ...MISMATCH.wanted, hook_dll: hookB, hook_label: 'test-660b', hook_build: '0.10.0+bbb' },
+    differs: ['hook_dll'],
+  });
+  page.evaluate(() => window.__guard(null));
+  await expect(page.locator('#themed-confirm-message')).toHaveText(
+    'Day of Defeat is running with the hook DLL from "test-660"; '
+    + 'DoD Studio is set to the hook DLL from "test-660b". '
+    + 'The game only takes these when it starts. Close it and start again?',
+  );
+  await expect(page.locator('#themed-confirm-details')).toContainText(`${hookA} (build 0.10.0+aaa)`);
+  await expect(page.locator('#themed-confirm-details')).toContainText(`${hookB} (build 0.10.0+bbb)`);
+  await page.click('#themed-confirm-ok-btn');
+  await expect(page.locator('#result')).toHaveText('true');
+  const closes = await invoked(page, 'close_running_game');
+  expect(closes.map((c) => c.args)).toEqual([{ pid: 4242 }]);
+});

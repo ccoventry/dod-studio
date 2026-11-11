@@ -123,6 +123,13 @@ impl SprintTurn {
         }
     }
 
+    /// He let go of sprint (`snapshot_motion::let_go_of_sprint`): the sprint
+    /// is over, with no hold, even while the gait still reads sprint.
+    pub(super) fn let_go(&mut self) {
+        self.sprinting = false;
+        self.hold_until = None;
+    }
+
     pub(super) fn reset(&mut self) {
         *self = Self::default();
     }
@@ -140,6 +147,11 @@ pub(super) fn note_snapshot(time: f64, x: f32, y: f32) {
 /// [`SprintTurn::lowered`] on the engine thread's state.
 pub(super) fn lowered(sprint_gait: bool, now: f64) -> bool {
     STATE.with(|s| s.borrow_mut().lowered(sprint_gait, now))
+}
+
+/// [`SprintTurn::let_go`] on the engine thread's state.
+pub(super) fn let_go() {
+    STATE.with(|s| s.borrow_mut().let_go());
 }
 
 /// The camera moved to another player.

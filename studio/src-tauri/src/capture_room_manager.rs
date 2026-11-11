@@ -10,8 +10,8 @@
 //!   checks the drive every second until `may_resume` says go.
 //! - **A clip stops recording** (`STOP_RECORD`): once its take stops growing
 //!   it is sent to the frontend (`capture_clip_ready`), which queues its
-//!   render; the Render tab runs one render at a time while the capture runs
-//!   and deletes each take as its clip finishes, per "After a clip is
+//!   render; the Render tab runs up to "Renders at once" of them while the
+//!   capture runs (one by default) and deletes each take as its clip finishes, per "After a clip is
 //!   finished" (#644).
 //! - **Held and it can never fit** (every pending take rendered and deleted
 //!   would still leave it short, or nothing is rendering any more): the batch
@@ -91,6 +91,11 @@ struct State {
     ratio: OutputRatio,
     /// Blocks recorded so far, with what they held once settled.
     recorded: Vec<(usize, u64)>,
+    /// Partial takes (#1105), with what they hold: kept for the user and
+    /// never deleted from here, so a hold never counts on their space.
+    partial: Vec<(usize, u64)>,
+    /// Take folders OBS started recording late (#1109): partial takes too.
+    started_late: Vec<PathBuf>,
     /// The block recording now, if any.
     recording: Option<usize>,
     /// A watcher is running.
@@ -103,6 +108,40 @@ struct State {
     /// The block the next `START_RECORD` / `STOP_RECORD` is looked for from.
     next_start: usize,
     next_stop: usize,
+}
+
+impl State {
+    /// Block `index`'s take settled holding `settled` bytes (`None`: it
+    /// didn't). A whole take is a pending one a render will free, and teaches
+    /// the size model; a partial one is never rendered or deleted from here,
+    /// so it stays out of both and a hold never waits for its space.
+    fn take_settled(&mut self, index: usize, ticks: u64, settled: Option<u64>, partial: bool) {
+        self.settling = self.settling.saturating_sub(1);
+        if self.recording == Some(index) {
+            self.recording = None;
+        }
+        match settled {
+            Some(bytes) if partial => self.partial.push((index, bytes)),
+            Some(bytes) => {
+                self.sizes.learn(bytes, ticks);
+                self.recorded.push((index, bytes));
+            }
+            None => {}
+        }
+    }
+}
+
+/// What a hold that gives up adds about the partial takes on its drive:
+/// space it could never get back, since they are kept for the user.
+fn partial_note(partial_bytes: u64, count: usize) -> String {
+    if count == 0 {
+        return String::new();
+    }
+    format!(
+        " ({} of the drive is {count} partial take{} kept for you to check, which Studio never deletes)",
+        format_gb(partial_bytes),
+        if count == 1 { "" } else { "s" }
+    )
 }
 
 /// One look at the drive before a clip boundary.
@@ -189,7 +228,20 @@ pub(crate) fn enabled(app: &AppHandle) -> bool {
         .render_while_capturing
 }
 
+/// How many renders run at once beside the capture, from the saved
+/// settings: 1 to 4.
+fn renders_beside(app: &AppHandle) -> usize {
+    app.state::<SettingsManager>()
+        .inner
+        .lock()
+        .unwrap()
+        .renders_while_capturing
+        .clamp(1, 4)
+}
+
 impl CaptureRoom {
+    // Constructor taking the room's inputs, each independent of the others.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         app: AppHandle,
         blocks: &[CaptureBlock],
@@ -200,15 +252,13 @@ impl CaptureRoom {
         cancel: Arc<AtomicBool>,
         can_hold: bool,
     ) -> Arc<Self> {
-        app.state::<RenderManager>().set_while_capturing(true);
-        log_markdown(&format!(
-            "[render-while-capturing] on for {} clip(s): each take renders once recorded, one render at a time{}",
+        let renders = renders_beside(&app);
+        app.state::<RenderManager>()
+            .set_while_capturing(true, renders);
+        log_markdown(&crate::messages::capture::room_on(
             blocks.len(),
-            if can_hold {
-                ", and the batch holds between clips when the next one would not fit"
-            } else {
-                "; this batch is patched, so it can't hold for space"
-            }
+            renders,
+            can_hold,
         ));
         Arc::new(Self {
             app,
@@ -226,7 +276,9 @@ impl CaptureRoom {
     /// The batch ended, however it ended.
     pub(crate) fn finish(&self) {
         self.hold.store(false, Ordering::Relaxed);
-        self.app.state::<RenderManager>().set_while_capturing(false);
+        self.app
+            .state::<RenderManager>()
+            .set_while_capturing(false, 1);
         let _ = self
             .app
             .emit("capture_room_status", serde_json::Value::Null);
@@ -289,10 +341,7 @@ impl CaptureRoom {
         let state = self.lock();
         let next_bytes = self.clip_bytes(&state, next)?;
         let folder = &self.blocks[next].folder;
-        let free = native::sys::disk::get_available_bytes(existing_ancestor(folder));
-        if free == u64::MAX {
-            return None;
-        }
+        let free = native::sys::disk::get_available_bytes(existing_ancestor(folder))?;
         let pending = self.pending_on(&state, &volume_of(folder), policy(&self.app));
         let inputs = RoomInputs {
             free_bytes: free,
@@ -345,12 +394,11 @@ impl CaptureRoom {
         if check.decision == RoomDecision::Continue {
             return;
         }
-        log_markdown(&format!(
-            "[render-while-capturing] Clip {} needs {} free with the one recording now (free {}): {:?}. Holding the batch after this clip.",
+        log_markdown(&crate::messages::capture::room_holding_after_clip(
             index + 2,
             format_gb(check.needed),
             format_gb(check.free),
-            check.decision
+            check.decision,
         ));
         self.hold.store(true, Ordering::Relaxed);
         self.lock().watching = true;
@@ -374,33 +422,45 @@ impl CaptureRoom {
         let room = Arc::clone(self);
         std::thread::spawn(move || {
             let settled = settle(&block.folder, &room.cancel);
-            {
-                let mut state = room.lock();
-                state.settling = state.settling.saturating_sub(1);
-                if state.recording == Some(index) {
-                    state.recording = None;
-                }
-                if let Some(bytes) = settled {
-                    state.sizes.learn(bytes, block.ticks);
-                    state.recorded.push((index, bytes));
-                }
-            }
+            // A take that stopped writing early (#1105) is partial: never
+            // rendered (and so never deleted) from here, nor learned from.
+            // Take verification after the batch calls it out.
+            let short = settled.and_then(|_| {
+                native::hlcr::take_length::short_take(&block.folder, room.capture_fps)
+            });
+            let started_late = room.lock().started_late.contains(&block.folder);
+            room.lock()
+                .take_settled(index, block.ticks, settled, short.is_some() || started_late);
             let Some(bytes) = settled else {
                 // Nothing there, still changing, or the batch was cancelled:
                 // the finish step after the batch sees it, as without this
                 // setting. A take still being written is never rendered (and
                 // so never deleted) from here.
-                log_markdown(&format!(
-                    "[render-while-capturing] Clip {} at {} didn't settle into a take to render; left for after the batch",
+                log_markdown(&crate::messages::capture::room_clip_did_not_settle(
                     index + 1,
-                    block.folder.display()
+                    block.folder.display(),
                 ));
                 return;
             };
-            log_markdown(&format!(
-                "[render-while-capturing] Clip {} recorded ({}); queueing its render",
+            if started_late {
+                log_markdown(&crate::messages::capture::room_clip_started_late(
+                    index + 1,
+                    block.folder.display(),
+                ));
+                return;
+            }
+            if let Some(short) = short {
+                log_markdown(&crate::messages::capture::room_clip_stopped_early(
+                    index + 1,
+                    block.folder.display(),
+                    short.video_secs,
+                    short.audio_secs,
+                ));
+                return;
+            }
+            log_markdown(&crate::messages::capture::room_clip_recorded(
                 index + 1,
-                format_gb(bytes)
+                format_gb(bytes),
             ));
             let _ = room.app.emit(
                 "capture_clip_ready",
@@ -417,6 +477,13 @@ impl CaptureRoom {
         });
     }
 
+    /// OBS started recording the clip at `folder` after its first frame
+    /// (#1109): its take is partial, so it is never rendered from here.
+    /// Comes at the clip's `START_RECORD`, before its take settles.
+    pub(crate) fn clip_started_late(&self, folder: &Path) {
+        self.lock().started_late.push(folder.to_path_buf());
+    }
+
     /// The game held (`BATCH_HELD`) or went on (`BATCH_GOING`). The hook
     /// repeats `BATCH_HELD` while it holds, to notice a Studio that has gone,
     /// so only a change is logged.
@@ -424,7 +491,7 @@ impl CaptureRoom {
         let was = std::mem::replace(&mut self.lock().held, held);
         self.app.state::<RenderManager>().set_capture_held(held);
         if held && !was {
-            log_markdown("[render-while-capturing] The batch is holding between clips");
+            log_markdown(crate::messages::capture::ROOM_BATCH_HOLDING);
         }
     }
 
@@ -483,11 +550,10 @@ impl CaptureRoom {
             }
 
             if check.resume {
-                log_markdown(&format!(
-                    "[render-while-capturing] Room for clip {} ({} free); going on after {:.0} s",
+                log_markdown(&crate::messages::capture::room_going_on(
                     next + 1,
                     format_gb(free),
-                    started.elapsed().as_secs_f64()
+                    started.elapsed().as_secs_f64(),
                 ));
                 self.hold.store(false, Ordering::Relaxed);
                 break;
@@ -515,9 +581,10 @@ impl CaptureRoom {
                         format_gb(short)
                     ),
                 };
-                log_markdown(&format!(
-                    "[render-while-capturing] Stopping the batch before clip {}: {why}. The clips recorded so far are kept.",
-                    next + 1
+                let why = why + &self.partial_on_drive(next);
+                log_markdown(&crate::messages::capture::room_stopping_batch(
+                    next + 1,
+                    &why,
                 ));
                 let _ = self.app.emit(
                     "capture_room_stopped",
@@ -541,6 +608,18 @@ impl CaptureRoom {
         let _ = self
             .app
             .emit("capture_room_status", serde_json::Value::Null);
+    }
+
+    /// [`partial_note`] for the partial takes on block `next`'s drive.
+    fn partial_on_drive(&self, next: usize) -> String {
+        let state = self.lock();
+        let on_drive: Vec<u64> = state
+            .partial
+            .iter()
+            .filter(|&&(i, _)| self.same_drive(i, next))
+            .map(|&(_, bytes)| bytes)
+            .collect();
+        partial_note(on_drive.iter().sum(), on_drive.len())
     }
 
     /// Learns clip bytes per take byte from this batch's finished renders.
@@ -637,6 +716,8 @@ mod tests {
             end_tick: stop,
             record_start_tick: start,
             record_stop_tick: stop,
+            ramped_gaps: 0,
+            plan: None,
         }
     }
 
@@ -666,6 +747,50 @@ mod tests {
         std::fs::write(dir.join("video.avi"), b"frames").unwrap();
         assert_eq!(settle(&dir, &cancel), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A partial take (#1105) is kept, never rendered or deleted from here:
+    /// a hold that only its space could end gives up at once instead of
+    /// waiting for it, and says why.
+    #[test]
+    fn a_partial_take_is_never_counted_on_to_free_space() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut state = State {
+            settling: 2,
+            recording: Some(1),
+            ..State::default()
+        };
+        state.take_settled(0, 100, Some(4 * GB), false);
+        state.take_settled(1, 100, Some(5 * GB), true);
+        assert_eq!(state.settling, 0);
+        assert_eq!(state.recording, None);
+        assert_eq!(state.recorded, vec![(0, 4 * GB)]);
+        assert_eq!(state.partial, vec![(1, 5 * GB)]);
+
+        // Held with only the partial take on the drive: the pending list
+        // (built from `recorded`) has nothing that will free space.
+        let inputs = RoomInputs {
+            free_bytes: GB,
+            headroom_bytes: GB,
+            writing_bytes: 0,
+            next_clip_bytes: 3 * GB,
+            pending: &[],
+            output_ratio: None,
+        };
+        assert!(matches!(decide(&inputs), RoomDecision::CannotFit { .. }));
+        assert_eq!(
+            partial_note(5 * GB, 1),
+            format!(
+                " ({} of the drive is 1 partial take kept for you to check, which Studio never deletes)",
+                format_gb(5 * GB)
+            )
+        );
+        assert_eq!(partial_note(0, 0), "");
+
+        // A take that never settled is in neither list.
+        state.settling = 1;
+        state.take_settled(2, 100, None, false);
+        assert_eq!((state.recorded.len(), state.partial.len()), (1, 1));
     }
 
     #[test]

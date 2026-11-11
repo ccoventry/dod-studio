@@ -11,10 +11,12 @@ import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
-import { multiMapSplitButton } from './queue_multimap.js';
+import { multiMapHint } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { renderQueueTotals } from './queue_totals.js';
 import { matchesInQueue } from './queue_match_groups.js';
 import { groupDemos, currentGroupBy } from './queue_group_by.js';
+import { sortDemos, currentSortBy } from './queue_sort_by.js';
 import { makeClearable } from './clearable_input.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
@@ -65,6 +67,9 @@ let currentOnLocateDemo = null;
 let currentOnUseFoundCopy = null;
 // main.js's handler for a multi-map demo's Split button (#217).
 let currentOnSplitDemo = null;
+// demo_context_menu.js's handler for a row's right-click / Menu key (#1111).
+let currentOnRowMenu = null;
+let lastMenuKeyAt = -Infinity;
 let currentSearchTerm = '';
 // #174: the player picked in the header's player filter ('' = everyone), and
 // the recorders looked up for demos scanned before a scan stored one
@@ -81,6 +86,34 @@ const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false, trackedOnly: f
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
 const checkedPaths = new Set();
+
+/** Registers what a row's context menu opens (demo_context_menu.js). Called
+ *  with `{ demo, row, select, at, fromKeyboard }`. */
+export function setDemoRowMenuHandler(handler) {
+  currentOnRowMenu = handler;
+}
+
+/** Selects `demo` as a left click on its row would. A queue re-render while
+ *  the menu was open leaves `tr` detached with an index that may no longer be
+ *  the demo's, so the index is looked up again. False when the demo is gone. */
+function selectForMenu(demo, tr) {
+  const idx = currentDemos.indexOf(demo);
+  if (idx === -1) return false;
+  if (tr.isConnected) tr.click();
+  else if (currentOnSelectDemo) currentOnSelectDemo(demo, idx);
+  return true;
+}
+
+/** Opens the row's menu at the pointer, or for the keyboard beside the row. */
+function openRowMenu(demo, tr, e, fromKeyboard) {
+  if (!currentOnRowMenu) return;
+  let at = { x: e.clientX, y: e.clientY };
+  if (fromKeyboard) {
+    const box = tr.getBoundingClientRect();
+    at = { x: box.left + 32, y: box.bottom };
+  }
+  currentOnRowMenu({ demo, row: tr, select: () => selectForMenu(demo, tr), at, fromKeyboard });
+}
 
 /** Who recorded `demo` ({ id, name }), or null: HLTV, no resolvable owner,
  *  or an older demo whose lookup hasn't come back yet. */
@@ -352,6 +385,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   if (!currentDemos || currentDemos.length === 0) {
     tableBody.innerHTML =
       `<tr><td colspan="7" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_DEMOS_IN_DIRS}</td></tr>`;
+    renderQueueTotals([], 0);
     // Notify only on the transition INTO empty, not on every re-render of an
     // already-empty queue. Without this guard, a currentOnSelectDemo(null,
     // null) implementation that calls renderDetailView (Load Session's does)
@@ -374,6 +408,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   }
 
   const filteredDemos = getVisibleDemos();
+  renderQueueTotals(filteredDemos, currentDemos.length);
 
   if (filteredDemos.length === 0) {
     tableBody.innerHTML =
@@ -389,12 +424,13 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   Array.from(checkedPaths).forEach(p => { if (!allPaths.has(p)) checkedPaths.delete(p); });
   syncClearSelectedButtonState();
 
-  // Group by (#685, #823): the visible demos in groups, a header line before
-  // each group; otherwise the queue's own order. Either way the same demos.
-  const groups = groupDemos(filteredDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
+  // Sort by, then Group by (#685, #823): the visible demos in groups, a header
+  // line before each group, sorted inside each. Either way the same demos.
+  const sortedDemos = sortDemos(filteredDemos, currentSortBy());
+  const groups = groupDemos(sortedDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
   const rows = groups
     ? groups.flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
-    : filteredDemos.map((demo) => ({ demo }));
+    : sortedDemos.map((demo) => ({ demo }));
 
   rows.forEach(({ header, demo }) => {
     if (header) {
@@ -417,7 +453,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
 
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #333';
+    tr.style.borderBottom = '1px solid var(--border-soft)';
     tr.style.cursor = 'pointer';
 
     if (selectedDemoIdx === originalIdx) {
@@ -448,7 +484,6 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdName = document.createElement('td');
     tdName.style.padding = '6px 8px';
     tdName.style.fontWeight = 'bold';
-    tdName.style.maxWidth = '200px';
     tdName.style.display = 'flex';
     tdName.style.alignItems = 'center';
     tdName.style.gap = '5px';
@@ -471,11 +506,11 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
     // Set by main.js's missing-demo check on project load (#21).
     if (demo.missing) {
-      nameSpan.style.color = '#ef5350';
+      nameSpan.style.color = 'var(--danger-light)';
       const missingBadge = document.createElement('span');
       missingBadge.textContent = STRINGS.WORKSPACE.MISSING_BADGE;
       missingBadge.title = STRINGS.WORKSPACE.missingBadgeTitle(demo.path);
-      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:#ef5350;border:1px solid #ef5350;border-radius:2px;padding:0 4px;cursor:help;';
+      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:var(--danger-light);border:1px solid var(--danger-light);border-radius:2px;padding:0 4px;cursor:help;';
       tdName.appendChild(missingBadge);
     }
 
@@ -487,15 +522,15 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const cameraBadge = noCameraDataBadge(demo);
     if (cameraBadge) tdName.appendChild(cameraBadge);
 
-    // More than one map: the game stops at the first map change (#217).
-    const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
-    if (splitBtn) tdName.appendChild(splitBtn);
+    // More than one map: only the first is used until it's split (#217).
+    const multiMap = multiMapHint(demo, currentOnSplitDemo);
+    if (multiMap) tdName.appendChild(multiMap);
 
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {
       const badge = document.createElement('span');
       badge.innerHTML = TRACKED_ICON_SVG;
-      badge.style.color = '#ffa726';
+      badge.style.color = 'var(--warn-orange)';
       badge.style.flexShrink = '0';
       badge.style.display = 'inline-flex';
       const reasons = describeTrackedReasons(demo);
@@ -514,7 +549,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdSelected = document.createElement('td');
     tdSelected.style.padding = '6px 8px';
     tdSelected.style.textAlign = 'center';
-    tdSelected.style.color = selected > 0 ? '#64b5f6' : '#555';
+    tdSelected.style.color = selected > 0 ? 'var(--info-light)' : 'var(--text-dim)';
     tdSelected.textContent = selected;
 
     // Col 5: Status, Pending / Captured / Rendered in one cell; col 6: Review,
@@ -611,6 +646,24 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       tr.classList.add('table-row-selected');
       quickFilters.keepPath = demo.path;
       if (currentOnSelectDemo) currentOnSelectDemo(demo, originalIdx);
+    });
+
+    // Right-click, or the Menu key / Shift+F10 on the focused row (#1111).
+    // A menu key press also raises a contextmenu event of its own, which the
+    // keydown has already answered.
+    // -1: a click focuses the row (so the Menu key works) but Tab still goes
+    // straight from checkbox to Remove instead of stopping on every row.
+    tr.tabIndex = -1;
+    tr.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (performance.now() - lastMenuKeyAt < 600) return;
+      openRowMenu(demo, tr, e, e.clientX === 0 && e.clientY === 0);
+    });
+    tr.addEventListener('keydown', (e) => {
+      if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+      e.preventDefault();
+      lastMenuKeyAt = performance.now();
+      openRowMenu(demo, tr, e, true);
     });
 
     tableBody.appendChild(tr);

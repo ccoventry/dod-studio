@@ -84,6 +84,10 @@ jobs:
             cat "$RUNNER_TEMP/release_notes.md"
             echo "RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
           } >> "$GITHUB_OUTPUT"
+          # The same notes go in the app for its What's new window (#1013):
+          # Vite copies studio/public/ beside index.html, readable offline.
+          mkdir -p studio/public
+          cp "$RUNNER_TEMP/release_notes.md" studio/public/release_notes.md
 
       # Nothing is published from a tree CI hasn't passed. CI already ran every
       # test on this code before it merged, so this asks GitHub for those

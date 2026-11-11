@@ -21,7 +21,10 @@ pub mod shared;
 pub mod sys;
 pub mod utils;
 
-mod messages;
+/// The app's text; public only so the command-line binaries can print from it
+/// (#237).
+#[doc(hidden)]
+pub mod messages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
@@ -44,15 +47,14 @@ pub mod demo_maps_scan;
 /// Splitting a demo that recorded more than one map (#624).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
+/// Whether a demo's maps were already split next to it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split_status;
 
 /// The Demo Auditor's renamer: facts, renames and the undo log (#469).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
-/// Linking a demo folder on another drive into the game folder, so
-/// `viewdemo` can play from it in place (#376).
-#[cfg(windows)]
-pub mod demo_links;
 /// Which match and half each demo of a list is (#685).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod match_groups;
@@ -66,6 +68,11 @@ pub mod preview_in_place;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_bar_res;
 
+/// The louder headshot sounds, written into `dod_addon` at every launch
+/// from the game's own (#1353).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headshot_louder;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
@@ -73,6 +80,10 @@ pub mod hd;
 /// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blender;
+
+/// Installing the VEGAS Pro nameplate script into its script menu (#429).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod vegas;
 
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
@@ -126,6 +137,20 @@ pub fn run_analyzer_with_progress<F>(
 where
     F: FnMut(usize, usize),
 {
+    run_analyzer_decoding(demo_path, analysis::Sounds::Skip, progress_cb)
+}
+
+/// `run_analyzer_with_progress`, decoding the demo's sounds or not
+/// (`analysis::Sounds`: the same analysis either way).
+#[cfg(not(target_arch = "wasm32"))]
+fn run_analyzer_decoding<F>(
+    demo_path: &PathBuf,
+    sounds: analysis::Sounds,
+    progress_cb: F,
+) -> Result<(FileInfo, Analysis), String>
+where
+    F: FnMut(usize, usize),
+{
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
@@ -136,7 +161,7 @@ where
     file.read_to_end(&mut bytes)
         .map_err(|e| format!("Could not read {}: {}", demo_path.display(), e))?;
 
-    let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
+    let analysis = Analysis::try_from_bytes_decoding(bytes.as_slice(), sounds, progress_cb)?;
     let file_info = FileInfo::of(demo_path)?;
 
     Ok((file_info, analysis))
@@ -168,11 +193,26 @@ pub fn run_analyzer_cached<F>(
 where
     F: FnMut(usize, usize),
 {
+    run_analyzer_cached_decoding(demo_path, analysis::Sounds::Skip, progress_cb)
+}
+
+/// `run_analyzer_cached`, decoding the demo's sounds or not on a miss.
+/// Every caller skips them (#37), the default; the entry is the same either
+/// way, since no analyzer reads a sound.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_analyzer_cached_decoding<F>(
+    demo_path: &PathBuf,
+    sounds: analysis::Sounds,
+    progress_cb: F,
+) -> Result<(FileInfo, Analysis, bool), String>
+where
+    F: FnMut(usize, usize),
+{
     let root = analyzer_cache_root();
     if let Some((file_info, analysis)) = analysis::cache::load(&root, demo_path) {
         return Ok((file_info, analysis, true));
     }
-    let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
+    let (file_info, analysis) = run_analyzer_decoding(demo_path, sounds, progress_cb)?;
     store_in_analyzer_cache(&root, demo_path, &file_info, &analysis);
     Ok((file_info, analysis, false))
 }

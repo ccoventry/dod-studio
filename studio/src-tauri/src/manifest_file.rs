@@ -1,17 +1,20 @@
 // manifest_file.rs
 // The capture manifest on disk (#19): `%APPDATA%\dod-studio\manifests\<session_id>.json`.
 //
-// A diagnostic record, not crash recovery (that is #20's lockfile). The
-// in-memory `CaptureManifest` is what correlates takes to blocks while the app
-// runs; once the process is gone nothing of it was left behind, so an
-// unmatched take or an ordering bug could not be looked into after the fact.
+// A diagnostic record, and since #545 and #20 the capture batch's recovery
+// record too: a separate lockfile would only repeat it. The in-memory
+// `CaptureManifest` is what correlates takes to blocks while the app runs;
+// once the process is gone nothing of it was left behind, so an unmatched take
+// or an ordering bug could not be looked into after the fact.
 //
 // Written twice per batch: once when the batch is planned (`outcome:
-// "planned"`, no verdicts), and again when it ends (`"complete"` or
-// `"cancelled"`, with each block's verification verdict). A batch that dies in
-// between leaves the planned file, which is itself the useful signal. Since
+// "planned"`, no verdicts), and again when it ends (`"complete"`,
+// `"cancelled"`, or `"error"` for one that failed after a demo played, with
+// each block's verification verdict). A batch that dies in between, or fails
+// before the game played anything, leaves the planned file, which is itself the useful signal. Since
 // #545 it is also how Studio catches up on a batch that ran while it was
-// closed (`batch_catch_up`), which rewrites the file as `"unwatched"`.
+// closed (`batch_catch_up`), which rewrites the file as `"unwatched"`, and
+// offers to capture the clips it never got to (`batch_resume.js`, #20).
 //
 // Best-effort throughout: a failed write is logged and never fails a batch.
 
@@ -25,7 +28,7 @@ const KEEP_MANIFESTS: usize = 50;
 #[derive(Serialize)]
 struct ManifestFile<'a> {
     session_id: &'a str,
-    /// "planned", "complete", "cancelled" or "unwatched".
+    /// "planned", "complete", "cancelled", "error" or "unwatched".
     outcome: &'a str,
     /// Seconds since the Unix epoch.
     written_at_unix: u64,
@@ -114,10 +117,9 @@ pub(crate) fn write_in(
             Some(path)
         }
         Err(e) => {
-            native::log_markdown(&format!(
-                "Could not write the capture manifest to {}: {}",
+            native::log_markdown(&crate::messages::batch::manifest_not_written(
                 dir.display(),
-                e
+                e,
             ));
             None
         }

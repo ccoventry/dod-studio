@@ -4,6 +4,9 @@
 // checklist card (setup_card.js) both read one answer from here, so they
 // never disagree about what is done. No DOM, no IPC.
 
+import { fileNameOf } from './path_display.js';
+import { BYTES_PER_MB, BYTES_PER_GB, BYTES_PER_TB } from './byte_size.js';
+
 /** The steps in the order the Setup window walks them. */
 export const SETUP_STEPS = ['hl', 'hlae', 'ffmpeg', 'captures', 'renders', 'demos'];
 
@@ -38,7 +41,7 @@ export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };
 /** The file name of `path` when it is not `expected` (case doesn't matter),
  *  else ''. A blank path is not wrong, only unset. */
 export function wrongExeName(path, expected) {
-  const name = (path || '').trim().split(/[\\/]/).pop();
+  const name = fileNameOf((path || '').trim());
   return name && name.toLowerCase() !== expected.toLowerCase() ? name : '';
 }
 
@@ -137,11 +140,11 @@ export function driveLabel(path) {
 /** Bytes as "412 GB" or "1.6 TB"; under a gigabyte in MB. */
 export function formatBytes(bytes) {
   if (typeof bytes !== 'number' || !(bytes >= 0)) return '';
-  const tb = bytes / 1024 ** 4;
+  const tb = bytes / BYTES_PER_TB;
   if (tb >= 1) return `${tb < 10 ? tb.toFixed(1) : Math.round(tb)} TB`;
-  const gb = bytes / 1024 ** 3;
+  const gb = bytes / BYTES_PER_GB;
   if (gb >= 1) return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`;
-  return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.round(bytes / BYTES_PER_MB)} MB`;
 }
 
 /** The movie install's demo folder: `dod` beside hl.exe. '' with no path. */

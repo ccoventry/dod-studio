@@ -19,7 +19,7 @@ const ROWS = [
   { key: 'sides', both: ['faction', 'enemy_faction'] },
   { key: 'teams', both: ['team_name', 'opponent', 'allies', 'axis', 'team1', 'team2'] },
   { key: 'demo', both: ['map', 'date', 'demo_type', 'demo', 'half', 'match'] },
-  { key: 'highlight', clip: ['kills', 'weapons', 'first_weapon', 'victims', 'first_victim', 'row', 'time'] },
+  { key: 'highlight', clip: ['kills', 'headshots', 'weapons', 'first_weapon', 'victims', 'first_victim', 'row', 'time'] },
 ];
 
 /** The chip rows of one template (`'clip'` or `'demo'`): `[{ key, names }]`,

@@ -27,8 +27,9 @@ pub struct TakeDeletion {
     pub take_folder: PathBuf,
     /// `<session>/<block>`, the key the take index and the clip names use.
     pub take_key: String,
-    /// What goes to the Recycle Bin: the folder itself, or everything in it
-    /// but `dodstudio_take.json` when the folder holds that file.
+    /// What goes to the Recycle Bin: the folder itself (and the OBS state
+    /// file beside it), or everything in it but `dodstudio_take.json` when
+    /// the folder holds that file.
     pub recycle: Vec<PathBuf>,
     /// The size on disk of everything in `recycle`.
     pub size_bytes: u64,
@@ -55,86 +56,92 @@ pub fn plan_take_deletion(
 /// strictly inside a Destinations folder.
 pub fn check_take_folder(take_folder: &Path, capture_dirs: &[PathBuf]) -> Result<String, String> {
     if !take_folder.is_absolute() {
-        return Err(format!(
-            "{} isn't a full path, so it was not deleted",
-            take_folder.display()
+        return Err(crate::messages::take_delete::not_a_full_path(
+            take_folder.display(),
         ));
     }
     let meta = std::fs::symlink_metadata(take_folder)
-        .map_err(|e| format!("{} can't be read: {e}", take_folder.display()))?;
+        .map_err(|e| crate::messages::take_delete::cant_be_read(take_folder.display(), e))?;
     // A link or junction would send its target's contents, which may be
     // anywhere, so only a real folder is accepted.
     if meta.file_type().is_symlink() {
-        return Err(format!(
-            "{} is a link, not a take folder, so it was not deleted",
-            take_folder.display()
+        return Err(crate::messages::take_delete::is_a_link(
+            take_folder.display(),
         ));
     }
     if !meta.is_dir() {
-        return Err(format!("{} isn't a folder", take_folder.display()));
+        return Err(crate::messages::take_delete::not_a_folder(
+            take_folder.display(),
+        ));
     }
 
     // Canonical on both sides, so `..`, a different case or a junction in the
     // capture path can't place the take somewhere it isn't.
     let canonical = take_folder
         .canonicalize()
-        .map_err(|e| format!("{} can't be resolved: {e}", take_folder.display()))?;
+        .map_err(|e| crate::messages::take_delete::cant_be_resolved(take_folder.display(), e))?;
     let inside_a_capture_dir = capture_dirs
         .iter()
         .filter_map(|dir| dir.canonicalize().ok())
         .any(|dir| canonical != dir && canonical.starts_with(&dir));
     if !inside_a_capture_dir {
-        return Err(format!(
-            "{} isn't inside a Destinations folder (Configuration → Destinations), so it was not deleted",
-            take_folder.display()
+        return Err(crate::messages::take_delete::outside_destinations(
+            take_folder.display(),
         ));
     }
 
     if !scanner::is_take_folder(take_folder) {
-        return Err(format!(
-            "{} isn't a take folder (no captured streams in it), so it was not deleted",
-            take_folder.display()
+        return Err(crate::messages::take_delete::no_captured_streams(
+            take_folder.display(),
         ));
     }
     // One take per delete, as the confirm said: a folder that also holds
     // another take would take that one with it.
     let holds_another_take = std::fs::read_dir(take_folder)
-        .map_err(|e| format!("{} can't be listed: {e}", take_folder.display()))?
+        .map_err(|e| crate::messages::take_delete::cant_be_listed(take_folder.display(), e))?
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .any(|e| scanner::is_take_folder(&e.path()));
     if holds_another_take {
-        return Err(format!(
-            "{} holds other takes, so it was not deleted",
-            take_folder.display()
+        return Err(crate::messages::take_delete::holds_other_takes(
+            take_folder.display(),
         ));
     }
-    take_key(take_folder).ok_or_else(|| {
-        format!(
-            "{} isn't inside a session folder, so it was not deleted",
-            take_folder.display()
-        )
-    })
+    take_key(take_folder)
+        .ok_or_else(|| crate::messages::take_delete::not_in_a_session_folder(take_folder.display()))
 }
 
 /// The folder itself, unless it holds the take's `dodstudio_take.json`: then
-/// everything in it but that file, so the history stays (#438).
+/// everything in it but that file, so the history stays (#438). OBS mode's
+/// per-take state file goes with the take either way: it is state about the
+/// recording, not history, and it sits in the block folder beside
+/// `take0000`, so a `take0000` also takes the block's copy.
 fn recycle_list(take_folder: &Path) -> Result<Vec<PathBuf>, String> {
     let entries: Vec<_> = std::fs::read_dir(take_folder)
-        .map_err(|e| format!("{} can't be listed: {e}", take_folder.display()))?
+        .map_err(|e| crate::messages::take_delete::cant_be_listed(take_folder.display(), e))?
         .flatten()
         .collect();
-    if !entries
+    let keeps_history = entries
         .iter()
-        .any(|e| take_meta::is_metadata(&e.file_name()))
+        .any(|e| e.file_name().eq_ignore_ascii_case(take_meta::TAKE_FILE));
+    let mut list: Vec<PathBuf> = if keeps_history {
+        entries
+            .into_iter()
+            .filter(|e| !e.file_name().eq_ignore_ascii_case(take_meta::TAKE_FILE))
+            .map(|e| e.path())
+            .collect()
+    } else {
+        vec![take_folder.to_path_buf()]
+    };
+    if !keeps_history
+        && let Some(state) = take_folder
+            .parent()
+            .map(|block| block.join(crate::obs::take_state::FILE))
+            .filter(|state| state.is_file())
     {
-        return Ok(vec![take_folder.to_path_buf()]);
+        list.push(state);
     }
-    Ok(entries
-        .into_iter()
-        .filter(|e| !take_meta::is_metadata(&e.file_name()))
-        .map(|e| e.path())
-        .collect())
+    Ok(list)
 }
 
 /// The total size of the files at or under `path`. Links are not followed,
@@ -158,10 +165,9 @@ pub fn recycle_take(deletion: &TakeDeletion) -> Result<(), String> {
     if errors.is_empty() {
         return Ok(());
     }
-    Err(format!(
-        "Couldn't move {} to the Recycle Bin: {}",
+    Err(crate::messages::take_delete::could_not_recycle(
         deletion.take_folder.display(),
-        errors.join("; ")
+        errors.join("; "),
     ))
 }
 
@@ -179,7 +185,8 @@ pub fn delete_take_permanently(
 ) -> Result<TakeDeletion, String> {
     let plan = plan_take_deletion(take_folder, capture_dirs)?;
     for path in &plan.recycle {
-        remove_path(path).map_err(|e| format!("Couldn't delete {}: {e}", path.display()))?;
+        remove_path(path)
+            .map_err(|e| crate::messages::take_delete::could_not_delete(path.display(), e))?;
     }
     Ok(plan)
 }
@@ -328,6 +335,18 @@ mod tests {
         let plan = delete_take_permanently(&take, &dirs(&capture)).expect("a real take");
         assert_eq!(plan.size_bytes, 7 + 3 + 3);
         assert!(!take.exists(), "the take folder is gone");
+        assert!(block.join(take_meta::TAKE_FILE).is_file(), "history kept");
+    }
+
+    #[test]
+    fn deleting_a_take_removes_its_obs_state_and_keeps_the_history() {
+        let (capture, take) = capture_with_take("obs_state");
+        let block = take.parent().unwrap().to_path_buf();
+        take_meta::write(&block, &take_meta::SessionMeta::new("s", 120)).unwrap();
+        std::fs::write(block.join(crate::obs::take_state::FILE), b"{}").unwrap();
+        delete_take_permanently(&take, &dirs(&capture)).unwrap();
+        assert!(!take.exists());
+        assert!(!block.join(crate::obs::take_state::FILE).exists());
         assert!(block.join(take_meta::TAKE_FILE).is_file(), "history kept");
     }
 

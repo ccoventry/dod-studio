@@ -56,9 +56,11 @@ const OLDEST_FORMAT: u32 = 1;
 pub const TAKE_FILE: &str = "dodstudio_take.json";
 
 /// Whether a directory entry is one of ours, and so must not be mistaken for
-/// captured output. `take_folder_has_content` asks this.
+/// captured output. `take_folder_has_content` asks this. OBS mode's take
+/// state (`obs::take_state`) sits beside this file and is ours too.
 pub fn is_metadata(file_name: &std::ffi::OsStr) -> bool {
     file_name.eq_ignore_ascii_case(TAKE_FILE)
+        || file_name.eq_ignore_ascii_case(crate::obs::take_state::FILE)
 }
 
 /// How far up from a take folder to look. HLAE nests its own `take0000` inside
@@ -88,6 +90,11 @@ pub struct SessionMeta {
     /// Absent unless `capture_mode` is `"agr"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agr_fps: Option<i32>,
+    /// What the batch planned this take to hold (#1084), so its length and
+    /// kills can be checked against it later. Absent for a take captured
+    /// before it was recorded, or whose demo had no frame times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<super::take_plan::TakePlan>,
 }
 
 impl SessionMeta {
@@ -99,6 +106,7 @@ impl SessionMeta {
             renders: Vec::new(),
             capture_mode: None,
             agr_fps: None,
+            plan: None,
         }
     }
 
@@ -616,6 +624,9 @@ mod tests {
         // report a capture that never happened.
         assert!(is_metadata(std::ffi::OsStr::new(TAKE_FILE)));
         assert!(is_metadata(std::ffi::OsStr::new("DODSTUDIO_TAKE.JSON")));
+        assert!(is_metadata(std::ffi::OsStr::new(
+            crate::obs::take_state::FILE
+        )));
         assert!(!is_metadata(std::ffi::OsStr::new("00000.bmp")));
         assert!(!is_metadata(std::ffi::OsStr::new("sound.wav")));
     }

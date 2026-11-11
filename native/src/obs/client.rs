@@ -44,6 +44,9 @@ const RECORD_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 pub const START_REFUSED: &str = "OBS did not start recording. OBS's own window says why \
      (often the recording encoder or folder); fix it in OBS and run the batch again";
 
+/// How long the websocket upgrade handshake may wait for OBS's answer.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Socket read timeout. Nothing waits on a single read; the timeout only makes
 /// the read loop interruptible so an overall deadline can be enforced.
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(200);
@@ -174,14 +177,20 @@ impl ObsClient {
         let host = url.trim_start_matches("ws://");
         let stream =
             TcpStream::connect(host).map_err(|e| ObsError::Connect(format!("{host}: {e}")))?;
+        // The upgrade handshake is one blocking read: the short polling
+        // timeout would fail it whenever OBS (or a loaded machine) takes
+        // longer than that to answer.
         stream
-            .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
+            .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
             .map_err(|e| ObsError::Connect(e.to_string()))?;
         let uri = url
             .parse::<tungstenite::http::Uri>()
             .map_err(|e| ObsError::Connect(e.to_string()))?;
         let (ws, _) = tungstenite::client(uri, stream)
             .map_err(|e| ObsError::Connect(format!("websocket handshake: {e}")))?;
+        ws.get_ref()
+            .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
+            .map_err(|e| ObsError::Connect(e.to_string()))?;
 
         let mut client = Self {
             ws,
@@ -838,7 +847,12 @@ impl ObsClient {
     /// So a start that doesn't happen is sent once more, and when OBS still
     /// answers "not recording", that is OBS refusing, not the connection
     /// failing: no reconnect, and the batch is told why.
-    pub fn start_record(&mut self) -> Result<(), ObsError> {
+    ///
+    /// Returns when the start was read: the `OUTPUT_STARTED` event's arrival,
+    /// or, when only a status check found it running, that check's answer,
+    /// which is as late as the start can have been. The capture holds it
+    /// against the clip's `START_RECORD` marker (#1109).
+    pub fn start_record(&mut self) -> Result<Instant, ObsError> {
         for (attempt, wait) in [RECORD_START_FIRST_WAIT, RECORD_START_TIMEOUT]
             .into_iter()
             .enumerate()
@@ -848,16 +862,16 @@ impl ObsClient {
                 if attempt == 0 || e.is_transport() || !self.is_recording().unwrap_or(false) {
                     return Err(e);
                 }
-                return Ok(());
+                return Ok(Instant::now());
             }
             if self
                 .wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STARTED", wait)
                 .is_some()
             {
-                return Ok(());
+                return Ok(Instant::now());
             }
             match self.is_recording() {
-                Ok(true) => return Ok(()),
+                Ok(true) => return Ok(Instant::now()),
                 Ok(false) => {}
                 Err(_) => {
                     return Err(ObsError::Transport(

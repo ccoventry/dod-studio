@@ -64,63 +64,19 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("ui_demo_list_folders");
 
-/// The fallback path's flag, when the cvar could not be registered.
-pub static ENABLED: AtomicBool = AtomicBool::new(true);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once `ds_ui_demo_list_folders` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
+/// `ds_ui_demo_list_folders`, or its default when the cvar could not be
+/// registered.
+pub static FOLDERS: Setting = Setting::new(NAME, true);
 
 pub(crate) fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        ENABLED.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
-
-/// A second on/off setting of this module, a cvar or, when that couldn't be
-/// registered, the fallback toggle's flag.
-pub struct Setting {
-    pub name: &'static str,
-    pub fallback: AtomicBool,
-    cvar: AtomicPtr<CvarSPartial>,
-}
-
-impl Setting {
-    pub(crate) const fn new(name: &'static str, on: bool) -> Self {
-        Self {
-            name,
-            fallback: AtomicBool::new(on),
-            cvar: AtomicPtr::new(std::ptr::null_mut()),
-        }
-    }
-
-    /// Called by `commands.rs` once the cvar is registered.
-    pub fn set_cvar(&self, cvar: *mut CvarSPartial) {
-        self.cvar.store(cvar, Ordering::Release);
-    }
-
-    pub fn on(&self) -> bool {
-        let cvar = self.cvar.load(Ordering::Acquire);
-        if cvar.is_null() {
-            self.fallback.load(Ordering::Relaxed)
-        } else {
-            // Safety: the engine owns the cvar for the session.
-            unsafe { (*cvar).value != 0.0 }
-        }
-    }
+    FOLDERS.on()
 }
 
 /// `ds_ui_demo_list_hide_empty 1`: while folders are listed, a folder with
@@ -149,31 +105,6 @@ pub fn hides_empty(show_counts: bool, hide_empty: bool) -> bool {
 
 fn hides_empty_now() -> bool {
     hides_empty(SHOW_COUNTS.on(), HIDE_EMPTY.on())
-}
-
-pub fn show_counts_status() -> String {
-    if SHOW_COUNTS.on() {
-        "folders are counted, and folder rows on the Demos tab end in their demo count".to_string()
-    } else {
-        "folders aren't counted: no demo counts, and empty folders are listed".to_string()
-    }
-}
-
-/// For the fallback toggle commands' bare-name query.
-pub fn hide_empty_status() -> String {
-    if HIDE_EMPTY.on() {
-        "folders with no demo anywhere inside them aren't listed".to_string()
-    } else {
-        "every folder is listed, with or without demos".to_string()
-    }
-}
-
-pub fn count_subfolders_status() -> String {
-    if COUNT_SUBFOLDERS.on() {
-        "a folder's count includes its subfolders' demos".to_string()
-    } else {
-        "a folder's count is only the demos directly in it".to_string()
-    }
 }
 
 /// The folder the lists show: a path from `dod/` (`""` for `dod/`), or a
@@ -723,18 +654,6 @@ pub fn drives() -> Vec<char> {
     #[cfg(not(target_arch = "x86"))]
     {
         Vec::new()
-    }
-}
-
-/// For the fallback toggle command's bare-name query.
-pub fn status() -> String {
-    if enabled() {
-        "the Load Demo window lists and opens folders".to_string()
-    } else {
-        format!(
-            "the Load Demo window lists only the demos in {}/",
-            crate::game_folder::name()
-        )
     }
 }
 

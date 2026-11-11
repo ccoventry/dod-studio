@@ -4,18 +4,23 @@ mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
+mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
+mod catch_up_takes;
 mod combine_manager;
+mod config_checks_cmd;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
-mod demo_links_manager;
+mod demo_preview;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
 mod download_progress;
 mod drop_paths;
+mod file_replace;
+mod game_process_manager;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -26,6 +31,7 @@ mod match_group_cmd;
 mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
+mod obs_manager;
 mod obs_test_manager;
 mod open_files;
 mod overview_manager;
@@ -37,10 +43,15 @@ mod project_convert;
 mod render_manager;
 mod review_library;
 mod review_manager;
+mod scan_manager;
 mod settings_manager;
+mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
+mod take_preview_manager;
+mod trimmed_demos;
 mod updater_manager;
+mod vegas_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
@@ -48,12 +59,15 @@ mod updater_manager;
 mod test_support;
 
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
-use capture_manager::{
-    CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
-    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
-    steam_state,
+use capture_manager::{CaptureManager, CapturePayload, read_cfg_commands};
+use demo_preview::{
+    delete_orphaned_previews, launch_demo_preview, scan_orphaned_previews,
+    send_preview_to_running_game,
 };
+use game_process_manager::{
+    check_engine_processes, kill_engine_processes, launch_standalone_game, start_steam, steam_state,
+};
+use obs_manager::launch_obs;
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
     check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
@@ -112,10 +126,12 @@ async fn save_settings(
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
         players_tab::mirror_table(&settings);
         *guard = settings;
+        native::log_markdown("[settings] saved");
         Ok(())
     }))
     .await
@@ -137,7 +153,7 @@ fn builtin_command_profiles() -> Vec<settings_manager::CommandProfile> {
 #[tauri::command]
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+        file_replace::replace_file(std::path::Path::new(&path), &contents)
     }))
     .await
 }
@@ -166,14 +182,14 @@ async fn default_projects_dir() -> Result<String, String> {
 #[tauri::command]
 async fn locate_missing_demos(
     app_handle: tauri::AppHandle,
-    demos: Vec<capture_manager::KnownDemo>,
+    demos: Vec<scan_manager::KnownDemo>,
     search_dirs: Vec<String>,
-) -> Result<Vec<capture_manager::MissingDemo>, String> {
+) -> Result<Vec<scan_manager::MissingDemo>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let dirs: Vec<std::path::PathBuf> =
             search_dirs.iter().map(std::path::PathBuf::from).collect();
-        Ok(capture_manager::locate_missing_demos(
+        Ok(scan_manager::locate_missing_demos(
             &demos,
             &dirs,
             &mut |missing| {
@@ -193,17 +209,17 @@ async fn locate_missing_demos(
 #[tauri::command]
 async fn changed_demos(
     app_handle: tauri::AppHandle,
-    demos: Vec<capture_manager::KnownDemo>,
+    demos: Vec<scan_manager::KnownDemo>,
 ) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let started = std::time::Instant::now();
         let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
-        Ok(capture_manager::changed_demos_with_progress(
+        Ok(scan_manager::changed_demos_with_progress(
             &demos,
             |done, total| {
                 let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                if scan_manager::changed_progress_due(&last_emit, now_ms, done, total) {
                     let _ = app_handle.emit(
                         "changed_demos_progress",
                         serde_json::json!({ "done": done, "total": total }),
@@ -303,7 +319,7 @@ fn cancel_audit(state: tauri::State<'_, AuditManager>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     audit_manager::reveal_in_explorer_impl(path)
 }
@@ -375,17 +391,17 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-    known: Option<Vec<capture_manager::KnownDemo>>,
+    known: Option<Vec<scan_manager::KnownDemo>>,
     workers: Option<usize>,
     include_subfolders: Option<bool>,
-) -> Result<capture_manager::ScanOutcome, String> {
-    capture_manager::scan_directory_impl(
+) -> Result<scan_manager::ScanOutcome, String> {
+    scan_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
         known.unwrap_or_default(),
-        workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        workers.unwrap_or(scan_manager::SCAN_CONCURRENCY),
         // Missing: today's walk into every subfolder (#531).
         include_subfolders.unwrap_or(true),
     )
@@ -437,21 +453,8 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 }
 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
-    let mut total: u64 = 0;
-    let mut seen = std::collections::HashSet::new();
-    for path_str in paths {
-        let p = std::path::PathBuf::from(path_str);
-        if let Some(key) = native::sys::disk::volume_key(&p)
-            && !seen.insert(key)
-        {
-            continue;
-        }
-        let space = native::sys::disk::get_available_bytes(&p);
-        if space != u64::MAX {
-            total += space;
-        }
-    }
-    Ok(total)
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    Ok(native::sys::disk::pool_free_bytes(&paths))
 }
 
 #[derive(serde::Serialize)]
@@ -491,7 +494,7 @@ fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic
                 native::sys::disk::PathStatus::NotFound => "not_found",
                 native::sys::disk::PathStatus::NotADirectory => "not_a_directory",
             };
-            let usable = native::sys::disk::get_available_bytes(&p) != u64::MAX;
+            let usable = native::sys::disk::get_available_bytes(&p).is_some();
             CaptureOutputDiagnostic {
                 path: path_str,
                 status,
@@ -529,72 +532,14 @@ async fn validate_paths(hlae_path: String, hl_path: String) -> Result<bool, Stri
 async fn check_hlae_ffmpeg(
     hlae_path: String,
     ffmpeg_path: Option<String>,
-) -> Result<serde_json::Value, String> {
-    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        hlae_ffmpeg_report(hlae_path, ffmpeg_path)
+) -> Result<native::shared::hlae_ffmpeg_report::HlaeFfmpegReport, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        native::shared::hlae_ffmpeg_report::report(
+            std::path::Path::new(&hlae_path),
+            ffmpeg_path.as_deref(),
+        )
     }))
     .await
-}
-
-fn hlae_ffmpeg_report(
-    hlae_path: String,
-    ffmpeg_path: Option<String>,
-) -> Result<serde_json::Value, String> {
-    use native::shared::hlae_ffmpeg as hf;
-
-    let state = hf::detect(std::path::Path::new(&hlae_path));
-
-    // "HLAE is pointed somewhere" and "HLAE is pointed at the same FFmpeg
-    // Render Studio uses" are different questions, and only the second keeps
-    // both halves of the pipeline encoding with the same build — which was the
-    // stated reason for writing an ini instead of copying the binary. Nothing
-    // was checking it stayed true, so changing the app's FFmpeg silently left
-    // HLAE on the old one.
-    let app_ffmpeg = hf::resolve_absolute(ffmpeg_path.as_deref().unwrap_or("ffmpeg"));
-    let agrees_with_app = match (&state, &app_ffmpeg) {
-        (hf::HlaeFfmpeg::Linked { target, .. }, Some(app)) => Some(hf::same_file(target, app)),
-        // A bundled binary is HLAE's own and is meant to differ; with nothing
-        // linked there is nothing to disagree with.
-        _ => None,
-    };
-
-    // "It exists" was the only test the picker applied, and ffplay.exe and
-    // ffprobe.exe sit in the same folder as ffmpeg.exe. Checking here as well as
-    // at link time means the row says so before the button is pressed, instead
-    // of reporting a disagreement between two paths one of which cannot record.
-    //
-    // Chaining this off `app_ffmpeg` was a hole: a path that does not resolve
-    // produces `None`, so the check never ran and a typo'd override said
-    // nothing at all. Failing to resolve is itself the problem worth reporting.
-    let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
-    // The frontend sends the bare default `ffmpeg` when no override is set, so
-    // that is "no override" too, not a file called ffmpeg that went missing.
-    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
-    let app_ffmpeg_problem = match &app_ffmpeg {
-        Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if no_override => {
-            Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
-        }
-        None => Some(format!("there is no file at \"{}\"", configured)),
-    };
-
-    // Whether the HLAE Executable above is a working HLAE install, answered by
-    // the file the pipeline actually consumes rather than by what the exe calls
-    // itself: `build_hlae_process` passes this DLL as `-hookDllPath`, so its
-    // absence means a capture cannot work whatever the exe is named. Advisory —
-    // reported, never enforced.
-    let missing_hook_dll = hf::missing_hook_dll(std::path::Path::new(&hlae_path))
-        .map(|p| p.to_string_lossy().into_owned());
-
-    Ok(serde_json::json!({
-        "state": state,
-        "usable": state.is_usable(),
-        "can_link": state.can_link(),
-        "app_ffmpeg": app_ffmpeg.map(|p| p.to_string_lossy().into_owned()),
-        "agrees_with_app": agrees_with_app,
-        "app_ffmpeg_problem": app_ffmpeg_problem,
-        "missing_hook_dll": missing_hook_dll,
-    }))
 }
 
 /// Whether each configured executable path actually points at a file.
@@ -720,11 +665,14 @@ async fn index_demo_players(
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let mut done = 0;
+        let mut unreadable = 0;
+        let total = paths.len();
         for path in paths {
             if current.load(Ordering::SeqCst) != request_id {
                 break;
             }
             let result = native::player_index::demo_players(std::path::Path::new(&path));
+            unreadable += usize::from(result.is_err());
             let payload = match result {
                 Ok((demo, _)) => serde_json::json!({
                     "lane": lane,
@@ -743,6 +691,9 @@ async fn index_demo_players(
             let _ = app_handle.emit("demo_players", payload);
             done += 1;
         }
+        native::log_markdown(&format!(
+            "[players] read the players of {done} of {total} demo(s) ({lane} lane), {unreadable} unreadable"
+        ));
         Ok(done)
     }))
     .await
@@ -814,7 +765,16 @@ async fn analyze_demo_full(
         };
 
         match native::run_analyzer_cached(&path, progress_cb) {
-            Ok((file_info, analysis, _from_cache)) => {
+            Ok((file_info, analysis, from_cache)) => {
+                native::log_markdown(&format!(
+                    "[analyzer] opened {} ({})",
+                    path.display(),
+                    if from_cache {
+                        "from the cache"
+                    } else {
+                        "parsed"
+                    }
+                ));
                 // Independent metadata lookup (not `file_info.created_at`) to avoid
                 // depending on `web_time::SystemTime`'s exact type identity here.
                 let created_unix_secs = std::fs::metadata(&path)
@@ -839,7 +799,13 @@ async fn analyze_demo_full(
                     state: analysis.state,
                 })
             }
-            Err(e) => Err(messages::analyzer_error(e)),
+            Err(e) => {
+                native::log_markdown(&format!(
+                    "[analyzer] could not read {}: {e}",
+                    path.display()
+                ));
+                Err(messages::analyzer_error(e))
+            }
         }
     }))
     .await
@@ -939,6 +905,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
         .manage(RenderManager::new())
+        .manage(take_preview_manager::TakePreviewManager::default())
+        .manage(take_checks_manager::TakeChecksManager::default())
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
@@ -967,6 +935,22 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // Hook DLL copies an earlier run left, which nothing else would
+            // remove until the next game launch (#1146).
+            #[cfg(windows)]
+            {
+                let settings = app.state::<SettingsManager>().inner.clone();
+                std::thread::spawn(move || {
+                    let configured = settings
+                        .lock()
+                        .ok()
+                        .and_then(|s| s.goldsrc_hooks_dll_path.clone())
+                        .map(std::path::PathBuf::from);
+                    native::sys::hook_copy::clean_at_start(configured.as_deref());
+                });
+            }
+            // ...and its Review tab to review the demo it has loaded (#1142).
+            review_manager::serve_game_requests(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]
@@ -1009,9 +993,9 @@ pub fn run() {
             load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            capture_manager::obs_test_connection,
-            capture_manager::obs_check_orphan,
-            capture_manager::obs_recover_orphan,
+            obs_manager::obs_test_connection,
+            obs_manager::obs_check_orphan,
+            obs_manager::obs_recover_orphan,
             obs_test_manager::obs_test_clip,
             obs_test_manager::obs_test_watch_start,
             obs_test_manager::obs_test_analyze,
@@ -1024,13 +1008,16 @@ pub fn run() {
             batch_catch_up::catch_up_unwatched_batches,
             batch_close::wait_for_batch_start,
             kill_engine_processes,
-            capture_manager::check_running_game,
-            capture_manager::close_running_game,
+            game_process_manager::check_running_game,
+            game_process_manager::running_game_for_batch,
+            game_process_manager::close_running_game,
             steam_state,
             start_steam,
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_manager::game_review_progress,
+            review_manager::game_review_finished,
             review_library::review_library_get,
             review_library::review_library_update,
             scan_orphaned_previews,
@@ -1053,8 +1040,15 @@ pub fn run() {
             reset_render_jobs,
             remove_render_jobs,
             clear_render_queue,
+            capture_history_manager::take_capture_states,
+            capture_history_manager::locate_rendered_videos,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
+            take_preview_manager::take_preview_thumb,
+            take_preview_manager::take_preview_sheet,
+            take_preview_manager::cancel_take_previews,
+            take_checks_manager::take_checks,
+            take_checks_manager::cancel_take_checks,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
@@ -1081,14 +1075,12 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
+            demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
-            demo_links_manager::list_demo_links,
-            demo_links_manager::add_demo_link,
-            demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
             menu_scale_manager::menu_scale_status,
             menu_scale_manager::set_menu_scale,
@@ -1115,8 +1107,8 @@ pub fn run() {
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
             map_manager::download_map,
-            map_manager::scan_game_configs,
-            map_manager::roll_floors,
+            config_checks_cmd::scan_game_configs,
+            config_checks_cmd::roll_floors,
             hd_manager::hd_status,
             hd_manager::hd_setup_tools,
             hd_manager::hd_cancel,
@@ -1143,9 +1135,11 @@ pub fn run() {
             blender_manager::blender_set_exe,
             blender_manager::blender_run,
             blender_manager::blender_cancel,
+            vegas_manager::vegas_install_script,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
+            updater_manager::release_history,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,

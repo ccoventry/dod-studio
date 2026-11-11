@@ -95,6 +95,18 @@ describe('highlightValues', () => {
   });
 });
 
+describe('{headshots} (#1128)', () => {
+  it('counts the headshots in the chosen kill range', () => {
+    const s = streak({ start_index: 1, end_index: 3, headshots: ['yes', 'no', 'yes', 'yes'] });
+    expect(automaticClipName(demo([s]), s, '{headshots}hs').name).toBe('2hs');
+  });
+
+  it('gives unknown for a highlight scanned before headshots were kept', () => {
+    const s = streak({});
+    expect(automaticClipName(demo([s]), s, '{headshots}hs').name).toBe('unknownhs');
+  });
+});
+
 describe('{player}, the old name (#751)', () => {
   it('still parses and gives the name as it is, tag included, as {full_name} does', () => {
     const s = streak({ target_player: 'dicE: m00cat' });
@@ -234,5 +246,36 @@ describe('names for takes', () => {
   it('leaves room for the longest export folder', () => {
     expect(maxNameLength(['D:\\Clips\\', 'E:\\Some\\Much\\Longer\\Folder'])).toBe(250 - 26 - 1 - 20);
     expect(timeWord(754.9)).toBe('12m34s');
+  });
+});
+
+describe('Use as names (#686)', () => {
+  const ID = '76561197961831029';
+  const useAs = (id) => (id === ID ? 'Chris' : null);
+
+  it('replace both {name} and {player} for a player with one', () => {
+    const s = streak({ target_player: 'dicE[: :]m00cat :D', steam_id: ID });
+    const v = highlightValues(demo([s]), s, { useAs });
+    expect(v.name).toBe('Chris');
+    expect(v.full_name).toBe('Chris');
+  });
+
+  it('leave everyone else, and a player without a SteamID, as they were', () => {
+    const other = streak({ steam_id: '76561197960265729' });
+    expect(highlightValues(demo([other]), other, { useAs }).name).toBe('krod');
+    const none = streak();
+    expect(highlightValues(demo([none]), none, { useAs }).full_name).toBe('krod');
+  });
+
+  it(':first, :lower and :upper apply after it, and file-name characters are cleaned', () => {
+    const s = streak({ steam_id: ID });
+    const name = (template, alias) => {
+      const values = highlightValues(demo([s]), s, { useAs: () => alias });
+      return buildName(parseTemplate(template), values).name;
+    };
+    expect(name('{name:first}', 'Chris D')).toBe('Chris');
+    expect(name('{name:lower}', 'Chris')).toBe('chris');
+    expect(name('{player:upper}', 'Chris')).toBe('CHRIS');
+    expect(name('{name}', 'a/b:c')).toBe('a_b_c');
   });
 });

@@ -96,7 +96,7 @@ function cvarOf(command) {
   return String(command).trim().split(/\s+/)[0] ?? '';
 }
 
-/** Where a stated value came from (map_manager.rs's ValueSourceRow). */
+/** Where a stated value came from (native/src/patch/cfg_report.rs's ValueSourceRow). */
 function describeSource(v, cvar) {
   switch (v.kind) {
     case 'config':
@@ -124,7 +124,7 @@ function conflictSection(rows) {
       return `<li><code>${STRINGS.CFG.conflictRow(c.cvar, values, c.effective.value)}</code></li>`;
     })
     .join('');
-  return section(STRINGS.CFG.CONFLICT_TITLE, STRINGS.CFG.CONFLICT_ADVICE, items, '#ff8a5c');
+  return section(STRINGS.CFG.CONFLICT_TITLE, STRINGS.CFG.CONFLICT_ADVICE, items, 'var(--warn-salmon)');
 }
 
 /** Commands too long for one demo ConsoleCommand frame (#453) — blocking. */
@@ -132,7 +132,7 @@ function tooLongSection(commands) {
   const rows = commands
     .map((c) => `<li><code>${STRINGS.CFG.tooLongRow(c, new TextEncoder().encode(c).length)}</code></li>`)
     .join('');
-  return section(STRINGS.CFG.TOO_LONG_TITLE, STRINGS.CFG.TOO_LONG_ADVICE, rows, '#f44336');
+  return section(STRINGS.CFG.TOO_LONG_TITLE, STRINGS.CFG.TOO_LONG_ADVICE, rows, 'var(--danger)');
 }
 
 /** Commands the game's demo filter drops (#679), as one section. */
@@ -140,7 +140,7 @@ function filteredSection(rows) {
   const items = rows
     .map((f) => `<li><code>${escapeHtml(STRINGS.CFG.filteredRow(f.command, f.rule, f.pattern))}</code></li>`)
     .join('');
-  return section(STRINGS.CFG.FILTERED_TITLE, STRINGS.CFG.FILTERED_ADVICE, items, '#ff8a5c');
+  return section(STRINGS.CFG.FILTERED_TITLE, STRINGS.CFG.FILTERED_ADVICE, items, 'var(--warn-salmon)');
 }
 
 function section(title, advice, rows, accent) {
@@ -165,7 +165,7 @@ function joinSections(parts) {
       const style =
         i === parts.length - 1
           ? ''
-          : ' style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,.12);"';
+          : ' style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--wash-12);"';
       return `<div${style}>${html}</div>`;
     })
     .join('');
@@ -190,8 +190,8 @@ function renderInto(elId, sectionsHtml) {
 
   el.hidden = false;
   el.style.cssText =
-    'margin: 0 0 8px; padding: 10px 12px; border: 1px solid #b58900; ' +
-    'border-radius: 4px; background: #2a2410; color: #e8dcb0; font-size: 12px;';
+    'margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--warn-note-border); ' +
+    'border-radius: 4px; background: var(--warn-note-bg); color: var(--warn-note-text); font-size: 12px;';
   el.innerHTML = sectionsHtml;
 }
 
@@ -242,7 +242,7 @@ function render() {
     const rows = fatalCvars
       .map((f) => `<li><code>${STRINGS.CFG.fatalRow(f.cvar, f.value, f.required, f.file, f.line)}</code></li>`)
       .join('');
-    initParts.push(section(STRINGS.CFG.FATAL_TITLE, STRINGS.CFG.FATAL_ADVICE, rows, '#f44336'));
+    initParts.push(section(STRINGS.CFG.FATAL_TITLE, STRINGS.CFG.FATAL_ADVICE, rows, 'var(--danger)'));
   }
   // Next — this one blocks Start Capture Batch, everything else below it is
   // merely advisory.
@@ -250,7 +250,7 @@ function render() {
     const rows = bannedInit
       .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, STRINGS.CFG.BANNED_REASONS[cvarOf(b.command)])}</code></li>`)
       .join('');
-    initParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
+    initParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, 'var(--danger)'));
   }
   if (tooLongInit.length > 0) {
     initParts.push(tooLongSection(tooLongInit));
@@ -266,7 +266,7 @@ function render() {
   // Same outcome: an exec of a file the game can't find runs nothing.
   if (missingExec.length > 0) {
     const rows = missingExec.map((c) => `<li><code>${escapeHtml(c)}</code></li>`).join('');
-    initParts.push(section(STRINGS.CFG.MISSING_EXEC_TITLE, STRINGS.CFG.MISSING_EXEC_ADVICE, rows, '#ff8a5c'));
+    initParts.push(section(STRINGS.CFG.MISSING_EXEC_TITLE, STRINGS.CFG.MISSING_EXEC_ADVICE, rows, 'var(--warn-salmon)'));
   }
   // Same: the game no longer knows an old dodstudio_ name (#555).
   if (renamedInit.length > 0) {
@@ -285,7 +285,7 @@ function render() {
   // so it gets a warning accent even though there is only ever one row.
   if (decalFlushIsNoop) {
     const rows = `<li><code>${STRINGS.CFG.DECAL_NOOP_ROW}</code></li>`;
-    initParts.push(section(STRINGS.CFG.DECAL_NOOP_TITLE, STRINGS.CFG.DECAL_NOOP_ADVICE, rows, '#f44336'));
+    initParts.push(section(STRINGS.CFG.DECAL_NOOP_TITLE, STRINGS.CFG.DECAL_NOOP_ADVICE, rows, 'var(--danger)'));
   }
   // Last, and no accent: nothing is wrong with taking the default, so this
   // is an FYI rather than something to fix, unlike everything above it.
@@ -317,7 +317,7 @@ function render() {
     const rows = bannedScheduled
       .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, STRINGS.CFG.BANNED_REASONS[cvarOf(b.command)])}</code></li>`)
       .join('');
-    schedParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
+    schedParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, 'var(--danger)'));
   }
   if (tooLongScheduled.length > 0) {
     schedParts.push(tooLongSection(tooLongScheduled));
@@ -328,7 +328,7 @@ function render() {
     const rows = hazards
       .map((h) => `<li><code>${STRINGS.CFG.hazardRow(h.command)}</code></li>`)
       .join('');
-    schedParts.push(section(STRINGS.CFG.HAZARD_TITLE, STRINGS.CFG.HAZARD_ADVICE, rows, '#ff6b6b'));
+    schedParts.push(section(STRINGS.CFG.HAZARD_TITLE, STRINGS.CFG.HAZARD_ADVICE, rows, 'var(--danger-coral)'));
   }
   // Next: a value that silently differs from the first clip on.
   if (asymmetric.length > 0) {
@@ -344,7 +344,7 @@ function render() {
         return `<li><code>${text}</code></li>`;
       })
       .join('');
-    schedParts.push(section(STRINGS.CFG.ASYMMETRIC_TITLE, STRINGS.CFG.ASYMMETRIC_ADVICE, rows, '#ff8a5c'));
+    schedParts.push(section(STRINGS.CFG.ASYMMETRIC_TITLE, STRINGS.CFG.ASYMMETRIC_ADVICE, rows, 'var(--warn-salmon)'));
   }
   if (scheduledConflicts.length > 0) {
     schedParts.push(conflictSection(scheduledConflicts));
@@ -363,5 +363,5 @@ function renamedSection(rows) {
   const items = rows
     .map((r) => `<li><code>${escapeHtml(STRINGS.CFG.renamedRow(r.old, r.new, r.source))}</code></li>`)
     .join('');
-  return section(STRINGS.CFG.RENAMED_TITLE, STRINGS.CFG.RENAMED_ADVICE, items, '#ff8a5c');
+  return section(STRINGS.CFG.RENAMED_TITLE, STRINGS.CFG.RENAMED_ADVICE, items, 'var(--warn-salmon)');
 }

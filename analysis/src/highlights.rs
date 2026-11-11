@@ -11,7 +11,8 @@
 //! so everyone's are (#247's decision D18). [`Highlights::shown`] applies it;
 //! [`Highlights::all`] keeps every player's for a caller that filters itself.
 
-use crate::{Analysis, Connection, Weapon};
+use crate::headshot::headshot_of;
+use crate::{Analysis, Connection, FlagTag, Headshot, Weapon, flag_tags_of};
 
 /// Which version of highlight detection a scan used. Studio saves it with
 /// each scanned demo and, on opening a project, offers to rescan the demos
@@ -24,7 +25,7 @@ use crate::{Analysis, Connection, Weapon};
 /// A change to what `kill.rs` caches needs both bumps, or the rescan reads
 /// the old highlights back out of the analyzer cache. Mirrored in
 /// `studio/src/scan_version.js`; a test checks the two agree.
-pub const HIGHLIGHTS_VERSION: u32 = 2;
+pub const HIGHLIGHTS_VERSION: u32 = 3;
 
 /// One kill in a highlight.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +38,12 @@ pub struct HighlightKill {
     /// Seconds on the `viewdemo` bar (what `ds_demo_seek_to` takes).
     pub viewdemo_secs: f32,
     pub weapon: Weapon,
+    /// Whether it was a headshot, from the helmet event (#1128); `Unknown`
+    /// when the demo can't say (see `headshot.rs`).
+    pub headshot: Headshot,
+    /// What was going on at the flags (#1132): only what the demo shows,
+    /// so empty for most kills (see `capture_area.rs`).
+    pub flag_tags: Vec<FlagTag>,
 }
 
 /// One life's kills by one player.
@@ -69,6 +76,14 @@ impl Highlight {
     /// The player's SteamID64, when the demo carries one.
     pub fn steam_id(&self) -> Option<String> {
         crate::player::steam_id_of(&self.player_id)
+    }
+
+    /// How many of the kills were headshots, and how many the demo can't
+    /// say, as `(headshots, unknown)`. The Highlight Finder (#621) scores on
+    /// the first and may add the second as a maybe.
+    pub fn headshot_counts(&self) -> (usize, usize) {
+        let count = |wanted| self.kills.iter().filter(|k| k.headshot == wanted).count();
+        (count(Headshot::Yes), count(Headshot::Unknown))
     }
 
     /// The first kill's time on the `viewdemo` bar: what a list sorted by
@@ -137,11 +152,13 @@ pub fn highlights(analysis: &Analysis) -> Highlights {
                     let kills: Vec<HighlightKill> = streak
                         .kills
                         .iter()
-                        .map(|(time, weapon, _victim)| HighlightKill {
+                        .map(|(time, weapon, victim)| HighlightKill {
                             frame_index: time.frame_index,
                             real_secs: time.real_offset.as_secs_f32(),
                             viewdemo_secs: time.viewdemo_offset.as_secs_f32(),
                             weapon: weapon.clone(),
+                            headshot: headshot_of(&analysis.state.kill_positions, time, victim),
+                            flag_tags: flag_tags_of(&analysis.state.kill_positions, time, victim),
                         })
                         .collect();
                     Highlight {
@@ -202,6 +219,8 @@ mod tests {
                 real_secs: at,
                 viewdemo_secs: at,
                 weapon: Weapon::K98,
+                headshot: Headshot::No,
+                flag_tags: Vec::new(),
             }],
         }
     }
@@ -238,7 +257,10 @@ mod tests {
             real_secs: 4.0,
             viewdemo_secs: 4.0,
             weapon: Weapon::K98,
+            headshot: Headshot::Yes,
+            flag_tags: vec![FlagTag::ClearedFlag],
         });
+        assert_eq!(h.headshot_counts(), (1, 0));
         assert_eq!(h.first_kill_secs(), 4.0);
     }
 

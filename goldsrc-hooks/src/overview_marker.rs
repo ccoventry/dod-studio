@@ -70,11 +70,13 @@
 //! `*_camera.spr` (#677). `tools/verify_hide_text_offsets.py` checks both
 //! branches, the `fld` after the skip and the epilogue it lands on.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::player_info::{ALLIES, AXIS};
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_overview_team_marker");
 
@@ -100,7 +102,7 @@ pub const TEAM: i32 = 1;
 /// No camera icon at all.
 pub const NONE: i32 = 2;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The pattern's start, 0 before a successful scan.
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -114,19 +116,9 @@ static ICON_TEAM: AtomicI32 = AtomicI32::new(0);
 /// pointed at [`ICON_TEAM`]; 0 before a scan.
 static GAME_TEAM_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 
-/// `g_iUser1`, `g_iUser2`, and `g_PlayerExtraInfo[0].teamnumber`.
+/// `g_iUser1` and `g_iUser2`.
 const MODE_RVA: usize = 0xe8_8d4;
 const TARGET_RVA: usize = 0xe8_8d8;
-const EXTRA_TEAM_RVA: usize = 0xe9_120;
-/// `sizeof(extra_player_info_t)`.
-const EXTRA_STRIDE: usize = 48;
-/// Allies (British maps included) and Axis.
-const ALLIES: i32 = 1;
-const AXIS: i32 = 2;
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The pattern's start and the client.dll base it is in.
 fn pattern_address() -> Result<(usize, usize), String> {
@@ -176,8 +168,7 @@ fn watched_team_now(base: usize) -> Option<i32> {
     let mode = unsafe { *((base + MODE_RVA) as *const i32) };
     let target = unsafe { *((base + TARGET_RVA) as *const i32) };
     watched_team(mode, target, |index| {
-        let at = base + EXTRA_TEAM_RVA + EXTRA_STRIDE * index as usize;
-        i32::from(unsafe { *(at as *const i16) })
+        crate::player_info::team(base, index).unwrap_or(0)
     })
 }
 
@@ -268,11 +259,9 @@ fn describe(mode: i32) -> &'static str {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(raw) = CVAR.value() else {
         return;
-    }
-    let raw = unsafe { (*cvar).value };
+    };
     let wanted = if raw.is_finite() { raw as i32 } else { GAME };
     let wanted = if (GAME..=NONE).contains(&wanted) {
         wanted

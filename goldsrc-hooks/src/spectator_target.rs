@@ -44,7 +44,7 @@
 //! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!
-//! This module's `poll` runs from `commands.rs`'s per-frame *prologue*,
+//! This module's `poll` runs from `commands/poll.rs`'s per-frame *prologue*,
 //! which fires before `anim_fix::apply()` (the crate's one per-frame
 //! callback slot) on the same frame -- so the viewmodel-entity value it logs
 //! is `apply()`'s *previous* frame's result, up to one frame stale. Good
@@ -97,7 +97,7 @@ pub fn mode() -> Option<i32> {
     read_i32(engine::client_module_base()?, MODE_RVA)
 }
 
-/// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two
+/// Called once per frame from `commands/poll.rs`'s per-frame prologue. Cheap: two
 /// pointer reads and three atomic loads when off, which is the common case.
 pub fn poll() {
     if !LOG.load(Ordering::Relaxed) {

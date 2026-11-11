@@ -70,6 +70,14 @@ pub struct AppSettings {
     /// Demo Analyzer Explorer sidebar's drag-to-resize width, in pixels.
     #[serde(default = "default_analyzer_explorer_width")]
     pub analyzer_explorer_width: i32,
+    /// Capture Studio's draggable split (#47): the Master Demo Queue pane's share
+    /// of the window width, in tenths of a percent. `None` = the default layout.
+    #[serde(default)]
+    pub capture_split_left_permille: Option<i32>,
+    /// Demo Analyzer's draggable split (#47): the Demos panel's height in pixels.
+    /// `None` = the default layout.
+    #[serde(default)]
+    pub analyzer_demos_height_px: Option<i32>,
     pub language: String,
     #[serde(default = "default_capture_fps")]
     pub capture_fps: i32,
@@ -269,11 +277,22 @@ pub struct AppSettings {
     #[serde(default)]
     pub take_delete_only_when_space_needed: bool,
     /// "Render while capturing" (#861): each take renders as soon as the
-    /// batch has recorded it, one render at a time, and a batch short of room
-    /// holds between clips until renders free enough. Off by default: how
-    /// much a render slows the capture depends on the machine.
+    /// batch has recorded it, and a batch short of room holds between clips
+    /// until renders free enough. Off by default: how much a render slows the
+    /// capture depends on the machine.
     #[serde(default)]
     pub render_while_capturing: bool,
+    /// How many of those renders run at once beside the capture, 1 to 4.
+    /// One by default, and for every settings file written before it
+    /// existed: more renders finish sooner but take more of the CPU from the
+    /// game.
+    #[serde(default = "default_renders_while_capturing")]
+    pub renders_while_capturing: usize,
+    /// Configuration > Timing's "Gaps between kills over N s" (#831): kept,
+    /// or recorded sped up. Kept by default, and for every settings file
+    /// written before it existed.
+    #[serde(default)]
+    pub kill_gaps: native::patch::types::KillGaps,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -402,7 +421,7 @@ fn default_render_max_concurrent() -> i32 {
     2
 }
 fn default_scan_workers() -> i32 {
-    crate::capture_manager::SCAN_CONCURRENCY as i32
+    crate::scan_manager::SCAN_CONCURRENCY as i32
 }
 fn default_analyzer_explorer_width() -> i32 {
     260
@@ -496,6 +515,9 @@ fn default_finish_codec_render_tab() -> String {
 fn default_take_after_finish() -> String {
     "keep".to_string()
 }
+fn default_renders_while_capturing() -> usize {
+    1
+}
 fn default_dem_open_target() -> String {
     "analyzer".to_string()
 }
@@ -515,6 +537,8 @@ impl Default for AppSettings {
             kept_json_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
+            capture_split_left_permille: None,
+            analyzer_demos_height_px: None,
             language: "en".to_string(),
             capture_fps: default_capture_fps(),
             obs_capture_fps: default_obs_capture_fps(),
@@ -583,6 +607,8 @@ impl Default for AppSettings {
             take_after_finish: default_take_after_finish(),
             take_delete_only_when_space_needed: false,
             render_while_capturing: false,
+            renders_while_capturing: default_renders_while_capturing(),
+            kill_gaps: native::patch::types::KillGaps::default(),
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
@@ -610,6 +636,21 @@ pub fn settings_path() -> PathBuf {
     // the activity log. It used to be spelled out again here, which is how the
     // two could have disagreed after #257 renamed the folder.
     native::shared::paths::get_appdata_dir().join("settings.json")
+}
+
+/// Whether the settings file says the one-time look at the pinned folders
+/// (#533) has run. An installed Studio and a dev one open at once share the
+/// file, and each saves its whole copy: one that loaded the file before the
+/// look was answered in the other wrote `false` back, and the look came up
+/// again at the next start (after each update). Once it has run in either,
+/// a save keeps it run.
+pub fn pinned_review_done_on_disk() -> bool {
+    pinned_review_done_in(&fs::read_to_string(settings_path()).unwrap_or_default())
+}
+
+fn pinned_review_done_in(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .is_ok_and(|v| v["pinned_folders_reviewed"] == true)
 }
 
 /// How many one-time changes to saved values exist; `migrate` runs the ones
@@ -724,9 +765,9 @@ impl SettingsManager {
 /// launching the game at a folder Studio cannot name.
 pub fn apply_game_folder(settings: &AppSettings) {
     if let Err(e) = native::shared::paths::set_game_folder(&settings.game_folder) {
-        native::log_markdown(&format!(
-            "⚠️ **Settings** — {e}. Using `{}` until it is changed in Configuration → Paths (#402).",
-            native::shared::paths::DEFAULT_GAME_FOLDER
+        native::log_markdown(&crate::messages::settings::game_folder_fell_back(
+            e,
+            native::shared::paths::DEFAULT_GAME_FOLDER,
         ));
         let _ = native::shared::paths::set_game_folder("");
     }
@@ -807,12 +848,19 @@ mod tests {
         assert!(!settings.take_delete_only_when_space_needed);
         // Settings saved before #861 don't render while capturing.
         assert!(!settings.render_while_capturing);
+        assert_eq!(settings.renders_while_capturing, 1);
+        // Settings saved before #831 keep the gaps between kills.
+        assert_eq!(
+            settings.kill_gaps.mode,
+            native::patch::types::KillGapMode::Keep
+        );
+        assert_eq!(settings.kill_gaps.over_seconds, 8.0);
         // No render_codec saved: today's default, ProRes 422.
         assert_eq!(settings.render_codec, "prores_422");
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,
-            crate::capture_manager::SCAN_CONCURRENCY as i32
+            crate::scan_manager::SCAN_CONCURRENCY as i32
         );
         // Settings saved before #599 still open Setup when a path is missing.
         assert!(!settings.setup_dismissed);
@@ -820,6 +868,19 @@ mod tests {
         assert!(!settings.pinned_folders_reviewed);
         // Settings saved before #531 keep walking into subfolders.
         assert!(settings.scan_include_subfolders);
+    }
+
+    #[test]
+    fn the_pinned_folder_look_reads_as_run_only_when_the_file_says_so() {
+        assert!(pinned_review_done_in(
+            r#"{"pinned_folders_reviewed": true, "hl_path": "x"}"#
+        ));
+        assert!(!pinned_review_done_in(
+            r#"{"pinned_folders_reviewed": false}"#
+        ));
+        // A file from before #533, or one that doesn't parse, hasn't had it.
+        assert!(!pinned_review_done_in(r#"{"hl_path": "x"}"#));
+        assert!(!pinned_review_done_in("not json"));
     }
 
     #[test]

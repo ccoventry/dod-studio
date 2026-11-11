@@ -4,6 +4,8 @@
 // the groups. auditor_pane.js and audit_folders.js do the DOM.
 import { STRINGS } from './strings.js';
 import { againstLastRun, lastRunKey } from './progress_view.js';
+import { fileNameOf } from './path_display.js';
+import { gbOrMbText } from './byte_size.js';
 
 const comparable = (p) => p.trim().replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 
@@ -129,7 +131,7 @@ export function copiesToDelete(groups, ticked) {
 
 /// The last part of an archive's path: `pack.7z`.
 function archiveName(zip) {
-  return shownPath(zip).split(/[\\/]/).pop();
+  return fileNameOf(shownPath(zip));
 }
 
 /// The chip of a loose demo an archive holds a copy of (#929), or `null`:
@@ -248,8 +250,7 @@ export function auditTotals(groups) {
 
 /** Wasted space for the footer: GB from 1 GB up, MB below it. */
 export function wastedSizeText(bytes) {
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return gbOrMbText(bytes);
 }
 
 /// The Status cell of a file row: kept, in use, or a copy.

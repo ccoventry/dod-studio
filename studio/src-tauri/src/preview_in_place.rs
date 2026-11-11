@@ -17,8 +17,6 @@ use native::preview_in_place::{
 };
 use native::sys::game_remote::{Sent, send_console_commands};
 
-use crate::capture_manager::SerializedStreak;
-
 /// How long a launched game has to open its command pipe.
 const PIPE_WAIT: Duration = Duration::from_secs(90);
 /// After the pipe answers, how long before the window is opened: the pipe
@@ -30,15 +28,11 @@ const SETTLE: Duration = Duration::from_secs(5);
 /// the same message loses to it.
 const TAB_AFTER: Duration = Duration::from_secs(3);
 
-/// The `viewdemo` argument for previewing `streaks`' demo in place, or
-/// `None` when this preview has to be patched.
-pub fn plan(
-    config: &PatcherConfig,
-    dod_dir: &Path,
-    streaks: &[SerializedStreak],
-) -> Option<String> {
+/// The `viewdemo` argument for previewing `demo` in place (the highlights'
+/// demo, or its trimmed copy, #207), or `None` when this preview has to be
+/// patched.
+pub fn plan(config: &PatcherConfig, dod_dir: &Path, demo: &Path) -> Option<String> {
     let dll = config.goldsrc_hooks_dll()?;
-    let demo = Path::new(&streaks.first()?.source_demo);
     if !demo.is_file() {
         return None;
     }
@@ -55,15 +49,12 @@ pub fn plan(
 /// ("Half-Life", "dod-studio", most demo names). Over the pipe, the line is
 /// the console's own, where a quoted argument keeps its dashes.
 pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
-    let before = crate::capture_manager::running_game_pids();
+    let before = crate::game_process_manager::running_game_pids();
     let mut cmd = config.build_hlae_process("");
-    let launcher = cmd
-        .spawn()
+    let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
-    native::log_markdown(&format!(
-        "[preview] in place: launched the game for \"{arg}\" (no patched copy)"
-    ));
-    crate::capture_manager::watch_for_error_dialogs(app, launcher);
+    native::log_markdown(&crate::messages::preview::preview_launched_in_place(arg));
+    crate::game_process_manager::watch_for_error_dialogs(app, launcher);
     let lines = preview_lines(arg);
     std::thread::spawn(move || {
         if let Some(pid) = send_when_ready(&before, &lines) {
@@ -78,8 +69,10 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
 fn open_highlights_later(pid: u32) {
     std::thread::sleep(TAB_AFTER);
     let sent = send_console_commands(pid, &[OPEN_HIGHLIGHTS.to_string()]);
-    native::log_markdown(&format!(
-        "[preview] in place: {OPEN_HIGHLIGHTS} -> pid {pid}: {sent:?}"
+    native::log_markdown(&crate::messages::preview::preview_sent_to_game(
+        OPEN_HIGHLIGHTS,
+        pid,
+        &sent,
     ));
 }
 
@@ -93,8 +86,8 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
             .map_err(crate::messages::failed_to_send_to_running_game)?
         {
             Sent::Delivered => {
-                native::log_markdown(&format!(
-                    "[preview] in place: sent \"{viewdemo}\" to the running game (pid {pid})"
+                native::log_markdown(&crate::messages::preview::preview_sent_to_running_game(
+                    &viewdemo, pid,
                 ));
                 std::thread::spawn(move || open_highlights_later(pid));
                 return Ok(Some(viewdemo));
@@ -112,7 +105,7 @@ pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < PIPE_WAIT {
         std::thread::sleep(Duration::from_millis(500));
-        let fresh: Vec<u32> = crate::capture_manager::running_game_pids()
+        let fresh: Vec<u32> = crate::game_process_manager::running_game_pids()
             .into_iter()
             .filter(|pid| !before.contains(pid))
             .collect();
@@ -123,16 +116,15 @@ pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
                 // is what lets the Highlights tab know the demo.
                 std::thread::sleep(SETTLE);
                 let sent = send_console_commands(pid, lines);
-                native::log_markdown(&format!(
-                    "[preview] in place: {} -> pid {pid}: {sent:?}",
-                    lines.join("; ")
+                native::log_markdown(&crate::messages::preview::preview_sent_to_game(
+                    lines.join("; "),
+                    pid,
+                    &sent,
                 ));
                 return matches!(sent, Ok(Sent::Delivered)).then_some(pid);
             }
         }
     }
-    native::log_markdown(
-        "[preview] in place: the game never opened its command pipe; the preview was not started",
-    );
+    native::log_markdown(crate::messages::preview::PREVIEW_PIPE_NEVER_OPENED);
     None
 }

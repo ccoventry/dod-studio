@@ -122,12 +122,17 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 
 pub mod types;
 
+/// A Seek Between Clips batch in the game that is already open (#725).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod batch_reuse;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod builder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cfg_report;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
 pub mod console_prefix;
@@ -139,6 +144,8 @@ pub mod decal_probe;
 pub mod decal_strip;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod entity_trim;
 pub mod game_dir;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
@@ -158,6 +165,9 @@ pub mod scanner;
 pub mod sound_mute;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source_copies;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod trimmed_copies;
+pub mod viewdemo_clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod viewdemo_refresh;
 

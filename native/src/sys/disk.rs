@@ -18,6 +18,42 @@ pub fn calculate_lossless_video_bytes(w: i32, h: i32, fps: i32, duration_secs: f
         * (duration_secs as f64).ceil() as u64
 }
 
+/// What an OBS take is billed at, in MB (10^6 bytes) per minute, for each
+/// OBS Quality setting (#1096): the largest take measured in #1060 at
+/// 2560x1440 and 120 fps (`docs/obs_alternate_capture.md`, "Encoder and
+/// quality") plus ~20% margin, so it stays an upper bound. The measured
+/// ranges were Small 1,590-1,900, Standard 2,770-3,170, High 4,170-4,740,
+/// Max 5,030-5,720 and OBS's own 2,880-3,340. Mirrored in
+/// `capture_estimate.js`'s `OBS_MB_PER_MINUTE`.
+pub fn obs_mb_per_minute(quality: crate::patch::ObsRecordingQuality) -> u64 {
+    use crate::patch::ObsRecordingQuality as Q;
+    match quality {
+        Q::Small => 2_300,
+        Q::Standard => 3_800,
+        Q::High => 5_700,
+        Q::Max => 6_900,
+        Q::ObsSimple => 4_000,
+    }
+}
+
+/// What an OBS take of `duration_secs` is expected to need on disk: an
+/// upper bound. The rates above were measured at 2560x1440 and 120 fps; a
+/// bigger picture or a faster capture scales them up, a smaller or slower
+/// one does not scale them down (file size falls slower than the pixel or
+/// frame count, so shrinking it would risk an under-count).
+pub fn calculate_obs_bytes(
+    quality: crate::patch::ObsRecordingQuality,
+    w: i32,
+    h: i32,
+    obs_fps: i32,
+    duration_secs: f32,
+) -> u64 {
+    let pixels = w.max(0) as f64 * h.max(0) as f64 / (2560.0 * 1440.0);
+    let rate = obs_fps.max(0) as f64 / 120.0;
+    let per_second = obs_mb_per_minute(quality) as f64 * 1_000_000.0 / 60.0;
+    (per_second * pixels.max(1.0) * rate.max(1.0) * (duration_secs as f64).ceil()).ceil() as u64
+}
+
 /// Bytes one recorded `mirv_agr` frame costs, rounded up. Measured on #403's
 /// test take: 7.3 MB for 32.6 s at 30 fps is ~7.5 KB a frame. It grows with
 /// how many models are on screen, so this is a planning figure, not a bound.
@@ -35,31 +71,81 @@ pub fn calculate_agr_bytes(fps: i32, duration_secs: f32) -> u64 {
 /// literals that could silently drift apart.
 pub const MIN_DRIVE_HEADROOM_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
-/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
-/// `None` for a path with no prefix. Folders with the same key share one
-/// drive's free space, so planners budget per key, not per folder (#774).
+/// The volume a path is on, lowercased: its `\\?\volume{guid}\` name when
+/// Windows can tell, so a disk mounted as a folder inside another drive
+/// (`D:\Captures`) keys apart from `D:` itself (#1041); else the drive
+/// (`c:`) or share (`\\server\share`). `None` for a path with no prefix.
+/// Folders with the same key share one drive's free space, so planners budget
+/// per key, not per folder (#774).
 pub fn volume_key(path: &std::path::Path) -> Option<String> {
-    match path.components().next()? {
-        std::path::Component::Prefix(prefix) => {
-            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+    let std::path::Component::Prefix(prefix) = path.components().next()? else {
+        return None;
+    };
+    // Only a drive letter is asked about: asking about a share that's offline
+    // waits on the network.
+    #[cfg(windows)]
+    if matches!(
+        prefix.kind(),
+        std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
+    ) && let Some(name) = win_volume::volume_name(path)
+    {
+        return Some(name.to_lowercase());
+    }
+    Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+}
+
+/// `GetVolumePathNameW` (the mount point a path is under, its nearest
+/// existing folder deciding) then `GetVolumeNameForVolumeMountPointW`.
+/// `None` for a `subst` drive or a drive that isn't there.
+#[cfg(windows)]
+mod win_volume {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetVolumePathNameW(file_name: *const u16, volume_path: *mut u16, len: u32) -> i32;
+        fn GetVolumeNameForVolumeMountPointW(
+            mount_point: *const u16,
+            volume_name: *mut u16,
+            len: u32,
+        ) -> i32;
+    }
+
+    pub fn volume_name(path: &std::path::Path) -> Option<String> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut mount = vec![0u16; wide.len().max(4) + 1];
+        if unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) } == 0
+        {
+            return None;
         }
-        _ => None,
+        // A volume name is `\\?\Volume{GUID}\`: 49 characters and the nul.
+        let mut name = [0u16; 64];
+        if unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), name.len() as u32)
+        } == 0
+        {
+            return None;
+        }
+        let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        Some(String::from_utf16_lossy(&name[..len]))
     }
 }
 
 /// Groups `dirs` by volume: returns the index of each dir's budget and one
 /// starting budget per volume, from `free_of` (the smallest answer among the
-/// volume's dirs). A dir with no volume key gets a budget of its own.
+/// volume's dirs). A dir with no volume key gets a budget of its own. A
+/// volume whose free space is unknown (`None`) gets an unbounded budget
+/// (`u64::MAX`), so the planner treats it as having room, as it always has.
 pub fn group_by_volume(
     dirs: &[std::path::PathBuf],
-    mut free_of: impl FnMut(&std::path::Path) -> u64,
+    mut free_of: impl FnMut(&std::path::Path) -> Option<u64>,
 ) -> (Vec<usize>, Vec<u64>) {
     let mut budget_of_dir = Vec::with_capacity(dirs.len());
     let mut budgets: Vec<u64> = Vec::new();
     let mut keys: Vec<Option<String>> = Vec::new();
     for dir in dirs {
         let key = volume_key(dir);
-        let free = free_of(dir);
+        let free = free_of(dir).unwrap_or(u64::MAX);
         let existing = key
             .is_some()
             .then(|| keys.iter().position(|k| *k == key))
@@ -77,6 +163,31 @@ pub fn group_by_volume(
         }
     }
     (budget_of_dir, budgets)
+}
+
+/// Free bytes across `paths`, counting each volume once and skipping paths
+/// whose free space is unknown (`None`).
+pub fn pool_free_bytes(paths: &[std::path::PathBuf]) -> u64 {
+    pool_free_bytes_with(paths, get_available_bytes)
+}
+
+fn pool_free_bytes_with(
+    paths: &[std::path::PathBuf],
+    mut free_of: impl FnMut(&std::path::Path) -> Option<u64>,
+) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    let mut total: u64 = 0;
+    for p in paths {
+        if let Some(key) = volume_key(p)
+            && !seen.insert(key)
+        {
+            continue;
+        }
+        if let Some(free) = free_of(p) {
+            total += free;
+        }
+    }
+    total
 }
 
 // Disk query results are cached for TTL_MS milliseconds to avoid
@@ -100,8 +211,10 @@ pub fn forget_free_space() {
 #[cfg(target_arch = "wasm32")]
 pub fn forget_free_space() {}
 
+/// Free bytes on the volume `path` is on, or `None` when that can't be told:
+/// a malformed, relative or non-directory path, or one under no known mount.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_available_bytes(path: &std::path::Path) -> u64 {
+pub fn get_available_bytes(path: &std::path::Path) -> Option<u64> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     use std::time::Instant;
@@ -112,7 +225,7 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     static DISKS: OnceLock<Mutex<(Disks, Instant, u64)>> = OnceLock::new();
 
     // Per-path TTL cache: path_key → (last_refresh, available_bytes, epoch)
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64, u64)>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<u64>, u64)>>> = OnceLock::new();
 
     let epoch = FREE_SPACE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
 
@@ -150,7 +263,7 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     // capture/render output folders are legitimately auto-created at write
     // time — "doesn't exist yet" alone isn't disqualifying.
     let result = match diagnose_path(path) {
-        PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => u64::MAX,
+        PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => None,
         PathStatus::Ok | PathStatus::NotFound => {
             let disks_mutex = DISKS.get_or_init(|| {
                 Mutex::new((Disks::new_with_refreshed_list(), Instant::now(), epoch))
@@ -167,7 +280,7 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
                     *listed_epoch = epoch;
                 }
 
-                let mut best_bytes = u64::MAX;
+                let mut best_bytes = None;
                 let mut best_len = 0usize;
 
                 for disk in disks.list() {
@@ -186,12 +299,12 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
                     if path_key.starts_with(&mount_key) && mount_key.len() > best_len {
                         best_len = mount_key.len();
-                        best_bytes = disk.available_space();
+                        best_bytes = Some(disk.available_space());
                     }
                 }
                 best_bytes
             } else {
-                u64::MAX
+                None
             }
         }
     };
@@ -212,8 +325,8 @@ fn list_is_fresh(refreshed_at: std::time::Instant, now: std::time::Instant) -> b
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn get_available_bytes(_path: &std::path::Path) -> u64 {
-    u64::MAX
+pub fn get_available_bytes(_path: &std::path::Path) -> Option<u64> {
+    None
 }
 
 /// Why a configured output path can't be used, for surfacing a specific
@@ -267,19 +380,64 @@ mod tests {
     use super::*;
 
     /// A real, existing folder resolves to its drive's free space; a path that
-    /// can never be written to reports "unknown" (u64::MAX) instead of the
+    /// can never be written to reports "unknown" (`None`) instead of the
     /// free space of whatever drive it prefix-matches.
     #[test]
     fn free_space_of_a_real_folder_and_a_bad_path() {
         let dir = std::env::temp_dir();
         let bytes = get_available_bytes(&dir);
-        assert!(bytes > 0 && bytes < u64::MAX, "{}: {bytes}", dir.display());
+        assert!(bytes.is_some_and(|b| b > 0), "{}: {bytes:?}", dir.display());
         // Cached for TTL_MS, so a second call agrees.
         assert_eq!(get_available_bytes(&dir), bytes);
         assert_eq!(
             get_available_bytes(std::path::Path::new("relative/folder")),
-            u64::MAX
+            None
         );
+        // The unknown answer is cached too.
+        assert_eq!(
+            get_available_bytes(std::path::Path::new("relative/folder")),
+            None
+        );
+    }
+
+    /// An unknown volume gets an unbounded budget, a known one the smallest
+    /// answer among its folders (an unknown folder doesn't shrink it).
+    #[cfg(windows)]
+    #[test]
+    fn an_unknown_volume_gets_an_unbounded_budget() {
+        use std::path::PathBuf;
+        let dirs: Vec<PathBuf> = [r"C:\a", r"Z:\gone", r"c:\b"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let free = |p: &std::path::Path| {
+            p.to_string_lossy()
+                .to_lowercase()
+                .starts_with("c:")
+                .then_some(70)
+        };
+        let (budget_of_dir, budgets) = group_by_volume(&dirs, free);
+        assert_eq!(budget_of_dir, vec![0, 1, 0]);
+        assert_eq!(budgets, vec![70, u64::MAX]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pool_counts_each_drive_once_and_skips_unknown() {
+        use std::path::PathBuf;
+        let free = |p: &std::path::Path| match p.to_string_lossy().to_lowercase().chars().next() {
+            Some('c') => Some(100),
+            Some('d') => Some(40),
+            _ => None,
+        };
+        let paths: Vec<PathBuf> = [r"C:\a", r"c:\b", r"D:\x", r"Z:\gone"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(pool_free_bytes_with(&paths, free), 140);
+        let reversed: Vec<PathBuf> = paths.iter().rev().cloned().collect();
+        assert_eq!(pool_free_bytes_with(&reversed, free), 140);
+        assert_eq!(pool_free_bytes_with(&[], free), 0);
     }
 
     #[cfg(windows)]
@@ -301,6 +459,29 @@ mod tests {
         assert_eq!(volume_key(Path::new("relative")), None);
     }
 
+    /// #1041: a real drive keys by its volume name, which a disk mounted as a
+    /// folder has of its own; a folder that isn't there yet keys by the
+    /// volume it will be on.
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_keys_by_its_volume_name() {
+        use std::path::Path;
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let key = volume_key(&Path::new(&system).join("Windows")).unwrap();
+        assert!(key.starts_with(r"\\?\volume{"), "{key}");
+        assert_eq!(
+            volume_key(&Path::new(&system).join("no-such-folder-1041").join("x")),
+            Some(key)
+        );
+        // No such drive: the letter, as before.
+        let missing = (b'A'..=b'Z')
+            .map(|c| format!("{}:", c as char))
+            .find(|d| !Path::new(&format!("{d}\\")).exists());
+        if let Some(d) = missing {
+            assert_eq!(volume_key(&Path::new(&d).join("x")), Some(d.to_lowercase()));
+        }
+    }
+
     /// #774: two folders on C: get one budget, D: its own, and folders with
     /// no drive never merge.
     #[cfg(windows)]
@@ -311,8 +492,9 @@ mod tests {
             .iter()
             .map(PathBuf::from)
             .collect();
-        let (budget_of_dir, budgets) =
-            group_by_volume(&dirs, |p| if p.starts_with(r"D:\") { 50 } else { 100 });
+        let (budget_of_dir, budgets) = group_by_volume(&dirs, |p| {
+            Some(if p.starts_with(r"D:\") { 50 } else { 100 })
+        });
         assert_eq!(budget_of_dir, vec![0, 1, 0, 2, 3]);
         assert_eq!(budgets, vec![100, 50, 100, 100]);
     }

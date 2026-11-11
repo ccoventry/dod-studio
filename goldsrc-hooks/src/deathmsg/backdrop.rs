@@ -444,7 +444,7 @@ pub(super) fn describe() -> String {
 /// # Safety
 ///
 /// On the engine's thread with its GL context current, inside a HUD draw.
-unsafe fn fill(rect: [i32; 4], rgb: Rgb, alpha: i32) {
+pub(crate) unsafe fn fill(rect: [i32; 4], rgb: Rgb, alpha: i32) {
     #[cfg(target_arch = "x86")]
     {
         if alpha <= 0 {

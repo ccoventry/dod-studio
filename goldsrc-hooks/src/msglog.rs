@@ -162,7 +162,7 @@ static WANTED: Mutex<Wanted> = Mutex::new(Wanted::None);
 
 /// True whenever [`WANTED`] is not [`Wanted::None`] -- lets [`poll`] skip the
 /// lock on the overwhelmingly common case (logging off) without changing
-/// behaviour, the same shape `commands.rs`' other `poll_*` helpers use.
+/// behaviour, the same shape `commands/poll.rs`' other `poll_*` helpers use.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The last payload logged per message name, for the identical-repeat
@@ -368,7 +368,7 @@ fn status() -> String {
 
 /// Folded into `ds_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `ds_spec_match_pov`) can treat this the same way -- see `commands.rs`.
+/// `ds_spec_match_pov`) can treat this the same way -- see `commands/status.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;
@@ -514,7 +514,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // ds_hud_hide_element's own fix (commit 3e44cd7) applied.
+        // the since-retired ds_hud_hide_element's fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }

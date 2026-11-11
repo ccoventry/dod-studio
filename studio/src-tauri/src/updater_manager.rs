@@ -61,7 +61,16 @@ pub async fn check_for_update(
         .build()
         .map_err(crate::messages::failed_to_build_updater)?;
 
-    let update = updater.check().await.map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| {
+        native::log_markdown(&crate::messages::update::update_check_failed(&channel, &e));
+        e.to_string()
+    })?;
+    native::log_markdown(&crate::messages::update::update_check_result(
+        &channel,
+        update
+            .as_ref()
+            .map(|u| (u.current_version.as_str(), u.version.as_str())),
+    ));
 
     match update {
         Some(update) => {
@@ -110,6 +119,9 @@ pub async fn download_and_install_update(
     // download-finished callback fires before the signature check and the
     // install, too early for "Installing" or "Ready" (#957).
     let mut meter = DownloadMeter::default();
+    native::log_markdown(&crate::messages::update::update_downloading(
+        &update.version,
+    ));
     let bytes = update
         .download(
             |chunk_length, content_length| {
@@ -120,16 +132,48 @@ pub async fn download_and_install_update(
             || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            native::log_markdown(&crate::messages::update::update_download_failed(&e));
+            e.to_string()
+        })?;
     // The throttle may have held back the last chunk: the bar ends full.
     let _ = app.emit("update_download_progress", meter.progress());
     let _ = app.emit("update_installing", ());
     // On Windows this starts the installer and quits Studio, so nothing after
     // it runs there.
-    update.install(bytes).map_err(|e| e.to_string())?;
+    native::log_markdown(crate::messages::update::UPDATE_DOWNLOADED_INSTALLING);
+    update.install(bytes).map_err(|e| {
+        native::log_markdown(&crate::messages::update::update_install_failed(&e));
+        e.to_string()
+    })?;
     let _ = app.emit("update_ready", ());
 
     Ok(())
+}
+
+/// Earlier versions' release notes for the What's new window (#1013):
+/// GitHub's release list, saved in the app's data folder, or that saved copy
+/// when GitHub can't be read. `offline` reads only the saved copy, for a
+/// Studio whose update checks are off. Off the async runtime: it waits on the
+/// network.
+#[tauri::command]
+pub async fn release_history(
+    offline: bool,
+) -> Result<native::shared::release_history::History, String> {
+    use native::shared::release_history as history;
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let dir = native::shared::paths::get_appdata_dir();
+        if offline {
+            history::History {
+                releases: history::read_cache(&dir),
+                from_cache: true,
+                error: None,
+            }
+        } else {
+            history::fetch_or_cached(history::RELEASES_URL, &dir)
+        }
+    }))
+    .await
 }
 
 /// `cfg!(debug_assertions)` is compile-time info baked into the binary — the

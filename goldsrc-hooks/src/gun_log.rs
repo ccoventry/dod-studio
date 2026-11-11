@@ -17,10 +17,11 @@
 //! shows on a jump or a crouch-jump. A POV-vs-HLTV difference it reports is
 //! a lead to check against the drawn frames, not a finding (#704).
 
-use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("debug_log_gun_lowered");
 
@@ -30,7 +31,7 @@ const PATTERN: &str = "83 F8 37 7D 06 D8 05 ?? ?? ?? ?? C7 05 ?? ?? ?? ?? 01 00 
 /// Where `g_ihidexhair`'s address sits in the pattern.
 const FLAG_OPERAND_AT: usize = 13;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// `g_ihidexhair`'s address, 1 when it can't be found, 0 before a look.
 static FLAG: AtomicUsize = AtomicUsize::new(0);
 static FLAG_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -60,10 +61,6 @@ const REASONS: [&str; 13] = [
 /// Called every frame by `anim_fix` with why the gun is lowered, or 0.
 pub fn note_spec_reason(code: u8) {
     SPEC_REASON.store(code, Ordering::Relaxed);
-}
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 fn report(line: &str) {
@@ -109,8 +106,7 @@ fn clock() -> f64 {
 
 /// Runs every frame.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() || unsafe { (*cvar).value } == 0.0 {
+    if !CVAR.on() {
         LAST.store(0, Ordering::Relaxed);
         return;
     }

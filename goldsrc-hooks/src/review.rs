@@ -8,12 +8,23 @@
 //! its demo with `viewdemo` (unless it is the one already in the player),
 //! waits for the whole file to be read, seeks to [`LEAD`] seconds before the
 //! first kill, and plays at normal speed until [`TAIL`] seconds after the
-//! last. There it pauses and opens the DoD Studio window on its Review tab.
+//! last. There it pauses and waits for an answer: on the game screen, from
+//! the answer keys (`review_keys`, #660), or with `ds_ui_review_keys 0` on
+//! the DoD Studio window's Review tab, which it opens. The keys answer while
+//! the highlight plays too, ending it early (#1141), but not for [`LOCKOUT`]
+//! after it starts. Once each seek has landed, `stopsound` ends whatever was
+//! still playing from before it ([`hush_once_landed`]).
 //!
 //! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
 //! events pipe (#434), then moves on. `replay` plays the highlight again,
 //! `next` and `back` move without answering, `stop` ends the review.
+//!
+//! The kill range and note can also be set without the menu: E (or `form`)
+//! opens a small form over the demo (`review_form`, #1139), whose Enter puts
+//! them on the highlight and sends them at once as a `REVIEW_EDIT` line,
+//! which sets the row's range and note and leaves its mark. The answer after
+//! it carries the same values.
 //!
 //! ## The queue file
 //!
@@ -23,9 +34,20 @@
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
 //! `maybe`, `no` or `-`), the note, and, for an HLTV demo, the player's
-//! number (#822; `-` or missing for a POV demo). The review starts at the
+//! number (#822; `-` or missing for a POV demo), and each kill's victim and
+//! weapon ([`KILL_SEP`] between kills, [`PART_SEP`] between a kill's two;
+//! #1140; missing from an older Studio). The review starts at the
 //! first highlight: Studio's Review box decides what the queue holds, so
-//! picking up where a review left off is its Unmarked choice.
+//! picking up where a review left off is its Unmarked choice. A header's
+//! `from=<seconds>` starts it at the first highlight whose first kill is at
+//! or after that time instead (#1142's From here); Back still reaches the
+//! ones before.
+//!
+//! ## Starting one from the game
+//!
+//! With no review running, the Review tab's From the start and From here
+//! (`ask start`, `ask here`) ask DoD Studio to review the demo playing
+//! (`review_ask`, #1142); Studio sends the queue back as above.
 //!
 //! ## HLTV demos
 //!
@@ -51,10 +73,11 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
+use crate::review_keys::{KeyMode, KillClock, kill_lines, now_text};
 
 pub const NAME: &str = console_name!("demo_review");
 
@@ -74,6 +97,11 @@ const SETTLE_FRAMES: u32 = 30;
 const UNSEEN_LOAD_FRAMES: u32 = 300;
 /// The longest note sent to Studio, in characters.
 const NOTE_MAX: usize = 500;
+/// How long the answer keys do nothing once a highlight starts playing
+/// (#1141): long enough that a double press on one answer, or a key held a
+/// beat long, can't answer the next highlight unseen; short enough that a
+/// clip the user already knows is a No can be answered at once.
+pub(crate) const LOCKOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Verdict {
@@ -111,6 +139,45 @@ pub(crate) struct Highlight {
     pub note: String,
     /// HLTV: the player the camera goes on, by number (#822).
     pub spectate: Option<i32>,
+    /// Each kill's victim and weapon, one per kill, or none from an older
+    /// Studio (#1140).
+    pub details: Vec<KillDetail>,
+}
+
+/// One kill's victim and weapon, as Studio's Highlight Details lists them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct KillDetail {
+    pub victim: String,
+    pub weapon: String,
+}
+
+/// Between two kills in the queue's details field, and between a kill's
+/// victim and weapon: control characters, which Studio keeps out of every
+/// name. Must match `native::review_queue::KILL_SEP` and `PART_SEP`.
+pub(crate) const KILL_SEP: char = '\u{1f}';
+pub(crate) const PART_SEP: char = '\u{1e}';
+
+/// The details field, or none when it is missing or doesn't hold one entry
+/// per kill.
+fn parse_details(field: Option<&str>, count: usize) -> Vec<KillDetail> {
+    let Some(field) = field.filter(|f| !f.trim().is_empty()) else {
+        return Vec::new();
+    };
+    let details: Vec<KillDetail> = field
+        .split(KILL_SEP)
+        .map(|kill| {
+            let (victim, weapon) = kill.split_once(PART_SEP).unwrap_or((kill, ""));
+            KillDetail {
+                victim: victim.trim().to_string(),
+                weapon: weapon.trim().to_string(),
+            }
+        })
+        .collect();
+    if details.len() == count {
+        details
+    } else {
+        Vec::new()
+    }
 }
 
 impl Highlight {
@@ -140,6 +207,8 @@ pub(crate) struct Options {
     pub gap: f64,
     /// The speed a gap plays at.
     pub speed: f32,
+    /// Start at the first highlight at or after this demo time (#1142).
+    pub from: Option<f64>,
 }
 
 impl Default for Options {
@@ -147,6 +216,7 @@ impl Default for Options {
         Options {
             gap: 0.0,
             speed: FAST_SPEED,
+            from: None,
         }
     }
 }
@@ -170,6 +240,13 @@ fn parse_options<'a>(fields: impl Iterator<Item = &'a str>) -> Options {
                 {
                     options.speed = speed.clamp(1.0, 16.0);
                 }
+            }
+            Some(("from", v)) => {
+                options.from = v
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|from| from.is_finite() && *from >= 0.0);
             }
             _ => {}
         }
@@ -266,6 +343,7 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
                 .get(8)
                 .and_then(|n| n.trim().parse::<i32>().ok())
                 .filter(|n| (1..=32).contains(n)),
+            details: parse_details(fields.get(9).copied(), count),
         });
     }
     if queue.is_empty() {
@@ -289,6 +367,19 @@ fn typed_kill(text: &str, count: usize) -> Option<usize> {
         .parse::<usize>()
         .ok()
         .filter(|&n| (1..=count).contains(&n))
+}
+
+/// The marker Studio reads a kill range and note saved without an answer
+/// from (#1139's form): the highlight's mark stays as it is.
+fn edit_label(h: &Highlight) -> String {
+    format!(
+        "REVIEW_EDIT\t{}\t{}\t{}\t{}\t{}",
+        h.demo,
+        h.key,
+        h.from,
+        h.to,
+        clean_note(&h.note)
+    )
 }
 
 /// The marker Studio reads an answer from.
@@ -412,6 +503,11 @@ struct Review {
     phase: Phase,
     /// The demo the review last loaded.
     loaded: Option<String>,
+    /// When the answer keys come on for the highlight playing ([`LOCKOUT`]).
+    keys_from: Instant,
+    /// Whether the sound left over from before the highlight's seek has been
+    /// stopped ([`hush_once_landed`]).
+    hushed: bool,
 }
 
 static REVIEW: Mutex<Option<Review>> = Mutex::new(None);
@@ -464,8 +560,170 @@ pub(crate) struct TabView {
 
 /// The Review tab's text with no review running.
 pub(crate) const IDLE_HEADING: &str = "No review running.";
-pub(crate) const IDLE_DETAIL: &str =
-    "In DoD Studio, tick demos in the Master Demo Queue and press Review highlights.";
+
+/// The Review tab's two buttons that start a review of the demo playing
+/// (#1142), in `ui/Review.res`.
+pub(crate) const START_BUTTONS: [&str; 2] = ["FromStartButton", "FromHereButton"];
+
+/// What decides whether a review can start from the game, and what the idle
+/// tab says.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct IdleFacts {
+    /// DoD Studio serves its game pipe.
+    pub studio: bool,
+    /// A demo is loaded and readable.
+    pub demo: bool,
+    pub ask: crate::review_ask::Status,
+}
+
+impl IdleFacts {
+    /// As they stand now. Only for the tab: it looks up the pipe at most once
+    /// a second.
+    pub(crate) fn now() -> IdleFacts {
+        IdleFacts {
+            studio: crate::review_ask::studio_running(),
+            demo: loaded_demo().is_some(),
+            ask: crate::review_ask::status(),
+        }
+    }
+
+    /// Whether From the start and From here may be pressed: not while a
+    /// request or a wait for the demo is on its way.
+    pub(crate) fn can_ask(&self) -> bool {
+        use crate::review_ask::Status;
+        self.studio && self.demo && !matches!(self.ask, Status::Asking(_) | Status::Sent(_))
+    }
+
+    /// The tab's second line with no review running.
+    pub(crate) fn detail(&self) -> String {
+        use crate::review_ask::Status;
+        match &self.ask {
+            Status::Asking(text) => return text.clone(),
+            Status::Sent(_) => return "DoD Studio sent the review: it starts in a moment.".into(),
+            Status::Failed(why) if self.studio => {
+                return format!("DoD Studio couldn't start it: {why}");
+            }
+            // The game gave up before asking: Studio never had the request.
+            Status::NotAsked(why) if self.studio => {
+                return format!("Not sent to DoD Studio: {why}");
+            }
+            Status::Failed(_) | Status::NotAsked(_) | Status::Idle => {}
+        }
+        // One line that fits the default window's 520-pixel label (about 85
+        // characters); the buttons' tooltips say the rest.
+        if !self.studio {
+            "Start DoD Studio to review the demo playing from here.".to_string()
+        } else if !self.demo {
+            "Play a demo to review it from here, or use Review highlights in DoD Studio."
+                .to_string()
+        } else {
+            "Review the demo playing: From the start, or From here (the next highlight from now on)."
+                .to_string()
+        }
+    }
+}
+
+/// The loaded demo's name and the demo player's clock now, while a demo is
+/// in the player and read.
+fn loaded_demo() -> Option<(String, f64)> {
+    let clock = crate::demo_seek::clock().filter(|c| c.active && !c.loading)?;
+    crate::demo_reload::current_demo().map(|name| (name, clock.now))
+}
+
+/// The demo player as an ask sees it.
+fn demo_now() -> crate::review_ask::DemoNow {
+    use crate::review_ask::DemoNow;
+    match crate::demo_seek::clock() {
+        Some(c) if c.loading => DemoNow::Loading,
+        Some(c) if c.active => DemoNow::Playing,
+        _ => DemoNow::Absent,
+    }
+}
+
+/// `ask start` / `ask here`: asks DoD Studio to review the demo playing, or
+/// once the demo loading now plays.
+fn ask(what: &str) {
+    use crate::review_ask::Start;
+    if lock().is_some() {
+        say("a review is running already");
+        return;
+    }
+    // From here is the clock as asked, even while the demo still loads: it
+    // plays meanwhile, so the clock when it is read has moved on.
+    let now = crate::demo_seek::clock()
+        .filter(|c| c.active)
+        .map(|c| c.now);
+    let start = match (what, now) {
+        ("start", _) => Start::First,
+        ("here", Some(now)) => Start::At(now),
+        ("here", None) => Start::First,
+        _ => {
+            say(&format!("usage: {NAME} ask start | ask here"));
+            return;
+        }
+    };
+    if demo_now() == crate::review_ask::DemoNow::Loading {
+        match crate::review_ask::wait_for_demo(start) {
+            Ok(()) => say("the demo is still loading: DoD Studio is asked once it plays"),
+            Err(why) => say(&why),
+        }
+        return;
+    }
+    // An ask still waiting would go out a second time on the next frame.
+    if crate::review_ask::waiting().is_some() {
+        crate::review_ask::stop_waiting(None);
+    }
+    send_ask(start);
+}
+
+/// An ask waiting for its demo to load, every frame: sent once the demo
+/// plays, dropped when a review starts meanwhile or the demo goes.
+fn poll_waiting_ask() {
+    use crate::review_ask::WaitStep;
+    let Some((start, waited)) = crate::review_ask::waiting() else {
+        return;
+    };
+    if lock().is_some() {
+        crate::review_ask::stop_waiting(None);
+        trace("ask: a review started while the demo loaded; not asking");
+        return;
+    }
+    match crate::review_ask::wait_step(demo_now(), waited) {
+        WaitStep::Wait => {}
+        WaitStep::Ask => {
+            crate::review_ask::stop_waiting(None);
+            send_ask(start);
+        }
+        WaitStep::GiveUp(why) => {
+            say(&format!("not asking DoD Studio: {why}"));
+            crate::review_ask::stop_waiting(Some(why));
+        }
+    }
+}
+
+/// Sends the ask for the demo playing now.
+fn send_ask(start: crate::review_ask::Start) {
+    let Some((name, _)) = loaded_demo() else {
+        say("no demo is playing: play one with viewdemo first");
+        return;
+    };
+    let demo = crate::review_ask::demo_path(&crate::texture_hires::game_dir(), &name);
+    match crate::review_ask::send(demo.clone(), start) {
+        Ok(()) => say(&format!("asked DoD Studio to review {}", demo.display())),
+        Err(why) => say(&why),
+    }
+}
+
+/// Where a review starts: the first highlight whose first kill is at or
+/// after `from`, or the first when `from` is none. `Err` with the first when
+/// every highlight is before it.
+fn start_index(queue: &[Highlight], from: Option<f64>) -> Result<usize, usize> {
+    let Some(from) = from else { return Ok(0) };
+    queue
+        .iter()
+        .position(|h| h.kills.first().is_some_and(|&t| t >= from))
+        .ok_or(0)
+}
 
 /// What the Review tab shows now, or `None` with no review running.
 pub(crate) fn tab_view() -> Option<TabView> {
@@ -481,6 +739,52 @@ pub(crate) fn tab_view() -> Option<TabView> {
         kills: h.kills.len(),
         note: h.note.clone(),
     })
+}
+
+/// What the kill range and note form shows for the highlight the review is
+/// on (#1139), or `None` with no review running.
+pub(crate) fn form_view() -> Option<crate::review_form::FormView> {
+    let guard = lock();
+    let review = guard.as_ref()?;
+    let h = review.queue.get(review.at)?;
+    Some(crate::review_form::FormView {
+        key: h.key.clone(),
+        title: panel_title(&review.queue, review.at),
+        from: h.from,
+        to: h.to,
+        kills: h.kills.len(),
+        note: h.note.clone(),
+    })
+}
+
+/// Puts what the form saved on its highlight and sends it to Studio, which
+/// sets the row's kill range and note and leaves its mark (#1139). The answer
+/// after it carries the same values. A save for a highlight the review has
+/// left is dropped: the form closes when the highlight changes, so only a
+/// save racing that change gets here.
+fn apply_saved(saved: crate::review_form::Saved) {
+    let mut guard = lock();
+    let Some(review) = guard.as_mut() else {
+        trace("form: saved with no review running, dropped");
+        return;
+    };
+    let at = review.at;
+    let h = &mut review.queue[at];
+    if h.key != saved.key {
+        trace("form: saved for a highlight the review has left, dropped");
+        return;
+    }
+    h.from = saved.from.clamp(1, h.kills.len());
+    h.to = saved.to.clamp(h.from, h.kills.len());
+    h.note = clean_note(&saved.note);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    crate::events::send(&edit_label(h));
+    say(&format!(
+        "highlight {}: kills {}-{} and the note saved",
+        at + 1,
+        h.from,
+        h.to
+    ));
 }
 
 /// "Demo 2 of 5 | highlight 3 of 9 | 4 left to answer".
@@ -559,6 +863,8 @@ fn play(review: &mut Review) {
                 spans,
                 fast: false,
             };
+            review.keys_from = Instant::now() + LOCKOUT;
+            review.hushed = false;
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -622,6 +928,10 @@ fn advance(guard: &mut Option<Review>) {
         say(&format!(
             "that was the last highlight -- {answered} of {total} answered"
         ));
+        // Answered mid-highlight (#1141): the demo plays on at normal speed.
+        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+            let _ = crate::demo_seek::set_time_scale(1.0);
+        }
         crate::events::send("REVIEW_END\tdone");
         *guard = None;
         crate::spectator_follow::hold_for_review(false);
@@ -630,10 +940,205 @@ fn advance(guard: &mut Option<Review>) {
     }
 }
 
-/// Runs every frame.
+/// Runs every frame: an answer key pressed since the last frame, the
+/// review's own step, then what the on-screen panel shows (#660).
 pub fn poll() {
+    // A key let go while the menu or a load had the keyboard (#1320).
+    crate::review_keys::forget_released();
+    if let Some(action) = crate::review_keys::take_pending() {
+        key_action(action);
+    }
+    if let Some(saved) = crate::review_form::take_saved() {
+        apply_saved(saved);
+    }
+    poll_waiting_ask();
     let mut guard = lock();
+    step(&mut guard);
+    let (panel, mode) = match guard.as_ref() {
+        Some(review) => panel_view(
+            review,
+            Instant::now(),
+            crate::demo_seek::clock()
+                .filter(|c| c.active)
+                .map(|c| c.now),
+        ),
+        None => (None, KeyMode::Off),
+    };
+    drop(guard);
+    crate::review_keys::publish(panel, mode);
+    watch_menu(mode);
+}
+
+/// "Highlight 3 of 12 | m00cat | 4 kills".
+fn panel_title(queue: &[Highlight], at: usize) -> String {
+    let h = &queue[at];
+    let mut parts = vec![format!("Highlight {} of {}", at + 1, queue.len())];
+    if !h.player.is_empty() {
+        parts.push(h.player.clone());
+    }
+    parts.push(match h.kills.len() {
+        1 => "1 kill".to_string(),
+        n => format!("{n} kills"),
+    });
+    if let Some(v) = h.verdict {
+        parts.push(format!("answered {}", v.word()));
+    }
+    parts.join(" | ")
+}
+
+/// What the answer keys do in the review as it stands at `now`, with
+/// `ds_ui_review_keys` at `keys_on`: taken from the moment a highlight loads,
+/// answering once [`LOCKOUT`] has passed since it started playing (#1141).
+fn key_mode(review: &Review, keys_on: bool, now: Instant) -> KeyMode {
+    if !keys_on {
+        return KeyMode::Off;
+    }
+    match review.phase {
+        Phase::Loading { .. } => KeyMode::Locked,
+        Phase::Playing { .. } | Phase::Waiting if now < review.keys_from => KeyMode::Locked,
+        Phase::Playing { .. } | Phase::Waiting => KeyMode::Live,
+        // The Review tab is open for why this one failed.
+        Phase::Failed(_) => KeyMode::Off,
+    }
+}
+
+/// The keys while the kill range and note form shows (#1139): taken but
+/// doing nothing, should one reach the game past the form's boxes, which
+/// keep every key they're typed in.
+fn under_form(mode: KeyMode, form_shown: bool) -> KeyMode {
+    if form_shown && mode == KeyMode::Live {
+        KeyMode::Locked
+    } else {
+        mode
+    }
+}
+
+/// What the on-screen panel shows for the review as it stands at `now`,
+/// with the demo player's clock at `clock`, and what the answer keys do.
+fn panel_view(
+    review: &Review,
+    now: Instant,
+    clock: Option<f64>,
+) -> (Option<crate::review_keys::Panel>, KeyMode) {
+    let keys = crate::review_keys::KEYS.on();
+    let info = crate::review_keys::INFO.on();
+    let Some(_) = review.queue.get(review.at) else {
+        return (None, KeyMode::Off);
+    };
+    let mode = under_form(key_mode(review, keys, now), crate::review_form::is_shown());
+    let title = panel_title(&review.queue, review.at);
+    let panel = |status: &str| crate::review_keys::Panel {
+        title: title.clone(),
+        status: status.to_string(),
+        keys,
+        live: mode == KeyMode::Live,
+        can_go_back: review.at > 0,
+        kills: Vec::new(),
+        xray: crate::spec_xray::XRAY.on(),
+    };
+    let h = &review.queue[review.at];
+    // The clock beside the kills' times, so the next kill's says how soon.
+    let now = clock.map_or_else(String::new, now_text);
+    let shown = match review.phase {
+        // With the keys off, the Review tab is open for the answer.
+        Phase::Waiting => keys.then(|| crate::review_keys::Panel {
+            kills: kill_lines(h, KillClock::Ended),
+            ..panel(&now)
+        }),
+        // The Review tab is open for why this one failed.
+        Phase::Failed(_) => None,
+        Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
+        Phase::Playing { .. } => info.then(|| crate::review_keys::Panel {
+            kills: kill_lines(h, clock.map_or(KillClock::Unknown, KillClock::At)),
+            ..panel(&now)
+        }),
+    };
+    (shown, mode)
+}
+
+/// What an answer key asks for, if the keys still answer: the key may have
+/// come in after the Review tab's buttons moved the review on.
+fn key_action(action: crate::review_keys::Action) {
+    use crate::review_keys::Action;
+    let live = lock().as_ref().is_some_and(|r| {
+        let mode = key_mode(r, crate::review_keys::KEYS.on(), Instant::now());
+        under_form(mode, crate::review_form::is_shown()) == KeyMode::Live
+    });
+    if !live {
+        return;
+    }
+    trace(&format!("key: {action:?}"));
+    match action {
+        Action::Form => crate::review_form::request_open(),
+        Action::Yes => answer(Verdict::Yes),
+        Action::Maybe => answer(Verdict::Maybe),
+        Action::No => answer(Verdict::No),
+        Action::Replay => replay(),
+        Action::Back => back(),
+        Action::Next => next(),
+        Action::Stop => stop(),
+        Action::Xray => {
+            if !crate::spec_xray::toggle() {
+                trace("X-ray: the engine's command buffer is not available");
+            }
+        }
+    }
+}
+
+/// Whether the menu was up last frame, for [`menu_opens_tab`].
+static MENU_WAS_UP: AtomicBool = AtomicBool::new(false);
+
+/// Whether the menu just came up by itself, ESC's doing: up now and not a
+/// frame ago, with neither our window nor the console window in it.
+fn menu_opens_tab(was_up: bool, (menu, window, console): (bool, bool, bool)) -> bool {
+    menu && !was_up && !window && !console
+}
+
+/// While the answer keys are the review's, ESC's menu comes up with the
+/// Review tab in it, for the kill range and the note (#660): the box says
+/// so whenever it lists the keys, while a highlight plays too (#1141).
+fn watch_menu(mode: KeyMode) {
+    let Some(state) = crate::studio_panel::menu_state() else {
+        return;
+    };
+    let was_up = MENU_WAS_UP.swap(state.0, Ordering::Relaxed);
+    // The form's Esc brings the menu up too; the form puts it away (#1139).
+    if mode != KeyMode::Off
+        && menu_opens_tab(was_up, state)
+        && !crate::review_form::menu_is_from_esc()
+    {
+        trace("the menu came up during a highlight: opening the Review tab");
+        open_tab();
+    }
+}
+
+/// Stops every sound once a highlight's seek has landed: a sound from before
+/// the seek (the last round's win music, a stepped seek's gunfire) would
+/// otherwise play on over the clip. Once per highlight played, so the clip's
+/// own sounds are left alone. `stopsound` also ends the map's looping
+/// ambience until the next demo load, which a review can do without.
+fn hush_once_landed(review: &mut Review) {
+    if review.hushed
+        || !matches!(review.phase, Phase::Playing { .. })
+        || crate::demo_seek::seeking()
+    {
+        return;
+    }
+    review.hushed = true;
+    if !run("stopsound\n") {
+        trace("stopsound: the engine's command buffer is not available");
+    }
+}
+
+/// The review's step for this frame.
+fn step(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
+    // A stepped seek still landing: the clip hasn't started for the eye, so
+    // neither has the lockout (#1141).
+    if matches!(review.phase, Phase::Playing { .. }) && crate::demo_seek::seeking() {
+        review.keys_from = Instant::now() + LOCKOUT;
+    }
+    hush_once_landed(review);
     match review.phase.clone() {
         Phase::Loading {
             since,
@@ -740,7 +1245,11 @@ pub fn poll() {
                 }
                 let _ = crate::demo_seek::set_paused(true);
                 review.phase = Phase::Waiting;
-                open_tab();
+                // With the answer keys on, the panel on screen asks instead
+                // (#660); ESC still opens the tab.
+                if !crate::review_keys::KEYS.on() {
+                    open_tab();
+                }
             }
             _ => fail(review, "the demo stopped".into()),
         },
@@ -805,7 +1314,70 @@ fn rest_of_line(from: i32) -> String {
     words.join(" ")
 }
 
-const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
+fn replay() {
+    let mut guard = lock();
+    match guard.as_mut() {
+        Some(review) if review.loaded.is_some() => {
+            let at = review.at;
+            if matches!(review.phase, Phase::Loading { .. }) {
+                say("still loading the demo");
+            } else {
+                go_to(review, at);
+            }
+        }
+        Some(_) => say("nothing to replay yet"),
+        None => say("no review running"),
+    }
+}
+
+fn back() {
+    let mut guard = lock();
+    match guard.as_mut() {
+        Some(review) if review.at > 0 => {
+            let at = review.at - 1;
+            go_to(review, at);
+        }
+        Some(_) => say("this is the first highlight"),
+        None => say("no review running"),
+    }
+}
+
+/// The next highlight without answering this one.
+fn next() {
+    let mut guard = lock();
+    if guard.is_none() {
+        say("no review running");
+    }
+    advance(&mut guard);
+}
+
+/// Ends the review; every answer so far is already in Studio.
+fn stop() {
+    if let Some(review) = lock().take() {
+        // Stopped inside a gap: the demo plays on at normal speed.
+        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+            let _ = crate::demo_seek::set_time_scale(1.0);
+        }
+        crate::events::send("REVIEW_END\tstopped");
+        crate::spectator_follow::hold_for_review(false);
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        say("stopped");
+    } else {
+        say("no review running");
+    }
+}
+
+const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | form | range <from> <to> | note <text> | stop";
+
+/// `form`: the kill range and note form, as E opens it (#1139), for a bind
+/// or a test that can't press keys.
+fn open_form() {
+    if lock().is_some() {
+        crate::review_form::request_open();
+    } else {
+        say("no review running");
+    }
+}
 
 /// `ds_demo_review <what>`.
 pub unsafe extern "C" fn command() {
@@ -821,42 +1393,14 @@ pub unsafe extern "C" fn command() {
             say(&line);
         }
         "start" => start(rest_of_line(2).trim().trim_matches('"')),
+        "ask" => ask(&words.next().unwrap_or("").to_ascii_lowercase()),
         "yes" => answer(Verdict::Yes),
         "maybe" => answer(Verdict::Maybe),
         "no" => answer(Verdict::No),
-        "replay" => {
-            let mut guard = lock();
-            match guard.as_mut() {
-                Some(review) if review.loaded.is_some() => {
-                    let at = review.at;
-                    if matches!(review.phase, Phase::Loading { .. }) {
-                        say("still loading the demo");
-                    } else {
-                        go_to(review, at);
-                    }
-                }
-                Some(_) => say("nothing to replay yet"),
-                None => say("no review running"),
-            }
-        }
-        "next" => {
-            let mut guard = lock();
-            if guard.is_none() {
-                say("no review running");
-            }
-            advance(&mut guard);
-        }
-        "back" => {
-            let mut guard = lock();
-            match guard.as_mut() {
-                Some(review) if review.at > 0 => {
-                    let at = review.at - 1;
-                    go_to(review, at);
-                }
-                Some(_) => say("this is the first highlight"),
-                None => say("no review running"),
-            }
-        }
+        "replay" => replay(),
+        "next" => next(),
+        "back" => back(),
+        "form" => open_form(),
         "range" => {
             let mut guard = lock();
             let Some(review) = guard.as_mut() else {
@@ -889,20 +1433,7 @@ pub unsafe extern "C" fn command() {
             review.queue[at].note = clean_note(&rest_of_line(2));
             GENERATION.fetch_add(1, Ordering::Relaxed);
         }
-        "stop" => {
-            if let Some(review) = lock().take() {
-                // Stopped inside a gap: the demo plays on at normal speed.
-                if matches!(review.phase, Phase::Playing { fast: true, .. }) {
-                    let _ = crate::demo_seek::set_time_scale(1.0);
-                }
-                crate::events::send("REVIEW_END\tstopped");
-                crate::spectator_follow::hold_for_review(false);
-                GENERATION.fetch_add(1, Ordering::Relaxed);
-                say("stopped");
-            } else {
-                say("no review running");
-            }
-        }
+        "stop" => stop(),
         other => say(&format!("unknown \"{other}\" -- {NAME} {USAGE}")),
     }
 }
@@ -912,6 +1443,9 @@ fn start(path: &str) {
         say(&format!("usage: {NAME} start \"<queue file>\""));
         return;
     }
+    // A request from the Review tab ends here, started or not: a queue that
+    // fails to read must not leave the tab waiting for it (#1142).
+    crate::review_ask::review_started();
     let queue = match std::fs::read_to_string(path)
         .map_err(|e| format!("could not read {path}: {e}"))
         .and_then(|text| parse_queue(&text))
@@ -924,7 +1458,13 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    let at = 0;
+    let at = match start_index(&queue, options.from) {
+        Ok(at) => at,
+        Err(first) => {
+            say("no highlight after where the demo was: starting from the first");
+            first
+        }
+    };
     say(&format!("{} highlight(s)", queue.len()));
     crate::events::send(&format!("REVIEW_START\t{}", queue.len()));
     // Held for the whole review: it only matters on an HLTV highlight, and
@@ -937,6 +1477,8 @@ fn start(path: &str) {
         at,
         phase: Phase::Waiting,
         loaded: None,
+        keys_from: Instant::now(),
+        hushed: false,
     });
     go_to(review, at);
 }
@@ -944,6 +1486,7 @@ fn start(path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::review_keys::clock_text;
 
     fn queue_text(lines: &[&str]) -> String {
         std::iter::once(QUEUE_HEADER)
@@ -963,7 +1506,107 @@ mod tests {
             verdict,
             note: String::new(),
             spectate: None,
+            details: Vec::new(),
         }
+    }
+
+    fn kill_detail(victim: &str, weapon: &str) -> KillDetail {
+        KillDetail {
+            victim: victim.to_string(),
+            weapon: weapon.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_queue_line_carries_each_kills_victim_and_weapon() {
+        let line = format!(
+            "p.dem\t1\t\t5,9\t1\t2\t-\t\t-\tgskiLL{PART_SEP}K98{KILL_SEP}{{$T}} Brain{PART_SEP}Colt"
+        );
+        let (queue, _) = parse_queue(&queue_text(&[&line])).unwrap();
+        assert_eq!(
+            queue[0].details,
+            vec![
+                kill_detail("gskiLL", "K98"),
+                kill_detail("{$T} Brain", "Colt")
+            ]
+        );
+        assert_eq!(queue[0].spectate, None);
+    }
+
+    #[test]
+    fn details_that_are_not_one_per_kill_are_dropped() {
+        assert_eq!(parse_details(Some("a"), 2), vec![]);
+        assert_eq!(parse_details(None, 1), vec![]);
+        assert_eq!(parse_details(Some(" "), 1), vec![]);
+        // A kill with no weapon part keeps its victim.
+        assert_eq!(parse_details(Some("a"), 1), vec![kill_detail("a", "")]);
+    }
+
+    #[test]
+    fn a_kill_time_reads_as_the_vcr_bar_shows_it() {
+        assert_eq!(clock_text(356.7), "5:56");
+        assert_eq!(clock_text(5.0), "0:05");
+        assert_eq!(clock_text(-1.0), "0:00");
+    }
+
+    #[test]
+    fn the_kill_list_stands_out_the_next_kill() {
+        use crate::review_keys::KillState::{Later, Next, Past};
+        let mut h = highlight("a", None);
+        h.kills = vec![356.0, 363.0, 370.0];
+        h.details = vec![
+            kill_detail("gskiLL", "K98"),
+            kill_detail("Brain", ""),
+            kill_detail("", ""),
+        ];
+        let states = |clock| {
+            kill_lines(&h, clock)
+                .into_iter()
+                .map(|l| l.state)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(states(KillClock::At(352.0)), vec![Next, Later, Later]);
+        // A kill counts as come once the clock reaches it.
+        assert_eq!(states(KillClock::At(356.0)), vec![Past, Next, Later]);
+        assert_eq!(states(KillClock::At(371.0)), vec![Past, Past, Past]);
+        assert_eq!(states(KillClock::Ended), vec![Past, Past, Past]);
+        assert_eq!(states(KillClock::Unknown), vec![Later, Later, Later]);
+        let texts: Vec<String> = kill_lines(&h, KillClock::Ended)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["1  5:56  gskiLL  K98", "2  6:03  Brain", "3  6:10"]
+        );
+    }
+
+    #[test]
+    fn the_box_lists_the_kills_while_playing_and_at_the_end() {
+        use crate::review_keys::KillState::{Next, Past};
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let kills = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").kills;
+        assert_eq!(kills(&review, Some(8.0))[0].state, Next);
+        review.phase = Phase::Waiting;
+        assert_eq!(kills(&review, Some(8.0))[0].state, Past);
+        review.phase = Phase::Loading {
+            since: Instant::now(),
+            frames: 0,
+            seen_loading: false,
+        };
+        assert!(kills(&review, None).is_empty());
+    }
+
+    #[test]
+    fn the_box_shows_the_clock_beside_the_kills() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let status = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").status;
+        assert_eq!(status(&review, Some(341.6)), "Now 5:41");
+        assert_eq!(status(&review, None), "");
+        review.phase = Phase::Waiting;
+        assert_eq!(status(&review, Some(370.0)), "Now 6:10");
     }
 
     #[test]
@@ -1028,9 +1671,108 @@ mod tests {
             options,
             Options {
                 gap: 8.0,
-                speed: 6.0
+                speed: 6.0,
+                from: None,
             }
         );
+    }
+
+    #[test]
+    fn from_here_on_the_header_starts_at_the_first_highlight_after_it() {
+        let text = format!("{QUEUE_HEADER}\tfrom=400.5\nd.dem\t1\tp\t5\t1\t1\t-\t");
+        let (_, options) = parse_queue(&text).unwrap();
+        assert_eq!(options.from, Some(400.5));
+        assert_eq!(parse_options("from=-1\tfrom=x".split('\t')).from, None);
+        let mut queue = vec![
+            highlight("a", None),
+            highlight("a", None),
+            highlight("a", None),
+        ];
+        queue[0].kills = vec![356.0, 363.0];
+        queue[1].kills = vec![402.9];
+        queue[2].kills = vec![428.0];
+        assert_eq!(start_index(&queue, None), Ok(0));
+        // In the middle of the first highlight: the next one.
+        assert_eq!(start_index(&queue, Some(360.0)), Ok(1));
+        // At a first kill exactly: that one.
+        assert_eq!(start_index(&queue, Some(428.0)), Ok(2));
+        // Past every highlight: the first, said so.
+        assert_eq!(start_index(&queue, Some(500.0)), Err(0));
+    }
+
+    #[test]
+    fn the_start_buttons_need_studio_a_demo_and_no_request_on_its_way() {
+        use crate::review_ask::Status;
+        let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
+        assert!(facts(true, true, Status::Idle).can_ask());
+        assert!(facts(true, true, Status::Failed("x".into())).can_ask());
+        assert!(facts(true, true, Status::NotAsked("x".into())).can_ask());
+        assert!(!facts(false, true, Status::Idle).can_ask());
+        assert!(!facts(true, false, Status::Idle).can_ask());
+        assert!(!facts(true, true, Status::Asking("Scanning".into())).can_ask());
+        assert!(!facts(true, true, Status::Sent(std::time::Instant::now())).can_ask());
+    }
+
+    #[test]
+    fn the_idle_tab_says_why_it_cant_start_or_how_the_request_goes() {
+        use crate::review_ask::Status;
+        let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
+        assert!(
+            facts(false, true, Status::Idle)
+                .detail()
+                .starts_with("Start DoD Studio")
+        );
+        assert!(
+            facts(true, false, Status::Idle)
+                .detail()
+                .starts_with("Play a demo")
+        );
+        assert!(
+            facts(true, true, Status::Idle)
+                .detail()
+                .contains("From here")
+        );
+        assert_eq!(
+            facts(true, true, Status::Asking("Scanning the demo...".into())).detail(),
+            "Scanning the demo..."
+        );
+        assert_eq!(
+            facts(true, true, Status::Failed("no highlights".into())).detail(),
+            "DoD Studio couldn't start it: no highlights"
+        );
+        // A wait that gave up in the game doesn't blame Studio.
+        let gave_up = "the demo did not finish loading in three minutes";
+        let line = facts(true, true, Status::NotAsked(gave_up.into())).detail();
+        assert_eq!(line, format!("Not sent to DoD Studio: {gave_up}"));
+        assert!(line.len() <= 88, "{line}");
+        // A failure from before Studio closed gives way to why nothing works.
+        assert!(
+            facts(false, true, Status::Failed("x".into()))
+                .detail()
+                .starts_with("Start DoD Studio")
+        );
+        // Each fits the default window's line; a longer one was cut off.
+        for studio in [false, true] {
+            for demo in [false, true] {
+                let line = facts(studio, demo, Status::Idle).detail();
+                assert!(line.len() <= 88, "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_start_buttons_are_in_the_review_tab_and_ask_studio() {
+        let res = include_str!("../ui/Review.res");
+        for (name, what) in START_BUTTONS.iter().zip(["start", "here"]) {
+            let at = res
+                .find(&format!("\"fieldName\"\t\t\"{name}\""))
+                .expect(name);
+            let block = &res[at..at + res[at..].find('}').unwrap()];
+            assert!(
+                block.contains(&format!("\"engine {NAME} ask {what}\"")),
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -1041,7 +1783,8 @@ mod tests {
             parse("gap=-3\tspeed=99"),
             Options {
                 gap: 0.0,
-                speed: 16.0
+                speed: 16.0,
+                from: None,
             }
         );
         assert_eq!(parse("gap=inf"), Options::default());
@@ -1207,6 +1950,152 @@ mod tests {
             heading(&queue, 0),
             "Demo 1 of 2 | highlight 1 of 3 | 2 left to answer"
         );
+    }
+
+    #[test]
+    fn the_panel_title_names_the_highlight_the_player_and_the_kills() {
+        let mut queue = vec![highlight("a", None), highlight("a", None)];
+        queue[1].player = "gorilla".to_string();
+        queue[1].kills = vec![1.0, 2.0, 3.0, 4.0];
+        assert_eq!(panel_title(&queue, 0), "Highlight 1 of 2 | 1 kill");
+        assert_eq!(
+            panel_title(&queue, 1),
+            "Highlight 2 of 2 | gorilla | 4 kills"
+        );
+        queue[1].verdict = Some(Verdict::Maybe);
+        assert_eq!(
+            panel_title(&queue, 1),
+            "Highlight 2 of 2 | gorilla | 4 kills | answered maybe"
+        );
+    }
+
+    fn review_of(queue: Vec<Highlight>, phase: Phase) -> Review {
+        Review {
+            queue,
+            options: Options::default(),
+            at: 0,
+            phase,
+            loaded: Some("a".to_string()),
+            keys_from: Instant::now(),
+            hushed: true,
+        }
+    }
+
+    fn playing() -> Phase {
+        Phase::Playing {
+            until: 20.0,
+            last: 6.0,
+            beat: Instant::now(),
+            spans: Vec::new(),
+            fast: false,
+        }
+    }
+
+    #[test]
+    fn the_keys_answer_while_a_highlight_plays_and_at_its_end() {
+        // The settings' defaults (both on): no cvar in a host build.
+        let mut review = review_of(vec![highlight("a", None)], Phase::Waiting);
+        let now = review.keys_from;
+        let (panel, mode) = panel_view(&review, now, None);
+        assert_eq!(mode, KeyMode::Live);
+        assert!(panel.is_some_and(|p| p.keys && p.live));
+        review.phase = playing();
+        let (panel, mode) = panel_view(&review, now, None);
+        assert_eq!(mode, KeyMode::Live);
+        assert!(panel.is_some_and(|p| p.keys && p.live && p.status.is_empty()));
+    }
+
+    #[test]
+    fn the_keys_do_nothing_while_the_form_shows() {
+        // Typing a Y in the note must not answer, should it reach the game.
+        assert_eq!(under_form(KeyMode::Live, true), KeyMode::Locked);
+        assert_eq!(under_form(KeyMode::Live, false), KeyMode::Live);
+        // Off stays off: the form doesn't take keys the review doesn't.
+        assert_eq!(under_form(KeyMode::Off, true), KeyMode::Off);
+    }
+
+    #[test]
+    fn a_form_save_is_one_tab_separated_line_without_a_verdict() {
+        let mut h = highlight("C:/d/a.dem", Some(Verdict::Yes));
+        h.key = "4".to_string();
+        h.kills = vec![1.0, 2.0, 3.0];
+        (h.from, h.to) = (2, 3);
+        h.note = "nice\tflick ".to_string();
+        assert_eq!(
+            edit_label(&h),
+            "REVIEW_EDIT\tC:/d/a.dem\t4\t2\t3\tnice flick"
+        );
+    }
+
+    #[test]
+    fn the_keys_are_locked_while_loading_and_off_on_a_failed_highlight() {
+        let mut review = review_of(
+            vec![highlight("a", None)],
+            Phase::Loading {
+                since: Instant::now(),
+                frames: 0,
+                seen_loading: false,
+            },
+        );
+        let now = review.keys_from;
+        let (panel, mode) = panel_view(&review, now, None);
+        assert_eq!(mode, KeyMode::Locked);
+        let panel = panel.expect("a panel");
+        assert_eq!(panel.status, "Loading the demo...");
+        assert!(panel.keys && !panel.live);
+        // A failed highlight has the Review tab open instead.
+        review.phase = Phase::Failed("gone".into());
+        assert_eq!(panel_view(&review, now, None), (None, KeyMode::Off));
+    }
+
+    #[test]
+    fn the_keys_do_nothing_for_the_lockout_after_a_highlight_starts() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let started = Instant::now();
+        review.keys_from = started + LOCKOUT;
+        let (panel, mode) = panel_view(&review, started, None);
+        assert_eq!(mode, KeyMode::Locked);
+        assert!(panel.is_some_and(|p| p.keys && !p.live));
+        let half = started + LOCKOUT / 2;
+        assert_eq!(key_mode(&review, true, half), KeyMode::Locked);
+        assert_eq!(key_mode(&review, true, started + LOCKOUT), KeyMode::Live);
+    }
+
+    #[test]
+    fn with_the_keys_off_they_are_the_games_throughout() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        assert_eq!(key_mode(&review, false, now), KeyMode::Off);
+        review.phase = Phase::Waiting;
+        assert_eq!(key_mode(&review, false, now), KeyMode::Off);
+    }
+
+    #[test]
+    fn back_is_greyed_on_the_first_highlight_only() {
+        use crate::review_keys::Action;
+        let mut review = review_of(
+            vec![highlight("a", None), highlight("a", None)],
+            Phase::Waiting,
+        );
+        let now = review.keys_from;
+        let first = panel_view(&review, now, None).0.expect("a panel");
+        assert!(!first.key_live(Action::Back));
+        assert!(first.key_live(Action::Next));
+        review.at = 1;
+        let second = panel_view(&review, now, None).0.expect("a panel");
+        assert!(second.key_live(Action::Back));
+    }
+
+    #[test]
+    fn only_a_menu_that_just_came_up_on_its_own_opens_the_review_tab() {
+        // ESC: the menu up, nothing in it.
+        assert!(menu_opens_tab(false, (true, false, false)));
+        // Already up last frame, or brought up around our window or the
+        // console window (the console key), or not up at all: left alone.
+        assert!(!menu_opens_tab(true, (true, false, false)));
+        assert!(!menu_opens_tab(false, (true, true, false)));
+        assert!(!menu_opens_tab(false, (true, false, true)));
+        assert!(!menu_opens_tab(false, (false, false, false)));
     }
 
     #[test]

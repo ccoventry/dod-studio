@@ -20,9 +20,9 @@
 //! Each entry records whether the engine has drawn anything by that path this
 //! session, and the status says so, so a typo stops failing silently.
 //!
-//! ## Why `ds_hud_hide_element` can't reach this
+//! ## Why the HUD element stub can't reach this
 //!
-//! That module (issue #265) patches the classic 2D HUD element list —
+//! `hudelement.rs` (issue #265) patches the classic 2D HUD element list —
 //! `CHud::Redraw` walking `CHudBase`-derived elements' vftable slot 3. An
 //! `env_sprite` is a completely different code path: server-replicated
 //! entity data the map's own BSP entity lump points at, rendered through the
@@ -85,9 +85,9 @@
 //! matched anything, not because of a path typo but because neither is a
 //! genuine `env_sprite`: the capture-area icon and the crosshair are both
 //! ordinary 2D HUD elements (`CHudDodIcons`/`CHudDoDCrossHair`), which this
-//! command was never able to reach in the first place -- see "Why
-//! `ds_hud_hide_element` can't reach this" above, which turns out to cut
-//! both ways.
+//! command was never able to reach in the first place -- see "Why the HUD
+//! element stub can't reach this" above, which turns out to cut both ways.
+//! (#808 since reaches HUD sprites by their `hud.txt` names.)
 
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
