@@ -1760,10 +1760,17 @@ export const STRINGS = {
     NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
     SAVE_COPY_DIALOG_TITLE: 'Save a copy',
     copyName: (stem) => `${stem} copy`,
-    updatedToast: ({ clips, takesFound, takesNotFound, settingsCopied = false }, backup) => {
+    updatedToast: ({ clips, takesFound, takesNotFound, settingsCopied = false, snapshotDay = '' }, backup) => {
       const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
-      // #1085: an old project's own settings start as a copy of Configuration's.
-      const settings = settingsCopied ? ' Its settings were copied from Configuration and are now its own.' : '';
+      // #1085: an old project's own settings start as the one snapshot of
+      // Configuration every older project gets, or, when there is none, a
+      // copy of Configuration as it was when the project opened.
+      let settings = '';
+      if (settingsCopied) {
+        settings = snapshotDay
+          ? ` Its settings are the ones Configuration had on ${snapshotDay}, the same for every older project, and are now its own.`
+          : ' Its settings were copied from Configuration and are now its own.';
+      }
       return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}.${settings} Backup: ${backup}`;
     },
     backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,

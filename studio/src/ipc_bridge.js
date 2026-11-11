@@ -61,6 +61,18 @@ export async function takeOpenFiles() {
     });
 }
 
+/** Keeps `snapshot` as the settings snapshot older projects start from
+ *  (#1085, project_settings_snapshot.js) unless one was taken before.
+ *  Resolves `{ snapshot, taken }`, the snapshot in effect; rejects with the
+ *  backend's error, which the caller logs. */
+export async function keepProjectSettingsSnapshot(snapshot) {
+  return invoke("keep_project_settings_snapshot", { snapshot })
+    .catch((err) => {
+      console.error("IPC Execution Error (keep_project_settings_snapshot):", err);
+      throw err;
+    });
+}
+
 /** The `.dodstudio` name a just-loaded `.json` project could switch to
  *  (#528, project_convert.js), or null when there's nothing to offer or the
  *  check failed. */

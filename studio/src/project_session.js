@@ -33,11 +33,15 @@ import { projectSaveDialogOptions, projectCopyDialogOptions, PROJECT_OPEN_FILTER
 import { createProjectOpenProgress } from './project_open_progress.js';
 import { fileNameOf } from './path_display.js';
 import { createProjectSettings } from './project_settings.js';
+import { snapshotDay } from './project_settings_snapshot.js';
 import { offerProjectInstall } from './project_install_offer.js';
 
 /** How long the toasts that say where a backup went, or what a newer file's
  *  save means, stay up: long enough to read a whole path. */
 const UPDATE_TOAST_MS = 12000;
+
+/** What an open copied into a project without settings: nothing. */
+const NOTHING_COPIED = Object.freeze({ copied: false, snapshotTakenAt: null });
 
 /**
  * @param {object} app  What this needs from main.js:
@@ -155,10 +159,10 @@ export function createProjectSession({
     updateSessionFileIndicator();
   }
 
-  // The project's own settings (#1085): its `settings` block, and whether
-  // this open copied Configuration's in, for the one-time summary.
+  // The project's own settings (#1085): its `settings` block, and what this
+  // open copied in (`{ copied, snapshotTakenAt }`), for the one-time summary.
   const projectSettings = createProjectSettings({ markDirty: markProjectDirty });
-  let settingsCopiedPending = false;
+  let settingsCopiedPending = NOTHING_COPIED;
 
   // The project's record of its rendered videos (#1264): kept current as
   // renders finish, and filled from the take folders when a project opens.
@@ -188,8 +192,14 @@ export function createProjectSession({
   // always and as a toast unless saving quietly. The take check reads the
   // disk, so it runs once the save is safely done.
   async function reportUpdate(filePath, takeIndex, backup, quiet) {
-    const summary = { ...await updateSummary(getDemos(), takeIndex), settingsCopied: settingsCopiedPending };
-    settingsCopiedPending = false;
+    const { copied, snapshotTakenAt } = settingsCopiedPending;
+    const summary = {
+      ...await updateSummary(getDemos(), takeIndex),
+      settingsCopied: copied,
+      snapshotTakenAt,
+      snapshotDay: snapshotTakenAt ? snapshotDay(snapshotTakenAt) : '',
+    };
+    settingsCopiedPending = NOTHING_COPIED;
     logFrontendEvent(projectUpdatedLine(filePath, summary, backup));
     if (!quiet) showToast(STRINGS.PROJECT_FILE.updatedToast(summary, backup), 'success', UPDATE_TOAST_MS);
   }
@@ -442,8 +452,9 @@ export function createProjectSession({
       // A project saved before #828 has no `review`: the HLTV box goes
       // back to its default, nobody picked.
       setReviewSettings(data.review);
-      // A file made before #1085 gets Configuration's copied in once.
-      settingsCopiedPending = projectSettings.open(data.settings, selected).copied;
+      // A file made before #1085 takes the snapshot of Configuration every
+      // older project starts from (project_settings_snapshot.js).
+      settingsCopiedPending = await projectSettings.open(data.settings, selected);
       if (data.demos) {
         // timeline_string is a derived field, saved as a convenience
         // snapshot rather than the source of truth — recompute it from
@@ -526,7 +537,7 @@ export function createProjectSession({
     setProjectTeams(emptyProjectTeams());
     setReviewSettings(null);
     projectSettings.clear();
-    settingsCopiedPending = false;
+    settingsCopiedPending = NOTHING_COPIED;
     refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
