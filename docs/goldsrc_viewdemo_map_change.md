@@ -219,37 +219,64 @@ change of the setting:
 | back to `0` | the first map again, and the stock stop at 1210.00 s | the same |
 
 Reading past a map costs the loader's time for it: about 1.3 s for these two
-short maps. The harrington demo (a 24-minute first map) was not timed.
+short maps, and by the harrington run below about 13 s for a 24-minute one
+(not timed with this setting).
+
+### Seeking across a change
+
+`ds_debug_demo_play_next_map 1`, the bewton demo, 2026-11-11, the same on
+both builds (times are the hook log's):
+
+| seek | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| `ds_demo_seek_to 99999` on map 1 (at 1175 s, the loader waiting) | lands on 1210.00 s in 7 steps, 61 ms; the loader is let go the same frame; `dod_anzio` loaded 1.0 s later | the same, 65 ms; 1.1 s |
+| `ds_demo_seek_to 20` on map 2 (clock 4.58-29.79) | lands on 20.00 s in 3 steps | the same |
+| `ds_demo_seek_to 8` from 26.6 s (backward, inside the map) | goes back to 8.00 s | the same |
+| `ds_demo_seek_by -500` | lands on 4.58 s, the map's start: no way back into map 1 | the same |
+| `ds_demo_seek_to 99999` on map 2 | lands on 29.79 s; the third map loaded 0.9 s later | the same; 1.0 s |
+| a seek on map 3 while it is still being read | refused: "the demo is still loading (up to 894.2 s so far)" | the same (990.9 s) |
+| `ds_demo_reload` on map 3 | the demo starts again at map 1, the loader waits at 1210.00 s again | the same |
+| `ds_demo_seek_to 1200`, typed once playback was on map 2 again | taken on map 2's clock: clamped to 29.79 s, and on into map 3 | the same |
+
+So a time means nothing without its map: the same `1200` is a spot on map 1
+and past the end of map 2. A seek forward past a map's end moves on one map;
+nothing seeks backward out of a map.
+
+### A long first map
+
+`ktps8w10qf-m00cat_soul_m2_harr_h2`, 2026-11-11, the same on both builds:
+the loader read `dod_harrington` (123,844 packets) in 13.4 s (13.6 s on the
+Anniversary build) and waited at 1429.99 s. `ds_demo_seek_to 1405` from 75 s,
+with the loader waiting, landed in 266 steps (2.4 s; 2.6 s). Playback reached
+1429.99 s, `dod_anzio` was loaded 1.1 s later, played its 5 seconds (clock
+5.30-10.58) and the demo ended the stock way.
+
+### `r_decals` at a change
+
+Measured on both builds: `r_decals 2048` set on map 1, with `mp_decals`
+4000; after the change to map 2, `r_decals` read `4000`. The engine sets it
+from `mp_decals` at every signon (`CL_ParseServerInfo`), so a batch's
+`r_decals` has to be set again after each change, or `mp_decals` set to the
+same value.
 
 ## Not reached
 
-The probes for these were written but did not run cleanly (two probe queues
-of this pass collided), so they are **untested on both builds**:
-
-- **Seeking.** By the code: the clock, the demo bar and `ds_demo_seek_to`
-  work on the map being played, in that map's own `svc_time`.
-  `ds_demo_seek_to` clamps a time past the end to the map's end, which is
-  what lets the loader go, so a seek past the end should move on to the next
-  map; a seek can't reach an earlier map, whose frames the world dropped at
-  the change. Going back means `viewdemo` again, with
-  `ds_debug_demo_start_at_map` for the map wanted. `IsLoading` says no while
-  the loader waits, so a seek inside the first map should not be refused.
-  None of this was measured.
-- **A long wait.** The loader waited 38 s at most in these runs. The channel
-  is a fake one that `NetChannel::IsTimedOut` never times out (read from
-  ReHLDS, not re-derived from the binaries), but a 24-minute wait
-  (the harrington demo) was not run.
+- **A long wait in real time.** The longest the loader waited in any run was
+  about 40 s (the harrington run seeked to the end of its 24 minutes). The
+  channel is a fake one that `NetChannel::IsTimedOut` never times out (read
+  from ReHLDS, not re-derived from the binaries); a wait of many minutes was
+  not run.
 - **`2`, the engine's own `reconnect` at the change.** `1` works without it
   on both builds, so it may not be needed at all.
-- **The same frames as the split file.** Whether the third map looks the
-  same started from the whole demo as from its Split Maps file (objective
-  icons, scoreboard) was not compared. One HLAE frame on the 25th Anniversary
-  build after two changes had no objective icons at the top left where the
+- **The same frames as the split file.** Whether a later map looks the same
+  started from the whole demo as from its Split Maps file (objective icons,
+  scoreboard) was not compared. One HLAE frame on the 25th Anniversary build
+  after two changes had no objective icons at the top left where the
   pre-Anniversary frame had them; the two were taken at different moments,
   so this is a lead, not a finding.
-- **HLTV demos, and a demo with long maps on both sides.** Every run was one
-  POV demo by one recorder. The survey says the file shape is the same
-  everywhere (181 of 181), not that playback is.
+- **HLTV demos.** There is none to test with: all 53 multi-map demos in the
+  analyzer cache on this PC are POV recordings. Every run here was one of two
+  POV demos.
 - **Known crashes** (#384's hull trace, lennon2 on the pre-Anniversary
   build): neither met; the hull-trace guard refused nothing in these runs.
 
@@ -269,9 +296,8 @@ one:
   map's name, which is in the signon 10 to 170 frames further into the file.
   With `ds_debug_demo_start_at_map` it runs the first map's cfg, not the
   started map's.
-- **`r_decals`.** `CL_ParseServerInfo` sets it from `mp_decals` on every
-  signon (pre-Anniversary `hw+0x1c6c3`..`+0x1c6d5`), so a value set by a
-  batch's init commands is likely replaced at the change. Not measured.
+- **`r_decals` is replaced.** `CL_ParseServerInfo` sets it from `mp_decals`
+  on every signon (pre-Anniversary `hw+0x1c6c3`..`+0x1c6d5`); measured above.
 - **The analysis.** Highlights, Review and the in-game tabs know only the
   first map (#681), and their times are that map's clock. A highlight on a
   later map needs a map number with its time (#538).
