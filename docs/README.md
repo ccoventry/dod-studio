@@ -54,4 +54,4 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 
 ## Folders
 - [wiki/](wiki/) — source for the GitHub wiki, published when `main` changes.
-- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes). History, not current state.
+- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes), the #1107 codebase audit findings (`archive/codebase_audit_1107.md`). History, not current state.
