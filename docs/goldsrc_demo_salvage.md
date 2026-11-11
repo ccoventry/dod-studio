@@ -1,6 +1,6 @@
 # Recovering damaged GoldSrc demos (#15)
 
-How a GoldSrc `.dem` is put together, what has to be true for a spliced or repaired one to play, and the traps hit recovering four damaged DoD 1.3 POV demos. The tools are probes in `analysis/examples/` (PR #227); no library or pipeline code depends on them. Issue #15 tracks what is left.
+How a GoldSrc `.dem` is put together, what has to be true for a spliced or repaired one to play, and the traps hit recovering four damaged DoD 1.3 POV demos. **Studio now does the repair** ("The repair in Studio" below): `analysis::repair`, run by the Demo Auditor's Damaged Demos tab, the Master Queue's and the Demo Analyzer's Repair buttons, and `hl-demo-auditor --repair`. The probes in `analysis/examples/` (PR #227) are the R&D trail and tools for checking a build. Issue #15 tracks what is left.
 
 Every fact below was measured on real demos or confirmed live in the engine, not assumed.
 
@@ -31,11 +31,41 @@ Established by static analysis of the pre-Anniversary `hw.dll` (2026-09-09).
 - Two further flush paths exist at `0x1d13081` / `0x1d130c4` ("oldcopy invalid" / "remove invalid on non-delta compressed update"). They fire only when a *non-delta* packet decodes copy/remove opcodes, which `dem`'s `EntityState` cannot encode, so an injected full snapshot cannot trip them.
 - **Why re-numbering the tail's `delta_sequence` was wrong**: it leaves `incoming_sequence` on the tail's own numbering, so the gap becomes 221 and *every* entity packet after the join is discarded. That is why the renumbered demo stopped crashing (nothing bad is parsed) and also why the world was missing around the join. Measured: a healthy demo's worst gap is 13; the stitched `m3_h2` before renumbering, 4 with no flushes; after renumbering, 62,374 packets discarded. Inject a full snapshot at the join instead.
 
-## The recovery pipeline
+## The repair in Studio
+
+`analysis::repair::repair_demo` takes a demo's bytes and returns the repaired demo's bytes and a report, or refuses. Pure: no files, no threads, so it builds for the wasm web analyzer too. One file per step:
+
+1. **Bridge** (`repair/bridge.rs`, was `multi_bridge`): walk the frame headers (`repair/frame_walk.rs`), cut at each hole, find where the recording resumes (shape first, then a parse of the run it starts), trim damaged frames off the end of each stretch, and splice. In process: the parser is bounds-checked at its read sites since #225, so a bad candidate is an `Err`, never an abort, and the child process `multi_bridge` used is gone (`m3_h1-1`'s 2,675 candidates took 4.5 min that way; in process the CLI repairs all four Monday demos in 2 min).
+2. **Joins** (`repair/joins.rs`, `join_state.rs`, `snapshot.rs`, was `snapshot_inject`): at each `incoming_sequence` jump, a full snapshot of the entities a real packet carried (baseline fields, reset at an inline `SvcSpawnBaseline`), the ramp with its `svc_clientdata`, replayed client data and `CurWeapon`, each ramp frame its own ordinal.
+3. **Entity counts** (`repair/entity_count.rs`, `entity_carry.rs`, was `entity_count_fix`).
+4. **Checks**: the result is parsed again; it must parse, keep nearly every frame the bridge kept (a stray section end ends an entry early and still parses), have no entity packet the engine would discard (the flush predicate, as `flush_predict`), every count agree with the carried set, and every join a snapshot. A result that fails one is not written, and the report says which.
+
+What the R&D builds did that the product doesn't:
+
+- **No breadcrumbs.** `inject_breadcrumbs` (`echo [BC t]` every 5 s) stays a test tool.
+- **No time sort.** `inject_breadcrumbs` also sorted every frame by time, which turned out to be doing a job: the bridge kept damaged frames at the edges of holes, and the sort moved them out of the way. The product drops them instead: a frame within 8 frames of a hole whose time is more than 1 s from the median of its side of the hole (`m1_h2`: a `Sound` frame stamped 0.000 s at hole 1, a client-data frame stamped 2031 s at hole 3; `m3_h1-1`: a client-data frame at 889 s and a network frame stamped 877 s among frames at 893 s, whose `incoming_sequence` is 2^17 too high, which the R&D build read as two more joins). The damage at these edges is bit flips: the network frame's sequence and time are each one bit off, and some resume frames' ordinals have bit 31 set. And the ramp goes in front of the client-data and demo-buffer frames that open the stretch after a hole, not after them, so frame times rise through every join as the sorted builds' did; after them, playback waits at their time for the whole hole and then plays the ramp at once.
+- **Hole times in the report** are each side's frames, in recording time (seconds since the recording started; the hook's demo clock matches it on a repaired build within a few seconds).
+
+Equivalence with the R&D builds, frame by frame (frames matched by type, time, ordinal and sequence, so an order change still matches; `analysis/examples/repair_compare.rs`):
+
+| demo | product vs. R&D build | difference |
+| --- | --- | --- |
+| `m1_h1` | `recovered_m1_h1_v14` | none but the 253 breadcrumbs (528,843 frames each; snapshots 48 and 49 entities) |
+| `m1_h2` | `recovered_m1_h2_v15` | the breadcrumbs, and the damaged `Sound` frame at hole 1 (705,715 frames against 705,716) |
+| `m3_h1-1` | `recovered_m3_h1-1_v14` | hole 3 is one join, not two: the bit-flipped frame and its neighbour are dropped, so one ramp (3,000 frames) and one snapshot (37 entities) instead of two of each (531,212 frames against 534,214) |
+| `m3_h2` | `recovered_m3_h2_v11` | v11 predates the real-entity snapshot and the count fix (3,372 count disagreements, snapshot 25 entities against 13); against today's R&D pipeline run without breadcrumbs, no difference |
+
+Every product build: 0 discarded entity packets, 0 count disagreements. On the four damaged originals the engine itself reads past some rubble the parser cuts: they end at about 369 s (`m1_h1`), 992 s (`m1_h2`), 397 s (`m3_h1-1`, `svc_bad`) and 917 s (`m3_h2`, `Demo message > MAX_POSSIBLE_MSG`), on both engine builds, later than the first hole in each.
+
+**A damaged demo that recorded more than one map is repaired first, then split.** The split reads with the strict parser, which stops at the damage; it now says the demo is damaged and points at the repair. Studio's Repair & Split does both in one job, and the original's "already split" check counts the repair's pieces (`<name>_repaired_split<N>_<map>.dem`).
+
+## The R&D pipeline (the probes the repair came from)
 
 1. **`multi_bridge`**: walk the file, cut at each damaged region, find the next honest resume point, repeat. Demos usually have several holes; assuming one hides every resume point before the last break.
 2. **`snapshot_inject`**: at every join, inject a full entity snapshot built by replaying the prefix, **seeded from `SvcSpawnBaseline`** (below) but listing only entities a real packet carried (see "Still open"), then a ramp of synthetic no-op frames up to the tail.
 3. **`flush_predict`**: verify no entity packet will be discarded. Sequence-level only (see Traps).
+
+`multi_bridge`, `snapshot_inject` and `entity_count_fix` were removed when they became `analysis::repair`; `flush_predict`, `snapshot_check` and `inject_breadcrumbs` stay.
 
 Supporting probes: `salvage_probe`, `salvage_demo`, `bridge_ceiling` (swallowed-frame and backwards-time checks), `snapshot_check` (declared vs. replayed entity counts), `event_rate` (events per minute, to spot silent loss), `graft_signon`, `inject_breadcrumbs`, `patch_resource_url`, `find_crash_spot`, `deathmsg_diag`. Superseded and not to be revived: re-numbering the tail's `delta_sequence` (it stops `svc_bad` only by making the engine discard every entity packet after the join), `bridge_search`/`bridge_best`/`reseq_probe`.
 
@@ -117,5 +147,4 @@ No `Sprite: no such frame` lines in any of these runs. All four damaged demos no
 
 **The level-change crash was the hook DLL**, not the salvage: under `playdemo`, the connect guard and the review lock wrapped `reconnect` into a loop, a stack overflow 1.3 s into any level change (a healthy `bewton-playoffs-round1-armory-allied.dem` crashed the same way). Fixed by #1370.
 
-Still open:
-- `inject_breadcrumbs` sorts every frame by time. `multi_bridge` keeps a damaged frame at the edge of some holes (`m1_h2`: a `Sound` frame stamped 0.000 s at join 1, a `ClientData` frame stamped 2031 s at join 3), and the sort moves them to the start and the end. Where the clock steps back at a join (`m3_h1-1`, 893 → 877 s), the sort interleaves the two sides. The builds play anyway.
+The R&D builds' time sort, once listed here as open, is gone from the product: see "The repair in Studio".

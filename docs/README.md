@@ -21,7 +21,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [position_data_in_demos.md](position_data_in_demos.md) — what player position data demos carry (fields, rates, POV vs HLTV coverage) and what stats it allows (#448).
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
-- [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
+- [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, how Studio repairs damaged ones (`analysis::repair`) and the R&D behind it, and the engine's entity-packet flush rule (#15).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.
