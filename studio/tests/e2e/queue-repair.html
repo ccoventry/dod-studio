@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Master Queue's Repair button (#15): master_pane.js's queue
+  table with one damaged demo and one whole one, and a repair handler that
+  reports 40% and then waits for window.__finishRowRepair().
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>queue_repair.js harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="demo-search-input" />
+  <table id="master-demo-table">
+    <thead><tr><th><div id="status-count-legend"></div></th><th><div id="review-count-legend"></div></th></tr></thead>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList, setRepairDemoHandler } from '/src/master_pane.js';
+
+    const demos = [
+      { name: 'broken.dem', path: 'C:\\demos\\broken.dem', streaks: [], signon_maps: ['dod_anzio'],
+        damage: { read_up_to_secs: 507.4, frame_index: 1, byte_offset: 2433784, bytes_unread: 79927172, reason: 'a frame does not parse' } },
+      { name: 'fine.dem', path: 'C:\\demos\\fine.dem', streaks: [], signon_maps: ['dod_anzio'], damage: null },
+    ];
+    const result = document.querySelector('#result');
+    initMasterPane(null, null, null, null, null);
+    setRepairDemoHandler(async (demo, update) => {
+      result.textContent = `repair ${demo.name}`;
+      update({ step: 'reading', fraction: 0.4 });
+      await new Promise((resolve) => { window.__finishRowRepair = resolve; });
+    });
+    renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
