@@ -197,3 +197,97 @@ The console prints the engine's own `Protocol Version 48, Spawn count 53`
 (then `54`) at each change. Frames recorded with HLAE after both changes show
 the world, the gun and the HUD drawn as usual on both builds.
 
+### Starting at a later map: `ds_debug_demo_start_at_map <n>`
+
+The same pieces skip maps. While the loader is on a map before the nth, the
+`Reconnect` wrap doesn't hold it, and `DemoPlayer::NewGame` (vftable slot 15,
+which `ReceiveSignal` calls through the vftable when a map's first frame is in
+the world) is swallowed, so the player stays where a freshly opened demo
+leaves it and hands the engine nothing. The first `NewGame` let through is
+the nth map's, so the game loads that map and no other. The setting is read
+when `viewdemo` opens the demo, and a value of 2 or more turns the play-on
+patch on by itself.
+
+Measured 2026-11-11 with the bewton demo, by `ds_demo_reload` after each
+change of the setting:
+
+| | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| `2`: first map loaded | `dod_anzio`, 4.1 s after map 1 was read past; clock 4.58-29.79; the loader then waits at the next change | `dod_anzio`, 5.2 s after; the same |
+| `3`: first map loaded | `dod_armory_b6` (the third map), 1.7 s after map 2 was read past; clock 3.18-1316.60 | the same, 2.1 s after |
+| `9` (the demo has 3 maps) | both maps read past, the demo loads to its end, nothing new plays (the last picture stays, paused) | the same |
+| back to `0` | the first map again, and the stock stop at 1210.00 s | the same |
+
+Reading past a map costs the loader's time for it: about 1.3 s for these two
+short maps. The harrington demo (a 24-minute first map) was not timed.
+
+## Not reached
+
+The probes for these were written but did not run cleanly (two probe queues
+of this pass collided), so they are **untested on both builds**:
+
+- **Seeking.** By the code: the clock, the demo bar and `ds_demo_seek_to`
+  work on the map being played, in that map's own `svc_time`.
+  `ds_demo_seek_to` clamps a time past the end to the map's end, which is
+  what lets the loader go, so a seek past the end should move on to the next
+  map; a seek can't reach an earlier map, whose frames the world dropped at
+  the change. Going back means `viewdemo` again, with
+  `ds_debug_demo_start_at_map` for the map wanted. `IsLoading` says no while
+  the loader waits, so a seek inside the first map should not be refused.
+  None of this was measured.
+- **A long wait.** The loader waited 38 s at most in these runs. The channel
+  is a fake one that `NetChannel::IsTimedOut` never times out (read from
+  ReHLDS, not re-derived from the binaries), but a 24-minute wait
+  (the harrington demo) was not run.
+- **`2`, the engine's own `reconnect` at the change.** `1` works without it
+  on both builds, so it may not be needed at all.
+- **The same frames as the split file.** Whether the third map looks the
+  same started from the whole demo as from its Split Maps file (objective
+  icons, scoreboard) was not compared. One HLAE frame on the 25th Anniversary
+  build after two changes had no objective icons at the top left where the
+  pre-Anniversary frame had them; the two were taken at different moments,
+  so this is a lead, not a finding.
+- **HLTV demos, and a demo with long maps on both sides.** Every run was one
+  POV demo by one recorder. The survey says the file shape is the same
+  everywhere (181 of 181), not that playback is.
+- **Known crashes** (#384's hull trace, lennon2 on the pre-Anniversary
+  build): neither met; the hull-trace guard refused nothing in these runs.
+
+## Per-map state at a change
+
+Read from the hook's code and its log at the two changes, not tested one by
+one:
+
+- **Carries over by itself**, because it hooks the engine's own map load: HD
+  textures, the lightmap gamma fixes, map lighting files, map sounds, the
+  overview, the leaked-`.bsp` fix. Decals are emptied by the engine's level
+  load.
+- **`ds_map_run_cfgs` does not run for the next map.** It runs from the
+  `viewdemo` wrap with the map name in the demo's header
+  (`map_cfgs::before_demo`), so the next map plays with the first map's
+  values. It would have to run when the loader is let go, with the next
+  map's name, which is in the signon 10 to 170 frames further into the file.
+  With `ds_debug_demo_start_at_map` it runs the first map's cfg, not the
+  started map's.
+- **`r_decals`.** `CL_ParseServerInfo` sets it from `mp_decals` on every
+  signon (pre-Anniversary `hw+0x1c6c3`..`+0x1c6d5`), so a value set by a
+  batch's init commands is likely replaced at the change. Not measured.
+- **The analysis.** Highlights, Review and the in-game tabs know only the
+  first map (#681), and their times are that map's clock. A highlight on a
+  later map needs a map number with its time (#538).
+- **The look-ahead for `ds_spec_match_pov`** reads the file ahead of playback
+  by time; a clock that starts again at each map will mislead it in an HLTV
+  demo. Not tested.
+
+## Open questions
+
+- Should a map change with no `reconnect` (none in 181) be handled too? It
+  would need the loader stopped inside `ParseServerinfo`, before the packet
+  is consumed.
+- A setting turned off while the loader waits leaves it waiting (playback
+  ends at the map's end, as stock, but the file stays open until the next
+  demo).
+- Engine symbols: the installs on this PC ship no engine `.so` (only the game
+  folders' `client.so`/`dod.so`). Valve's Linux depots do carry them with
+  symbols (#1133, `docs/goldsrc_linux_symbols.md` once that lands); the names
+  here could be checked against `demoplayer.so` there.
