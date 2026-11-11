@@ -796,3 +796,6 @@ mod tests;
 
 #[cfg(test)]
 mod grouping_tests;
+
+#[cfg(test)]
+mod golden_tests;
