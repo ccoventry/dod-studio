@@ -315,6 +315,13 @@ const FIELD_WORLD: usize = 0x14c;
 const FIELD_LAST_FRAME_TIME: usize = 0x3c0;
 const FIELD_LAST_FRAME_SEQ_NR: usize = 0x3d8;
 
+/// `m_PlayerState`, and its value while the player sends world frames
+/// (`DEMOPLAYER_RUNNING`): 2 and 3 are the two messages that connect the
+/// engine to a map, and `ReadDemoMessage` zeroes `m_LastFrameSeqNr` on the
+/// way to 4.
+const FIELD_PLAYER_STATE: usize = 0x37c;
+const PLAYER_STATE_RUNNING: u32 = 4;
+
 /// `frame_t` fields: the server time as a float, then the sequence number.
 const FRAME_SEQ_NR: usize = 4;
 
@@ -872,6 +879,16 @@ pub fn clock() -> Option<Clock> {
     None
 }
 
+/// Whether playback has sent the last frame the player holds and isn't
+/// paused: the end of the demo, or of the map when the loader waits at a map
+/// change (`demo_next_map`, #1372).
+pub fn played_to_end() -> bool {
+    #[cfg(target_arch = "x86")]
+    return player::played_to_end();
+    #[cfg(not(target_arch = "x86"))]
+    false
+}
+
 /// Pauses the demo player, or plays on.
 pub fn set_paused(paused: bool) -> Result<(), String> {
     #[cfg(target_arch = "x86")]
@@ -1028,6 +1045,41 @@ mod player {
                 end: get_end(player),
                 time_scale: get_scale(player),
             })
+        }
+    }
+
+    /// [`super::played_to_end`]: the clock is on the world's last frame, and
+    /// that frame is the last one sent. The player's own state gates it,
+    /// because between two maps the last sent number is the old map's.
+    pub(super) fn played_to_end() -> bool {
+        let Some(c) = clock() else {
+            return false;
+        };
+        if !c.active || c.paused || c.end <= c.start || c.now < c.end - 0.001 {
+            return false;
+        }
+        let Ok((player, _)) = find() else {
+            return false;
+        };
+        // Safety: the fields and the slot `skip_gap` reads, and
+        // `m_PlayerState`, checked against both builds by
+        // tools/verify_demo_next_map_offsets.py.
+        unsafe {
+            let state =
+                ((player as *const u8).add(FIELD_PLAYER_STATE) as *const u32).read_unaligned();
+            let world = *((player as *const u8).add(FIELD_WORLD) as *const *mut c_void);
+            if state != PLAYER_STATE_RUNNING || world.is_null() {
+                return false;
+            }
+            let frame_by_time: FrameByTimeFn = slot(world, WORLD_SLOT_GET_FRAME_BY_TIME);
+            let frame = frame_by_time(world, c.end);
+            if frame.is_null() {
+                return false;
+            }
+            let frame_seq = (frame.add(FRAME_SEQ_NR) as *const u32).read_unaligned();
+            let sent_seq =
+                ((player as *const u8).add(FIELD_LAST_FRAME_SEQ_NR) as *const u32).read_unaligned();
+            frame_seq == sent_seq
         }
     }
 

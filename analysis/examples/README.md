@@ -147,6 +147,7 @@ forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.
 | `verify_curweapon` | Verifies the join's injected `CurWeapon` message landed, and what it names. |
 | `tempentity_scan` | Every `SvcTempEntity` in a time window, by variant. |
 | `patch_resource_url` | Replaces a demo's recorded `SvcResourceLocation` (download URL). |
+| `map_change_probe` | What a demo holds at each map change: was there a `reconnect` before the next map's signon, and how many frames before? (#1372) |
 
 ## What they established
 

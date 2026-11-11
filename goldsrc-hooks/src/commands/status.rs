@@ -190,6 +190,9 @@ fn status_text() -> String {
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
+    if let Some(next_map) = crate::demo_next_map::status_line() {
+        lines.push(next_map);
+    }
     if let Some(blood) = crate::own_blood::status_line() {
         lines.push(blood);
     }
