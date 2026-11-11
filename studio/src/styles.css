@@ -1856,6 +1856,14 @@ button.danger-btn {
   flex: 1 1 320px;
 }
 
+/* Already split: a quiet line, not a warning. */
+.analyzer-multimap-banner.analyzer-multimap-quiet {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-dim);
+  cursor: help;
+}
+
 /* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
 .split-progress {
   display: flex;
@@ -1955,6 +1963,24 @@ button.danger-btn {
 .multimap-split-btn:disabled {
   opacity: 0.5;
   cursor: progress;
+}
+
+.multimap-hint {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* A multi-map demo whose maps were already split next to it: quiet, not a warning. */
+.multimap-split-note {
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.multimap-hint [hidden] {
+  display: none;
 }
 
 /* Combine Clips (#107). */

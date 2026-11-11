@@ -41,7 +41,12 @@
       null,
       (demo) => { result.textContent = `locate ${demo.name}`; },
       null,
-      null
+      // A split reports 30% and then waits, so the menu can be opened mid-split.
+      async (demo, update) => {
+        result.textContent = `split ${demo.name}`;
+        update({ fraction: 0.3, stage: 'reading', map: '', part: 0, parts: 0 });
+        await new Promise(() => {});
+      }
     );
     startDemoContextMenu({
       startReview: (paths) => { result.textContent = `review ${paths.join(',')}`; },
@@ -50,6 +55,9 @@
     // For the stale-menu test: rebuild the queue with the given demo names, in order.
     window.__rerender = (names) => renderMasterList(
       names.map((n) => demos.find((d) => d.name === n)), null, (demo, idx) => { window.__selected = `${demo.name}@${idx}`; });
+    // For the Split Maps tests: a queue of one demo that recorded two maps.
+    const twoMaps = { name: 'two.dem', path: 'C:\demos\two.dem', streaks: [], signon_maps: ['dod_harrington', 'dod_anzio'] };
+    window.__renderTwoMaps = () => renderMasterList([twoMaps], null, () => {});
     window.__harnessReady = true;
   </script>
 </body>
