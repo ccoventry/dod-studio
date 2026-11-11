@@ -218,7 +218,7 @@ export const STRINGS = {
       + 'Click to split it: each map of a minute or more becomes a demo of its own in the queue, in place of this one. The file itself is kept.',
     MULTI_MAP_ALREADY_SPLIT: 'Already split',
     multiMapAlreadySplitTitle: (maps, files) => `This demo recorded ${maps.length} maps (${maps.join(', ')}), already split next to it: `
-      + `${files.join(', ')}. This row uses the first map; the split demos hold every map.`,
+      + `${files.join(', ')}. This row uses the first map only.`,
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
