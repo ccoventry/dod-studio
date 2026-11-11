@@ -1888,6 +1888,10 @@ export async function cancelDemoRepair(path) {
   return invoke("cancel_demo_repair", { path })
     .catch((err) => {
       console.error("IPC Execution Error (cancel_demo_repair):", err);
+      throw err;
+    });
+}
+
 // Whether a multi-map demo's maps were already split next to it:
 // `{ split, files }` (split_status.js).
 export async function demoSplitStatus(path, maps, minSeconds) {

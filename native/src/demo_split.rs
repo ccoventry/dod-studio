@@ -792,7 +792,8 @@ mod tests {
 
     #[test]
     fn a_damaged_demo_split_points_at_the_repair() {
-        let dir = std::env::temp_dir().join(format!("dodstudio-split-damaged-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("dodstudio-split-damaged-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let demo = dir.join("damaged.dem");
         let mut bytes = ci_fixture();
@@ -800,7 +801,10 @@ mod tests {
         bytes[at..at + 300_000].fill(0xEE);
         std::fs::write(&demo, &bytes).unwrap();
         let err = demo_segments(&demo).unwrap_err();
-        assert!(err.contains("damaged") && err.contains("Repair it first"), "{err}");
+        assert!(
+            err.contains("damaged") && err.contains("Repair it first"),
+            "{err}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
