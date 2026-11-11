@@ -1856,3 +1856,38 @@ export async function splitDemoAuto(path, minSeconds) {
       throw err;
     });
 }
+
+// #15: damaged demos (demo_repair_manager.rs).
+export async function findDamagedDemos(folder, recursive) {
+  return invoke("find_damaged_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_damaged_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDamagedScan() {
+  return invoke("cancel_damaged_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_damaged_scan):", err);
+      throw err;
+    });
+}
+
+/** Repairs the demo at `path` into `<name>_repaired.dem` beside it; resolves
+ *  its RepairResult. Progress arrives as `repair_progress` events. */
+export async function repairDemo(path) {
+  return invoke("repair_demo_cmd", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (repair_demo_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoRepair(path) {
+  return invoke("cancel_demo_repair", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_repair):", err);
+      throw err;
+    });
+}

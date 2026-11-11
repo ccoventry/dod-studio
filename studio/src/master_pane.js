@@ -12,6 +12,7 @@ import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
 import { multiMapSplitButton } from './queue_multimap.js';
+import { damagedRepairButton } from './queue_repair.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { renderQueueTotals } from './queue_totals.js';
 import { matchesInQueue } from './queue_match_groups.js';
@@ -67,6 +68,8 @@ let currentOnLocateDemo = null;
 let currentOnUseFoundCopy = null;
 // main.js's handler for a multi-map demo's Split button (#217).
 let currentOnSplitDemo = null;
+// main.js's handler for a damaged demo's Repair button (#15).
+let currentOnRepairDemo = null;
 // demo_context_menu.js's handler for a row's right-click / Menu key (#1111).
 let currentOnRowMenu = null;
 let lastMenuKeyAt = -Infinity;
@@ -212,6 +215,12 @@ function matchesSearch(demo, term) {
  *  touches, not just what's on screen. */
 export function getVisibleDemos() {
   return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesPlayer(d) && matchesQuickFilters(d, quickFilters));
+}
+
+/** Sets what a damaged demo's Repair button runs: `(demo, update)`, from
+ *  queue_repair.js (#15). */
+export function setRepairDemoHandler(onRepairDemo) {
+  currentOnRepairDemo = onRepairDemo;
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
@@ -525,6 +534,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // More than one map: the game stops at the first map change (#217).
     const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
     if (splitBtn) tdName.appendChild(splitBtn);
+
+    // Damaged partway: it plays only up to its first gap (#15).
+    const repairBtn = damagedRepairButton(demo, currentOnRepairDemo);
+    if (repairBtn) tdName.appendChild(repairBtn);
 
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {

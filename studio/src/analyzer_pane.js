@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, getWeaponDisplayNames, loadMapOverview, splitDemoAuto } from './ipc_bridge.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
+import { repairAnalyzedDemo } from './analyzer_repair.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
@@ -124,7 +125,7 @@ async function loadAnalyzerDemo(path) {
     markDemoSelected(path);
     showReport(result);
     renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), result, (update) => splitAnalyzedDemo(path, update));
-    renderDamageBanner(document.querySelector('#analyzer-damage-banner'), result);
+    renderDamageBanner(document.querySelector('#analyzer-damage-banner'), result, (update) => repairAnalyzedDemo(path, update, { relistFolderOf, open: loadAnalyzerDemo }));
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;

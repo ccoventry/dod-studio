@@ -394,6 +394,18 @@ pub fn old_split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String
     }
 }
 
+/// Why the demo in `bytes` does not read. A damaged one (#15) says where it
+/// breaks and points at the repair, which a split of the repaired copy
+/// follows; anything else keeps the parser's reason.
+fn read_error(bytes: &[u8], err: impl std::fmt::Display) -> String {
+    match analysis::repair::find_first_hole(bytes) {
+        Some(hole) => crate::messages::repair::split_needs_repair(&analysis::integrity::clock(
+            hole.after_secs,
+        )),
+        None => crate::messages::repair::split_could_not_read(err),
+    }
+}
+
 /// The maps of the demo at `path`, without a full parse when it can: the
 /// frame headers and the signons are enough for [`segments`]' answer, in
 /// well under a second where a full parse takes 5-10 s (#844). Falls back to
@@ -404,8 +416,7 @@ pub fn quick_demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, St
     match quick_segments(&bytes) {
         Some(segs) => Ok(segs),
         None => {
-            let demo = dem::open_demo_from_bytes(&bytes)
-                .map_err(|e| format!("could not read the demo: {e}"))?;
+            let demo = dem::open_demo_from_bytes(&bytes).map_err(|e| read_error(&bytes, e))?;
             Ok(segments(&demo))
         }
     }
@@ -569,8 +580,7 @@ fn segments_from_frames(
 pub fn demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    let demo =
-        dem::open_demo_from_bytes(&bytes).map_err(|e| format!("could not read the demo: {e}"))?;
+    let demo = dem::open_demo_from_bytes(&bytes).map_err(|e| read_error(&bytes, e))?;
     Ok(segments(&demo))
 }
 
@@ -690,7 +700,7 @@ pub fn split_file_cancellable(
             parts: 0,
         })
     })
-    .map_err(|e| format!("could not read the demo: {e}"))?;
+    .map_err(|e| read_error(&bytes, e))?;
     let segs = segments(&demo);
     let keep: Vec<usize> = match keep {
         Keep::These(k) => k.to_vec(),
@@ -778,6 +788,20 @@ mod tests {
             "/../test-fixtures/ci_fixture.dem"
         ))
         .expect("test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn a_damaged_demo_split_points_at_the_repair() {
+        let dir = std::env::temp_dir().join(format!("dodstudio-split-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("damaged.dem");
+        let mut bytes = ci_fixture();
+        let at = bytes.len() / 2;
+        bytes[at..at + 300_000].fill(0xEE);
+        std::fs::write(&demo, &bytes).unwrap();
+        let err = demo_segments(&demo).unwrap_err();
+        assert!(err.contains("damaged") && err.contains("Repair it first"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
