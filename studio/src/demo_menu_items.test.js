@@ -21,6 +21,12 @@ describe('demoMenuItems', () => {
   it('adds Split Maps only when the row has that button', () => {
     const items = demoMenuItems({ name: 'a.dem' }, { ...fns(), split() {} });
     expect(labels(items)).toContain('Split Maps');
+    expect(items.find((i) => i?.label === 'Split Maps').disabled).toBe(false);
+  });
+
+  it('dims Split Maps with the reason when the demo is already split or splitting', () => {
+    const items = demoMenuItems({ name: 'a.dem' }, { ...fns(), split() {}, splitBlocked: 'already split next to it: a_split1_anzio.dem' });
+    expect(items.find((i) => i?.label === 'Split Maps').disabled).toMatch(/already split/);
   });
 
   it('dims what needs the file on a missing demo, with the reason, and keeps Locate', () => {

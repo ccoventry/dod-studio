@@ -79,6 +79,35 @@ test.describe('queue row context menu', () => {
     await expect(page.locator('#result')).toHaveText('preview bravo.dem');
   });
 
+  test('Split Maps is dimmed with the pieces named on a demo already split', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = {
+        demo_split_status: () => ({ split: true, files: ['two_split1_harrington.dem', 'two_split2_anzio.dem'] }),
+      };
+    });
+    await gotoHarness(page);
+    await page.evaluate(() => window.__renderTwoMaps());
+    await expect(row(page, 'two.dem').locator('.multimap-split-note')).toBeVisible();
+    await row(page, 'two.dem').click({ button: 'right' });
+    await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
+    await expect(item(page, 'Split Maps')).toHaveAttribute('title', /two_split1_harrington\.dem/);
+  });
+
+  test('Split Maps runs on a demo not split yet, and is dimmed while that split runs', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }) };
+    });
+    await gotoHarness(page);
+    await page.evaluate(() => window.__renderTwoMaps());
+    await expect(row(page, 'two.dem').locator('.multimap-split-btn')).toBeVisible();
+    await row(page, 'two.dem').click({ button: 'right' });
+    await item(page, 'Split Maps').click();
+    await expect(page.locator('#result')).toHaveText('split two.dem');
+    await row(page, 'two.dem').click({ button: 'right' });
+    await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
+    await expect(item(page, 'Split Maps')).toHaveAttribute('title', 'This demo is being split.');
+  });
+
   test('a missing demo dims what needs the file, with the reason, and offers Locate', async ({ page }) => {
     await gotoHarness(page);
     await row(page, 'lost.dem').click({ button: 'right' });
