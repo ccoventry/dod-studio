@@ -119,12 +119,40 @@ pub struct DamagedRow {
 
 /// The maps of the demo at `path`, by a byte scan; none when unreadable.
 fn maps_of(path: &Path) -> Vec<String> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Vec::new();
-    };
-    native::demo_split::header_protocol(&bytes)
-        .map(|protocol| native::demo_split::quick_maps(&bytes, protocol))
+    std::fs::read(path)
+        .map(|bytes| maps_in(&bytes))
         .unwrap_or_default()
+}
+
+/// The maps a demo's `bytes` signon to, one per signon, by a byte scan for
+/// the server info (`native::demo_split::quick_maps`), which damage doesn't
+/// stop; none for a file without a demo header.
+fn maps_in(bytes: &[u8]) -> Vec<String> {
+    native::demo_split::header_protocol(bytes)
+        .map(|protocol| native::demo_split::quick_maps(bytes, protocol))
+        .unwrap_or_default()
+}
+
+/// What the Master Queue and the Demo Analyzer learn about a demo the
+/// analyzer flags as damaged before they offer Repair (and Repair & Split).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RepairCheck {
+    /// The repair has a hole to cut out (`hl_demo_auditor::repair::is_repairable`);
+    /// damage inside a frame whose header reads is none.
+    pub repairable: bool,
+    /// Every map the demo recorded, as the Damaged Demos tab lists them
+    /// ([`maps_in`]). The analyzer's own list stops at the damage, so a demo
+    /// damaged before its level change has more maps here, and its repair has
+    /// more than one to split.
+    pub maps: Vec<String>,
+}
+
+/// [`RepairCheck`] of a demo's `bytes`: one read of the file answers both.
+fn repair_check(bytes: &[u8]) -> RepairCheck {
+    RepairCheck {
+        repairable: is_repairable(bytes),
+        maps: maps_in(bytes),
+    }
 }
 
 /// Lists the demos in `folder` (and its subfolders when `recursive`) that
@@ -215,15 +243,19 @@ pub async fn repair_demo_cmd(
     result
 }
 
-/// Whether a repair of the demo at `path` would find a hole to cut out
-/// (`hl_demo_auditor::repair::is_repairable`): the Master Queue and the Demo
+/// The [`RepairCheck`] of the demo at `path`: whether a repair would find a
+/// hole to cut out, and every map it recorded. The Master Queue and the Demo
 /// Analyzer ask before they offer Repair on a demo the analyzer flags as
-/// damaged, since damage inside a frame whose header reads is not one. Reads
-/// the whole file, off the main thread.
+/// damaged, since damage inside a frame whose header reads is not a hole, and
+/// for Repair & Split, since their own map list stops at the damage. Reads
+/// the whole file once, off the main thread.
 #[tauri::command]
-pub async fn demo_repairable(path: String) -> Result<bool, String> {
+pub async fn demo_repairable(path: String) -> Result<RepairCheck, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        is_repairable(Path::new(&path))
+        let path = Path::new(&path);
+        std::fs::read(path)
+            .map(|bytes| repair_check(&bytes))
+            .map_err(|e| crate::messages::repair::cannot_read(&path.display().to_string(), e))
     }))
     .await
 }
@@ -340,5 +372,76 @@ mod tests {
         manager.release("c:/Demos/M1_H1.dem");
         assert!(!first.load(Ordering::SeqCst));
         assert!(manager.claim(r"C:\demos\m1_h1.dem").is_some());
+    }
+
+    fn fixture() -> Vec<u8> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-fixtures/ci_fixture.dem"
+        );
+        std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    /// A server info as a level change writes it: `maps/<map>.bsp` where
+    /// `quick_maps` looks for it.
+    fn server_info(map: &str) -> Vec<u8> {
+        let mut b = vec![11];
+        b.extend_from_slice(&48i32.to_le_bytes());
+        b.extend_from_slice(&[0; 4 + 4 + 16]);
+        b.extend_from_slice(&[32, 4, 1]);
+        b.extend_from_slice(b"dod\0My Server\0");
+        b.extend_from_slice(format!("maps/{map}.bsp\0").as_bytes());
+        b
+    }
+
+    #[test]
+    fn a_demo_damaged_before_its_level_change_lists_the_maps_after_it() {
+        let mut bytes = fixture();
+        let first = maps_in(&bytes);
+        assert_eq!(first.len(), 1, "the fixture records one map");
+        // Damage mid-file, then a level change to another map after it: the
+        // analyzer's parse stops at the damage and never sees that map.
+        let at = bytes.len() / 2;
+        bytes[at..at + 300_000].fill(0xEE);
+        let change = server_info("dod_flash");
+        let later = at + 400_000;
+        bytes[later..later + change.len()].copy_from_slice(&change);
+        let check = repair_check(&bytes);
+        assert!(check.repairable);
+        assert_eq!(check.maps, [first[0].as_str(), "dod_flash"]);
+        // A healthy demo: nothing to repair, its one map.
+        assert_eq!(
+            repair_check(&fixture()),
+            RepairCheck {
+                repairable: false,
+                maps: first
+            }
+        );
+    }
+
+    /// `monday-wsod25_r07_m1_h2.dem` (3 maps, its first break at 11:58,
+    /// before the level change), from `DOD_DAMAGED_MULTIMAP_DEMO` or the PRE
+    /// install's `dod` folder: the check finds the break and all three maps.
+    #[test]
+    #[ignore = "needs a demo damaged before its level change (DOD_DAMAGED_MULTIMAP_DEMO or the PRE install)"]
+    fn a_real_demo_damaged_before_its_level_change_lists_all_its_maps() {
+        let path = std::env::var_os("DOD_DAMAGED_MULTIMAP_DEMO")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod\monday-wsod25_r07_m1_h2.dem",
+                )
+            });
+        let started = Instant::now();
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let check = repair_check(&bytes);
+        eprintln!(
+            "{}: {:?} in {:.2} s",
+            path.display(),
+            check,
+            started.elapsed().as_secs_f64()
+        );
+        assert!(check.repairable);
+        assert_eq!(check.maps.len(), 3, "{:?}", check.maps);
     }
 }

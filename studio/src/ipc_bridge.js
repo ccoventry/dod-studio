@@ -1892,7 +1892,8 @@ export async function cancelDemoRepair(path) {
     });
 }
 
-// Whether a repair of the demo at `path` has a break to cut out (#15).
+// Whether a repair of the demo at `path` has a break to cut out, and every
+// map it recorded, read past the damage (#15): `{ repairable, maps }`.
 export async function demoRepairable(path) {
   return invoke("demo_repairable", { path })
     .catch((err) => {

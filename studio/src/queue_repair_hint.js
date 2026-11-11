@@ -2,16 +2,17 @@
 // A Master Demo Queue row's buttons for a demo damaged partway (#15): "Damaged
 // · Repair", and for one that recorded more than one map as well, "Repair &
 // Split" (its Split button is greyed out by queue_multimap.js: the damage
-// stops a split). Once the repair's maps were split next to it
+// stops a split). The maps are the row's own or, when the damage hides the
+// level change, those the repair check's scan finds past it
+// (repair_status.js). Once the repair's maps were split next to it
 // (split_status.js counts the repair's pieces), the row needs neither and
 // shows none, and neither does a demo whose damage the repair has no break
 // to cut out (repair_status.js). The jobs themselves are queue_repair.js's,
 // through the handlers main.js passes in.
 
 import { isDamagedDemo, repairProgressBar } from './repair_view.js';
-import { isMultiMapDemo } from './queue_multimap.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
-import { offersRepair, repairableStatus } from './repair_status.js';
+import { offersRepair, repairMaps, repairableStatus } from './repair_status.js';
 import { clockFloor } from './time_format.js';
 import { STRINGS } from './strings.js';
 
@@ -20,7 +21,7 @@ const R = STRINGS.REPAIR;
 /**
  * The row's repair buttons in one span, or null for a whole demo (or when no
  * handler is wired). `handlers.repair(demo, update)` and, for a multi-map
- * demo, `handlers.repairSplit(demo, update)` run on click without selecting
+ * demo (its own maps or `repairable`'s), `handlers.repairSplit(demo, update)` run on click without selecting
  * the row; the first `update(p)` (a RepairProgress, or a `{ pct, text }`
  * view) swaps the buttons for a progress bar until the job ends. The span
  * hides once `repairable` (repair_status.js) finds nothing for the repair
@@ -30,19 +31,31 @@ export function damagedRepairHint(demo, handlers, { status = splitStatus, repair
   if (!isDamagedDemo(demo) || !handlers?.repair) return null;
   const hint = document.createElement('span');
   hint.className = 'multimap-hint damaged-repair-hint';
-  const buttons = [jobButton(R.QUEUE_BUTTON, R.queueButtonTitle(clockFloor(demo.damage.read_up_to_secs)), demo, handlers.repair, hint)];
-  const both = isMultiMapDemo(demo) && handlers.repairSplit;
-  if (both) buttons.push(jobButton(R.REPAIR_SPLIT_BUTTON, R.REPAIR_SPLIT_TITLE, demo, handlers.repairSplit, hint));
-  hint.append(...buttons);
+  hint.append(jobButton(R.QUEUE_BUTTON, R.queueButtonTitle(clockFloor(demo.damage.read_up_to_secs)), demo, handlers.repair, hint));
+  const own = demo.signon_maps || [];
+  let maps = repairMaps(own, repairable.lastMaps(demo.path));
+  let both = false;
   // Repaired and split already, or nothing to repair: nothing to offer.
-  let split = both ? status.last(demo.path) : null;
+  let split = maps.length > 1 ? status.last(demo.path) : null;
   let canRepair = repairable.last(demo.path);
   const show = () => {
-    if (!hint.dataset.running) hint.hidden = isAlreadySplit(split) || !offersRepair(demo, canRepair);
+    if (hint.dataset.running) return;
+    // Repair & Split once there is a second map: the row's own, or the
+    // repair check's scan past the damage (repair_status.js).
+    if (!both && handlers.repairSplit && maps.length > 1) {
+      both = true;
+      hint.append(jobButton(R.REPAIR_SPLIT_BUTTON, R.REPAIR_SPLIT_TITLE, demo, handlers.repairSplit, hint));
+    }
+    hint.hidden = isAlreadySplit(split) || !offersRepair(demo, canRepair);
   };
   show();
-  repairable.check(demo.path).then((answer) => { canRepair = answer; show(); });
-  if (both) status.check(demo.path, demo.signon_maps).then((answer) => { split = answer; show(); });
+  repairable.checkMaps(demo.path, own).then((scanned) => {
+    canRepair = repairable.last(demo.path);
+    maps = repairMaps(own, scanned);
+    show();
+    // Asked with the list the repair is split by, as queue_multimap.js does.
+    if (both) status.check(demo.path, maps).then((answer) => { split = answer; show(); });
+  });
   return hint;
 }
 

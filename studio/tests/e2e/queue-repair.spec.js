@@ -84,3 +84,31 @@ test('a Repair that finds nothing to cut out takes Repair away at once, and Spli
   await expect(r.locator('.multimap-split-btn')).toBeDisabled();
   await expect(r.locator('.multimap-split-btn')).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
 });
+
+test('a demo damaged before its level change offers Repair & Split once the repair check finds its maps', async ({ page }) => {
+  const r = row(page, 'early.dem');
+  // The analysis knows one map: no "N maps · Split" of its own.
+  await expect(r.locator('.multimap-split-btn')).toHaveCount(0);
+  await expect(r.locator('.damaged-repair-btn:visible')).toHaveText(['Damaged · Repair', 'Repair & Split']);
+  await r.locator('.damaged-repair-btn', { hasText: 'Repair & Split' }).click();
+  await expect(page.locator('#result')).toHaveText('repair-split early.dem');
+  await page.evaluate(() => window.__finishRowRepair());
+  await expect(r.locator('.repair-progress')).toHaveCount(0);
+  // Its "Already split" check asks with the scan's three maps.
+  expect(await page.evaluate(() => window.__splitAskedWith['C:\\demos\\early.dem']))
+    .toEqual(['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a']);
+  // A one-map damaged demo the scan finds nothing more in keeps Repair alone.
+  await expect(row(page, 'broken.dem').locator('.damaged-repair-btn:visible')).toHaveText(['Damaged · Repair']);
+});
+
+test('once a demo damaged before its level change was repaired and split, its row offers no Repair', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__splitStatus = { split: true, files: ['early_repaired_split1_anzio.dem', 'early_repaired_split3_thunder2_b5a.dem'] };
+  });
+  await page.evaluate(async () => {
+    const { renderMasterList } = await import('/src/master_pane.js');
+    renderMasterList([{ name: 'early.dem', path: 'C:/demos/again/early.dem', streaks: [], signon_maps: ['dod_anzio'],
+      damage: { read_up_to_secs: 718.3, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'x' } }], null, () => {});
+  });
+  await expect(row(page, 'early.dem').locator('.damaged-repair-hint')).toBeHidden();
+});

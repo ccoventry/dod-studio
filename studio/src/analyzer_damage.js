@@ -12,7 +12,7 @@ import { STRINGS } from './strings.js';
 import { clockFloor } from './time_format.js';
 import { escapeHtml as esc } from './html.js';
 import { repairProgressBar } from './repair_view.js';
-import { isUnrepairableDamage, repairableStatus } from './repair_status.js';
+import { isUnrepairableDamage, repairMaps, repairableStatus } from './repair_status.js';
 
 /** A byte count as "14.2 MB" or "312 KB". */
 export function sizeText(bytes) {
@@ -37,7 +37,8 @@ export function damageNotice(report) {
  * Fills `el` with the notice for `report`, or hides it. With `onRepair`, the
  * notice has a Repair now button that runs `onRepair(update)`, with
  * `update(p)` for the banner's bar (a RepairProgress or a `{ pct, text }`
- * view), and for a demo that recorded more than one map, a Repair & Split
+ * view), and for a demo that recorded more than one map (its report's, or
+ * those `repairable`'s scan finds past the damage), a Repair & Split
  * that runs `onRepairSplit(update)` the same way (#15). While one runs both
  * buttons are disabled and the bar shows; if it throws, the banner says why.
  * Each resolves the line the banner shows after. Once `repairable`
@@ -59,11 +60,16 @@ export function renderDamageBanner(el, report, onRepair, onRepairSplit, repairab
     renderUnrepairable(el, notice);
     return;
   }
-  renderRepairButtons(el, { notice, both: (report?.state?.signon_maps || []).length > 1 && onRepairSplit, onRepair, onRepairSplit });
+  const own = report?.state?.signon_maps || [];
+  const bothFor = (scanned) => Boolean(onRepairSplit) && repairMaps(own, scanned).length > 1;
+  const both = bothFor(path ? repairable.lastMaps(path) : null);
+  renderRepairButtons(el, { notice, both, onRepair, onRepairSplit });
   if (!path) return;
-  repairable.check(path).then((answer) => {
+  repairable.checkMaps(path, own).then((scanned) => {
     if (el.dataset.path !== path || el.querySelector('button:disabled')) return;
-    if (isUnrepairableDamage(demo, answer)) renderUnrepairable(el, notice);
+    if (isUnrepairableDamage(demo, repairable.last(path))) renderUnrepairable(el, notice);
+    // The scan found maps past the damage: Repair & Split joins Repair now.
+    else if (!both && bothFor(scanned)) renderRepairButtons(el, { notice, both: true, onRepair, onRepairSplit });
   });
 }
 

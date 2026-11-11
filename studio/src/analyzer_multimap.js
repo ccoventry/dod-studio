@@ -13,7 +13,7 @@ import { escapeHtml as esc } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
-import { repairableStatus, splitDamageReason } from './repair_status.js';
+import { mapsToSplit, repairableStatus, splitDamageReason } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** The maps a report's demo recorded, when there is more than one; else null.
@@ -66,8 +66,15 @@ export function renderMultiMapBanner(el, report, onSplit, status = splitStatus, 
     if (el.dataset.path !== path || el.querySelector('.analyzer-multimap-split[data-splitting]')) return;
     show();
   };
-  status.check(path, maps).then((answer) => { split = answer; redraw(); });
-  if (isDamagedDemo(demo)) repairable.check(path).then((answer) => { canRepair = answer; redraw(); });
+  // A damaged demo's "Already split" check waits for the repair check: it
+  // asks with the maps the repair is split by (repair_status.js).
+  const damaged = isDamagedDemo(demo);
+  mapsToSplit(path, maps, damaged, repairable)
+    .then((asked) => {
+      if (damaged) { canRepair = repairable.last(path); redraw(); }
+      return status.check(path, asked);
+    })
+    .then((answer) => { split = answer; redraw(); });
 }
 
 /**

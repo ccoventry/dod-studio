@@ -97,7 +97,7 @@ test.describe('queue row context menu', () => {
 
   test('Split Maps is dimmed with "Repair it first" on a damaged demo the repair can fix', async ({ page }) => {
     await page.addInitScript(() => {
-      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => true };
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => ({ repairable: true, maps: [] }) };
     });
     await gotoHarness(page);
     await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);
@@ -109,7 +109,7 @@ test.describe('queue row context menu', () => {
 
   test('Split Maps is dimmed with its own reason on a damaged demo the repair finds no break in', async ({ page }) => {
     await page.addInitScript(() => {
-      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => false };
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => ({ repairable: false, maps: [] }) };
     });
     await gotoHarness(page);
     await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);

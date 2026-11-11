@@ -32,6 +32,10 @@
         damage: { read_up_to_secs: 1480.2, frame_index: 1, byte_offset: 96233819, bytes_unread: 18644387, reason: 'a frame does not parse' } },
       { name: 'inside.dem', path: 'C:\\demos\\inside.dem', streaks: [], signon_maps: ['dod_anzio', 'dod_flash'],
         damage: { read_up_to_secs: 300.5, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'a frame does not parse' } },
+      // Damaged before its level change: the analysis knows one map, the
+      // repair check's scan three (m1_h2's case).
+      { name: 'early.dem', path: 'C:\\demos\\early.dem', streaks: [], signon_maps: ['dod_anzio'],
+        damage: { read_up_to_secs: 718.3, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'a frame does not parse' } },
     ];
     const result = document.querySelector('#result');
     // Not split yet, unless a test sets window.__splitStatus first.
@@ -42,8 +46,19 @@
       update(what === 'repair' ? { step: 'reading', fraction: 0.4 } : { pct: 60, text: 'Splitting the repaired demo: Writing dod_anzio… 20%' });
       await new Promise((resolve) => { window.__finishRowRepair = resolve; });
     };
-    // The repair has a break to cut out of every damaged demo but inside.dem.
-    window.__mockInvokeHandlers.demo_repairable = ({ path }) => !path.includes('inside');
+    // The repair has a break to cut out of every damaged demo but inside.dem;
+    // the scan finds early.dem's maps past its damage.
+    window.__mockInvokeHandlers.demo_repairable = ({ path }) => ({
+      repairable: !path.includes('inside'),
+      maps: path.includes('early') ? ['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a'] : (demos.find((d) => d.path === path)?.signon_maps || []),
+    });
+    // What the "Already split" check was last asked with, by demo.
+    window.__splitAskedWith = {};
+    const splitStatusMock = window.__mockInvokeHandlers.demo_split_status;
+    window.__mockInvokeHandlers.demo_split_status = (args) => {
+      window.__splitAskedWith[args.path] = args.maps;
+      return splitStatusMock(args);
+    };
     const onSelect = (demo) => { result.textContent = `select ${demo.name}`; };
     if (new URLSearchParams(location.search).has('real')) {
       const { createQueueRepair } = await import('/src/queue_repair.js');

@@ -8,6 +8,13 @@
 // out on a damaged demo either way (the split parses the whole demo and stops
 // at the damage too); only its reason follows the answer.
 //
+// The same read lists every map the demo recorded, by the byte scan the
+// Demo Auditor's Damaged Demos tab uses: the analyzer's own list stops at the
+// damage, so a demo damaged before its level change looks like one map there.
+// With the scan's maps, Repair & Split shows in the queue and the Analyzer
+// wherever the Auditor shows it, and the "Already split" check is asked with
+// the same list, so a repaired-and-split demo reads as split.
+//
 // Asked when shown, not saved with the scan: the check reads the whole file
 // (about as fast as reading it), and only damaged demos are asked. A repair's
 // own "not damaged" verdict is remembered at once, so the row or notice that
@@ -52,27 +59,71 @@ export function isUnrepairableDamage(demo, answer) {
 }
 
 /**
+ * The maps a damaged demo's repair would split: `scanned` (the byte scan's,
+ * null while unknown) when it found more than `own` (the analyzer's list,
+ * which stops at the damage), else `own`. Pure.
+ */
+export function repairMaps(own, scanned) {
+  const mine = Array.isArray(own) ? own : [];
+  return Array.isArray(scanned) && scanned.length > mine.length ? scanned : mine;
+}
+
+/**
  * @param {object} deps
- *   ask(path) resolves native's boolean; now() the clock in ms (tests);
- *   log(line) where a damaged demo found unrepairable is said, once per path.
- * @returns {{ last(path), check(path), remember(path, answer) }} as
- *   cached_check.js's, the answer a boolean (null while unknown).
+ *   ask(path) resolves native's `{ repairable, maps }`; now() the clock in
+ *   ms (tests); log(line) where a damaged demo found unrepairable, or with
+ *   maps past its damage, is said, once per path each.
+ * @returns {{ last(path), check(path), remember(path, answer), lastMaps(path), checkMaps(path, own) }}
+ *   `last`/`check`/`remember` as cached_check.js's, the answer a boolean
+ *   (null while unknown); `lastMaps`/`checkMaps` the scan's map list (null
+ *   while unknown) from the same call. `checkMaps` logs, once per path, when
+ *   the list turns `own`'s one map into several, since that adds Repair &
+ *   Split.
  */
 export function createRepairableCheck({ ask, now, log = () => {} }) {
   const logged = new Set();
-  return createCachedCheck({
+  const logOnce = (key, line) => {
+    if (logged.has(key)) return;
+    logged.add(key);
+    log(line);
+  };
+  const inner = createCachedCheck({
     keepMs: REPAIRABLE_KEEP_MS,
     now,
     ask: async (path) => {
       const answer = await ask(path);
-      if (typeof answer !== 'boolean') throw new Error('no answer');
-      if (answer === false && !logged.has(path)) {
-        logged.add(path);
-        log(STRINGS.REPAIR.cannotRepairLog(path));
-      }
-      return answer;
+      if (typeof answer?.repairable !== 'boolean') throw new Error('no answer');
+      if (answer.repairable === false) logOnce(`cannot:${path}`, STRINGS.REPAIR.cannotRepairLog(path));
+      return { repairable: answer.repairable, maps: Array.isArray(answer.maps) ? answer.maps : [] };
     },
   });
+  const repairableOf = (answer) => answer?.repairable ?? null;
+  return {
+    last: (path) => repairableOf(inner.last(path)),
+    check: (path) => inner.check(path).then(repairableOf),
+    // A repair's own verdict keeps the maps the scan found.
+    remember: (path, repairable) => inner.remember(path, { repairable, maps: inner.last(path)?.maps ?? [] }),
+    lastMaps: (path) => inner.last(path)?.maps ?? null,
+    checkMaps: (path, own = []) => inner.check(path).then((answer) => {
+      const maps = answer?.maps ?? null;
+      const mine = Array.isArray(own) ? own : [];
+      if (answer?.repairable && mine.length < 2 && repairMaps(mine, maps).length > 1) {
+        logOnce(`maps:${path}`, STRINGS.REPAIR.mapsPastDamageLog(path, maps));
+      }
+      return maps;
+    }),
+  };
+}
+
+/**
+ * The maps to ask split_status.js about for the demo at `path` (`own` the
+ * analyzer's list): for a damaged demo, [repairMaps] once `status` has
+ * scanned it (`own` if the scan fails), so every "Already split" check of
+ * it uses the list its repair is split by; `own` for any other demo.
+ */
+export async function mapsToSplit(path, own, damaged, status = repairableStatus) {
+  if (!damaged || !path) return own;
+  return repairMaps(own, await status.checkMaps(path, own));
 }
 
 /** Studio's one checker, over IPC. */

@@ -1323,6 +1323,9 @@ export const STRINGS = {
     // stops at the same damage.
     SPLIT_DAMAGE_CANNOT_REPAIR: "The damage stops a split, and Repair can't cut it out.",
     cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it, and Split stays greyed out (the damage stops a split too)`,
+    // The analyzer's map list stops at the damage; the repair check's byte
+    // scan found the maps after it (repair_status.js).
+    mapsPastDamageLog: (path, maps) => `Repair: ${path} recorded ${maps.length} maps (${maps.join(', ')}), some after its damage; Repair & Split is offered for it`,
     REPAIR_SPLIT_BUTTON: 'Repair & Split',
     REPAIR_SPLIT_TITLE: 'Repair the damage, then split the repaired demo into one demo per map. Both are saved next to this one, which is not changed.',
     repairSplitRepairing: (text) => `Repairing: ${text}`,

@@ -13,7 +13,7 @@
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
-import { repairableStatus, splitDamageReason } from './repair_status.js';
+import { mapsToSplit, repairableStatus, splitDamageReason } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -54,10 +54,18 @@ export function multiMapHint(demo, onSplit, status = splitStatus, repairable = r
     if (title !== null) note.title = title;
   };
   show(status.last(demo.path));
-  status.check(demo.path, demo.signon_maps).then(show);
   if (isDamagedDemo(demo)) {
     holdForRepair(btn, demo, repairable.last(demo.path));
-    repairable.check(demo.path).then((answer) => holdForRepair(btn, demo, answer));
+    // The repair check answers Repair's offer and the maps its repair is
+    // split by, which the "Already split" check then asks with.
+    mapsToSplit(demo.path, demo.signon_maps, true, repairable)
+      .then((maps) => {
+        holdForRepair(btn, demo, repairable.last(demo.path));
+        return status.check(demo.path, maps);
+      })
+      .then(show);
+  } else {
+    status.check(demo.path, demo.signon_maps).then(show);
   }
   return hint;
 }

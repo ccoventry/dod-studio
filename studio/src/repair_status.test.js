@@ -3,20 +3,23 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('./ipc_bridge.js', () => ({ demoRepairable: vi.fn(), logFrontendEvent: vi.fn() }));
 
 const {
-  createRepairableCheck, isUnrepairableDamage, noteRepairResult, offersRepair, splitDamageReason, REPAIRABLE_KEEP_MS,
+  createRepairableCheck, isUnrepairableDamage, mapsToSplit, noteRepairResult, offersRepair, repairMaps, splitDamageReason,
+  REPAIRABLE_KEEP_MS,
 } = await import('./repair_status.js');
 const { STRINGS } = await import('./strings.js');
 
 const DAMAGED = { path: 'C:/demos/a.dem', damage: { read_up_to_secs: 507.4, bytes_unread: 1, reason: 'x' } };
 const WHOLE = { path: 'C:/demos/b.dem', damage: null };
 
-/** A checker over `answers` (one per call, in order), a clock and a log. */
+/** A checker over `answers` (one per call, in order: a boolean stands for
+ *  `{ repairable, maps: [] }`), a clock and a log. */
 function checker(...answers) {
   const clock = { ms: 0 };
   const log = vi.fn();
   const ask = vi.fn(() => {
     const next = answers.shift();
-    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+    if (next instanceof Error) return Promise.reject(next);
+    return Promise.resolve(typeof next === 'boolean' ? { repairable: next, maps: [] } : next);
   });
   return { clock, ask, log, status: createRepairableCheck({ ask, now: () => clock.ms, log }) };
 }
@@ -99,6 +102,71 @@ describe('createRepairableCheck', () => {
     await status.check(DAMAGED.path);
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0][0]).toContain(DAMAGED.path);
+  });
+});
+
+describe('repairMaps', () => {
+  it("takes the scan's maps when it found more than the analyzer, whose list stops at the damage", () => {
+    expect(repairMaps(['dod_anzio'], ['dod_anzio', 'pandemic_aim', 'dod_thunder2_b5a']))
+      .toEqual(['dod_anzio', 'pandemic_aim', 'dod_thunder2_b5a']);
+  });
+
+  it("keeps the demo's own list while the scan is unknown, failed or found no more", () => {
+    expect(repairMaps(['dod_anzio'], null)).toEqual(['dod_anzio']);
+    expect(repairMaps(['dod_anzio', 'dod_flash'], ['dod_anzio'])).toEqual(['dod_anzio', 'dod_flash']);
+    expect(repairMaps(undefined, null)).toEqual([]);
+  });
+});
+
+describe('checkMaps', () => {
+  const THREE = ['dod_anzio', 'pandemic_aim', 'dod_thunder2_b5a'];
+
+  it('answers the maps from the same call as the repairable check', async () => {
+    const { ask, status } = checker({ repairable: true, maps: THREE });
+    const [maps, repairable] = await Promise.all([status.checkMaps(DAMAGED.path, ['dod_anzio']), status.check(DAMAGED.path)]);
+    expect(maps).toEqual(THREE);
+    expect(repairable).toBe(true);
+    expect(status.lastMaps(DAMAGED.path)).toEqual(THREE);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs once per demo when the scan turns one map into several', async () => {
+    const { clock, log, status } = checker({ repairable: true, maps: THREE }, { repairable: true, maps: THREE });
+    await status.checkMaps(DAMAGED.path, ['dod_anzio']);
+    clock.ms = REPAIRABLE_KEEP_MS;
+    await status.checkMaps(DAMAGED.path, ['dod_anzio']);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain('Repair & Split');
+  });
+
+  it('logs nothing when it changes nothing offered', async () => {
+    const { log, status } = checker({ repairable: true, maps: THREE });
+    await status.checkMaps(DAMAGED.path, ['dod_anzio', 'pandemic_aim']);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('answers null when the check fails, and a repair verdict keeps the maps', async () => {
+    const failed = checker(new Error('cannot read the file'));
+    expect(await failed.status.checkMaps(DAMAGED.path, [])).toBeNull();
+    const { status } = checker({ repairable: true, maps: THREE });
+    await status.check(DAMAGED.path);
+    noteRepairResult(DAMAGED.path, { verdict: 'not_damaged' }, status);
+    expect(status.last(DAMAGED.path)).toBe(false);
+    expect(status.lastMaps(DAMAGED.path)).toEqual(THREE);
+  });
+});
+
+describe('mapsToSplit', () => {
+  it("asks a damaged demo's \"Already split\" with the scan's maps, any other with its own", async () => {
+    const { ask, status } = checker({ repairable: true, maps: ['a', 'b', 'c'] });
+    expect(await mapsToSplit(DAMAGED.path, ['a'], true, status)).toEqual(['a', 'b', 'c']);
+    expect(await mapsToSplit(WHOLE.path, ['a', 'b'], false, status)).toEqual(['a', 'b']);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the demo's own maps when the check fails", async () => {
+    const { status } = checker(new Error('gone'));
+    expect(await mapsToSplit(DAMAGED.path, ['a', 'b'], true, status)).toEqual(['a', 'b']);
   });
 });
 

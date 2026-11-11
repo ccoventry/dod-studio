@@ -5,6 +5,10 @@ pub fn not_a_folder(folder: &str) -> String {
     format!("{folder} is not a folder")
 }
 
+pub fn cannot_read(path: &str, err: std::io::Error) -> String {
+    format!("{path}: cannot read the file: {err}")
+}
+
 pub fn damaged_scan_started(folder: &str, recursive: bool) -> String {
     let sub = if recursive { " and its subfolders" } else { "" };
     format!("[repair] looking for damaged demos in {folder}{sub}")

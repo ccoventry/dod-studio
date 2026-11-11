@@ -132,7 +132,7 @@ async function openTwoMaps(page, { repairable, verdict = 'not_damaged' }) {
     window.__mockInvokeHandlers.analyze_demo_full = () => both;
     window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
     window.__mockInvokeHandlers.demo_split_status = () => ({ split: false, files: [] });
-    window.__mockInvokeHandlers.demo_repairable = () => repairable;
+    window.__mockInvokeHandlers.demo_repairable = () => ({ repairable, maps: both.state.signon_maps });
     window.__mockInvokeHandlers.repair_demo_cmd = () => ({ verdict, holes: [], reasons: [] });
   }, { both, repairable, verdict });
   await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
@@ -159,4 +159,33 @@ test("a Repair that finds nothing to cut out turns the notice and Split now's re
   await expect(banner.locator('button')).toHaveCount(0);
   await expect(split).toBeDisabled();
   await expect(split).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
+});
+
+test('a demo damaged before its level change offers Repair & Split once the repair check finds its maps', async ({ page }) => {
+  // The analysis stops at the damage, before the level change: one map.
+  const early = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  await page.evaluate(({ early }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = () => early;
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_split_status = () => ({ split: false, files: [] });
+    window.__mockInvokeHandlers.demo_repairable = () => ({ repairable: true, maps: ['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a'] });
+  }, { early });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+  const banner = page.locator('#analyzer-damage-banner');
+  await expect(banner.locator('button')).toHaveText(['Repair now', 'Repair & Split']);
+  // Its own multi-map notice stays as it was: the analysis knows one map.
+  await expect(page.locator('#analyzer-multimap-banner')).toBeHidden();
+});
+
+test('a one-map damaged demo the repair check finds no more maps in keeps Repair now alone', async ({ page }) => {
+  const one = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  await page.evaluate(({ one }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = () => one;
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_repairable = () => ({ repairable: true, maps: ['dod_anzio'] });
+  }, { one });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+  const banner = page.locator('#analyzer-damage-banner');
+  await expect(banner.locator('.analyzer-damage-repair')).toBeVisible();
+  await expect(banner.locator('button')).toHaveCount(1);
 });
