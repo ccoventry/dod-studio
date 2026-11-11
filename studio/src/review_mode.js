@@ -28,10 +28,12 @@ import { STRINGS } from './strings.js';
  *  - onChanged(): re-render and mark the project dirty after an answer
  *  - hltvPick: review_hltv_picker.js's picker, which holds the box's choice
  *    and the players "Players I pick" reviews
+ *  - ensureDemoFiles(demos): demo_file_recheck.js's ensurePresent, so a
+ *    review whose demo was renamed away says so instead of sending it
  * Returns `{ startReview }`, which review_from_game.js starts the game's own
  * requests with (#1142).
  */
-export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null }) {
+export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null, ensureDemoFiles = async () => true }) {
   const btn = document.querySelector('#review-highlights-btn');
   if (!btn) return { startReview: async () => STRINGS.REVIEW.NOT_STARTED };
   let answers = 0;
@@ -125,6 +127,10 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     }
     btn.disabled = true;
     try {
+      // Only the demos with a highlight in this review: one renamed away is
+      // named (ensureDemoFiles toasts it) and nothing is sent.
+      const reviewed = new Set(highlights.map((h) => h.demo));
+      if (!(await ensureDemoFiles(getDemos().filter((d) => reviewed.has(d.path))))) return STRINGS.REVIEW.NOT_STARTED;
       // A game started with other launch settings is closed and started
       // again, if the user says so; otherwise nothing is sent (#666).
       if (!fromGame && !(await closeGameWithOtherSettings())) return STRINGS.REVIEW.NOT_STARTED;

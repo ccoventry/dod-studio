@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<!--
+  Harness for a queued demo renamed, moved or deleted while Studio is open
+  (demo_file_recheck.js): the real master_pane.js, project_demos.js,
+  demo_context_menu.js and Highlight Details' Launch Preview, wired as
+  main.js wires them. window.__disk is the set of files that are there and
+  window.__renamed maps a gone path to where locate_missing_demos finds it;
+  window.__clock is the recheck's clock, so a test can step past its
+  focus throttle. Review reports into #result.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>demo file recheck test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="demo-search-input" />
+  <input id="hlae-path-input" value="C:/HLAE/HLAE.exe" />
+  <input id="hl-path-input" value="C:/Games/Half-Life/hl.exe" />
+  <button id="btn-launch-preview" type="button">Launch Preview</button>
+  <h3 id="detail-demo-title"></h3>
+  <div id="detail-streaks-container"></div>
+  <table>
+    <thead><tr><th><div id="status-count-legend"></div></th><th><div id="review-count-legend"></div></th></tr></thead>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+    import { startDemoContextMenu } from '/src/demo_context_menu.js';
+    import { createProjectDemos } from '/src/project_demos.js';
+    import { createDemoFileRecheck } from '/src/demo_file_recheck.js';
+    import { initDetailPane, renderDetailView } from '/src/detail_pane.js';
+
+    const result = document.querySelector('#result');
+    const kill = (t) => ({ time: { real_offset: { secs: t, nanos: 0 }, viewdemo_offset: { secs: t, nanos: 0 }, frame_index: t * 100 }, weapon: 'K98', victim: 'v' });
+    const streak = (t) => ({ kill_count: 2, start_index: 0, end_index: 1, selected: false, status: 'None', notes: '', kills: [kill(t), kill(t + 3)] });
+    const demos = [
+      { name: 'alpha.dem', path: 'D:/tests/alpha.dem', file_key: 'k-alpha', is_pov: true, streaks: [streak(60)] },
+      { name: 'harrington.dem', path: 'D:/tests/harrington.dem', file_key: 'k-harr', is_pov: true, streaks: [streak(90)] },
+    ];
+    window.__demos = demos;
+    window.__disk = new Set(demos.map((d) => d.path));
+    window.__renamed = {};
+    window.__clock = 0;
+    window.__mockInvokeHandlers = {
+      ...window.__mockInvokeHandlers,
+      files_exist: ({ paths }) => paths.map((p) => window.__disk.has(p)),
+      locate_missing_demos: ({ demos: asked }) => asked
+        .filter((d) => !window.__disk.has(d.path))
+        .map((d) => ({ path: d.path, candidate: window.__renamed[d.path] || null })),
+    };
+
+    let selectedIdx = null;
+    const onSelect = (demo, idx) => {
+      selectedIdx = idx;
+      renderDetailView(demo, idx);
+    };
+    const draw = () => renderMasterList(demos, selectedIdx, onSelect);
+    const projectDemos = createProjectDemos({
+      getDemos: () => demos,
+      getTakeIndex: () => ({}),
+      getScanPaths: () => [],
+      refreshQueue: draw,
+      scan: async () => {},
+      removeDemo: () => {},
+    });
+    const { ensurePresent } = createDemoFileRecheck({
+      getDemos: () => demos,
+      markDemosGone: projectDemos.markDemosGone,
+      markDemosBack: projectDemos.markDemosBack,
+      refreshQueue: draw,
+      useFoundCopies: projectDemos.useFoundCopies,
+      now: () => window.__clock,
+    });
+    initMasterPane(
+      () => null,
+      null,
+      projectDemos.locateDemoByHand,
+      (demo) => projectDemos.useFoundCopies([demo]),
+      null,
+    );
+    startDemoContextMenu({
+      startReview: (paths) => { result.textContent = `review ${paths.join(',')}`; },
+      ensureDemoFiles: ensurePresent,
+    });
+    initDetailPane(() => demos, () => {}, () => {}, { ensureDemoFiles: ensurePresent });
+    draw();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

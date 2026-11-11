@@ -42,6 +42,18 @@ export function missingDemosLine(checked, missing, foundElsewhere) {
   return `[project] ${missing} of ${checked} demo(s) are missing, ${foundElsewhere} found elsewhere`;
 }
 
+/**
+ * What a look at the queue's demo files found when something changed
+ * (demo_file_recheck.js): `gone` and `back` are the names of the rows whose
+ * files went or came back, `found` how many gone ones turned up under another
+ * name or folder. Counts always; the names only when there are few.
+ */
+export function demoFilesRecheckedLine({ checked, gone, back, found, elapsedMs }) {
+  const few = (names) => (names.length > 0 && names.length <= 3 ? ` (${names.join(', ')})` : '');
+  return `[project] looked at ${checked} demo file(s) again in ${elapsedMs} ms: `
+    + `${gone.length} gone${few(gone)}, ${found} of them found elsewhere; ${back.length} back${few(back)}`;
+}
+
 /** Demos replaced on disk since they were scanned. */
 export function changedDemosLine(count, willRescan) {
   return `[project] ${count} demo(s) changed since they were scanned${willRescan ? ', rescanning' : ', left as they are'}`;

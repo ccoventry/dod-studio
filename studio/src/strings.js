@@ -2011,6 +2011,24 @@ export const STRINGS = {
       return `Left ${names.length} moved demo(s) as missing: ${shown}${more}. Each row has a Use found copy button.`;
     },
     USE_ALL_FOUND_COPIES: 'Use all found copies',
+    // Queued demos whose files went while Studio was open (demo_file_recheck.js);
+    // `found` of them have the same file found under another name or folder.
+    demoFilesGoneToast: (names, found) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      const rows = names.length === 1 ? 'Its row has' : 'Each row has';
+      const copy = found === 0 ? '' : ', or Use found copy where DoD Studio found the same file under another name';
+      return `No longer where the queue says: ${shown}${more}. ${rows} Locate… to point at it again${copy}.`;
+    },
+    // Launch Preview, Review, Open in Demo Analyzer or Open Folder on a demo
+    // whose file isn't there.
+    demoFilesMissing: (names, found) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      const one = names.length === 1;
+      return `Not found: ${shown}${more}. ${one ? 'It was' : 'They were'} renamed, moved or deleted. `
+        + `Use Locate… on ${one ? 'its row' : 'their rows'} in the Master Demo Queue${found > 0 ? ', or Use found copy,' : ''} first.`;
+    },
     foundCopiesGoneToast: (names) =>
       `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
     // #21: a scanned demo that is an identical copy of one already queued.

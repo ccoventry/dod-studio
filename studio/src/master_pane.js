@@ -504,7 +504,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     nameSpan.textContent = demo.name || STRINGS.WORKSPACE.EMPTY_DASH;
     tdName.appendChild(nameSpan);
 
-    // Set by main.js's missing-demo check on project load (#21).
+    // Set by project_demos.js (#21): on project load, at Start Capture Batch,
+    // and when demo_file_recheck.js finds a file gone while Studio is open.
     if (demo.missing) {
       nameSpan.style.color = 'var(--danger-light)';
       const missingBadge = document.createElement('span');
@@ -601,7 +602,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, demoIsTracked ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
       renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
     });
-    // A match the load-time search found but the user left as missing:
+    // A match a missing-demo search found and nobody has used yet (on load,
+    // one the user left as missing; while open, a file renamed or moved):
     // one click to use it after all.
     if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
       const useBtn = document.createElement('button');
