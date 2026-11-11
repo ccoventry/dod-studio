@@ -93,6 +93,32 @@ test.describe('queue row context menu', () => {
     await expect(item(page, 'Split Maps')).toHaveAttribute('title', /two_split1_harrington\.dem/);
   });
 
+  const DAMAGE = { damage: { read_up_to_secs: 600, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'x' } };
+
+  test('Split Maps is dimmed with "Repair it first" on a damaged demo the repair can fix', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => true };
+    });
+    await gotoHarness(page);
+    await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);
+    await expect(row(page, 'two.dem').locator('.multimap-split-btn')).toBeDisabled();
+    await row(page, 'two.dem').click({ button: 'right' });
+    await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
+    await expect(item(page, 'Split Maps')).toHaveAttribute('title', /Repair it first/);
+  });
+
+  test('Split Maps runs on a damaged demo the repair finds no break in', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => false };
+    });
+    await gotoHarness(page);
+    await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);
+    await expect(row(page, 'two.dem').locator('.multimap-split-btn')).toBeEnabled();
+    await row(page, 'two.dem').click({ button: 'right' });
+    await item(page, 'Split Maps').click();
+    await expect(page.locator('#result')).toHaveText('split two.dem');
+  });
+
   test('Split Maps runs on a demo not split yet, and is dimmed while that split runs', async ({ page }) => {
     await page.addInitScript(() => {
       window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }) };

@@ -122,3 +122,40 @@ test('a damaged demo with more than one map greys out Split now and offers Repai
   await expect(page.locator('#analyzer-current-file')).toHaveText('monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem');
   await expect(page.locator('#toast-container')).toContainText('Repaired (2 gaps cut out) and split into 2 demos');
 });
+
+/** A damaged two-map demo, with `repairable` as demo_repairable's answer and
+ *  `verdict` as the repair's. */
+async function openTwoMaps(page, { repairable, verdict = 'not_damaged' }) {
+  const both = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  both.state.signon_maps = ['dod_anzio', 'dod_pandemic_aim'];
+  await page.evaluate(({ both, repairable, verdict }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = () => both;
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_split_status = () => ({ split: false, files: [] });
+    window.__mockInvokeHandlers.demo_repairable = () => repairable;
+    window.__mockInvokeHandlers.repair_demo_cmd = () => ({ verdict, holes: [], reasons: [] });
+  }, { both, repairable, verdict });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+}
+
+test('damage the repair finds no break in keeps its notice, offers no Repair, and leaves Split now on', async ({ page }) => {
+  await openTwoMaps(page, { repairable: false });
+  const banner = page.locator('#analyzer-damage-banner');
+  await expect(banner).toContainText('Damaged demo: read up to 8:27.');
+  await expect(banner).toContainText("Repair can't fix this one");
+  await expect(banner.locator('button')).toHaveCount(0);
+  const split = page.locator('#analyzer-multimap-banner .analyzer-multimap-split');
+  await expect(split).toBeEnabled();
+  await expect(split).not.toHaveAttribute('title', /Repair it first/);
+});
+
+test('a Repair that finds nothing to cut out turns the notice and gives Split now back', async ({ page }) => {
+  await openTwoMaps(page, { repairable: true });
+  const banner = page.locator('#analyzer-damage-banner');
+  const split = page.locator('#analyzer-multimap-banner .analyzer-multimap-split');
+  await expect(split).toBeDisabled();
+  await banner.locator('.analyzer-damage-repair').click();
+  await expect(banner).toContainText("Repair can't fix this one");
+  await expect(banner.locator('button')).toHaveCount(0);
+  await expect(split).toBeEnabled();
+});

@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use analysis::repair::{Hole, RepairHooks, RepairProgress, RepairReport};
-use hl_demo_auditor::repair::{DamagedDemo, FileRepair, find_damaged_demos, repair_file};
+use hl_demo_auditor::repair::{
+    DamagedDemo, FileRepair, find_damaged_demos, is_repairable, repair_file,
+};
 use native::utils::duration_text::duration_text;
 use tauri::{AppHandle, Emitter};
 
@@ -211,6 +213,19 @@ pub async fn repair_demo_cmd(
     .await;
     state.release(&key);
     result
+}
+
+/// Whether a repair of the demo at `path` would find a hole to cut out
+/// (`hl_demo_auditor::repair::is_repairable`): the Master Queue and the Demo
+/// Analyzer ask before they offer Repair on a demo the analyzer flags as
+/// damaged, since damage inside a frame whose header reads is not one. Reads
+/// the whole file, off the main thread.
+#[tauri::command]
+pub async fn demo_repairable(path: String) -> Result<bool, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        is_repairable(Path::new(&path))
+    }))
+    .await
 }
 
 /// Stops the running repair of the demo at `path`, at its next check.

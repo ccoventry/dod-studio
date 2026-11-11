@@ -1081,6 +1081,7 @@ pub fn run() {
             demo_repair_manager::cancel_damaged_scan,
             demo_repair_manager::repair_demo_cmd,
             demo_repair_manager::cancel_demo_repair,
+            demo_repair_manager::demo_repairable,
             demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,

@@ -3,6 +3,8 @@
 // that does not parse, and everything the Demo Analyzer shows stops there.
 // It says so above every tab, with where it stopped on the viewdemo clock,
 // and offers Repair now (#15): the repair is the caller's, through `onRepair`.
+// Damage the repair has no break to cut out (repair_status.js) keeps the
+// notice, which says Repair can't fix it instead of offering it.
 //
 // Pure, apart from the banner it fills in.
 
@@ -10,6 +12,7 @@ import { STRINGS } from './strings.js';
 import { clockFloor } from './time_format.js';
 import { escapeHtml as esc } from './html.js';
 import { repairProgressBar } from './repair_view.js';
+import { isUnrepairableDamage, repairableStatus } from './repair_status.js';
 
 /** A byte count as "14.2 MB" or "312 KB". */
 export function sizeText(bytes) {
@@ -37,19 +40,42 @@ export function damageNotice(report) {
  * view), and for a demo that recorded more than one map, a Repair & Split
  * that runs `onRepairSplit(update)` the same way (#15). While one runs both
  * buttons are disabled and the bar shows; if it throws, the banner says why.
- * Each resolves the line the banner shows after.
+ * Each resolves the line the banner shows after. Once `repairable`
+ * (repair_status.js) finds no break for the repair to cut out, the notice
+ * says Repair can't fix it in place of the buttons.
  */
-export function renderDamageBanner(el, report, onRepair, onRepairSplit) {
+export function renderDamageBanner(el, report, onRepair, onRepairSplit, repairable = repairableStatus) {
   if (!el) return;
   const notice = damageNotice(report);
+  const path = report?.file_path || '';
   el.hidden = !notice;
+  el.dataset.path = path;
   if (!notice || !onRepair) {
     el.textContent = notice || '';
     return;
   }
+  const demo = report.demo_info;
+  if (isUnrepairableDamage(demo, repairable.last(path))) {
+    renderUnrepairable(el, notice);
+    return;
+  }
+  renderRepairButtons(el, { notice, both: (report?.state?.signon_maps || []).length > 1 && onRepairSplit, onRepair, onRepairSplit });
+  if (!path) return;
+  repairable.check(path).then((answer) => {
+    if (el.dataset.path !== path || el.querySelector('button:disabled')) return;
+    if (isUnrepairableDamage(demo, answer)) renderUnrepairable(el, notice);
+  });
+}
+
+/** The notice for damage the repair has no break to cut out: no buttons. */
+function renderUnrepairable(el, notice) {
+  el.innerHTML = `<span class="analyzer-damage-text">${esc(notice)}</span>
+    <span class="analyzer-damage-cannot-repair">${esc(STRINGS.REPAIR.CANNOT_REPAIR)}</span>`;
+}
+
+/** The notice with Repair now (and Repair & Split when `both`). */
+function renderRepairButtons(el, { notice, both, onRepair, onRepairSplit }) {
   const R = STRINGS.REPAIR;
-  const maps = report?.state?.signon_maps || [];
-  const both = maps.length > 1 && onRepairSplit;
   el.innerHTML = `<span class="analyzer-damage-text">${esc(notice)}</span>
     <button type="button" class="analyzer-damage-repair primary-btn" title="${esc(R.ANALYZER_BUTTON_TITLE)}">${esc(R.ANALYZER_BUTTON)}</button>
     ${both ? `<button type="button" class="analyzer-damage-repair-split primary-btn" title="${esc(R.REPAIR_SPLIT_TITLE)}">${esc(R.REPAIR_SPLIT_BUTTON)}</button>` : ''}

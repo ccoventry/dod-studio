@@ -1892,6 +1892,15 @@ export async function cancelDemoRepair(path) {
     });
 }
 
+// Whether a repair of the demo at `path` has a break to cut out (#15).
+export async function demoRepairable(path) {
+  return invoke("demo_repairable", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_repairable):", err);
+      throw err;
+    });
+}
+
 // Whether a multi-map demo's maps were already split next to it:
 // `{ split, files }` (split_status.js).
 export async function demoSplitStatus(path, maps, minSeconds) {

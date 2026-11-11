@@ -10,6 +10,7 @@ import { analyzeDemoFull, getWeaponDisplayNames, loadMapOverview, splitDemoAuto 
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
 import { repairAnalyzedDemo, repairSplitAnalyzedDemo } from './analyzer_repair.js';
+import { repairableStatus } from './repair_status.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
@@ -124,10 +125,7 @@ async function loadAnalyzerDemo(path) {
     setAnalyzerFileIndicator(result.file_name);
     markDemoSelected(path);
     showReport(result);
-    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), result, (update) => splitAnalyzedDemo(path, update));
-    const repairApp = { relistFolderOf, open: loadAnalyzerDemo };
-    renderDamageBanner(document.querySelector('#analyzer-damage-banner'), result,
-      (update) => repairAnalyzedDemo(path, update, repairApp), (update) => repairSplitAnalyzedDemo(path, update, repairApp));
+    renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
@@ -138,6 +136,23 @@ async function loadAnalyzerDemo(path) {
   } finally {
     if (seq === analyzerLoadSeq) analyzerLoadingPath = null;
   }
+}
+
+// The multi-map notice's Split now and the damage notice's Repair (#15) for
+// the demo at `path`. A repair that found nothing to cut out draws both
+// again: the damage notice then says Repair can't fix it, and Split now is
+// no longer held back for a repair (repair_status.js remembers the verdict).
+function renderRepairAndSplitBanners(path, result) {
+  renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), result, (update) => splitAnalyzedDemo(path, update));
+  const repairApp = { relistFolderOf, open: loadAnalyzerDemo };
+  const thenRedraw = (repair) => async (update) => {
+    const text = await repair(path, update, repairApp);
+    const stillShown = document.querySelector('#analyzer-damage-banner')?.dataset.path === path;
+    if (stillShown && repairableStatus.last(path) === false) renderRepairAndSplitBanners(path, result);
+    return text;
+  };
+  renderDamageBanner(document.querySelector('#analyzer-damage-banner'), result,
+    thenRedraw(repairAnalyzedDemo), thenRedraw(repairSplitAnalyzedDemo));
 }
 
 // #217: Split now on a demo that recorded more than one map. Writes each map

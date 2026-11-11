@@ -8,6 +8,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { repairDemo } from './ipc_bridge.js';
 import { repairResultText } from './repair_view.js';
+import { noteRepairResult } from './repair_status.js';
 import { repairThenSplit } from './repair_split.js';
 import { fileNameOf } from './path_display.js';
 import { STRINGS } from './strings.js';
@@ -17,7 +18,8 @@ import { samePath } from './path_display.js';
 /**
  * Repairs the demo at `path`, feeding `update(RepairProgress)`. `app` holds
  * `relistFolderOf(path)` and `open(path)` from analyzer_pane.js. Resolves the
- * line the notice shows after; throws when the repair fails outright.
+ * line the notice shows after; throws when the repair fails outright. A "not
+ * damaged" verdict is remembered (repair_status.js) for the notices' redraw.
  */
 export async function repairAnalyzedDemo(path, update, { relistFolderOf, open }) {
   const unlisten = await listen('repair_progress', (event) => {
@@ -29,6 +31,7 @@ export async function repairAnalyzedDemo(path, update, { relistFolderOf, open })
   } finally {
     unlisten();
   }
+  noteRepairResult(path, result);
   const text = repairResultText(result);
   if (result.verdict !== 'repaired') return text;
   showToast(text, 'success', 6000);

@@ -13,6 +13,7 @@ import { repairProgressView, repairResultText } from './repair_view.js';
 import { SPLIT_SHARE, nest, placed, queueProgress } from './queue_progress.js';
 import { applyCarriedWork, carryReport, matchSplitHighlights } from './split_carry.js';
 import { repairThenSplit } from './repair_split.js';
+import { noteRepairResult } from './repair_status.js';
 import { repairCarryReport } from './repair_carry.js';
 import { renameUidsInTakeIndex } from './take_index.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -27,9 +28,11 @@ const R = STRINGS.REPAIR;
  * @param {object} app  What this needs from main.js: getDemos() the queue,
  *   removeDemo(demo) take one row out of it, scan(paths, opts) main.js's
  *   triggerAutoScan, getTakeIndex() the project's take index, and
- *   refreshQueue() redraw the queue and mark the project changed.
+ *   refreshQueue() redraw the queue and mark the project changed, and
+ *   renderQueue() redraw it alone (a repair that found nothing to cut out
+ *   takes the row's Repair away and gives its Split back).
  */
-export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, refreshQueue }) {
+export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, refreshQueue, renderQueue }) {
   const progress = queueProgress();
 
   // The new demos are in the queue now: put the original's highlight work on
@@ -51,6 +54,15 @@ export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, re
     report.log.forEach((line) => logFrontendEvent(line));
     if (report.toast) showToast(report.toast.text, report.toast.type, 10000);
     refreshQueue();
+  }
+
+  // A repair that saved nothing says why; one that found nothing to cut out
+  // redraws the queue, whose row then offers no Repair (repair_status.js).
+  function notSaved(name, job, result) {
+    const why = repairResultText(result);
+    showToast(R.queueNotSaved(name, why), 'warning', 8000);
+    progress.end(job, R.queueNotSaved(name, why));
+    if (result?.verdict === 'not_damaged') renderQueue();
   }
 
   // The original file is kept; its row goes, and its highlights' work moves
@@ -81,10 +93,9 @@ export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, re
     } finally {
       unlisten();
     }
+    noteRepairResult(demo.path, result);
     if (result.verdict !== 'repaired') {
-      const why = repairResultText(result);
-      showToast(R.queueNotSaved(name, why), 'warning', 8000);
-      progress.end(job, R.queueNotSaved(name, why));
+      notSaved(name, job, result);
       return false;
     }
     removeDemo(demo);
@@ -127,9 +138,7 @@ export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, re
     }
     const { result, written } = outcome;
     if (!written) {
-      const why = repairResultText(result);
-      showToast(R.queueNotSaved(name, why), 'warning', 8000);
-      progress.end(job, R.queueNotSaved(name, why));
+      notSaved(name, job, result);
       return false;
     }
     removeDemo(demo);

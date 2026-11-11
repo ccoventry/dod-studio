@@ -288,6 +288,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     getTakeIndex: () => takeIndex,
     refreshQueue: () => queue.refreshAfterRelocation(true),
+    renderQueue: queue.renderQueue,
   });
   setRepairDemoHandlers({
     repair: (demo, update) => repairQueuedDemo(demo, { update }),

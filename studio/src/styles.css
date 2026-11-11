@@ -1996,7 +1996,8 @@ button.danger-btn {
   cursor: progress;
 }
 
-.analyzer-damage-repair {
+.analyzer-damage-repair,
+.analyzer-damage-cannot-repair {
   margin-left: 8px;
 }
 

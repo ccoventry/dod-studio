@@ -13,6 +13,7 @@ import { escapeHtml as esc } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
+import { repairableStatus, splitWaitsForRepair } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** The maps a report's demo recorded, when there is more than one; else null.
@@ -26,12 +27,14 @@ export function multiMapList(report) {
  * Fills `el` with the notice for `report`, or hides it for a one-map demo.
  * Shows the last known split answer from `status` (split_status.js's
  * checker) at once, then asks again and redraws when the answer differs,
- * unless another demo was opened or a split is running meanwhile.
+ * unless another demo was opened or a split is running meanwhile. A damaged
+ * demo's Split now waits for its repair until `repairable`
+ * (repair_status.js) finds no break for the repair to cut out.
  * `onSplit(update)` runs on Split now, with `update(SplitProgress)` for the
  * banner's progress bar. While it runs the button is disabled and the bar
  * shows; if it throws, the banner says why.
  */
-export function renderMultiMapBanner(el, report, onSplit, status = splitStatus) {
+export function renderMultiMapBanner(el, report, onSplit, status = splitStatus, repairable = repairableStatus) {
   if (!el) return;
   const maps = multiMapList(report);
   const path = report?.file_path;
@@ -44,20 +47,27 @@ export function renderMultiMapBanner(el, report, onSplit, status = splitStatus) 
     return;
   }
   el.hidden = false;
-  let shownSplit = null;
-  const show = (answer) => {
-    const notice = multiMapNotice(maps, answer);
-    if (notice.quiet === shownSplit) return;
-    shownSplit = notice.quiet;
+  const demo = report?.demo_info;
+  let split = path ? status.last(path) : null;
+  let canRepair = path ? repairable.last(path) : null;
+  let shown = null;
+  const show = () => {
+    const notice = multiMapNotice(maps, split);
+    const waits = splitWaitsForRepair(demo, canRepair);
+    const key = `${notice.quiet}/${waits}`;
+    if (key === shown) return;
+    shown = key;
     if (notice.quiet) renderAlreadySplit(el, notice);
-    else renderSplitHint(el, notice, onSplit, isDamagedDemo(report?.demo_info));
+    else renderSplitHint(el, notice, onSplit, waits);
   };
-  show(path ? status.last(path) : null);
+  show();
   if (!path) return;
-  status.check(path, maps).then((answer) => {
-    if (el.dataset.path !== path || el.querySelector('.analyzer-multimap-split:disabled')) return;
-    show(answer);
-  });
+  const redraw = () => {
+    if (el.dataset.path !== path || el.querySelector('.analyzer-multimap-split[data-splitting]')) return;
+    show();
+  };
+  status.check(path, maps).then((answer) => { split = answer; redraw(); });
+  if (isDamagedDemo(demo)) repairable.check(path).then((answer) => { canRepair = answer; redraw(); });
 }
 
 /**
@@ -85,9 +95,10 @@ function renderAlreadySplit(el, notice) {
 }
 
 /** The notice with Split now, for a demo not split yet. A damaged demo
- *  (#15) can't be split until it is repaired: Split now is greyed out and
- *  says so, and the damage notice's Repair & Split does both. */
-function renderSplitHint(el, notice, onSplit, damaged) {
+ *  (#15) can't be split until it is repaired (`waitsForRepair`): Split now
+ *  is greyed out and says so, and the damage notice's Repair & Split does
+ *  both. */
+function renderSplitHint(el, notice, onSplit, waitsForRepair) {
   el.classList.remove('analyzer-multimap-quiet');
   el.removeAttribute('title');
   el.innerHTML = `
@@ -97,13 +108,14 @@ function renderSplitHint(el, notice, onSplit, damaged) {
     <span class="analyzer-multimap-status"></span>`;
   const btn = el.querySelector('.analyzer-multimap-split');
   const status = el.querySelector('.analyzer-multimap-status');
-  if (damaged) {
+  if (waitsForRepair) {
     btn.disabled = true;
     btn.title = STRINGS.REPAIR.SPLIT_NEEDS_REPAIR;
     return;
   }
   btn.addEventListener('click', async () => {
     btn.disabled = true;
+    btn.dataset.splitting = '1';
     const bar = splitProgressBar();
     status.replaceChildren(bar.el);
     try {
@@ -113,6 +125,7 @@ function renderSplitHint(el, notice, onSplit, damaged) {
       status.textContent = STRINGS.ANALYZER.multiMapSplitFailed(err);
     } finally {
       btn.disabled = false;
+      delete btn.dataset.splitting;
     }
   });
 }

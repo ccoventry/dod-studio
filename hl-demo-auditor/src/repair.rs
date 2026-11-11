@@ -151,6 +151,20 @@ pub fn first_hole_in(path: &Path) -> Option<FirstHole> {
     find_first_hole(&bytes)
 }
 
+/// Whether a repair of the demo at `path` has a hole to cut out: its frames
+/// stop reading before the end ([`find_first_hole`], the repair's own test).
+/// A demo the analyzer flags as damaged inside a frame whose header reads has
+/// none, and [`repair_file`] would call it not damaged; Studio offers Repair
+/// only where this says yes.
+///
+/// # Errors
+/// The file can't be read (the message names it).
+pub fn is_repairable(path: &Path) -> Result<bool, String> {
+    let bytes =
+        fs::read(path).map_err(|e| crate::messages::cannot_read(&path.display().to_string(), e))?;
+    Ok(find_first_hole(&bytes).is_some())
+}
+
 /// Every demo with a hole in `folder` (and its subfolders when `recursive`),
 /// sorted by path. Repairs this module wrote are skipped. `progress(done,
 /// total, demo)` is called before each demo is read; `cancel` stops the
@@ -284,6 +298,20 @@ mod tests {
         };
         assert_eq!(repair_file(&demo, hooks), Ok(FileRepair::NotDamaged));
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_demo_with_a_hole_is_repairable() {
+        let dir = temp_dir("repairable");
+        let (fine, broken) = (dir.join("fine.dem"), dir.join("broken.dem"));
+        fs::write(&fine, fixture()).unwrap();
+        fs::write(&broken, damaged_fixture()).unwrap();
+        assert_eq!(is_repairable(&broken), Ok(true));
+        assert_eq!(is_repairable(&fine), Ok(false));
+        let missing = dir.join("gone.dem");
+        let err = is_repairable(&missing).unwrap_err();
+        assert!(err.contains(&missing.display().to_string()), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 

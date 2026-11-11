@@ -247,3 +247,37 @@ fn the_first_hole_is_found_where_the_frames_stop_reading() {
     );
     assert!(hole.after_secs > 60.0, "{hole:?}");
 }
+
+/// The fixture with one mid-file network frame's messages overwritten, its
+/// frame header (and so its length) left intact.
+fn message_damaged_fixture() -> Vec<u8> {
+    let mut bytes = crate::tests_fixture::fixture();
+    let demo = dem::open_demo_from_bytes(&bytes).expect("parses");
+    let spans: Vec<_> = demo
+        .directory
+        .entries
+        .iter()
+        .flat_map(|e| &e.frames)
+        .filter_map(|f| match &f.frame_data {
+            FrameData::NetworkMessage(n) => n.1.source_span.clone(),
+            _ => None,
+        })
+        .filter(|span| span.len() > 64)
+        .collect();
+    let span = spans[spans.len() / 2].clone();
+    bytes[span].fill(0xEE);
+    bytes
+}
+
+/// Damage inside a frame whose header reads: the analyzer's tolerant parse
+/// stops there and flags the demo (#811), but the frames walk to the end, so
+/// the repair has no hole to cut out. Studio asks `find_first_hole` before
+/// it offers Repair, and leaves Split alone for such a demo.
+#[test]
+fn damage_inside_a_frame_is_no_hole_and_nothing_to_repair() {
+    let bytes = message_damaged_fixture();
+    let analysis = crate::Analysis::try_from_bytes(&bytes).expect("the frames before it read");
+    assert!(analysis.demo_info.damage.is_some(), "the analyzer flags it");
+    assert_eq!(find_first_hole(&bytes), None);
+    assert_eq!(repair(&bytes).expect("repairs"), RepairOutcome::NotDamaged);
+}

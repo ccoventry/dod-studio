@@ -13,6 +13,7 @@
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
+import { repairableStatus, splitWaitsForRepair } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -36,7 +37,7 @@ export function pickedMultiMapDemos(demos) {
  * select the row; the first `update(SplitProgress)` swaps the button for a
  * progress bar until it ends.
  */
-export function multiMapHint(demo, onSplit, status = splitStatus) {
+export function multiMapHint(demo, onSplit, status = splitStatus, repairable = repairableStatus) {
   if (!isMultiMapDemo(demo) || !onSplit) return null;
   const hint = document.createElement('span');
   hint.className = 'multimap-hint';
@@ -54,6 +55,10 @@ export function multiMapHint(demo, onSplit, status = splitStatus) {
   };
   show(status.last(demo.path));
   status.check(demo.path, demo.signon_maps).then(show);
+  if (isDamagedDemo(demo)) {
+    holdForRepair(btn, demo, repairable.last(demo.path));
+    repairable.check(demo.path).then((answer) => holdForRepair(btn, demo, answer));
+  }
   return hint;
 }
 
@@ -76,20 +81,13 @@ export function splitBlockedReason(row) {
   return btn.dataset.splitting ? STRINGS.WORKSPACE.MULTI_MAP_SPLITTING : btn.title;
 }
 
-/** The "2 maps · Split" button itself. A damaged demo (#15) can't be split
- *  until it is repaired: its button is greyed out and says so, and the row's
- *  Repair & Split (queue_repair.js) does both. */
+/** The "2 maps · Split" button itself. */
 function splitButton(demo, onSplit) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'multimap-split-btn';
   btn.textContent = STRINGS.WORKSPACE.multiMapSplitButton(demo.signon_maps.length);
   btn.title = STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
-  if (isDamagedDemo(demo)) {
-    btn.disabled = true;
-    btn.title = STRINGS.REPAIR.SPLIT_NEEDS_REPAIR;
-    return btn;
-  }
   btn.addEventListener('click', async (e) => {
     e.stopPropagation(); // do not select the row
     btn.disabled = true;
@@ -114,4 +112,15 @@ function splitButton(demo, onSplit) {
     }
   });
   return btn;
+}
+
+/** Greys out a damaged demo's Split (#15) while the repair has a break to cut
+ *  out (`answer`, repair_status.js's: true, false or null while unknown):
+ *  the split can't read past it, and the row's Repair & Split does both.
+ *  Once the answer is that the repair can't fix it, Split is left on. */
+function holdForRepair(btn, demo, answer) {
+  if (btn.dataset.splitting) return;
+  const wait = splitWaitsForRepair(demo, answer);
+  btn.disabled = wait;
+  btn.title = wait ? STRINGS.REPAIR.SPLIT_NEEDS_REPAIR : STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
 }

@@ -11,6 +11,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { repairDemo, splitDemoAuto } from './ipc_bridge.js';
 import { repairProgressView } from './repair_view.js';
+import { noteRepairResult } from './repair_status.js';
 import { splitProgressView } from './split_progress.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { samePath } from './path_display.js';
@@ -50,11 +51,14 @@ async function withProgress(event, path, on, job) {
  * Repairs the demo at `path`, then splits the repair. `update({ pct, text })`
  * follows both. Resolves `{ result, written }`: the RepairResult, and the
  * split's Written list, or null when the repair saved nothing (then nothing
- * was split). Throws when either step fails outright.
+ * was split). A "not damaged" verdict is remembered (repair_status.js), so
+ * the demo is no longer offered Repair. Throws when either step fails
+ * outright.
  */
 export async function repairThenSplit(path, update = () => {}) {
   update(repairStepView(null));
   const result = await withProgress('repair_progress', path, (p) => update(repairStepView(p)), () => repairDemo(path));
+  noteRepairResult(path, result);
   if (result.verdict !== 'repaired') return { result, written: null };
   update(splitStepView({ fraction: 0, stage: 'reading' }));
   const written = await withProgress('split_progress', result.written, (p) => update(splitStepView(p)),

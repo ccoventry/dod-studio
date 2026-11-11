@@ -44,7 +44,10 @@ impl Carry {
     /// when the engine throws the packet away. `entries` are (entity index,
     /// removed) in the order the packet lists them.
     pub fn delta(&mut self, seq: i32, from: u8, entries: &[(u16, bool)]) -> Option<&BTreeSet<u16>> {
-        if (seq - from as i32) & 0xFF >= CL_UPDATE_MASK {
+        // Wrapping, as the engine's own int arithmetic does: only the low
+        // byte counts, and a bit-flipped `seq` near `i32::MIN` would
+        // otherwise overflow (a panic in a debug build).
+        if seq.wrapping_sub(from as i32) & 0xFF >= CL_UPDATE_MASK {
             self.flushed += 1;
             self.store(seq, BTreeSet::new());
             return None;
@@ -90,6 +93,16 @@ mod tests {
         let mut carry = Carry::default();
         carry.full(10, [1].into_iter());
         assert!(carry.delta(73, 10, &[]).is_none());
+        assert_eq!(carry.flushed, 1);
+    }
+
+    #[test]
+    fn a_bit_flipped_sequence_near_i32_min_does_not_overflow() {
+        let mut carry = Carry::default();
+        carry.full(i32::MIN + 2, [1].into_iter());
+        // i32::MIN + 2 - 10 overflows plain subtraction; its low byte is
+        // 0xF8, far past the base, so the engine throws the packet away.
+        assert!(carry.delta(i32::MIN + 2, 10, &[]).is_none());
         assert_eq!(carry.flushed, 1);
     }
 }

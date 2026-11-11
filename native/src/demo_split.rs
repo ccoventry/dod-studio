@@ -402,7 +402,9 @@ fn read_error(bytes: &[u8], err: impl std::fmt::Display) -> String {
         Some(hole) => crate::messages::repair::split_needs_repair(&analysis::integrity::clock(
             hole.after_secs,
         )),
-        None => crate::messages::repair::split_could_not_read(err),
+        None => crate::messages::repair::split_could_not_read(
+            analysis::integrity::parse_error_reason(&err.to_string()),
+        ),
     }
 }
 
@@ -805,6 +807,43 @@ mod tests {
             err.contains("damaged") && err.contains("Repair it first"),
             "{err}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Damage inside one network frame's messages, its header intact: the
+    /// repair finds no hole in it, so Studio offers no Repair and leaves
+    /// Split on. The split's strict parse still stops at the damage; what it
+    /// says must not send the user to Repair.
+    #[test]
+    fn a_demo_damaged_inside_a_frame_split_does_not_point_at_the_repair() {
+        let dir = std::env::temp_dir().join(format!(
+            "dodstudio-split-frame-damaged-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("damaged.dem");
+        let mut bytes = ci_fixture();
+        let parsed = dem::open_demo_from_bytes(&bytes).unwrap();
+        let spans: Vec<_> = parsed
+            .directory
+            .entries
+            .iter()
+            .flat_map(|e| &e.frames)
+            .filter_map(|f| match &f.frame_data {
+                FrameData::NetworkMessage(n) => n.1.source_span.clone(),
+                _ => None,
+            })
+            .filter(|span| span.len() > 64)
+            .collect();
+        bytes[spans[spans.len() / 2].clone()].fill(0xEE);
+        std::fs::write(&demo, &bytes).unwrap();
+        assert_eq!(analysis::repair::find_first_hole(&bytes), None);
+        let err = split_file_with_progress(&demo, Keep::AtLeast(60.0), &[], &mut |_| {})
+            .expect_err("the strict parse stops at the damage");
+        assert!(err.starts_with("could not read the demo"), "{err}");
+        assert!(!err.contains("Repair"), "{err}");
+        // The parser's reason, not its dump of every byte after the damage.
+        assert!(err.chars().count() < 300, "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
