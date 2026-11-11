@@ -415,6 +415,8 @@ pub fn poll() {
     crate::lightmap_rebuild::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // One atomic load unless a demo just stopped on a damaged frame.
+    crate::demo_damage::poll();
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();

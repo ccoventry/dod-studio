@@ -137,6 +137,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_damage`: when a demo stops because its file is damaged, says so in
+//!   the console and tells Studio over the events pipe (#1373).
+//!   `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 //! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
 //!   models around them, which the engine culled from the map's origin
 //!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
@@ -285,6 +288,7 @@ mod debug_texture;
 mod decals;
 mod demo_bar_progress;
 mod demo_console_keys;
+mod demo_damage;
 mod demo_file;
 mod demo_list_folders;
 mod demo_other_drives;
@@ -484,6 +488,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only reads, when a demo has already stopped on a damaged frame, so on
+    // unless asked not to.
+    demo_damage::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_DAMAGE", true),
+        Ordering::Relaxed,
+    );
     // Only restores what a chase camera can see, so on unless asked not to.
     spectator_chase_pvs::ENABLED
         .store(env_flag("GOLDSRC_HOOKS_CHASE_PVS", true), Ordering::Relaxed);
@@ -621,6 +631,8 @@ fn install_fixes() {
     particle_hide::reinstall_if_used();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // hw.dll, once; before the first demo, which is the one it may catch.
+    demo_damage::install();
     // Before any map loads, so before the first demo's InitHUD.
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.

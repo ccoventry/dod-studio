@@ -392,7 +392,7 @@ fn split_time(words: &[String]) -> Option<(String, &[String])> {
 
 /// A time as the demo bar shows it: `m:ss`, `h:mm:ss` from an hour, with
 /// hundredths when it has them, and a minus when negative.
-fn clock_text(seconds: f64) -> String {
+pub(crate) fn clock_text(seconds: f64) -> String {
     let sign = if seconds < 0.0 { "-" } else { "" };
     let hundredths = (seconds.abs() * 100.0).round() as u64;
     let (h, m, s, cs) = (
