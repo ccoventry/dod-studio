@@ -393,6 +393,7 @@ mod spectator_target;
 mod spectator_text;
 mod spray;
 mod spray_hltv;
+mod spray_lambda;
 mod sprite_blend;
 mod steam_id;
 mod strafe_twitch;

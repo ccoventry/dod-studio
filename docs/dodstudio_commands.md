@@ -517,11 +517,10 @@ PNG from the game's own `<game>\logos\` folder, any size, RGBA, or **From
 the demo**) and a crosshair (a 64x64 tile of a sprite in `<game>\sprites\`, picked from a 4x4
 preview), and what everyone not listed gets:
 
-- **Sprays, POV demos:** their own spray (the default: the one the demo
-  saved), one fallback PNG, or no spray;
-- **Sprays, HLTV demos:** one fallback PNG (the default) or no spray. "Their
-  own" is not offered: an HLTV demo records that a player sprayed, never the
-  image.
+- **Fallback spray, POV demos** and **Fallback spray, HLTV demos:** one
+  fallback PNG (the default) or no spray, for players not listed and when
+  From the demo finds none. With no PNG picked, a spray the demo saved is
+  drawn as it is, and any other shows nothing;
 - **Crosshair:** the game's own (the default: the viewer's `cl_xhair_style`
   tile of `customXHair.spr`, as without the table) or one sprite and tile.
 
@@ -549,11 +548,24 @@ player, or the fallback.
   drawn rather than skipped because skipping would need another patch
   inside `CL_ParseTEnt` on both builds; this path is the one already checked
   on both.
-- **"From the demo"** (a listed player) and **"Their own spray"** (the POV
-  fallback) draw the spray the demo saved, untouched, at its real size.
-  With none saved (the player joined before the recording, or any HLTV
-  demo), "From the demo" is the fallback for that demo type, and "Their own
-  spray" is no spray: never the engine's bullet-hole stand-in.
+- **"From the demo"** (a listed player) draws the spray the demo saved,
+  untouched, at its real size. With none saved (the player joined before the
+  recording, or any HLTV demo), it is the fallback for that demo type: never
+  the engine's bullet-hole stand-in.
+- **Lambdas** (#1322). A server with no custom spray for a player places the
+  stock lambda (`}lambda06`, decal index `0x6a`) as a `TE_WORLDDECAL` with no
+  player attached, so the rule above can't name anyone. In a POV demo, a
+  lambda that lands along the recorder's aim within 128 units, at any moment
+  of the 0.3 s before it arrives, is the recorder's and gets their table
+  spray, unless the recorder has a `TE_PLAYERDECAL` of their own anywhere in
+  the demo: someone with a working spray isn't placing lambdas, so that is a
+  teammate beside them. Every other lambda names no player and gets the
+  fallback for the demo type, or nothing with "No spray". The hook reads the
+  demo file for this on a thread of its own when a POV demo starts, about a
+  second for 40 MB, and a lambda that arrives before that ends counts as
+  nobody's. The hook log's `spray lambda:` lines say what each one became and
+  why. (`goldsrc-hooks/src/spray_lambda.rs`, measured on 42 demos and 636
+  lambdas from 6 POV players, their HLTV demos and solifotw-pb2.)
 
 How: `CL_ParseTEnt`'s `customdata` test asks the hook for every spray, and
 `Draw_DecalTexture` answers each frame with the hook's texture for that
