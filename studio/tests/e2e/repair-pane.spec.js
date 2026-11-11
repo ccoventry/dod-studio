@@ -73,6 +73,23 @@ test('a row\'s Repair shows its step as it goes, then what was lost and where it
   await expect(page.locator('#footer-audit-summary')).toHaveText('Damaged demos: 2 | Repaired: 1');
 });
 
+test('while a row\'s Repair runs, its Repair & Split waits, so the demo is repaired once', async ({ page }) => {
+  await page.evaluate((found) => {
+    const multi = found.map((d) => ({ ...d, maps: ['dod_anzio', 'dod_pandemic_aim'] }));
+    window.__mockInvokeHandlers.find_damaged_demos_cmd = () => new Promise((resolve) => { window.__finishFind = () => resolve(multi); });
+    window.__holdRepair();
+  }, found);
+  await find(page);
+  const row = page.locator('#repair-body tr').nth(0);
+  await row.locator('.repair-row-btn').click();
+  await expect(row.locator('.repair-split-btn')).toBeDisabled();
+  await page.evaluate((r) => window.__finishRepair(r), REPAIRED);
+  await expect(row.locator('.repair-result')).toContainText('Repaired: 1 gap cut out');
+  await expect(row.locator('.repair-split-btn')).toBeEnabled();
+  const calls = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'repair_demo_cmd').length);
+  expect(calls).toBe(1);
+});
+
 test('Repair Checked repairs only the ticked demos, and says when a repair was not saved', async ({ page }) => {
   await page.evaluate(() => {
     window.__mockInvokeHandlers.repair_demo_cmd = () => ({

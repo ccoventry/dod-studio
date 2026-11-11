@@ -108,7 +108,6 @@ pub(crate) fn bridge(bytes: &[u8], mut hooks: BridgeHooks) -> Result<Bridged, Br
         if hole == 0 && reached_end {
             return Ok(Bridged::default());
         }
-        let run = walk(bytes, pos, end, usize::MAX);
         if !starts.is_empty() {
             match trim_to_parse(
                 bytes,
@@ -121,8 +120,12 @@ pub(crate) fn bridge(bytes: &[u8], mut hooks: BridgeHooks) -> Result<Bridged, Br
             ) {
                 Some(seg) => {
                     segments.push(seg);
-                    if run.last_time.is_some_and(|t| t > 0.0) {
-                        last_time = run.last_time.unwrap_or(last_time);
+                    // The median of the kept frames' last times, never the
+                    // last frame's own: a frame the damage reached can be
+                    // stamped far ahead of the recording, and the resume
+                    // search would then skip every honest frame before it.
+                    if let Some(t) = time_at_end(bytes, seg.start, seg.stop).filter(|t| *t > 0.0) {
+                        last_time = t;
                     }
                 }
                 None if segments.is_empty() => return Err(BridgeError::NothingParses),
@@ -146,7 +149,7 @@ pub(crate) fn bridge(bytes: &[u8], mut hooks: BridgeHooks) -> Result<Bridged, Br
             }
         }
     }
-    let (frames, edge_frames_dropped) = drop_misplaced_edge_frames(bytes, &segments);
+    let (frames, edge_frames_dropped) = drop_misplaced_edge_frames(bytes, e0, &segments);
     let cuts = cuts_between(bytes, &segments, &frames);
     let bytes_kept =
         frames.iter().map(|s| s.stop - s.start).sum::<usize>() - (e0 - DEMO_HEADER_SIZE);
@@ -263,9 +266,15 @@ fn probe_demo(bytes: &[u8], e0: usize, seg: Segment) -> Vec<u8> {
 /// at `m3_h1-1`'s third a network frame stamped 877 s among frames at 893 s
 /// whose `incoming_sequence` is 2^17 too high, which read as two more joins.
 /// The engine plays frames in file order and waits for each one's time, so a
-/// frame stamped far ahead holds playback there (#15). Returns the pieces to
-/// keep and how many frames were left out.
-fn drop_misplaced_edge_frames(bytes: &[u8], segments: &[Segment]) -> (Vec<Segment>, usize) {
+/// frame stamped far ahead holds playback there (#15). The signon (before
+/// `e0`) is never judged: its frames' times spread over the seconds the map
+/// took to load, and the directory's first entry must end exactly at `e0`.
+/// Returns the pieces to keep and how many frames were left out.
+fn drop_misplaced_edge_frames(
+    bytes: &[u8],
+    e0: usize,
+    segments: &[Segment],
+) -> (Vec<Segment>, usize) {
     let mut drop_at: Vec<(usize, usize)> = Vec::new();
     let mut misplaced = |side: &[&TimedFrame], edge: &[&TimedFrame]| {
         let Some(reference) = median_time(side) else {
@@ -280,7 +289,12 @@ fn drop_misplaced_edge_frames(bytes: &[u8], segments: &[Segment]) -> (Vec<Segmen
     for pair in segments.windows(2) {
         let before = timed_frames(bytes, pair[0]);
         let after = timed_frames(bytes, pair[1]);
-        let before_side: Vec<&TimedFrame> = before.iter().rev().take(EDGE_FRAMES * 3).collect();
+        let before_side: Vec<&TimedFrame> = before
+            .iter()
+            .rev()
+            .take_while(|f| f.start >= e0)
+            .take(EDGE_FRAMES * 3)
+            .collect();
         let after_side: Vec<&TimedFrame> = after.iter().take(EDGE_FRAMES * 3).collect();
         misplaced(
             &before_side,

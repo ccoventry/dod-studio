@@ -21,8 +21,37 @@ const PROGRESS_EVERY_MS: u32 = 33;
 pub struct DemoRepairManager {
     /// The running Find Damaged Demos' cancel flag.
     pub scan_cancel: Arc<AtomicBool>,
-    /// Each running repair's cancel flag, by the demo's path.
+    /// Each running repair's cancel flag, by [`repair_key`] of the demo's path.
     pub repairs: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+/// One demo's key in [`DemoRepairManager::repairs`]: the Master Queue, the
+/// Analyzer and the Auditor can spell one file's path differently.
+fn repair_key(path: &str) -> String {
+    path.replace('/', "\\").to_lowercase()
+}
+
+impl DemoRepairManager {
+    /// Claims the demo at `path` for one repair: its cancel flag, or `None`
+    /// while another repair of it runs. Two at once wrote two repairs of one
+    /// demo, and the first to end dropped the second's cancel flag.
+    fn claim(&self, path: &str) -> Option<Arc<AtomicBool>> {
+        let mut repairs = self.repairs.lock().unwrap_or_else(|p| p.into_inner());
+        let key = repair_key(path);
+        if repairs.contains_key(&key) {
+            return None;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        repairs.insert(key, Arc::clone(&cancel));
+        Some(cancel)
+    }
+
+    fn release(&self, path: &str) {
+        self.repairs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&repair_key(path));
+    }
 }
 
 /// What a repair came to, for the frontend.
@@ -170,22 +199,17 @@ pub async fn repair_demo_cmd(
     state: tauri::State<'_, DemoRepairManager>,
     path: String,
 ) -> Result<RepairResult, String> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .repairs
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(path.clone(), Arc::clone(&cancel));
+    let Some(cancel) = state.claim(&path) else {
+        let shown = Path::new(&path).display().to_string();
+        native::log_markdown(&crate::messages::repair::already_repairing_log(&shown));
+        return Err(crate::messages::repair::already_repairing(&shown));
+    };
     let key = path.clone();
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         repair_with_events(&app_handle, Path::new(&path), &cancel)
     }))
     .await;
-    state
-        .repairs
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&key);
+    state.release(&key);
     result
 }
 
@@ -199,7 +223,7 @@ pub fn cancel_demo_repair(
         .repairs
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .get(&path)
+        .get(&repair_key(&path))
     {
         flag.store(true, Ordering::SeqCst);
     }
@@ -286,4 +310,20 @@ fn repair_with_events(
         }
     };
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_demo_is_repaired_by_one_job_at_a_time_however_its_path_is_spelt() {
+        let manager = DemoRepairManager::default();
+        let first = manager.claim(r"C:\demos\m1_h1.dem").expect("free");
+        assert!(manager.claim("c:/Demos/M1_H1.dem").is_none());
+        assert!(manager.claim(r"C:\demos\m3_h2.dem").is_some());
+        manager.release("c:/Demos/M1_H1.dem");
+        assert!(!first.load(Ordering::SeqCst));
+        assert!(manager.claim(r"C:\demos\m1_h1.dem").is_some());
+    }
 }

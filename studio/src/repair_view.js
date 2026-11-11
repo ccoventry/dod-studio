@@ -59,8 +59,13 @@ export function repairResultText(result) {
   const R = STRINGS.REPAIR;
   switch (result?.verdict) {
     case 'repaired': {
-      const text = R.repaired(result.holes.length, Math.round(result.seconds_lost),
-        result.percent_kept.toFixed(1), fileNameOf(result.written || ''));
+      const kept = result.percent_kept.toFixed(1);
+      const name = fileNameOf(result.written || '');
+      // The break the recording never resumes after is not one of `holes`
+      // (each of those has recording on both sides): damage that runs to
+      // the end of the file has no gap at all.
+      if (result.ends_at_last_hole && result.holes.length === 0) return R.repairedEndCutOff(kept, name);
+      const text = R.repaired(result.holes.length, Math.round(result.seconds_lost), kept, name);
       return result.ends_at_last_hole ? `${text} ${R.ENDS_AT_LAST_GAP}` : text;
     }
     case 'not_damaged': return R.NOT_DAMAGED;

@@ -72,6 +72,64 @@ fn a_demo_with_a_hole_is_repaired_and_keeps_the_frames_around_it() {
     }
 }
 
+/// The frame right before a hole carries a time far ahead of the recording
+/// around it (a bit flip in its header, as at `m1_h2`'s third hole): the
+/// search for where the recording resumes must not wait for that time, or it
+/// never finds the resume and everything after the hole is lost.
+#[test]
+fn a_damaged_time_right_before_a_hole_does_not_hide_the_resume() {
+    let original = crate::tests_fixture::fixture();
+    let mut bytes = damaged_fixture(original.len() / 2, 300_000);
+    let end = frame_walk::frames_end(&bytes);
+    let (starts, _) = frame_walk::frame_starts(&bytes, frame_walk::DEMO_HEADER_SIZE, end);
+    let last = *starts.last().expect("frames before the hole");
+    bytes[last + 1..last + 5].copy_from_slice(&50_000f32.to_le_bytes());
+    let outcome = repair(&bytes).expect("repairs");
+    let RepairOutcome::Repaired { report, .. } = outcome else {
+        panic!("not repaired: {outcome:?}");
+    };
+    assert!(!report.ends_at_last_hole, "{report:?}");
+    assert_eq!(report.holes.len(), 1, "{report:?}");
+    // The hole is the 300 KB of rubble and the frame it cut through, as
+    // without the damaged time: the recording resumes right after it.
+    let hole = report.holes[0];
+    assert!(hole.bytes_skipped < 310_000, "{hole:?}");
+    assert!(hole.lost_secs < 10.0, "{hole:?}");
+}
+
+/// Damage that runs to the end of the file: nothing resumes after it, so the
+/// repair is the recording up to the break, with no gap to list.
+#[test]
+fn a_demo_damaged_to_its_end_is_repaired_up_to_the_break() {
+    let original = crate::tests_fixture::fixture();
+    let len = 200_000;
+    let outcome = repair(&damaged_fixture(original.len() - len, len)).expect("repairs");
+    let RepairOutcome::Repaired { bytes, report } = outcome else {
+        panic!("not repaired: {outcome:?}");
+    };
+    assert!(report.ends_at_last_hole, "{report:?}");
+    assert!(report.holes.is_empty(), "{report:?}");
+    assert!(report.percent_kept() > 97.0, "{report:?}");
+    assert_eq!(find_first_hole(&bytes), None);
+}
+
+/// Damage right where playback starts, behind an intact signon. The signon's
+/// last frames sit next to the hole, and their times spread over the map's
+/// loading (17 to 22.7 s in the fixture): judged as edge frames, three were
+/// dropped, the first directory entry no longer ended where it said, and the
+/// result did not parse.
+#[test]
+fn a_demo_damaged_where_playback_starts_keeps_its_signon_whole() {
+    let original = crate::tests_fixture::fixture();
+    let e0 = frame_walk::entry0_end(&original, frame_walk::frames_end(&original)).expect("signon");
+    let outcome = repair(&damaged_fixture(e0, 300_000)).expect("repairs");
+    let RepairOutcome::Repaired { report, .. } = outcome else {
+        panic!("not repaired: {outcome:?}");
+    };
+    assert_eq!(report.holes.len(), 1, "{report:?}");
+    assert_eq!(report.checks.parse_error, None);
+}
+
 #[test]
 fn a_repair_can_be_cancelled() {
     let original = crate::tests_fixture::fixture();

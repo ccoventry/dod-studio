@@ -46,6 +46,15 @@ pub fn repair_failed(path: &str, err: &str, took: &str) -> String {
     format!("[repair] {path}: failed after {took}: {err}")
 }
 
+/// A second repair of a demo whose repair is still running.
+pub fn already_repairing(path: &str) -> String {
+    format!("{path} is already being repaired")
+}
+
+pub fn already_repairing_log(path: &str) -> String {
+    format!("[repair] {path}: not started, it is already being repaired")
+}
+
 pub fn repair_cancelled(path: &str, took: &str) -> String {
     format!("[repair] {path}: cancelled after {took}, nothing written")
 }

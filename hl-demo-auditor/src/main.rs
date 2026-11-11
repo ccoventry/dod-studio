@@ -197,6 +197,6 @@ fn print_holes(report: &analysis::repair::RepairReport) {
         println!("{}", text::hole_line(n + 1, hole));
     }
     if report.ends_at_last_hole {
-        println!("{}", text::ENDS_AT_LAST_GAP);
+        println!("{}", text::ends_at_break(report.holes.len()));
     }
 }

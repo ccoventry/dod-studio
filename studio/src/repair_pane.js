@@ -188,10 +188,13 @@ export function createRepairPane() {
   /// outcome there after. Resolves whether a repair was saved.
   async function repairRow(d) {
     const row = rows.get(d.path);
-    if (!row) return false;
+    // One job per demo: Repair Checked reaching a row whose own Repair or
+    // Repair & Split is still going would write a second repair of it.
+    if (!row || busy(d.path)) return false;
     repairing += 1;
     refresh();
     row.button.disabled = true;
+    if (row.splitButton) row.splitButton.disabled = true;
     row.result.textContent = '';
     const bar = repairProgressBar();
     bars.set(d.path, bar);
@@ -212,6 +215,7 @@ export function createRepairPane() {
       bar.el.remove();
       bars.delete(d.path);
       row.button.disabled = false;
+      if (row.splitButton) row.splitButton.disabled = false;
       repairing -= 1;
       refresh();
     }
@@ -221,7 +225,7 @@ export function createRepairPane() {
   /// what it came to. Resolves whether it saved the repair.
   async function repairSplitRow(d) {
     const row = rows.get(d.path);
-    if (!row) return false;
+    if (!row || busy(d.path)) return false;
     repairing += 1;
     refresh();
     row.button.disabled = true;
@@ -250,6 +254,11 @@ export function createRepairPane() {
       repairing -= 1;
       refresh();
     }
+  }
+
+  /** Whether a repair (alone or with its split) of the demo at `path` runs. */
+  function busy(path) {
+    return bars.has(path) || splitting.has(path);
   }
 
   function showResult(row, result) {

@@ -124,7 +124,9 @@ pub enum Refusal {
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct RepairReport {
     pub holes: Vec<Hole>,
-    /// The recording never resumes after the last hole: the repair ends there.
+    /// The recording breaks once more after the last hole (or, with none,
+    /// once at all) and never resumes: the repair ends at that break, which
+    /// is not one of `holes`.
     pub ends_at_last_hole: bool,
     pub joins: Vec<JoinReport>,
     /// Damaged frames left out at the edges of holes.

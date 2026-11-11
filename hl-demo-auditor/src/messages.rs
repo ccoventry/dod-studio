@@ -54,9 +54,16 @@ pub fn summary_line(report: &RepairReport) -> String {
     )
 }
 
-/// After the last hole the recording never resumes.
-pub const ENDS_AT_LAST_GAP: &str =
-    "  the recording does not resume after the last gap, so the repair ends there";
+/// The recording breaks and never resumes. That break is not one of the
+/// report's holes (each has recording on both sides), so with `gaps` listed
+/// it comes after the last of them, and with none it is the only one.
+pub fn ends_at_break(gaps: usize) -> &'static str {
+    if gaps == 0 {
+        "  the recording breaks and never resumes, so the repair ends at the break"
+    } else {
+        "  after the last gap the recording breaks once more and never resumes, so the repair ends at that break"
+    }
+}
 
 /// Why a repair was not written, in words.
 pub fn refusal(reason: &Refusal) -> String {

@@ -45,8 +45,12 @@ describe('repairResultText', () => {
     expect(repairResultText(repaired))
       .toBe('Repaired: 2 gaps cut out (in all 42 s of recording lost, 96.7% kept). Saved as match_repaired.dem.');
   });
-  it('says when the recording never resumes after the last gap', () => {
-    expect(repairResultText({ ...repaired, ends_at_last_hole: true })).toMatch(/never resumes/);
+  it('says when the recording breaks once more after the last gap and never resumes', () => {
+    expect(repairResultText({ ...repaired, ends_at_last_hole: true })).toMatch(/breaks once more and never resumes/);
+  });
+  it('lists no gap for damage that runs to the end, only where the repair ends', () => {
+    const text = repairResultText({ ...repaired, holes: [], seconds_lost: 0, percent_kept: 98.2, ends_at_last_hole: true });
+    expect(text).toBe('Repaired: the recording breaks and never resumes, so the repair ends at the break (98.2% kept). Saved as match_repaired.dem.');
   });
   it('says nothing was saved for a demo with no damage, a failed check or a cancel', () => {
     expect(repairResultText({ verdict: 'not_damaged' })).toMatch(/nothing saved/);
