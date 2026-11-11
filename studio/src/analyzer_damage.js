@@ -33,10 +33,13 @@ export function damageNotice(report) {
 /**
  * Fills `el` with the notice for `report`, or hides it. With `onRepair`, the
  * notice has a Repair now button that runs `onRepair(update)`, with
- * `update(RepairProgress)` for the banner's bar. While it runs the button is
- * disabled and the bar shows; if it throws, the banner says why.
+ * `update(p)` for the banner's bar (a RepairProgress or a `{ pct, text }`
+ * view), and for a demo that recorded more than one map, a Repair & Split
+ * that runs `onRepairSplit(update)` the same way (#15). While one runs both
+ * buttons are disabled and the bar shows; if it throws, the banner says why.
+ * Each resolves the line the banner shows after.
  */
-export function renderDamageBanner(el, report, onRepair) {
+export function renderDamageBanner(el, report, onRepair, onRepairSplit) {
   if (!el) return;
   const notice = damageNotice(report);
   el.hidden = !notice;
@@ -45,22 +48,27 @@ export function renderDamageBanner(el, report, onRepair) {
     return;
   }
   const R = STRINGS.REPAIR;
+  const maps = report?.state?.signon_maps || [];
+  const both = maps.length > 1 && onRepairSplit;
   el.innerHTML = `<span class="analyzer-damage-text">${esc(notice)}</span>
     <button type="button" class="analyzer-damage-repair primary-btn" title="${esc(R.ANALYZER_BUTTON_TITLE)}">${esc(R.ANALYZER_BUTTON)}</button>
+    ${both ? `<button type="button" class="analyzer-damage-repair-split primary-btn" title="${esc(R.REPAIR_SPLIT_TITLE)}">${esc(R.REPAIR_SPLIT_BUTTON)}</button>` : ''}
     <span class="analyzer-damage-status"></span>`;
-  const btn = el.querySelector('.analyzer-damage-repair');
   const status = el.querySelector('.analyzer-damage-status');
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+  const buttons = [...el.querySelectorAll('button')];
+  const wire = (btn, run, failed) => btn?.addEventListener('click', async () => {
+    buttons.forEach((b) => { b.disabled = true; });
     const bar = repairProgressBar();
     status.replaceChildren(bar.el);
     try {
-      const text = await onRepair(bar.update);
+      const text = await run(bar.update);
       status.textContent = text || '';
     } catch (err) {
-      status.textContent = R.failed(err);
+      status.textContent = failed(err);
     } finally {
-      btn.disabled = false;
+      buttons.forEach((b) => { b.disabled = false; });
     }
   });
+  wire(el.querySelector('.analyzer-damage-repair'), onRepair, R.failed);
+  if (both) wire(el.querySelector('.analyzer-damage-repair-split'), onRepairSplit, R.repairSplitFailed);
 }

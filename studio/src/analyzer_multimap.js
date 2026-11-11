@@ -12,6 +12,7 @@
 import { escapeHtml as esc } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
+import { isDamagedDemo } from './repair_view.js';
 import { STRINGS } from './strings.js';
 
 /** The maps a report's demo recorded, when there is more than one; else null.
@@ -49,7 +50,7 @@ export function renderMultiMapBanner(el, report, onSplit, status = splitStatus) 
     if (notice.quiet === shownSplit) return;
     shownSplit = notice.quiet;
     if (notice.quiet) renderAlreadySplit(el, notice);
-    else renderSplitHint(el, notice, onSplit);
+    else renderSplitHint(el, notice, onSplit, isDamagedDemo(report?.demo_info));
   };
   show(path ? status.last(path) : null);
   if (!path) return;
@@ -83,8 +84,10 @@ function renderAlreadySplit(el, notice) {
   el.innerHTML = `<span class="analyzer-multimap-text">${esc(notice.text)}</span>`;
 }
 
-/** The notice with Split now, for a demo not split yet. */
-function renderSplitHint(el, notice, onSplit) {
+/** The notice with Split now, for a demo not split yet. A damaged demo
+ *  (#15) can't be split until it is repaired: Split now is greyed out and
+ *  says so, and the damage notice's Repair & Split does both. */
+function renderSplitHint(el, notice, onSplit, damaged) {
   el.classList.remove('analyzer-multimap-quiet');
   el.removeAttribute('title');
   el.innerHTML = `
@@ -94,6 +97,11 @@ function renderSplitHint(el, notice, onSplit) {
     <span class="analyzer-multimap-status"></span>`;
   const btn = el.querySelector('.analyzer-multimap-split');
   const status = el.querySelector('.analyzer-multimap-status');
+  if (damaged) {
+    btn.disabled = true;
+    btn.title = STRINGS.REPAIR.SPLIT_NEEDS_REPAIR;
+    return;
+  }
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     const bar = splitProgressBar();

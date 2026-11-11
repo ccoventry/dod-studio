@@ -12,6 +12,7 @@
 
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
+import { isDamagedDemo } from './repair_view.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -45,7 +46,7 @@ export function multiMapHint(demo, onSplit, status = splitStatus) {
   note.textContent = STRINGS.WORKSPACE.MULTI_MAP_ALREADY_SPLIT;
   hint.append(btn, note);
   const show = (answer) => {
-    if (btn.disabled) return; // splitting: its bar stays until it ends
+    if (btn.dataset.splitting) return; // its bar stays until it ends
     const title = alreadySplitNoteTitle(demo, answer);
     btn.hidden = title !== null;
     note.hidden = title === null;
@@ -63,16 +64,24 @@ export function alreadySplitNoteTitle(demo, answer) {
   return isAlreadySplit(answer) ? STRINGS.WORKSPACE.multiMapAlreadySplitTitle(demo.signon_maps, answer.files) : null;
 }
 
-/** The "2 maps · Split" button itself. */
+/** The "2 maps · Split" button itself. A damaged demo (#15) can't be split
+ *  until it is repaired: its button is greyed out and says so, and the row's
+ *  Repair & Split (queue_repair.js) does both. */
 function splitButton(demo, onSplit) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'multimap-split-btn';
   btn.textContent = STRINGS.WORKSPACE.multiMapSplitButton(demo.signon_maps.length);
   btn.title = STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
+  if (isDamagedDemo(demo)) {
+    btn.disabled = true;
+    btn.title = STRINGS.REPAIR.SPLIT_NEEDS_REPAIR;
+    return btn;
+  }
   btn.addEventListener('click', async (e) => {
     e.stopPropagation(); // do not select the row
     btn.disabled = true;
+    btn.dataset.splitting = '1';
     let bar = null;
     const update = (p) => {
       if (!bar) {
@@ -89,6 +98,7 @@ function splitButton(demo, onSplit) {
       bar?.el.remove();
       btn.hidden = false;
       btn.disabled = false;
+      delete btn.dataset.splitting;
     }
   });
   return btn;

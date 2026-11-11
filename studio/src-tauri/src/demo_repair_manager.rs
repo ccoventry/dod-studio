@@ -75,6 +75,27 @@ impl RepairResult {
     }
 }
 
+/// A damaged demo as the Damaged Demos tab lists it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DamagedRow {
+    #[serde(flatten)]
+    pub demo: DamagedDemo,
+    /// One per signon, whatever map the damage is on: read by scanning the
+    /// bytes for the server info (`native::demo_split::quick_maps`), which the
+    /// damage doesn't stop. Two or more offer Repair & Split.
+    pub maps: Vec<String>,
+}
+
+/// The maps of the demo at `path`, by a byte scan; none when unreadable.
+fn maps_of(path: &Path) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    native::demo_split::header_protocol(&bytes)
+        .map(|protocol| native::demo_split::quick_maps(&bytes, protocol))
+        .unwrap_or_default()
+}
+
 /// Lists the demos in `folder` (and its subfolders when `recursive`) that
 /// have a hole, emitting `repair_scan_progress` as it reads them.
 #[tauri::command]
@@ -83,7 +104,7 @@ pub async fn find_damaged_demos_cmd(
     state: tauri::State<'_, DemoRepairManager>,
     folder: String,
     recursive: bool,
-) -> Result<Vec<DamagedDemo>, String> {
+) -> Result<Vec<DamagedRow>, String> {
     let cancel = Arc::clone(&state.scan_cancel);
     cancel.store(false, Ordering::SeqCst);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -116,7 +137,13 @@ pub async fn find_damaged_demos_cmd(
                 }),
             );
         };
-        let found = find_damaged_demos(&folder, recursive, &cancel, &mut progress);
+        let found: Vec<DamagedRow> = find_damaged_demos(&folder, recursive, &cancel, &mut progress)
+            .into_iter()
+            .map(|demo| DamagedRow {
+                maps: maps_of(&demo.path),
+                demo,
+            })
+            .collect();
         native::log_markdown(&crate::messages::repair::damaged_scan_ended(
             found.len(),
             &duration_text(started.elapsed().as_secs_f64()),

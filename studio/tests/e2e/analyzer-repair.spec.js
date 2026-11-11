@@ -82,3 +82,43 @@ test('a failed repair says why and leaves the button usable', async ({ page }) =
   await expect(banner.locator('.analyzer-damage-repair')).toBeEnabled();
   await expect(page.locator('#analyzer-current-file')).toHaveText('monday-wsod25_r07_m1_h1.dem');
 });
+
+test('a damaged demo with more than one map greys out Split now and offers Repair & Split', async ({ page }) => {
+  const both = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  both.state.signon_maps = ['dod_anzio', 'dod_pandemic_aim'];
+  const piece = report('monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem', null);
+  await page.evaluate(({ both, piece }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = ({ demoPath }) => (demoPath.includes('_split1_') ? piece : both);
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_split_status = () => ({ split: false, files: [] });
+    window.__mockInvokeHandlers.repair_demo_cmd = () => ({
+      verdict: 'repaired', written: 'C:/demos/monday-wsod25_r07_m1_h2_repaired.dem',
+      holes: [{ before_secs: 1, after_secs: 2, lost_secs: 1, bytes_skipped: 1 }, { before_secs: 3, after_secs: 4, lost_secs: 1, bytes_skipped: 1 }],
+      seconds_lost: 2, percent_kept: 97.7, ends_at_last_hole: false, reasons: [],
+    });
+    window.__mockInvokeHandlers.split_demo_auto = ({ path }) => new Promise((resolve) => {
+      window.__splitPath = path;
+      window.__finishSplit = () => resolve([
+        { index: 0, path: 'C:/demos/monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem', map: 'dod_anzio', seconds: 1479, size_bytes: 1 },
+        { index: 1, path: 'C:/demos/monday-wsod25_r07_m1_h2_repaired_split2_pandemic_aim.dem', map: 'dod_pandemic_aim', seconds: 48, size_bytes: 1 },
+      ]);
+    });
+  }, { both, piece });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+
+  const split = page.locator('#analyzer-multimap-banner .analyzer-multimap-split');
+  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', /Repair it first/);
+  const banner = page.locator('#analyzer-damage-banner');
+  await banner.locator('.analyzer-damage-repair-split').click();
+  await page.waitForFunction(() => typeof window.__finishSplit === 'function');
+  expect(await page.evaluate(() => window.__splitPath)).toBe('C:/demos/monday-wsod25_r07_m1_h2_repaired.dem');
+  await page.evaluate(() => window.__mockEmit('split_progress', {
+    path: 'C:/demos/monday-wsod25_r07_m1_h2_repaired.dem', progress: { fraction: 0.5, stage: 'writing', map: 'dod_anzio', part: 1, parts: 2 },
+  }));
+  await expect(banner.locator('.split-progress-text')).toHaveText('Splitting the repaired demo: Writing dod_anzio (1 of 2)… 50%');
+  await expect(banner.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 75%/);
+  await page.evaluate(() => window.__finishSplit());
+  await expect(page.locator('#analyzer-current-file')).toHaveText('monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem');
+  await expect(page.locator('#toast-container')).toContainText('Repaired (2 gaps cut out) and split into 2 demos');
+});

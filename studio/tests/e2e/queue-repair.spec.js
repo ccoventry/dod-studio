@@ -27,3 +27,34 @@ test('Repair runs without selecting the row, and shows its bar until it ends', a
   await expect(r.locator('.repair-progress')).toHaveCount(0);
   await expect(r.locator('.damaged-repair-btn')).toBeVisible();
 });
+
+test('a damaged demo with more than one map greys out Split and offers Repair & Split', async ({ page }) => {
+  const r = row(page, 'both.dem');
+  const split = r.locator('.multimap-split-btn');
+  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', 'Repair it first: the damage stops a split. Repair & Split does both.');
+  await expect(r.locator('.damaged-repair-btn')).toHaveText(['Damaged · Repair', 'Repair & Split']);
+  await r.locator('.damaged-repair-btn', { hasText: 'Repair & Split' }).click();
+  await expect(page.locator('#result')).toHaveText('repair-split both.dem');
+  await expect(r.locator('.repair-progress .split-progress-text')).toHaveText('Splitting the repaired demo: Writing dod_anzio… 20%');
+  await expect(r.locator('.damaged-repair-btn')).toHaveCount(2);
+  await expect(r.locator('.damaged-repair-btn').first()).toBeHidden();
+  await page.evaluate(() => window.__finishRowRepair());
+  await expect(r.locator('.repair-progress')).toHaveCount(0);
+});
+
+test('once the repair was split, the original offers neither Repair nor Split', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__splitStatus = { split: true, files: ['both_repaired_split1_anzio.dem', 'both_repaired_split2_pandemic_aim.dem'] };
+  });
+  // A redraw asks again; the harness draws once, so draw it again.
+  await page.evaluate(async () => {
+    const { renderMasterList } = await import('/src/master_pane.js');
+    renderMasterList([{ name: 'both.dem', path: 'C:/demos/again/both.dem', streaks: [], signon_maps: ['dod_anzio', 'dod_pandemic_aim'],
+      damage: { read_up_to_secs: 1480.2, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'x' } }], null, () => {});
+  });
+  const r = row(page, 'both.dem');
+  await expect(r.locator('.damaged-repair-hint')).toBeHidden();
+  await expect(r.locator('.multimap-split-btn')).toBeHidden();
+  await expect(r.locator('.multimap-split-note')).toBeVisible();
+});

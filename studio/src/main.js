@@ -1,7 +1,7 @@
 import { configurePickPath } from './pick_path.js';
 import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
-import { renderMasterList, initMasterPane, setRepairDemoHandler } from './master_pane.js';
+import { renderMasterList, initMasterPane, setRepairDemoHandlers } from './master_pane.js';
 import { startDemoContextMenu } from './demo_context_menu.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
@@ -281,15 +281,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     pickedDemosPresent,
   });
 
-  // Demos damaged partway (#15): queue_repair.js; the row's button runs it.
-  const { repairQueuedDemo } = createQueueRepair({
+  // Demos damaged partway (#15): queue_repair.js; the row's buttons run it.
+  const { repairQueuedDemo, repairAndSplitQueuedDemo } = createQueueRepair({
     getDemos: queue.getDemos,
     removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     getTakeIndex: () => takeIndex,
     refreshQueue: () => queue.refreshAfterRelocation(true),
   });
-  setRepairDemoHandler((demo, update) => repairQueuedDemo(demo, { update }));
+  setRepairDemoHandlers({
+    repair: (demo, update) => repairQueuedDemo(demo, { update }),
+    repairSplit: (demo, update) => repairAndSplitQueuedDemo(demo, { update }),
+  });
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });

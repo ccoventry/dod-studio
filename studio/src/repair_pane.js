@@ -3,7 +3,9 @@
 // with a gap in it (the frames stop making sense partway), and a Repair for
 // each one and for the ticked ones. A repair is saved next to the demo as
 // <name>_repaired.dem (demo_repair_manager.rs); the original is never
-// changed. Find shows a bar while it reads the demos; each repair shows its
+// changed. A demo that recorded more than one map also gets Repair & Split
+// (repair_split.js): a split can't read past the damage, so it is repaired
+// first. Find shows a bar while it reads the demos; each repair shows its
 // own bar and step line in its row, then what it came to.
 
 import { listen } from '@tauri-apps/api/event';
@@ -17,6 +19,7 @@ import { fileNameOf } from './path_display.js';
 import { clockFloor, durationTextMs } from './time_format.js';
 import { sizeText } from './analyzer_damage.js';
 import { repairProgressBar, repairResultText, repairGapsTitle } from './repair_view.js';
+import { repairThenSplit } from './repair_split.js';
 
 /** Wires the tab. Needs nothing from main.js: it reads the page's Target
  *  Folder and talks to the backend itself. */
@@ -41,6 +44,8 @@ export function createRepairPane() {
   const rows = new Map();
   // Each running repair's bar, by path, fed by `repair_progress`.
   const bars = new Map();
+  // The demos a Repair & Split is running on (its bar is fed by repair_split.js).
+  const splitting = new Set();
   let repairedCount = 0;
 
   const updateFooter = () => setAuditorFooter('repair', R.footer(shown.length, repairedCount));
@@ -113,7 +118,7 @@ export function createRepairPane() {
       return;
     }
     // A repair run: stop each one that is going.
-    for (const path of bars.keys()) {
+    for (const path of [...bars.keys(), ...splitting]) {
       try { await cancelDemoRepair(path); } catch { /* logged by ipc_bridge */ }
     }
   });
@@ -146,18 +151,22 @@ export function createRepairPane() {
   function addRow(d) {
     const tr = document.createElement('tr');
     const name = fileNameOf(d.path);
+    const maps = (d.maps || []).length > 1
+      ? `<span class="split-demo-meta" title="${escapeHtml(d.maps.join(', '))}">${escapeHtml(R.mapsCount(d.maps.length))}</span> `
+      : '';
     const before = d.repaired
       ? `<span class="split-done-chip" title="${escapeHtml(R.alreadyRepairedTitle(fileNameOf(d.repaired)))}">${escapeHtml(R.ALREADY_REPAIRED_CHIP)}</span>`
       : '';
     tr.innerHTML = `
       <td><input type="checkbox" class="repair-tick" checked /></td>
-      <td><span class="repair-name" title="${escapeHtml(d.path)}">${escapeHtml(name)}</span> ${before}</td>
+      <td><span class="repair-name" title="${escapeHtml(d.path)}">${escapeHtml(name)}</span> ${maps}${before}</td>
       <td title="${escapeHtml(R.BREAKS_TITLE)}">${escapeHtml(R.breaksAt(clockFloor(d.first_hole.after_secs), sizeText(d.first_hole.bytes_unread)))}</td>
       <td>${escapeHtml(sizeText(d.size_bytes))}</td>
-      <td class="repair-result-cell"><button type="button" class="repair-row-btn">${escapeHtml(R.REPAIR_BUTTON)}</button><span class="repair-result"></span></td>`;
+      <td class="repair-result-cell"><button type="button" class="repair-row-btn">${escapeHtml(R.REPAIR_BUTTON)}</button>${maps ? ` <button type="button" class="repair-split-btn" title="${escapeHtml(R.REPAIR_SPLIT_TITLE)}">${escapeHtml(R.REPAIR_SPLIT_BUTTON)}</button>` : ''}<span class="repair-result"></span></td>`;
     const row = {
       tick: tr.querySelector('.repair-tick'),
       button: tr.querySelector('.repair-row-btn'),
+      splitButton: tr.querySelector('.repair-split-btn'),
       cell: tr.querySelector('.repair-result-cell'),
       result: tr.querySelector('.repair-result'),
     };
@@ -165,6 +174,11 @@ export function createRepairPane() {
       cancelBtn.disabled = false;
       await repairRow(d);
       cancelBtn.disabled = bars.size === 0;
+    });
+    row.splitButton?.addEventListener('click', async () => {
+      cancelBtn.disabled = false;
+      await repairSplitRow(d);
+      cancelBtn.disabled = bars.size === 0 && splitting.size === 0;
     });
     rows.set(d.path, row);
     body.appendChild(tr);
@@ -198,6 +212,41 @@ export function createRepairPane() {
       bar.el.remove();
       bars.delete(d.path);
       row.button.disabled = false;
+      repairing -= 1;
+      refresh();
+    }
+  }
+
+  /// Repair & Split on one listed demo: one bar through both steps, then
+  /// what it came to. Resolves whether it saved the repair.
+  async function repairSplitRow(d) {
+    const row = rows.get(d.path);
+    if (!row) return false;
+    repairing += 1;
+    refresh();
+    row.button.disabled = true;
+    row.splitButton.disabled = true;
+    row.result.textContent = '';
+    const bar = repairProgressBar();
+    row.cell.appendChild(bar.el);
+    splitting.add(d.path);
+    try {
+      const { result, written } = await repairThenSplit(d.path, bar.update);
+      showResult(row, result);
+      if (written) {
+        row.result.textContent = R.repairSplitDone(result.holes.length, written.map((w) => fileNameOf(w.path)));
+        repairedCount += 1;
+        updateFooter();
+      }
+      return result.verdict === 'repaired';
+    } catch (err) {
+      row.result.textContent = R.repairSplitFailed(err);
+      return false;
+    } finally {
+      bar.el.remove();
+      splitting.delete(d.path);
+      row.button.disabled = false;
+      row.splitButton.disabled = false;
       repairing -= 1;
       refresh();
     }

@@ -1312,6 +1312,18 @@ export const STRINGS = {
     ANALYZER_BUTTON: 'Repair now',
     ANALYZER_BUTTON_TITLE: 'Cut the damage out and save the repaired demo next to this one (<name>_repaired.dem), then open it. This demo is not changed.',
     analyzerDone: (name) => `Repaired, saved as ${name}`,
+    // A demo both damaged and multi-map: repair first, then split (#15).
+    SPLIT_NEEDS_REPAIR: 'Repair it first: the damage stops a split. Repair & Split does both.',
+    REPAIR_SPLIT_BUTTON: 'Repair & Split',
+    REPAIR_SPLIT_TITLE: 'Repair the damage, then split the repaired demo into one demo per map. Both are saved next to this one, which is not changed.',
+    repairSplitRepairing: (text) => `Repairing: ${text}`,
+    repairSplitSplitting: (text) => `Splitting the repaired demo: ${text}`,
+    repairSplitDone: (gaps, names) => `Repaired (${gaps} gap${gaps === 1 ? '' : 's'} cut out) and split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    queueRepairSplitHead: (name) => `Repairing and splitting ${name}`,
+    QUEUE_REPAIR_SPLIT_ADDING: 'adding its maps to the queue',
+    queueRepairSplitDoneLine: (elapsed, pieces) => `Done in ${elapsed}: repaired 1 demo and split it into ${pieces}`,
+    repairSplitFailed: (e) => `Repair & Split failed: ${e}`,
+    mapsCount: (n) => `${n} maps`,
   },
 
   AUDITOR: {

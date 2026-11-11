@@ -19,20 +19,25 @@
   <div id="result"></div>
 
   <script type="module">
-    import { initMasterPane, renderMasterList, setRepairDemoHandler } from '/src/master_pane.js';
+    import { initMasterPane, renderMasterList, setRepairDemoHandlers } from '/src/master_pane.js';
 
     const demos = [
       { name: 'broken.dem', path: 'C:\\demos\\broken.dem', streaks: [], signon_maps: ['dod_anzio'],
         damage: { read_up_to_secs: 507.4, frame_index: 1, byte_offset: 2433784, bytes_unread: 79927172, reason: 'a frame does not parse' } },
       { name: 'fine.dem', path: 'C:\\demos\\fine.dem', streaks: [], signon_maps: ['dod_anzio'], damage: null },
+      { name: 'both.dem', path: 'C:\\demos\\both.dem', streaks: [], signon_maps: ['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a'],
+        damage: { read_up_to_secs: 1480.2, frame_index: 1, byte_offset: 96233819, bytes_unread: 18644387, reason: 'a frame does not parse' } },
     ];
     const result = document.querySelector('#result');
-    initMasterPane(null, null, null, null, null);
-    setRepairDemoHandler(async (demo, update) => {
-      result.textContent = `repair ${demo.name}`;
-      update({ step: 'reading', fraction: 0.4 });
+    // Not split yet, unless a test sets window.__splitStatus first.
+    window.__mockInvokeHandlers.demo_split_status = () => window.__splitStatus || { split: false, files: [] };
+    initMasterPane(null, null, null, null, async () => { result.textContent = 'split'; });
+    const hold = (what) => async (demo, update) => {
+      result.textContent = `${what} ${demo.name}`;
+      update(what === 'repair' ? { step: 'reading', fraction: 0.4 } : { pct: 60, text: 'Splitting the repaired demo: Writing dod_anzio… 20%' });
       await new Promise((resolve) => { window.__finishRowRepair = resolve; });
-    });
+    };
+    setRepairDemoHandlers({ repair: hold('repair'), repairSplit: hold('repair-split') });
     renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
     window.__harnessReady = true;
   </script>
