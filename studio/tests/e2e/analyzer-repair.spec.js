@@ -138,24 +138,25 @@ async function openTwoMaps(page, { repairable, verdict = 'not_damaged' }) {
   await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
 }
 
-test('damage the repair finds no break in keeps its notice, offers no Repair, and leaves Split now on', async ({ page }) => {
+test('damage the repair finds no break in keeps its notice, offers no Repair, and Split now says why it is greyed out', async ({ page }) => {
   await openTwoMaps(page, { repairable: false });
   const banner = page.locator('#analyzer-damage-banner');
   await expect(banner).toContainText('Damaged demo: read up to 8:27.');
   await expect(banner).toContainText("Repair can't fix this one");
   await expect(banner.locator('button')).toHaveCount(0);
   const split = page.locator('#analyzer-multimap-banner .analyzer-multimap-split');
-  await expect(split).toBeEnabled();
-  await expect(split).not.toHaveAttribute('title', /Repair it first/);
+  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
 });
 
-test('a Repair that finds nothing to cut out turns the notice and gives Split now back', async ({ page }) => {
+test("a Repair that finds nothing to cut out turns the notice and Split now's reason", async ({ page }) => {
   await openTwoMaps(page, { repairable: true });
   const banner = page.locator('#analyzer-damage-banner');
   const split = page.locator('#analyzer-multimap-banner .analyzer-multimap-split');
-  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', /Repair it first/);
   await banner.locator('.analyzer-damage-repair').click();
   await expect(banner).toContainText("Repair can't fix this one");
   await expect(banner.locator('button')).toHaveCount(0);
-  await expect(split).toBeEnabled();
+  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
 });

@@ -1319,7 +1319,10 @@ export const STRINGS = {
     // A damaged demo with no break for the repair to cut out (repair_status.js):
     // the damage is inside a frame, so Repair is not offered.
     CANNOT_REPAIR: "Repair can't fix this one: the damage is inside the recording rather than a break in it, so there is no gap to cut out.",
-    cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it and Split is not held back`,
+    // Its Split stays greyed out too: the split parses the whole demo and
+    // stops at the same damage.
+    SPLIT_DAMAGE_CANNOT_REPAIR: "The damage stops a split, and Repair can't cut it out.",
+    cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it, and Split stays greyed out (the damage stops a split too)`,
     REPAIR_SPLIT_BUTTON: 'Repair & Split',
     REPAIR_SPLIT_TITLE: 'Repair the damage, then split the repaired demo into one demo per map. Both are saved next to this one, which is not changed.',
     repairSplitRepairing: (text) => `Repairing: ${text}`,

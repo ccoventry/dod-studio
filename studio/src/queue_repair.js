@@ -30,7 +30,7 @@ const R = STRINGS.REPAIR;
  *   triggerAutoScan, getTakeIndex() the project's take index, and
  *   refreshQueue() redraw the queue and mark the project changed, and
  *   renderQueue() redraw it alone (a repair that found nothing to cut out
- *   takes the row's Repair away and gives its Split back).
+ *   takes the row's Repair away, and its greyed-out Split says why).
  */
 export function createQueueRepair({ getDemos, removeDemo, scan, getTakeIndex, refreshQueue, renderQueue }) {
   const progress = queueProgress();

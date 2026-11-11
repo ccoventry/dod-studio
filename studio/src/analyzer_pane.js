@@ -140,8 +140,9 @@ async function loadAnalyzerDemo(path) {
 
 // The multi-map notice's Split now and the damage notice's Repair (#15) for
 // the demo at `path`. A repair that found nothing to cut out draws both
-// again: the damage notice then says Repair can't fix it, and Split now is
-// no longer held back for a repair (repair_status.js remembers the verdict).
+// again: the damage notice then says Repair can't fix it, and Split now's
+// tooltip says why it stays greyed out (repair_status.js remembers the
+// verdict).
 function renderRepairAndSplitBanners(path, result) {
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), result, (update) => splitAnalyzedDemo(path, update));
   const repairApp = { relistFolderOf, open: loadAnalyzerDemo };

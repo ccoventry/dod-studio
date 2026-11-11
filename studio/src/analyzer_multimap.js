@@ -13,7 +13,7 @@ import { escapeHtml as esc } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
-import { repairableStatus, splitWaitsForRepair } from './repair_status.js';
+import { repairableStatus, splitDamageReason } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** The maps a report's demo recorded, when there is more than one; else null.
@@ -28,8 +28,8 @@ export function multiMapList(report) {
  * Shows the last known split answer from `status` (split_status.js's
  * checker) at once, then asks again and redraws when the answer differs,
  * unless another demo was opened or a split is running meanwhile. A damaged
- * demo's Split now waits for its repair until `repairable`
- * (repair_status.js) finds no break for the repair to cut out.
+ * demo's Split now is greyed out, its reason from `repairable`
+ * (repair_status.js): "Repair it first", or that Repair can't cut it out.
  * `onSplit(update)` runs on Split now, with `update(SplitProgress)` for the
  * banner's progress bar. While it runs the button is disabled and the bar
  * shows; if it throws, the banner says why.
@@ -53,12 +53,12 @@ export function renderMultiMapBanner(el, report, onSplit, status = splitStatus, 
   let shown = null;
   const show = () => {
     const notice = multiMapNotice(maps, split);
-    const waits = splitWaitsForRepair(demo, canRepair);
-    const key = `${notice.quiet}/${waits}`;
+    const blocked = splitDamageReason(demo, canRepair);
+    const key = `${notice.quiet}/${blocked}`;
     if (key === shown) return;
     shown = key;
     if (notice.quiet) renderAlreadySplit(el, notice);
-    else renderSplitHint(el, notice, onSplit, waits);
+    else renderSplitHint(el, notice, onSplit, blocked);
   };
   show();
   if (!path) return;
@@ -95,10 +95,9 @@ function renderAlreadySplit(el, notice) {
 }
 
 /** The notice with Split now, for a demo not split yet. A damaged demo
- *  (#15) can't be split until it is repaired (`waitsForRepair`): Split now
- *  is greyed out and says so, and the damage notice's Repair & Split does
- *  both. */
-function renderSplitHint(el, notice, onSplit, waitsForRepair) {
+ *  (#15) can't be split: Split now is greyed out with `blockedReason`
+ *  (Repair it first, when the damage notice's Repair & Split does both). */
+function renderSplitHint(el, notice, onSplit, blockedReason) {
   el.classList.remove('analyzer-multimap-quiet');
   el.removeAttribute('title');
   el.innerHTML = `
@@ -108,9 +107,9 @@ function renderSplitHint(el, notice, onSplit, waitsForRepair) {
     <span class="analyzer-multimap-status"></span>`;
   const btn = el.querySelector('.analyzer-multimap-split');
   const status = el.querySelector('.analyzer-multimap-status');
-  if (waitsForRepair) {
+  if (blockedReason) {
     btn.disabled = true;
-    btn.title = STRINGS.REPAIR.SPLIT_NEEDS_REPAIR;
+    btn.title = blockedReason;
     return;
   }
   btn.addEventListener('click', async () => {

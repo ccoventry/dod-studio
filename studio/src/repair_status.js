@@ -3,8 +3,10 @@
 // repair (#15) to cut out (native's demo_repairable: its frames stop reading
 // before the end of the file). Damage inside a frame whose header reads stops
 // the analysis but is no such break, and Repair would only say "not damaged".
-// The Master Queue and the Demo Analyzer ask before they offer Repair and grey
-// out Split; until the answer is in, or when the check fails, they offer it.
+// The Master Queue and the Demo Analyzer ask before they offer Repair; until
+// the answer is in, or when the check fails, they offer it. Split stays greyed
+// out on a damaged demo either way (the split parses the whole demo and stops
+// at the damage too); only its reason follows the answer.
 //
 // Asked when shown, not saved with the scan: the check reads the whole file
 // (about as fast as reading it), and only damaged demos are asked. A repair's
@@ -31,12 +33,14 @@ export function offersRepair(demo, answer) {
 }
 
 /**
- * Whether `demo`'s Split waits for a repair (greyed out, "Repair it first"):
- * exactly when Repair is offered, so a demo the repair can't fix never has
- * its Split held back. Pure.
+ * Why `demo`'s Split is greyed out by its damage, or null when it isn't
+ * damaged: "Repair it first" while Repair is offered (Repair & Split does
+ * both), else that the damage stops a split and Repair can't cut it out.
+ * Pure.
  */
-export function splitWaitsForRepair(demo, answer) {
-  return offersRepair(demo, answer);
+export function splitDamageReason(demo, answer) {
+  if (!isDamagedDemo(demo)) return null;
+  return offersRepair(demo, answer) ? STRINGS.REPAIR.SPLIT_NEEDS_REPAIR : STRINGS.REPAIR.SPLIT_DAMAGE_CANNOT_REPAIR;
 }
 
 /**

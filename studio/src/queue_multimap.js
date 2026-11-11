@@ -13,7 +13,7 @@
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
 import { isDamagedDemo } from './repair_view.js';
-import { repairableStatus, splitWaitsForRepair } from './repair_status.js';
+import { repairableStatus, splitDamageReason } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -114,13 +114,13 @@ function splitButton(demo, onSplit) {
   return btn;
 }
 
-/** Greys out a damaged demo's Split (#15) while the repair has a break to cut
- *  out (`answer`, repair_status.js's: true, false or null while unknown):
- *  the split can't read past it, and the row's Repair & Split does both.
- *  Once the answer is that the repair can't fix it, Split is left on. */
+/** Greys out a damaged demo's Split (#15): the split can't read past the
+ *  damage. Its tooltip says why, from `answer` (repair_status.js's: true,
+ *  false or null while unknown): "Repair it first" while the row offers
+ *  Repair & Split, else that Repair can't cut this damage out either. */
 function holdForRepair(btn, demo, answer) {
   if (btn.dataset.splitting) return;
-  const wait = splitWaitsForRepair(demo, answer);
-  btn.disabled = wait;
-  btn.title = wait ? STRINGS.REPAIR.SPLIT_NEEDS_REPAIR : STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
+  const reason = splitDamageReason(demo, answer);
+  btn.disabled = reason !== null;
+  btn.title = reason ?? STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
 }

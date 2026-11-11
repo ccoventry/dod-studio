@@ -59,20 +59,18 @@ test('once the repair was split, the original offers neither Repair nor Split', 
   await expect(r.locator('.multimap-split-note')).toBeVisible();
 });
 
-test('a demo damaged where the repair finds no break offers no Repair and leaves its Split on', async ({ page }) => {
+test('a demo damaged where the repair finds no break offers no Repair, and its greyed-out Split says why', async ({ page }) => {
   const r = row(page, 'inside.dem');
   await expect(r.locator('.damaged-repair-hint')).toBeHidden();
   const split = r.locator('.multimap-split-btn');
-  await expect(split).toBeEnabled();
-  await expect(split).not.toHaveAttribute('title', /Repair it first/);
-  await split.click();
-  await expect(page.locator('#result')).toHaveText('split');
+  await expect(split).toBeDisabled();
+  await expect(split).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
   // A demo the repair can fix keeps both, on the same queue.
   await expect(row(page, 'both.dem').locator('.multimap-split-btn')).toBeDisabled();
   await expect(row(page, 'both.dem').locator('.damaged-repair-btn').first()).toBeVisible();
 });
 
-test('a Repair that finds nothing to cut out takes Repair away and gives Split back at once', async ({ page }) => {
+test('a Repair that finds nothing to cut out takes Repair away at once, and Split says why it stays greyed out', async ({ page }) => {
   await page.goto('/tests/e2e/queue-repair.html?real');
   await page.waitForFunction(() => window.__harnessReady === true);
   // Damaged, the repair's own check said yes (a file changed since, say),
@@ -83,5 +81,6 @@ test('a Repair that finds nothing to cut out takes Repair away and gives Split b
   await r.locator('.damaged-repair-btn', { hasText: 'Damaged · Repair' }).click();
   await expect(page.locator('#toast-container')).toContainText('Not damaged');
   await expect(r.locator('.damaged-repair-hint')).toBeHidden();
-  await expect(r.locator('.multimap-split-btn')).toBeEnabled();
+  await expect(r.locator('.multimap-split-btn')).toBeDisabled();
+  await expect(r.locator('.multimap-split-btn')).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
 });

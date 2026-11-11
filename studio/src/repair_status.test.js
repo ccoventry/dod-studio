@@ -3,8 +3,9 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('./ipc_bridge.js', () => ({ demoRepairable: vi.fn(), logFrontendEvent: vi.fn() }));
 
 const {
-  createRepairableCheck, isUnrepairableDamage, noteRepairResult, offersRepair, splitWaitsForRepair, REPAIRABLE_KEEP_MS,
+  createRepairableCheck, isUnrepairableDamage, noteRepairResult, offersRepair, splitDamageReason, REPAIRABLE_KEEP_MS,
 } = await import('./repair_status.js');
+const { STRINGS } = await import('./strings.js');
 
 const DAMAGED = { path: 'C:/demos/a.dem', damage: { read_up_to_secs: 507.4, bytes_unread: 1, reason: 'x' } };
 const WHOLE = { path: 'C:/demos/b.dem', damage: null };
@@ -20,25 +21,37 @@ function checker(...answers) {
   return { clock, ask, log, status: createRepairableCheck({ ask, now: () => clock.ms, log }) };
 }
 
-describe('offersRepair and splitWaitsForRepair', () => {
-  it('offer Repair and hold Split back on a damaged demo the repair can fix', () => {
+describe('offersRepair', () => {
+  it('offers Repair on a damaged demo the repair can fix', () => {
     expect(offersRepair(DAMAGED, true)).toBe(true);
-    expect(splitWaitsForRepair(DAMAGED, true)).toBe(true);
   });
 
-  it('keep offering Repair while the answer is unknown or the check failed', () => {
+  it('keeps offering Repair while the answer is unknown or the check failed', () => {
     expect(offersRepair(DAMAGED, null)).toBe(true);
-    expect(splitWaitsForRepair(DAMAGED, null)).toBe(true);
   });
 
-  it('offer no Repair and leave Split on when the repair has nothing to cut out', () => {
+  it('offers no Repair when the repair has nothing to cut out', () => {
     expect(offersRepair(DAMAGED, false)).toBe(false);
-    expect(splitWaitsForRepair(DAMAGED, false)).toBe(false);
   });
 
-  it('never offer Repair on a whole demo, whatever the answer', () => {
+  it('never offers Repair on a whole demo, whatever the answer', () => {
     expect(offersRepair(WHOLE, true)).toBe(false);
-    expect(splitWaitsForRepair(WHOLE, null)).toBe(false);
+  });
+});
+
+describe('splitDamageReason', () => {
+  it('says "Repair it first" while Repair is offered, the answer known or not', () => {
+    expect(splitDamageReason(DAMAGED, true)).toBe(STRINGS.REPAIR.SPLIT_NEEDS_REPAIR);
+    expect(splitDamageReason(DAMAGED, null)).toBe(STRINGS.REPAIR.SPLIT_NEEDS_REPAIR);
+  });
+
+  it('still greys Split out when Repair has nothing to cut, saying why', () => {
+    expect(splitDamageReason(DAMAGED, false)).toBe(STRINGS.REPAIR.SPLIT_DAMAGE_CANNOT_REPAIR);
+  });
+
+  it("leaves a whole demo's Split alone", () => {
+    expect(splitDamageReason(WHOLE, null)).toBeNull();
+    expect(splitDamageReason(WHOLE, false)).toBeNull();
   });
 });
 
