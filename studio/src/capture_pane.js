@@ -39,7 +39,7 @@ import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
-import { effectiveSettings, withProjectLaunchSize } from './project_settings.js';
+import { effectiveSettings, effectiveCaptureSettings, withProjectLaunchSize } from './project_settings.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -626,7 +626,8 @@ function initImportCfgButton() {
  * settings go over the form's last (#1085, project_settings.js).
  */
 export function batchSettingsPayload(state) {
-  const own = effectiveSettings({
+  // The project's field of view replaces the mirv_fov lines when it sets one.
+  const own = effectiveCaptureSettings({
     capture_fps: numberField('#config-capture-fps', 120, { integer: true, positive: true }),
     obs_capture_fps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     // Empty is 0, "the same as Capture FPS" — resolved by the backend.

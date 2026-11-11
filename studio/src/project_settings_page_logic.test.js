@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  PROJECT_TAB_KEYS, sizeChoiceOf, rateChoiceOf, rateKeyFor, rateOf, codecKeyFor, startingValues,
+  PROJECT_TAB_KEYS, PAGE_KEYS, sizeChoiceOf, rateChoiceOf, rateKeyFor, rateOf, codecKeyFor, startingValues,
   changedKeys, hasChanges, pendingProblems, blockWithPending, templateOrDefault, killGapsWith,
   withFolder, withoutFolder, sameDriveLines, installState,
 } from './project_settings_page_logic.js';
@@ -47,8 +47,9 @@ describe('startingValues', () => {
     expect(startingValues(form(), block(), 'pc-b').target_drives).toEqual(['E:/captures']);
   });
 
-  it('holds only the keys the Project tab edits', () => {
-    expect(Object.keys(startingValues(form(), block(), 'pc-a')).sort()).toEqual([...PROJECT_TAB_KEYS].sort());
+  it('holds only the keys the page edits, both tabs', () => {
+    expect(Object.keys(startingValues(form(), block(), 'pc-a')).sort()).toEqual([...PAGE_KEYS].sort());
+    expect(PAGE_KEYS).toEqual(expect.arrayContaining([...PROJECT_TAB_KEYS, 'init_commands', 'custom_commands', 'command_profile_active']));
   });
 
   it('shares no array with the form, so an edit never reaches it', () => {

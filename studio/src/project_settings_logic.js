@@ -15,6 +15,7 @@
 
 import { killGapsFrom } from './kill_gaps_setting.js';
 import { samePath, fileNameOf, folderOf } from './path_display.js';
+import { isUsableFov, withPictureFov } from './clip_settings_logic.js';
 
 const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 
@@ -32,6 +33,7 @@ const KINDS = {
   textOrNone: (v) => (typeof v === 'string' || v === null ? v : undefined),
   texts: (v) => (Array.isArray(v) && v.every((s) => typeof s === 'string') ? [...v] : undefined),
   killGaps: (v) => (v && typeof v === 'object' ? killGapsFrom(v) : undefined),
+  fov: (v) => (isUsableFov(v) ? v : undefined),
   scheduled: (v) => (Array.isArray(v) && v.every((c) => c && typeof c.command === 'string')
     ? v.map((c) => ({ command: c.command, relation: c.relation === 'After' ? 'After' : 'Before', offset_seconds: c.offset_seconds }))
     : undefined),
@@ -50,6 +52,9 @@ export const PROJECT_FIELDS = Object.freeze([
   { key: 'capture_fps', path: ['picture', 'captureFps'], kind: 'size' },
   { key: 'obs_capture_fps', path: ['picture', 'obsCaptureFps'], kind: 'size' },
   { key: 'agr_fps', path: ['picture', 'agrFps'], kind: 'rateOrZero' },
+  // Not a settings-file key: Configuration has no field of view of its own,
+  // so only the Project settings page sets it (build plan step 8).
+  { key: 'capture_fov', path: ['picture', 'fov'], kind: 'fov' },
   { key: 'finish_clips_after_batch', path: ['picture', 'finished', 'enabled'], kind: 'flag' },
   { key: 'finish_codec_obs', path: ['picture', 'finished', 'codecObs'], kind: 'text' },
   { key: 'finish_codec_video', path: ['picture', 'finished', 'codecVideo'], kind: 'text' },
@@ -110,6 +115,19 @@ export function resolveSettings(form, block, pcId = '') {
     if (key in resolved) resolved[key] = value;
   }
   return resolved;
+}
+
+/**
+ * resolveSettings for what a batch sends: the same values, and when `block`
+ * sets a field of view, the Initial Commands with it in place of every
+ * `mirv_fov` line (withPictureFov). A block without one resolves exactly as
+ * resolveSettings does, so a project made before step 8 sends what it did.
+ */
+export function resolveCaptureSettings(form, block, pcId = '') {
+  const resolved = resolveSettings(form, block, pcId);
+  const fov = blockValues(block, pcId).find(([key]) => key === 'capture_fov')?.[1];
+  if (fov === undefined || !Array.isArray(resolved.init_commands)) return resolved;
+  return { ...resolved, init_commands: withPictureFov(resolved.init_commands, fov) };
 }
 
 /**

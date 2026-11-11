@@ -17,7 +17,7 @@
 
 import { logFrontendEvent } from './ipc_bridge.js';
 import {
-  resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
+  resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
 } from './project_settings_logic.js';
 import { projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine } from './project_log.js';
 
@@ -62,6 +62,13 @@ export function setFormReader(reader) {
  *  a capture, a launch or a render uses. See resolveSettings. */
 export function effectiveSettings(form) {
   return resolveSettings(form, block, pcId);
+}
+
+/** effectiveSettings for the batch payload: with the project's field of view
+ *  in place of the Initial Commands' `mirv_fov` lines when it sets one. See
+ *  resolveCaptureSettings. */
+export function effectiveCaptureSettings(form) {
+  return resolveCaptureSettings(form, block, pcId);
 }
 
 /** The value in effect for one setting whose form value is `formValue`. */

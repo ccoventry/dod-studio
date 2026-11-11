@@ -10,18 +10,33 @@ import { samePath } from './path_display.js';
 import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
 import { sameDriveFolders } from './setup_checklist.js';
+import { CLIP_TAB_KEYS, clipProblems, isUsableFov } from './clip_settings_logic.js';
 import { STRINGS } from './strings.js';
 
 /** Every setting the Project tab edits, by its settings-file name. The
  *  project's block holds each one (project_settings_logic.js's fields). */
 export const PROJECT_TAB_KEYS = Object.freeze([
-  'capture_mode', 'resolution_width', 'resolution_height',
+  'capture_mode', 'resolution_width', 'resolution_height', 'capture_fov',
   'capture_fps', 'obs_capture_fps', 'agr_fps',
   'finish_clips_after_batch', 'finish_codec_obs', 'finish_codec_video', 'finish_codec_frames',
   'record_start_lead', 'record_stop_trail', 'kill_gaps',
   'clip_name_template',
   'target_drives', 'render_export_dirs',
 ]);
+
+/** Every setting the page edits: the Project tab's, then the Clip settings
+ *  tab's (clip_settings_logic.js). One OK, Cancel and Apply covers both. */
+export const PAGE_KEYS = Object.freeze([...PROJECT_TAB_KEYS, ...CLIP_TAB_KEYS]);
+
+/** Field of view's chips other than Custom. */
+export const FOV_CHOICES = Object.freeze([90, 100]);
+
+/** The Field of view chip `fov` matches, 'custom', or null when the project
+ *  sets none. */
+export function fovChoiceOf(fov) {
+  if (fov === undefined || fov === null) return null;
+  return FOV_CHOICES.includes(fov) ? fov : 'custom';
+}
 
 /** Capture with's chips, in the page's order. */
 export const CAPTURE_MODES = Object.freeze(['frame_sequence', 'direct_to_video', 'obs', 'agr']);
@@ -80,9 +95,9 @@ const copyOf = (value) => (value === undefined ? undefined : JSON.parse(JSON.str
  * for every key the tab edits. `pcId` picks this PC's folders.
  */
 export function startingValues(form, block, pcId) {
-  const asked = Object.fromEntries(PROJECT_TAB_KEYS.map((key) => [key, copyOf(form?.[key])]));
+  const asked = Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(form?.[key])]));
   const values = resolveSettings(asked, block, pcId);
-  return Object.fromEntries(PROJECT_TAB_KEYS.map((key) => [key, copyOf(values[key])]));
+  return Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(values[key])]));
 }
 
 const RATE_KEYS = ['capture_fps', 'obs_capture_fps', 'agr_fps'];
@@ -108,7 +123,7 @@ export function usablePending(start, pending) {
 /** The keys whose pending value differs from the value the page started from. */
 export function changedKeys(start, pending) {
   const usable = usablePending(start, pending);
-  return PROJECT_TAB_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(usable[key]));
+  return PAGE_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(usable[key]));
 }
 
 /** Whether there is anything for Apply to do. */
@@ -136,6 +151,10 @@ export function pendingProblems(pending) {
   if (!(isWhole(rate) || (rateKey === 'agr_fps' && rate === 0))) problems[rateKey] = S.BAD_RATE;
   // AGR's 0 reads Capture FPS, which must then be usable.
   else if (rateKey === 'agr_fps' && rate === 0 && !isWhole(pending.capture_fps)) problems[rateKey] = S.BAD_RATE;
+  // Unset is fine: the Clip settings lines or the game's configs decide.
+  if (pending.capture_fov !== undefined && pending.capture_fov !== null && !isUsableFov(pending.capture_fov)) {
+    problems.capture_fov = S.BAD_FOV;
+  }
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};
@@ -145,7 +164,7 @@ export function pendingProblems(pending) {
   }
   const template = parseTemplate(pending.clip_name_template);
   if (template.errors.length > 0) problems.clip_name_template = template.errors.join(' ');
-  return problems;
+  return { ...problems, ...clipProblems(pending) };
 }
 
 /**

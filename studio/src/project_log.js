@@ -128,6 +128,20 @@ export function projectSettingsPageAppliedLine(path, how, keys) {
   return `[project settings] ${how}: ${keys.length} setting(s) changed in ${pageProject(path)}: ${keys.join(', ')}`;
 }
 
+/** What the project's Clip settings hold after an Apply that changed them
+ *  (#1085 step 8): the preset it started from and how many lines, counts
+ *  rather than the lines themselves. */
+export function clipSettingsAppliedLine(path, { preset, initCount, scheduledCount, fov }) {
+  const from = preset ? `from ${preset}` : 'no preset';
+  const view = fov === undefined || fov === null ? 'field of view not set' : `field of view ${fov}`;
+  return `[project settings] Clip settings for ${pageProject(path)}: ${from}, ${initCount} line(s), ${scheduledCount} at each clip, ${view}`;
+}
+
+/** A Clip settings preset saved on this PC from the Project settings page. */
+export function clipPresetSavedLine(name, lists) {
+  return `[project settings] Saved the Clip settings preset ${name} (${(lists.init_commands || []).length} line(s), ${(lists.custom_commands || []).length} at each clip)`;
+}
+
 /** The page closed by `how` (OK, Cancel, Discard, a project opening), with
  *  how many unapplied edits it dropped. */
 export function projectSettingsPageClosedLine(path, how, dropped) {
