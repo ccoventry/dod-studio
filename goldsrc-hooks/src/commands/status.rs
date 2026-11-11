@@ -196,6 +196,9 @@ fn status_text() -> String {
     if let Some(weather) = crate::map_weather::status_line() {
         lines.push(weather);
     }
+    if let Some(wind) = crate::map_wind::status_line() {
+        lines.push(wind);
+    }
     lines.push(crate::map_light::status_line());
     lines.push(crate::player_overrides::status());
     if let Some(renames) = crate::player_names::status_line() {

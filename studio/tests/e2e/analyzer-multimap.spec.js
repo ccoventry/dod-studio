@@ -4,7 +4,8 @@
 // the tabs says so and offers Split now: native splits off every map of a
 // minute or more (split_demo_auto; which maps is native's keep_at_least,
 // tested there), the notice shows its progress, and the first demo written
-// opens.
+// opens. Once the maps were split next to it (demo_split_status), the notice
+// is a quiet line instead.
 import { test, expect } from '@playwright/test';
 
 const DEMO = 'C:/demos/wsod25_grp3_h1_dyelife.dem';
@@ -74,6 +75,31 @@ test('a demo with two maps says so above the tabs', async ({ page }) => {
   await expect(banner).toContainText('This demo recorded 2 maps (dod_lennon2, dod_lennon2).');
   await expect(banner).toContainText('Only the first is analysed');
   await expect(banner.locator('button')).toHaveText('Split now');
+});
+
+test('a demo not split yet says only the first map is used, and offers Split now', async ({ page }) => {
+  await page.evaluate(() => { window.__mockInvokeHandlers.demo_split_status = () => ({ split: false, files: [] }); });
+  await open(page, ['dod_lennon2', 'dod_anzio']);
+  const banner = page.locator('#analyzer-multimap-banner');
+  await expect(banner).toContainText('Only the first is analysed, and highlights and captures use it too. Split it to use the rest.');
+  await expect(banner.locator('button')).toHaveText('Split now');
+  await expect(banner).not.toHaveClass(/analyzer-multimap-quiet/);
+  expect(await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'demo_split_status')?.args))
+    .toEqual({ path: DEMO, maps: ['dod_lennon2', 'dod_anzio'], minSeconds: 60 });
+});
+
+test('a demo already split next to it gets a quiet line naming the files, with no button', async ({ page }) => {
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.demo_split_status = () => ({ split: true, files: ['a_split1_lennon2.dem', 'a_split2_anzio.dem'] });
+  });
+  await open(page, ['dod_lennon2', 'dod_anzio']);
+  const banner = page.locator('#analyzer-multimap-banner');
+  await expect(banner).toHaveText('This demo recorded 2 maps (dod_lennon2, dod_anzio) and was already split. This report covers the first.');
+  await expect(banner).toHaveClass(/analyzer-multimap-quiet/);
+  await expect(banner).toHaveAttribute('title', 'Split next to it into: a_split1_lennon2.dem, a_split2_anzio.dem');
+  await expect(banner.locator('button')).toHaveCount(0);
+  // Not a warning: no gold.
+  await expect(banner).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 });
 
 test('a one-map demo, or an older cache entry with no map list, shows nothing', async ({ page }) => {

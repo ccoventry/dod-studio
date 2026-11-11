@@ -95,6 +95,8 @@ MAP
       25th Anniversary only: allow the engine's map-surface shaders during playback.
   ds_map_weather 0-3
       Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
+  ds_map_wind "<x> <y>"|0
+      The wind that blows rain, snow and smoke, in units a second along the map's x and y: "0 0" is calm, 0 the map's own.
   ds_map_run_cfgs 0/1
       Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
   ds_map_apply_lighting 0/1
