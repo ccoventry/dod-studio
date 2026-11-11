@@ -92,11 +92,14 @@
 //! sign-on still holds. An HLTV demo has no such gap and starts over from
 //! the clock's start, as it always has ([`recording_start`]).
 //!
-//! The kill feed is emptied just before the step that lands: the steps
-//! replay every `DeathMsg` of the demo within a second or two of real time,
-//! which would put the last few kills before the landing in the feed however
-//! long ago they were. The landing step's own (the 5 s before the target)
-//! stay, as playing up to it would leave them.
+//! The kill feed is emptied on the way: the steps replay every `DeathMsg` of
+//! the demo within a second or two of real time, which would put the last
+//! few kills before the landing in the feed however long ago they were. So a
+//! rewind steps to exactly `hud_deathnotice_time` before the target, empties
+//! the feed there, and steps on: the kills it then replays are the ones
+//! playing up to the target would still show (#1085: on `solifotw-pb2` a
+//! clear just before the last step also took a kill 2.5 s before the target,
+//! since that step starts anywhere up to 5 s back).
 //!
 //! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
@@ -202,10 +205,12 @@ struct Pending {
     /// `m_LastFrameTime` before it, until the player has sent the start
     /// frame.
     rewind_from: Option<f64>,
-    /// This seek is a rewind: it empties the kill feed before landing.
+    /// This seek is a rewind: it empties the kill feed at `feed_at`.
     rewind: bool,
-    /// Frames the kill feed has been emptied on before the landing step
-    /// ([`FEED_CLEAR_FRAMES`]).
+    /// Where a rewind empties the kill feed: the target less a notice's
+    /// lifetime ([`rewind_step`]).
+    feed_at: f64,
+    /// Frames the kill feed has been emptied on ([`FEED_CLEAR_FRAMES`]).
     feed_cleared: u32,
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
@@ -249,6 +254,8 @@ fn cancel_pending() -> Option<f64> {
 enum Step {
     To(f64),
     Land(f64),
+    /// Empty the kill feed before stepping on (a rewind).
+    ClearFeed,
 }
 
 fn next_step(now: f64, target: f64) -> Step {
@@ -256,6 +263,16 @@ fn next_step(now: f64, target: f64) -> Step {
         Step::To(now + STEP_SECONDS)
     } else {
         Step::Land(target)
+    }
+}
+
+/// One frame of a rewind still to empty the kill feed at `feed_at`: step to
+/// exactly there, then clear; `None` once cleared, stepping as any seek.
+fn rewind_step(now: f64, target: f64, feed_at: Option<f64>) -> Step {
+    match feed_at {
+        Some(at) if now < at - 0.001 => Step::To((now + STEP_SECONDS).min(at)),
+        Some(_) => Step::ClearFeed,
+        None => next_step(now, target),
     }
 }
 
@@ -274,6 +291,7 @@ impl Pending {
             last_set,
             rewind_from: None,
             rewind: false,
+            feed_at: target,
             feed_cleared: 0,
             waited: 0,
             steps: 0,
@@ -283,10 +301,20 @@ impl Pending {
     }
 }
 
-/// Frames the kill feed is emptied on before a rewind's landing step: the
-/// last step's `DeathMsg`s may reach the client a frame after the player
-/// sent them, so one clear could come before they arrive.
+/// Frames the kill feed is emptied on during a rewind: the last step's
+/// `DeathMsg`s may reach the client a frame after the player sent them, so
+/// one clear could come before they arrive.
 const FEED_CLEAR_FRAMES: u32 = 2;
+
+/// The longest notice lifetime a rewind allows for: past this, steps would
+/// replay more than a few seconds' worth of kills after the clear anyway.
+const MAX_FEED_SECONDS: f64 = 60.0;
+
+/// Where a rewind to `target` empties the kill feed, for notices that live
+/// `lifetime` seconds.
+fn feed_clear_at(target: f64, lifetime: Option<f64>) -> f64 {
+    target - lifetime.unwrap_or(0.0).clamp(0.0, MAX_FEED_SECONDS)
+}
 
 /// Whether a seek from `now` to `to` goes back to the start first and steps
 /// forward from there (#830, #1085): any backward seek, since a jump back
@@ -1252,11 +1280,13 @@ mod player {
             }
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let t = match next_step(get_now(player), seek.target) {
+            let feed_at =
+                (seek.rewind && seek.feed_cleared < FEED_CLEAR_FRAMES).then_some(seek.feed_at);
+            let t = match rewind_step(get_now(player), seek.target, feed_at) {
                 Step::To(t) => t,
-                Step::Land(_) if seek.rewind && seek.feed_cleared < FEED_CLEAR_FRAMES => {
-                    // The kills the steps replayed, not the landing's own
-                    // (module doc).
+                Step::ClearFeed => {
+                    // The kills the steps replayed too early to still be up
+                    // at the target (module doc).
                     seek.feed_cleared += 1;
                     if let Err(why) = crate::deathmsg::clear_for_rewind() {
                         crate::debug::report(&format!(
@@ -1344,6 +1374,7 @@ mod player {
                 let mut seek = Pending::new(to, then, base);
                 seek.rewind_from = Some(from);
                 seek.rewind = true;
+                seek.feed_at = feed_clear_at(to, crate::deathmsg::notice_lifetime());
                 *pending = Some(seek);
                 let from_where = if recording.is_some() {
                     "the first recorded frame"
@@ -1690,6 +1721,26 @@ mod tests {
         assert!((got - 3399.99).abs() < 1e-2, "{got}");
         assert!(next_float_up(3000.0) > 3000.0);
         assert_eq!(next_float_up(f32::INFINITY), f32::INFINITY);
+    }
+
+    /// A rewind steps to exactly the notice lifetime before the target,
+    /// clears there, then steps on to the target.
+    #[test]
+    fn a_rewind_empties_the_kill_feed_one_notice_lifetime_before_landing() {
+        let at = feed_clear_at(978.61, Some(10.0));
+        assert!((at - 968.61).abs() < 1e-9);
+        assert_eq!(rewind_step(566.49, 978.61, Some(at)), Step::To(571.49));
+        assert_eq!(rewind_step(965.0, 978.61, Some(at)), Step::To(at));
+        assert_eq!(rewind_step(968.62, 978.61, Some(at)), Step::ClearFeed);
+        assert_eq!(rewind_step(968.62, 978.61, None), Step::To(973.62));
+        assert_eq!(rewind_step(975.0, 978.61, None), Step::Land(978.61));
+        // A target nearer the start than one lifetime clears at once.
+        assert_eq!(
+            rewind_step(566.49, 570.0, Some(feed_clear_at(570.0, Some(10.0)))),
+            Step::ClearFeed
+        );
+        assert_eq!(feed_clear_at(100.0, None), 100.0);
+        assert_eq!(feed_clear_at(100.0, Some(1e6)), 40.0);
     }
 
     #[test]
