@@ -267,3 +267,29 @@ fn an_obs_batch_writes_what_it_always_has() {
 fn an_agr_batch_writes_what_it_always_has() {
     check_golden("agr", CaptureMode::Agr);
 }
+
+/// The take cleanup's disk estimate and the batch read one plan (#1085): one
+/// figure per block the batch records, in play order, each the sum of its
+/// highlights' own estimates.
+#[test]
+fn the_disk_estimate_bills_the_blocks_the_batch_records() {
+    let root = Scratch::new("batch_golden_estimate");
+    let config = config(&root, CaptureMode::FrameSequence);
+    let streaks = payload();
+    let (jobs, _headroom) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new())
+            .expect("the golden batch builds");
+    let billed: Vec<u64> = jobs
+        .iter()
+        .flat_map(|job| job.blocks.iter())
+        .map(|block| {
+            block
+                .source_streak_indices
+                .iter()
+                .map(|&i| block_byte_estimate(&config, &streaks[i], FPS))
+                .sum()
+        })
+        .collect();
+    assert_eq!(billed.len(), 7);
+    assert_eq!(estimate_batch_capture_blocks(&streaks, &config), billed);
+}
