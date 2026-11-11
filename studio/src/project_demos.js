@@ -77,6 +77,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     return back;
   }
 
+  // How many checkMissingDemos calls are under way (project open, Start
+  // Capture Batch), for markDemosGone.
+  let checksRunning = 0;
+
   /**
    * Marks `demos`, whose files were there and have gone, as missing, with no
    * dialog: the rows show it (demo_file_recheck.js, a file renamed, moved or
@@ -84,10 +88,15 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
    * near where it was and in the scan folders, so a renamed file gets the
    * row's Use found copy button. A file back by the time the search runs is
    * left as it is. Resolves to the rows marked; the caller redraws the queue.
+   * Marks nothing while checkMissingDemos runs, or when one started during
+   * the search: that check marks the same rows itself after its dialog, and
+   * a second toast with its own Use found copy would contradict the dialog.
    */
   async function markDemosGone(demos) {
-    if (demos.length === 0) return [];
-    return markMissing(await findMissingDemos(demos, searchDirs(demos)), demos);
+    if (demos.length === 0 || checksRunning > 0) return [];
+    const missing = await findMissingDemos(demos, searchDirs(demos));
+    if (checksRunning > 0) return [];
+    return markMissing(missing, demos);
   }
 
   // A loaded project's demos may have moved or been deleted since it was
@@ -97,7 +106,16 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // Capture Batch over the demos with a highlight picked (no project path
   // then). Resolves to how many of `demos` are still missing. `onSearched`
   // is called when the folder search is done, before any dialog (#958).
-  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
+  async function checkMissingDemos(...args) {
+    checksRunning += 1;
+    try {
+      return await checkMissingDemosNow(...args);
+    } finally {
+      checksRunning -= 1;
+    }
+  }
+
+  async function checkMissingDemosNow(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
     const missing = await findMissingDemos(demos, searchDirs(demos, projectPath, savedScanPaths));
     onSearched?.();
     logFrontendEvent(missingDemosLine(demos.length, missing.length, missing.filter((m) => m.candidate).length));

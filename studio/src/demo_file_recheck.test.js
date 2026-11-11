@@ -99,6 +99,18 @@ describe('the look on focus', () => {
     expect(app.markDemosGone).not.toHaveBeenCalled();
     expect(a.missing).toBeUndefined();
   });
+
+  it('says nothing when project_demos.js marked none (its own missing check has them)', async () => {
+    const a = demo('a.dem');
+    const { app, disk, focus } = setUp([a]);
+    app.markDemosGone.mockResolvedValueOnce([]);
+    disk.delete(a.path);
+    await focus();
+    expect(app.markDemosGone).toHaveBeenCalledWith([a]);
+    expect(app.refreshQueue).not.toHaveBeenCalled();
+    expect(logFrontendEvent).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
 });
 
 describe('ensurePresent', () => {

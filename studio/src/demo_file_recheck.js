@@ -57,6 +57,9 @@ export function createDemoFileRecheck({
     if (gone.length === 0 && back.length === 0) return [];
     markDemosBack(back);
     const marked = await markDemosGone(gone);
+    // None marked and none back: the file came back during the search, or
+    // project_demos.js's own missing check has those rows (markDemosGone).
+    if (marked.length === 0 && back.length === 0) return [];
     // The missing state isn't saved, so the project isn't marked changed.
     refreshQueue(false);
     const found = marked.filter((d) => d.foundAt);
