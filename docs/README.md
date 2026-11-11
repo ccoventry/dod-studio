@@ -51,7 +51,8 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
 - [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files).
+- [../tools/agent-kit/](../tools/agent-kit/README.md) — dev-only helpers for testing the app: the shared game lock, playing demos to the end on PRE and POST, a throwaway Studio driven over CDP, frame checks and the comparison-video stopwatch, the activity log, the open-PR board, issue audits, open PRs by file, demos and kill moments from the analyzer cache, the hook log by game run, and HLAE's command names.
 
 ## Folders
 - [wiki/](wiki/) — source for the GitHub wiki, published when `main` changes.
-- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes). History, not current state.
+- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes), the #1107 codebase audit findings (`archive/codebase_audit_1107.md`). History, not current state.
