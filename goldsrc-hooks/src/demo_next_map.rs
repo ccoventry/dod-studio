@@ -251,11 +251,16 @@ static WAITING_FROM_END: AtomicU64 = AtomicU64::new(0);
 static LOADER_MAP: AtomicU32 = AtomicU32::new(1);
 static PLAYING_MAP: AtomicU32 = AtomicU32::new(0);
 
+/// The map this demo's playback starts at: the setting as it was when the
+/// demo was opened, so changing it partway through a load changes nothing.
+static START_MAP: AtomicU32 = AtomicU32::new(1);
+
 /// Called by the `viewdemo` wrap before the engine opens the demo: its maps
-/// are counted from 1 again.
+/// are counted from 1 again, and it starts at the map the setting names now.
 pub fn demo_started() {
     LOADER_MAP.store(1, Ordering::Relaxed);
     PLAYING_MAP.store(0, Ordering::Relaxed);
+    START_MAP.store(wanted_start_map(), Ordering::Relaxed);
 }
 
 /// `ds_debug_status`'s line, while a `viewdemo` demo is in the player or
@@ -509,7 +514,7 @@ mod installed {
             }
         }
         let ended = LOADER_MAP.fetch_add(1, Ordering::Relaxed);
-        let start = wanted_start_map();
+        let start = START_MAP.load(Ordering::Relaxed);
         if before_start(ended, start) {
             // Safety: `report` only appends to the hook log.
             unsafe {
@@ -545,7 +550,7 @@ mod installed {
         proxy: *mut c_void,
     ) {
         let loader_map = LOADER_MAP.load(Ordering::Relaxed);
-        if before_start(loader_map, wanted_start_map()) {
+        if before_start(loader_map, START_MAP.load(Ordering::Relaxed)) {
             return;
         }
         PLAYING_MAP.store(loader_map, Ordering::Relaxed);

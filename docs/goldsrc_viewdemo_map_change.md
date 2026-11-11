@@ -153,3 +153,47 @@ Nothing is touched until the setting is first turned on. The value `2` also
 runs the engine's own `reconnect` when it lets go, as `playdemo` does at that
 point, to compare.
 
+## Measured
+
+All with `goldsrc-hooks/tools/game_probe.py`, the hook DLL from this branch,
+the game kept behind other windows, on both movie installs, 2026-11-10 and
+11-11. Demos (pre-Anniversary install's `dod` folder, played on the
+Anniversary install by a `../../` path):
+
+- `bewton-playoffs-round1-armory-allied` (POV): `dod_armory_b6` to 1210.00 s
+  of the player's clock (3,910 network frames), `dod_anzio` from 4.58 to
+  29.79 s (2,496 frames), then `dod_armory_b6` again from 3.18 to 1316.60 s.
+- `ktps8w10qf-m00cat_soul_m2_harr_h2` (POV): `dod_harrington` to 1430 s
+  (123,865 frames), then 8 s of `dod_anzio`.
+
+The player's clock is each map's own `svc_time`, so it starts again at every
+map change.
+
+### Stock: the loader stops while playback is still at the start
+
+`ds_debug_demo_play_next_map 0`, and the connect guard switched off
+(`GOLDSRC_HOOKS_ALLOW_CONNECT=1`) so no wrapper of ours sits on `reconnect`:
+
+| | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| console, as the loader reaches the change | `Demo file completely loaded.` twice, `Demo playback stopped.` | `Demo file completely loaded.`, `Disconnected.`, `Demo playback stopped.` |
+| loaded | 3,899 packets | 3,899 packets |
+| playback then | 1178 s up to 1210.00 s, and stays there (6 readings 10 s apart) | 1173 s up to 1210.00 s, and stays there |
+
+The stop comes seconds after `viewdemo`, long before playback is anywhere
+near the map change, and with nothing of the hook's on `reconnect`: it is the
+loader's own.
+
+### With `ds_debug_demo_play_next_map 1`
+
+| | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| at load | the loader waits at 1210.00 s; `IsLoading` no, the loading strip goes | the same |
+| playback reaches 1210.00 s | `dod_anzio` loaded 2.5 s later, clock 4.58-29.79 | `dod_anzio` loaded 6.9 s later, the same clock |
+| playback reaches 29.79 s | `dod_armory_b6` loaded 2.3 s later, clock from 3.18 | loaded 4.4 s later, the same clock |
+| the last map | loads whole (128,201 packets, to 1316.60 s) and ends as any demo does: `Demo file completely loaded.`, `Disconnected.`, `Automatic connection retry...` | the same |
+
+The console prints the engine's own `Protocol Version 48, Spawn count 53`
+(then `54`) at each change. Frames recorded with HLAE after both changes show
+the world, the gun and the HUD drawn as usual on both builds.
+
