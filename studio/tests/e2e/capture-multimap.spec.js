@@ -24,5 +24,5 @@ test('a pick in a multi-map demo starts the batch without asking, and the log sa
   const log = await page.evaluate(() => window.__mockInvocations
     .filter((c) => c.cmd === 'log_frontend_event')
     .map((c) => c.args.message));
-  expect(log).toContain('[capture] Using the first map of 1 demo that recorded more than one map');
+  expect(log).toContain('[capture] two_maps.dem recorded 2 maps: capturing dod_harrington only; dod_anzio is left out (split the demo to capture it)');
 });
