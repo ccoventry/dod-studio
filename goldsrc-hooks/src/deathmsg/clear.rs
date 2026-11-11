@@ -297,9 +297,14 @@ fn expire_up_to(cutoff: f32) -> usize {
     count
 }
 
+/// Every line goes on the next frame. Returns how many.
+pub(super) fn expire_all() -> usize {
+    expire_up_to(f32::INFINITY)
+}
+
 /// `clear`: every line goes on the next frame.
 pub(super) fn clear_now() -> String {
-    match expire_up_to(f32::INFINITY) {
+    match expire_all() {
         0 => format!("{COMMAND}: the kill feed is already empty\n"),
         1 => format!("{COMMAND}: cleared 1 line\n"),
         n => format!("{COMMAND}: cleared {n} lines\n"),

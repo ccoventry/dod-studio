@@ -715,6 +715,19 @@ pub(crate) fn lift_name_cap() -> Result<(), String> {
     unsafe { name_cap::lift(base, array) }
 }
 
+/// Empties the kill feed before a rewind lands (`demo_seek`, #1085): its
+/// steps replay every kill before the landing within a second or two.
+/// Returns how many lines went.
+// Only the 32-bit demo player rewinds; a host build has none.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn clear_for_rewind() -> Result<usize, String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    Ok(clear::expire_all())
+}
+
 /// Whether the kill feed holds 63-character names now.
 pub(crate) fn name_cap_lifted() -> bool {
     engine::client_module_base().is_some_and(name_cap::lifted)
