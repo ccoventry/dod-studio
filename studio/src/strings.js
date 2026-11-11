@@ -214,8 +214,11 @@ export const STRINGS = {
     // #217: a queued demo that recorded more than one map.
     multiMapSplitButton: (count) => `${count} maps · Split`,
     multiMapSplitTitle: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'The game stops playing it at the first map change, so nothing past it can be captured, and its highlights cover one map only. '
+      + 'Its highlights and captures use the first map only; the maps after it are left out. '
       + 'Click to split it: each map of a minute or more becomes a demo of its own in the queue, in place of this one. The file itself is kept.',
+    MULTI_MAP_ALREADY_SPLIT: 'Already split',
+    multiMapAlreadySplitTitle: (maps, files) => `This demo recorded ${maps.length} maps (${maps.join(', ')}), already split next to it: `
+      + `${files.join(', ')}. This row uses the first map; the split demos hold every map.`,
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
@@ -1471,7 +1474,10 @@ export const STRINGS = {
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
     multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'Only the first is analysed: the game stops playing it at the map change. Split it to use the rest.',
+      + 'Only the first is analysed, and highlights and captures use it too. Split it to use the rest.',
+    multiMapAlreadySplit: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}) and was already split. `
+      + 'This report covers the first.',
+    multiMapAlreadySplitTitle: (files) => `Split next to it into: ${files.join(', ')}`,
     MULTI_MAP_SPLIT_BUTTON: 'Split now',
     MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
       + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
@@ -2088,14 +2094,12 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
-    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    // The queue's line while a split runs (#951).
+    queueSplitHead: (name) => `Splitting ${name}`,
     QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
-    queueSplitDoneLine: (elapsed, demos) => `Done in ${elapsed}: split ${demos} demo${demos === 1 ? '' : 's'}`,
-    MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
-    MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
-    MULTI_MAP_PICKED_SPLIT: 'Split Them',
+    queueSplitDoneLine: (elapsed) => `Done in ${elapsed}: split 1 demo`,
+    // #217: the activity log's line when picks are in demos with several maps.
+    captureFirstMapOnly: (n) => `[capture] Using the first map of ${n} demo${n === 1 ? '' : 's'} that recorded more than one map`,
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
