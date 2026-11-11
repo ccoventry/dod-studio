@@ -18,6 +18,8 @@
 //! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
 //!   capture mode records through HLAE's `mirv_` commands.
 //! - **Its command pipe answers**, so the batch can be handed over.
+//! - **It asks this Studio**, not another one open beside it, for analyses
+//!   and reviews (#1235): a game another open Studio started stays that one's.
 //!
 //! What a launch guarantees and a reuse doesn't is listed in
 //! `docs/features.md` (3.3); `REUSE_LINES` resets what the batch relies on.
@@ -42,6 +44,9 @@ pub struct ReuseFacts<'a> {
     pub modules: Option<&'a [PathBuf]>,
     /// Its command pipe took an empty message.
     pub pipe_answers: bool,
+    /// It asks this Studio, not another one open beside it, for analyses
+    /// and reviews (`sys::studio_pipe::game_asks_this_studio`, #1235).
+    pub asks_this_studio: bool,
 }
 
 /// The hook DLL's file name, as the game has it loaded.
@@ -60,45 +65,48 @@ fn named<'a>(modules: &'a [PathBuf], name: &str) -> Vec<&'a PathBuf> {
         .collect()
 }
 
+/// Whether a running game with `modules` loaded could be capturing a batch:
+/// every batch records through HLAE, and a game left open for one (#1075)
+/// was started by Studio through HLAE too, so a game without it (started
+/// from Steam) never is. One whose DLLs can't be read (`None`) may be.
+pub fn may_be_capturing(modules: Option<&[PathBuf]>) -> bool {
+    modules.is_none_or(|m| !named(m, HLAE_DLL_NAME).is_empty())
+}
+
 /// The game to run the batch in, or why a launch is needed (one sentence
 /// for the activity log, starting lower case).
 pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
     let pid = match facts.running {
         RunningGameCheck::Match { pid } => *pid,
-        RunningGameCheck::None => return Err("no game is running".into()),
+        RunningGameCheck::None => return Err(crate::messages::game_reuse::NO_GAME_RUNNING.into()),
         RunningGameCheck::Mismatch { .. } => {
-            return Err("the running game was started with other launch settings".into());
+            return Err(crate::messages::game_reuse::GAME_HAS_OTHER_LAUNCH_SETTINGS.into());
         }
     };
     if !facts.hook_runs_batch {
-        return Err(
-            "Seek Between Clips is off, and a patched batch starts the game on its first demo"
-                .into(),
-        );
+        return Err(crate::messages::game_reuse::SEEK_BETWEEN_CLIPS_OFF.into());
     }
     if facts.capture_mode == CaptureMode::Obs {
-        return Err(
-            "OBS mode starts the game with its sound through waveOut, which only a fresh start sets"
-                .into(),
-        );
+        return Err(crate::messages::game_reuse::OBS_NEEDS_FRESH_START.into());
     }
     if facts.hook_dll.is_none() {
-        return Err("Studio has no hook DLL to run the batch with".into());
+        return Err(crate::messages::game_reuse::NO_HOOK_DLL_IN_STUDIO.into());
     }
     let Some(modules) = facts.modules else {
-        return Err(format!("the game's DLLs (PID {pid}) could not be read"));
+        return Err(crate::messages::game_reuse::game_dlls_unreadable(pid));
     };
     // Which hook DLL and build it has is part of `facts.running` (#1143).
     if named(modules, HOOK_DLL_NAME).is_empty() {
-        return Err("the running game has no DoD Studio hook DLL (not started by Studio)".into());
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HOOK_DLL.into());
     }
     if named(modules, HLAE_DLL_NAME).is_empty() {
-        return Err(
-            "the running game has no HLAE in it, which every capture records through".into(),
-        );
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HLAE.into());
     }
     if !facts.pipe_answers {
-        return Err("the running game does not take commands from Studio".into());
+        return Err(crate::messages::game_reuse::GAME_DOES_NOT_TAKE_COMMANDS.into());
+    }
+    if !facts.asks_this_studio {
+        return Err(crate::messages::game_reuse::GAME_STARTED_BY_OTHER_STUDIO.into());
     }
     Ok(pid)
 }
@@ -152,7 +160,23 @@ mod tests {
             hook_dll: Some(Path::new(DLL)),
             modules: Some(modules),
             pipe_answers: true,
+            asks_this_studio: true,
         }
+    }
+
+    /// #20: a game from Steam, with no HLAE in it, can't be capturing a
+    /// batch from before Studio closed, so the catch-up doesn't wait for it.
+    #[test]
+    fn only_a_game_with_hlae_in_it_may_be_capturing() {
+        let m = modules();
+        assert!(may_be_capturing(Some(&m)));
+        let steam = vec![
+            PathBuf::from(r"C:\Games\Half-Life\hl.exe"),
+            PathBuf::from(r"C:\Games\Half-Life\hw.dll"),
+        ];
+        assert!(!may_be_capturing(Some(&steam)));
+        // Unreadable: it may be.
+        assert!(may_be_capturing(None));
     }
 
     #[test]
@@ -209,6 +233,21 @@ mod tests {
                 ..facts(&running, &m)
             })
             .contains("does not take commands")
+        );
+    }
+
+    #[test]
+    fn a_game_another_open_studio_started_is_not_reused() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let m = modules();
+        let f = ReuseFacts {
+            asks_this_studio: false,
+            ..facts(&running, &m)
+        };
+        assert!(
+            game_to_reuse(&f)
+                .unwrap_err()
+                .contains("another DoD Studio")
         );
     }
 

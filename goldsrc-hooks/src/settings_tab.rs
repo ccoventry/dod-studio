@@ -89,6 +89,13 @@ const OVERVIEW_PLAYERS: &[(&str, &str)] = &[
     ("3", "The watched player"),
     ("4", "Nobody"),
 ];
+const XRAY: &[(&str, &str)] = &[("0", "Off"), ("1", "Through walls"), ("2", "And outlines")];
+const HEADSHOT_LOUDER: &[(&str, &str)] = &[
+    ("0", "The game's own"),
+    ("1", "A little louder"),
+    ("2", "Louder"),
+    ("3", "Loudest (clipped)"),
+];
 const OVERVIEW_MARKER: &[(&str, &str)] = &[
     ("0", "The game's own"),
     ("1", "HLTV: team icon"),
@@ -102,10 +109,10 @@ const OWN_BLOOD: &[(&str, &str)] = &[
     ("4", "All"),
 ];
 const FAST_LOAD: &[(&str, &str)] = &[
-    ("0", "Off"),
-    ("1", "8 ms a frame"),
-    ("16", "16 ms a frame"),
-    ("33", "33 ms a frame"),
+    ("0", "Off (slowest)"),
+    ("1", "8 ms (default)"),
+    ("16", "16 ms (choppy)"),
+    ("33", "33 ms (choppier)"),
 ];
 const EX_INTERP_MAX: &[(&str, &str)] = &[
     ("100", "100 ms (stock)"),
@@ -113,6 +120,12 @@ const EX_INTERP_MAX: &[(&str, &str)] = &[
     ("300", "300 ms"),
     ("500", "500 ms"),
     ("1000", "1000 ms"),
+];
+const PLAYER_INFO: &[(&str, &str)] = &[
+    ("0", "Off"),
+    ("1", "Name"),
+    ("2", "Health"),
+    ("3", "Name and health"),
 ];
 const WEATHER: &[(&str, &str)] = &[
     ("0", "The map's own"),
@@ -152,6 +165,18 @@ pub const AREAS: &[Area] = &[
                 console_name!("spec_hide_hltv_messages"),
                 "Hide HLTV messages",
                 "hide the HLTV proxy's on-screen messages.",
+            ),
+            choice(
+                console_name!("spec_show_player_info"),
+                "Over players",
+                "what to show over each player's head in an HLTV demo.",
+                PLAYER_INFO,
+            ),
+            choice(
+                console_name!("spec_xray_show"),
+                "X-ray",
+                "players behind walls glow in their team's colour while a demo plays, like CS:GO's GOTV.",
+                XRAY,
             ),
         ],
     },
@@ -296,6 +321,16 @@ pub const AREAS: &[Area] = &[
                 "rain or snow on any map, or none. Needs cl_particlefx 2.",
                 WEATHER,
             ),
+            check(
+                console_name!("map_run_cfgs"),
+                "Run per-map cfgs",
+                "before a demo's map loads, run dodstudio_maps\\all_maps.cfg and dodstudio_maps\\<map>.cfg.",
+            ),
+            check(
+                console_name!("map_apply_lighting"),
+                "Apply map light files",
+                "relight the boxes and lamps dodstudio_maps\\<map>_light.txt lists.",
+            ),
         ],
     },
     Area {
@@ -323,6 +358,27 @@ pub const AREAS: &[Area] = &[
                 "Play gunshots a demo left out",
                 "play the gunshots a demo left silent, every player's.",
             ),
+            check(
+                console_name!("sound_headshot_farther"),
+                "Hear headshots farther away",
+                "a headshot's sound fades half as fast with distance, so it carries twice as far.",
+            ),
+            check(
+                console_name!("sound_headshot_pov_farther"),
+                "POV player only",
+                "only the headshots the POV player (or the HLTV player you watch in first person) makes carry farther.",
+            ),
+            choice(
+                console_name!("sound_headshot_louder"),
+                "Headshot volume",
+                "plays a louder copy of the headshot sound, made from the game's own when DoD Studio starts the game.",
+                HEADSHOT_LOUDER,
+            ),
+            check(
+                console_name!("sound_headshot_pov_louder"),
+                "POV player only",
+                "only the headshots the POV player (or the HLTV player you watch in first person) makes play louder.",
+            ),
         ],
     },
     Area {
@@ -348,7 +404,7 @@ pub const AREAS: &[Area] = &[
             choice(
                 console_name!("demo_fast_load"),
                 "Fast loading",
-                "viewdemo loads the demo for this long each frame; Off is the game's 33 packets a frame.",
+                "how long viewdemo loads the demo each frame. 8 ms loads it about twice as fast as Off and stays smooth; more is barely faster and choppy until the demo has loaded.",
                 FAST_LOAD,
             ),
             choice(
@@ -807,10 +863,10 @@ mod tests {
 
     #[test]
     fn a_dropdown_shows_its_value_or_the_value_itself() {
-        assert_eq!(choice_text(FAST_LOAD, "1"), "8 ms a frame");
-        assert_eq!(choice_text(FAST_LOAD, "16.000000"), "16 ms a frame");
+        assert_eq!(choice_text(FAST_LOAD, "1"), "8 ms (default)");
+        assert_eq!(choice_text(FAST_LOAD, "16.000000"), "16 ms (choppy)");
         assert_eq!(choice_text(FAST_LOAD, "12"), "12");
-        assert_eq!(choice_value(FAST_LOAD, "33 ms a frame"), Some("33"));
+        assert_eq!(choice_value(FAST_LOAD, "33 ms (choppier)"), Some("33"));
         assert_eq!(choice_value(FAST_LOAD, "12"), None);
         assert_eq!(
             choice_text(&[("ultrasharp", "ultrasharp")], "UltraSharp"),

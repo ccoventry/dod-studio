@@ -423,7 +423,7 @@ pub(crate) mod tests {
 
     /// Serialises the tests that set bits in `HIDDEN`: cargo runs tests in
     /// parallel, and one test's `show_all()` could otherwise clear the bit
-    /// another had just set. `pub(crate)`: `commands.rs`'s status test sets
+    /// another had just set. `pub(crate)`: `commands/status.rs`'s test sets
     /// one too.
     static HIDDEN_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

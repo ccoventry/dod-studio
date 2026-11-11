@@ -31,6 +31,7 @@ import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
+import { setFieldError, clearFieldError } from './field_error.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
@@ -41,6 +42,7 @@ import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { startVegasEdlExport } from './vegas_edl_export.js';
+import { startVegasScriptInstall } from './vegas_script_install.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
@@ -48,13 +50,16 @@ import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
 import { startTakePreview } from './take_preview.js';
 import { startTakeChecks } from './take_checks.js';
 import { renderSizeText } from './byte_size.js';
+
+/** How often the crash-recovery prompt looks again while another dialog is open. */
+const STARTUP_PROMPT_POLL_MS = 500;
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -94,15 +99,16 @@ function getCustomCodecArgs() {
 function syncCustomCodecVisibility() {
   const group = document.querySelector('#render-custom-codec-group');
   if (group) group.style.display = getSelectedCodec() === 'custom' ? '' : 'none';
+  if (getSelectedCodec() !== 'custom') clearFieldError(document.querySelector('#render-custom-codec-input'));
 }
 
 function statusColor(status) {
   switch (status) {
-    case JOB_STATUS.FINISHED: return '#4caf50';
-    case JOB_STATUS.ERROR: return '#f44336';
-    case JOB_STATUS.CANCELLED: return '#ffeb3b';
-    case JOB_STATUS.RENDERING: return '#7ec8e3';
-    default: return '#ffffff';
+    case JOB_STATUS.FINISHED: return 'var(--ok)';
+    case JOB_STATUS.ERROR: return 'var(--danger)';
+    case JOB_STATUS.CANCELLED: return 'var(--warn-cancelled)';
+    case JOB_STATUS.RENDERING: return 'var(--sky)';
+    default: return 'var(--text-strong)';
   }
 }
 
@@ -542,6 +548,10 @@ function syncSelectionControls() {
   const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
   // No export folder: the renderer refuses, so Start says where to add one.
   const noExportDir = !hasExportDir();
+  // The field itself says why Start is off; it clears when a folder is added.
+  setFieldError(document.querySelector('#render-export-dir-input'),
+    noExportDir && queued > 0 ? R.EXPORT_DIR_FIELD_EMPTY : '',
+    { autoClear: false });
   setButton('#start-render-btn', queued, R.startRenderBatch,
     noExportDir ? R.START_RENDER_NO_EXPORT_DIR_TITLE
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
@@ -611,6 +621,9 @@ export async function checkRenderRecoveryOnStartup(showRenderTab) {
 
   const modal = document.querySelector('#render-recovery-modal');
   if (!modal) return;
+  // One start-up prompt at a time: a dialog already on screen is answered
+  // first, or this one opens on top of it.
+  while (isAnyDialogOpen()) await new Promise((resolve) => { setTimeout(resolve, STARTUP_PROMPT_POLL_MS); });
   document.querySelector('#render-recovery-source').textContent = summary.source_folder || STRINGS.RENDER.UNKNOWN_SOURCE_FOLDER;
   document.querySelector('#render-recovery-completed').textContent = String(summary.completed_count);
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
@@ -709,9 +722,12 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
+  startVegasScriptInstall();
   startVegasEdlExport({
     getJobs: () => jobs,
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
   });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
@@ -920,6 +936,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     scanRenderBtn.addEventListener('click', () => {
       const captureLocations = getCaptureLocations ? getCaptureLocations() : [];
       if (!captureLocations || captureLocations.length === 0) {
+        // The folder list is on Configuration, off screen here: mark its field
+        // for when the user goes there, and say so in a toast now.
+        setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.RENDER_DIR_FIELD_EMPTY,
+          { list: document.querySelector('#target-drive-list') });
         showToast(STRINGS.RENDER.ADD_RENDER_DIR_REQUIRED, 'error');
         return;
       }
@@ -927,6 +947,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const codecVal = getSelectedCodec();
       const customCodecArgsVal = getCustomCodecArgs();
       if (codecVal === 'custom' && !customCodecArgsVal) {
+        setFieldError(document.querySelector('#render-custom-codec-input'), STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED);
         showToast(STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED, 'error');
         return;
       }
@@ -990,6 +1011,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
           scanRenderBtn.disabled = false;
           scanClock.stop();
           hideBar(scanBar);
+          // The error is about the folders: show it at the folder field too.
+          setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.scanDirError(err),
+            { list: document.querySelector('#target-drive-list') });
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
         });
@@ -1003,6 +1027,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
       if (!hasExportDir()) {
+        // syncSelectionControls marks the export folder field.
         showToast(STRINGS.RENDER.START_RENDER_NO_EXPORT_DIR_TITLE, 'error');
         syncSelectionControls();
         return;

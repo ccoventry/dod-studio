@@ -44,6 +44,9 @@ const RECORD_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 pub const START_REFUSED: &str = "OBS did not start recording. OBS's own window says why \
      (often the recording encoder or folder); fix it in OBS and run the batch again";
 
+/// How long the websocket upgrade handshake may wait for OBS's answer.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Socket read timeout. Nothing waits on a single read; the timeout only makes
 /// the read loop interruptible so an overall deadline can be enforced.
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(200);
@@ -174,14 +177,20 @@ impl ObsClient {
         let host = url.trim_start_matches("ws://");
         let stream =
             TcpStream::connect(host).map_err(|e| ObsError::Connect(format!("{host}: {e}")))?;
+        // The upgrade handshake is one blocking read: the short polling
+        // timeout would fail it whenever OBS (or a loaded machine) takes
+        // longer than that to answer.
         stream
-            .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
+            .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
             .map_err(|e| ObsError::Connect(e.to_string()))?;
         let uri = url
             .parse::<tungstenite::http::Uri>()
             .map_err(|e| ObsError::Connect(e.to_string()))?;
         let (ws, _) = tungstenite::client(uri, stream)
             .map_err(|e| ObsError::Connect(format!("websocket handshake: {e}")))?;
+        ws.get_ref()
+            .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
+            .map_err(|e| ObsError::Connect(e.to_string()))?;
 
         let mut client = Self {
             ws,

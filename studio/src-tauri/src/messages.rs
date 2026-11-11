@@ -5,9 +5,9 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log_markdown/eprintln!
-// diagnostics stay inline at their call site, same as strings.js leaves
-// console.log/console.error alone. Issue #33, track 2 — a parallel catalog
+// as a toast/dialog string, and, since #237's decision, the activity-log
+// lines too (moved area by area, e.g. `messages/capture.rs`). Per-item
+// eprintln! diagnostics stay inline. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
@@ -26,6 +26,26 @@
 // (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
 // `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
 // caller before wrapping.
+
+pub mod batch;
+pub mod blender;
+pub mod capture;
+pub mod catch_up;
+pub mod combine;
+pub mod game_process;
+pub mod hd;
+pub mod open_with;
+pub mod overview;
+pub mod preview;
+pub mod preview_start;
+pub mod render;
+pub mod review;
+pub mod scan;
+pub mod settings;
+pub mod take_cleanup;
+pub mod take_delete;
+pub mod update;
+pub mod vegas;
 
 use std::fmt::Display;
 use std::path::Path;
@@ -473,6 +493,56 @@ pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
 pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
     "Capture cancelled while making room. Nothing was captured.";
 
+// ── trimmed_demos.rs (#207) ──────────────────────────────────────────────
+
+pub const CAPTURE_CANCELLED_WHILE_TRIMMING: &str =
+    "Capture cancelled while making a trimmed copy. Nothing was captured.";
+
+/// The status line while Studio learns whether a demo is over the engine's
+/// entity limit, or makes its trimmed copy.
+pub fn trimming_demo(demo: &str, step: native::patch::trimmed_copies::Progress) -> String {
+    use native::patch::trimmed_copies::Progress;
+    let percent = |f: f32| (f.clamp(0.0, 1.0) * 100.0).round() as u32;
+    match step {
+        Progress::Counting(f) => format!(
+            "Checking whether {demo} has more entities than the game takes ({}%)",
+            percent(f)
+        ),
+        Progress::Reading(f) => format!(
+            "Making a trimmed copy of {demo}: reading it ({}%)",
+            percent(f)
+        ),
+        Progress::Writing => format!("Making a trimmed copy of {demo}: writing it"),
+        Progress::Checking(f) => format!(
+            "Making a trimmed copy of {demo}: checking it ({}%)",
+            percent(f)
+        ),
+    }
+}
+
+/// Why a demo over the engine's entity limit can't be played: no trimmed copy
+/// could be made safely.
+pub fn demo_cannot_be_trimmed(
+    demo: &str,
+    engine: &native::patch::trimmed_copies::Engine,
+    why: &native::patch::entity_trim::TrimError,
+) -> String {
+    format!(
+        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}. \
+         Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights.",
+        engine.name(),
+        engine.limit
+    )
+}
+
+/// What a Launch Preview says when it plays a trimmed copy.
+pub fn preview_plays_trimmed_copy(engine: &native::patch::trimmed_copies::Engine) -> String {
+    format!(
+        "This demo has more entities than the {} engine takes, so the preview plays a trimmed copy: fog, invisible hulls and a few far decorations are left out. The original is unchanged.",
+        engine.name()
+    )
+}
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 /// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`
@@ -638,14 +708,6 @@ fn failed_to(action: &str, err: impl Display) -> String {
     format!("Failed to {action}: {cause}")
 }
 
-pub fn failed_to_add_demo_link(err: impl Display) -> String {
-    failed_to("link the demo folder", err)
-}
-
-pub fn failed_to_remove_demo_link(err: impl Display) -> String {
-    failed_to("remove the demo folder link", err)
-}
-
 pub fn failed_to_forget_crash_map(err: impl Display) -> String {
     failed_to("forget the crashed map", err)
 }
@@ -668,6 +730,28 @@ pub fn failed_to_read_map_for_flags(err: impl Display) -> String {
 
 pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
     failed_to("discard the saved render queue", err)
+}
+
+// ── menu_scale_manager.rs, movie_copy_manager.rs, overview_manager.rs, players_tab.rs ──
+
+pub fn menu_size_check_stopped(err: impl Display) -> String {
+    format!("menu size check stopped: {err}")
+}
+
+pub fn menu_size_change_stopped(err: impl Display) -> String {
+    format!("menu size change stopped: {err}")
+}
+
+pub fn could_not_list_to_copy(source: impl Display, err: impl Display) -> String {
+    format!("Couldn't list {source} to copy it: {err}")
+}
+
+pub const MOVIE_COPY_ALREADY_RUNNING: &str = "A movie copy is already running";
+
+pub const OVERVIEW_IMAGE_NOT_RAW_BYTES: &str = "the high-quality image did not arrive as raw bytes";
+
+pub fn not_a_sprite_file_name(sprite: &str) -> String {
+    format!("{sprite:?} is not a sprite file name")
 }
 
 /// Pins every function/constant above against the exact `format!`/literal it
@@ -977,10 +1061,6 @@ mod tests {
     #[test]
     fn lower_crate_errors_name_the_action_then_the_cause() {
         assert_eq!(
-            failed_to_add_demo_link("not a folder"),
-            "Failed to link the demo folder: not a folder"
-        );
-        assert_eq!(
             failed_to_copy_demos_for_batch("no room on D:"),
             "Failed to copy the demos for the batch: no room on D:"
         );
@@ -1011,6 +1091,28 @@ mod tests {
         assert!(
             err.starts_with("Background task crashed: "),
             "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn small_manager_messages_match_their_original_inline_text() {
+        assert_eq!(menu_size_check_stopped("x"), "menu size check stopped: x");
+        assert_eq!(menu_size_change_stopped("x"), "menu size change stopped: x");
+        assert_eq!(
+            could_not_list_to_copy("D:/dod", "denied"),
+            "Couldn't list D:/dod to copy it: denied"
+        );
+        assert_eq!(
+            MOVIE_COPY_ALREADY_RUNNING,
+            "A movie copy is already running"
+        );
+        assert_eq!(
+            OVERVIEW_IMAGE_NOT_RAW_BYTES,
+            "the high-quality image did not arrive as raw bytes"
+        );
+        assert_eq!(
+            not_a_sprite_file_name("a.spr"),
+            "\"a.spr\" is not a sprite file name"
         );
     }
 

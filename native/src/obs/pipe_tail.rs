@@ -17,7 +17,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use super::log_tail::{Marker, MarkerGate, parse_marker};
+use super::log_tail::{Marker, parse_marker};
+use super::marker_gate::{AlreadyDelivered, MarkerGate};
 
 /// How often to look for the game and its pipe before the first connection.
 const RETRY: Duration = Duration::from_millis(250);
@@ -138,15 +139,18 @@ fn bytes_waiting(_pipe: &std::fs::File) -> Option<u32> {
     None
 }
 
-/// Sends every marker in `lines` after the first `skip`, marked as from the
-/// pipe. False when the receiver has hung up.
-fn forward(lines: impl Iterator<Item = String>, mut skip: usize, tx: &Sender<Marker>) -> bool {
+/// Sends every marker in `lines` but the ones the log already delivered,
+/// marked as from the pipe. False when the receiver has hung up.
+fn forward(
+    lines: impl Iterator<Item = String>,
+    mut skip: AlreadyDelivered,
+    tx: &Sender<Marker>,
+) -> bool {
     for line in lines {
         let Some(mut marker) = parse_marker(&line) else {
             continue;
         };
-        if skip > 0 {
-            skip -= 1;
+        if skip.seen(&marker.label) {
             continue;
         }
         marker.via_pipe = true;
@@ -185,7 +189,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         assert!(forward(
             lines("[dod-studio] DEMO_START 1 2 3\nnoise\n[dod-studio] BATCH_COMPLETE"),
-            0,
+            AlreadyDelivered::default(),
             &tx
         ));
         let got: Vec<Marker> = rx.try_iter().collect();
@@ -201,15 +205,9 @@ mod tests {
         // The log sent the first two before the pipe connected; the pipe's
         // replay starts from the game's first marker.
         let gate = MarkerGate::default();
-        assert!(gate.admit_from_log());
-        assert!(gate.admit_from_log());
+        assert!(gate.admit_from_log("DEMO_START 1 1 2"));
+        assert!(gate.admit_from_log("NEXT_CLIP 1 1 1 2"));
         let skip = gate.switch_to_pipe();
-        assert_eq!(skip, 2);
-        assert!(
-            !gate.admit_from_log(),
-            "the log is dropped once the pipe has it"
-        );
-        assert!(gate.pipe_active());
 
         let (tx, rx) = std::sync::mpsc::channel();
         forward(
@@ -224,12 +222,34 @@ mod tests {
         assert_eq!(got[0].kind, MarkerKind::AudioSync);
     }
 
+    /// #1358: a hook-only line between two console markers goes on, and the
+    /// `START_RECORD` the log already sent doesn't go on a second time.
     #[test]
-    fn a_reconnect_skips_nothing() {
+    fn a_hook_only_line_in_the_replay_goes_on_and_nothing_repeats() {
         let gate = MarkerGate::default();
-        gate.admit_from_log();
-        assert_eq!(gate.switch_to_pipe(), 1);
-        assert_eq!(gate.switch_to_pipe(), 0);
+        for label in [
+            "DEMO_START 1 1 2",
+            "NEXT_CLIP 1 1 1 2",
+            "START_RECORD - Tick 900",
+        ] {
+            assert!(gate.admit_from_log(label));
+        }
+        let skip = gate.switch_to_pipe();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        forward(
+            lines(concat!(
+                "[dod-studio] DEMO_START 1 1 2\n",
+                "[dod-studio] NEXT_CLIP 1 1 1 2\n",
+                "[dod-studio] KILLFEED_LAYOUT\teven\n",
+                "[dod-studio] START_RECORD - Tick 900\n",
+                "[dod-studio] STOP_RECORD - Tick 1200",
+            )),
+            skip,
+            &tx,
+        );
+        let got: Vec<String> = rx.try_iter().map(|m| m.label).collect();
+        assert_eq!(got, ["KILLFEED_LAYOUT\teven", "STOP_RECORD - Tick 1200"]);
     }
 
     /// #725: a cancelled reader lets go of the pipe at once, so the game's
@@ -290,7 +310,9 @@ mod tests {
         });
 
         let mut client = None;
-        for _ in 0..50 {
+        // The server thread may not be listening yet on a loaded machine.
+        let open_deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while std::time::Instant::now() < open_deadline {
             match std::fs::OpenOptions::new().read(true).open(&name) {
                 Ok(pipe) => {
                     client = Some(pipe);
@@ -304,14 +326,19 @@ mod tests {
             pipe: client.expect("the test pipe never opened"),
             cancel: Arc::clone(&cancel),
         };
+        let (read_tx, read_rx) = std::sync::mpsc::channel::<()>();
         let reading = std::thread::spawn(move || {
             let mut lines = BufReader::new(reader).lines().map_while(Result::ok);
             let hello = lines.next();
+            let _ = read_tx.send(());
             // Nothing more comes: only `cancel` ends this.
             let rest: Vec<String> = lines.collect();
             (hello, rest)
         });
-        std::thread::sleep(Duration::from_millis(100));
+        // Cancel only once the first line is in, however slow the machine is.
+        read_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the reader never saw the first line");
         cancel.store(true, Ordering::Relaxed);
         let (hello, rest) = reading.join().unwrap();
         assert_eq!(hello.as_deref(), Some("hello"));

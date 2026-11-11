@@ -36,7 +36,7 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 > | the 64-byte command limit (§3.1) | not reachable | — | #256 |
 > | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
 > | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
-> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207, open |
+> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207: Studio plays a trimmed copy of the demo instead |
 >
 > ### Read this before §1
 >
@@ -846,7 +846,7 @@ same location in three places:
 | `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
 
 In every one, **both sides save the slot's current value and call through it**
-— `hook_import` stores `*slot` as the real function, `connect_guard`'s `wrap`
+— `hook_import` stores `*slot` as the real function, `cmd_list::wrap`
 keeps the handler it replaces, and HLAE's three writers do the same — so either
 install order gives a working chain. *Inferred, not traced:* that neither side
 restores its saved value while the other's hook is above it. Restoring would
@@ -1209,7 +1209,7 @@ code runs. This search does not list those.
 Every HLAE hook therefore lasts for the life of the process. That turns §12.5's
 *inferred* "neither side restores its saved value" into a proven one for HLAE;
 `goldsrc-hooks` has no restore path for the three shared slots either
-(`hook_import`, `connect_guard`'s `wrap` and `swap_slot` only ever install).
+(`hook_import`, `cmd_list::wrap` and `swap_slot` only ever install).
 So the three shared slots are chain-safe in either install order, and stay so.
 
 One detail of the swapper: for `startmovie` and `endmovie` HLAE throws the old

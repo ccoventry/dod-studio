@@ -59,11 +59,12 @@
 //! its `ret 0xc`, the three pushes, every `#Spec_Duck` caller popping its own
 //! argument, and nothing branching into either span.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("spec_hide_text");
 
@@ -131,7 +132,7 @@ impl State {
 
 static STATES: [State; 2] = [State::new(), State::new()];
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// Set the first time the cvar is on, so a session that never asks for it
 /// never scans.
 static TOUCHED: AtomicBool = AtomicBool::new(false);
@@ -144,11 +145,6 @@ static WANTED: AtomicBool = AtomicBool::new(false);
 const HUD_PRINTCENTER: u8 = 4;
 /// The start of the mode names' `titles.txt` keys.
 const MODE_KEY: &[u8] = b"#Spec_Mode";
-
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether a `TextMsg` payload (destination byte, then the key) is the
 /// server's copy of the camera mode name.
@@ -234,11 +230,9 @@ fn apply(site: &Site, state: &State, base: usize, hidden: bool) -> Result<bool, 
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     WANTED.store(wanted, Ordering::Relaxed);
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);

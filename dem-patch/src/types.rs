@@ -350,6 +350,13 @@ pub enum MessageData {
 pub enum MessageDataParseMode {
     /// Parses network messages
     Parse,
+    /// [`MessageDataParseMode::Parse`] leaving every `svc_sound` out of the
+    /// parsed list, for a caller that only reads the demo and reads no
+    /// sound (the analyzer, #37). Sounds are a fifth of a demo's messages
+    /// and several heap blocks each. The sounds are still read through, so
+    /// a demo fails to parse exactly where `Parse` fails. Never write a demo
+    /// parsed this way: its sounds are gone.
+    ParseWithoutSounds,
     /// Store raw network message bytes
     Raw,
     /// Does not store any network message bytes
@@ -367,16 +374,35 @@ pub type BitSlice = _BitSlice<u8, Lsb0>;
 pub type ByteVec = Vec<u8>;
 
 // Delta
-pub type Delta = HashMap<String, ByteVec>;
+pub use crate::delta_fields::{Delta, DeltaValue, FieldName};
 pub type DeltaDecoder = Vec<DeltaDecoderS>;
 pub type DeltaDecoderTable = HashMap<String, DeltaDecoder>;
 
 #[derive(Debug, Clone)]
 pub struct DeltaDecoderS {
     pub name: ByteVec,
+    /// `name` as the key a decoded [`Delta`] files the field under, made once
+    /// here so every decoded field shares it rather than copying it (#37).
+    pub key: FieldName,
     pub bits: u32,
     pub divisor: f32,
     pub flags: u32,
+}
+
+impl DeltaDecoderS {
+    pub fn new(name: ByteVec, bits: u32, divisor: f32, flags: u32) -> Self {
+        // A decoder table built from a corrupted delta_description can carry
+        // a non-UTF-8 field name. Lossy rather than `unwrap`, because the
+        // release profile aborts on panic. #225.
+        let key = FieldName::from(String::from_utf8_lossy(&name));
+        Self {
+            name,
+            key,
+            bits,
+            divisor,
+            flags,
+        }
+    }
 }
 
 #[repr(u32)]

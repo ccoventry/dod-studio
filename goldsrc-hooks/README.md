@@ -112,6 +112,16 @@ is the complete list):
   the rules the demo patcher uses), plus two lists surveyed over the installed
   maps (`native/examples/map_sound_table.rs`). See the module doc in
   `src/map_sounds.rs` (#284).
+- **Headshots heard farther away** (`ds_sound_headshot_farther 1`): the headshot
+  sound (`player/helmet_hit.wav`) fades half as fast with distance. DoD's
+  client plays it from its `bodydamage` event through `EV_PlaySound`, so the
+  `fire_sounds` hook halves its attenuation. With
+  `ds_sound_headshot_pov_farther 1` only the POV player's headshots do: the
+  kill's `DeathMsg` names the shooter (#1353). `ds_sound_headshot_louder 1-3`
+  plays a louder copy instead (and `ds_sound_headshot_pov_louder 1` only
+  for the POV player), which Studio writes into
+  `dod_addon\sound\dodstudio\` at every launch from the install's own sound
+  (`native/src/headshot_louder.rs`). See `src/headshot_sound.rs`.
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
@@ -147,6 +157,12 @@ is the complete list):
   `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
   scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
   `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
+- **Names and health bars over players** (`ds_spec_show_player_info`: 1
+  name, 2 health bar, 3 both): while an HLTV demo plays (not POV), a
+  name and/or a health bar over each player the game draws, from the record
+  `client.dll` keeps per player (`g_PlayerExtraInfo`, `src/player_info.rs`).
+  A prototype (#1130); see `src/nameplates.rs` and
+  `docs/goldsrc_player_info.md`.
 - **Spectator target** (`ds_spec_target <player>`): puts the camera on
   a player by number, the one `ds_hud_deathmsg players` lists. Same doc.
 - **Spectator bars** (`ds_spec_hide_bars 1`): hides the two dark
@@ -471,6 +487,7 @@ crash. Set the variable to `0` to turn it off.
 | --- | --- | --- |
 | `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `ds_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
 | `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/map_file_leak.rs` | `Fatal Error: COM_LoadFile: not enough space for maps/<map>.bsp`, or a silent exit, after about 30 map loads on the pre-Anniversary build: DoD's client leaks a copy of every map's `.bsp` (#1232). `ds_debug_status` shows how many it freed. | `GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX=0` |
 | `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
 | `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |
 

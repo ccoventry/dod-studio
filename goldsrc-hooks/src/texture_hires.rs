@@ -254,9 +254,10 @@ use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The command name that toggles verbose per-load logging. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = console_name!("debug_log_texture_loads");
 
 /// `GL_LoadTexture2`'s tail, from the optional upload callback through both
@@ -550,8 +551,8 @@ pub const STYLE_NAME: &str = console_name!("hd_style");
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 /// Fallback when the cvar could not be registered.
 const STYLE_ENV: &str = "GOLDSRC_HOOKS_HD_STYLE";
-static STYLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// A string: read through [`Cvar::ptr`], not as an on/off.
+pub static STYLE_CVAR: Cvar = Cvar::new();
 /// The style in force; empty until first asked for.
 static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// Hash of the style cvar's text as last seen by [`poll_hd`], so a frame
@@ -561,23 +562,12 @@ static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 /// `ds_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
 pub const HD_NAME: &str = console_name!("hd_enabled");
-static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+pub static HD_CVAR: Cvar = Cvar::new();
 /// The switch's current value; what every replacement path checks.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Set when the switch or style changed after a map had loaded: some of what's
 /// on screen was loaded the other way until the game restarts.
 static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands.rs` once `ds_hd_style` is registered.
-pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    STYLE_CVAR.store(cvar, Ordering::Release);
-}
-
-/// Called by `commands.rs` once `ds_hd_enabled` is registered.
-pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    HD_CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether HD starts on, and so whether `lib.rs` installs the hook at
 /// startup: `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` decides outright; unset,
@@ -617,7 +607,7 @@ fn clean_style(raw: &str) -> Option<String> {
 
 /// The style cvar's raw text, or `None` if it isn't registered.
 fn style_cvar_bytes() -> Option<&'static [u8]> {
-    let cvar = STYLE_CVAR.load(Ordering::Acquire);
+    let cvar = STYLE_CVAR.ptr();
     // Safety: a cvar_t the engine registered for us and keeps for the
     // session; its `string` is always a valid C string.
     let p = (!cvar.is_null()).then(|| unsafe { (*cvar).string })?;
@@ -648,6 +638,19 @@ fn active_style() -> String {
         unsafe { crate::debug::report(&format!("texture_hires: HD style {chosen:?}")) };
     }
     chosen
+}
+
+/// The style HD files load from this session, for a report that names the
+/// style to build for (#1339): the one in force, or before any HD load the
+/// one the cvar asks for. Never fixes the style itself, as `active_style`
+/// does.
+pub(crate) fn style_in_force() -> String {
+    ACTIVE_STYLE
+        .read()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.clone())
+        .unwrap_or_else(chosen_style)
 }
 
 /// The style for reports: the one in force, or "not chosen yet".
@@ -724,20 +727,17 @@ impl<T> Cached<T> {
 /// `ds_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
-    let cvar = HD_CVAR.load(Ordering::Acquire);
-    if !cvar.is_null() {
-        // Safety: registered by us, kept by the engine for the session.
-        let on = unsafe { (*cvar).value } != 0.0;
-        if ENABLED.swap(on, Ordering::AcqRel) != on {
-            if on && let Err(why) = install() {
-                unsafe {
-                    crate::debug::report(&format!(
-                        "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
-                    ))
-                };
-            }
-            settings_changed(&format!("{HD_NAME} {}", on as u8));
+    if let Some(on) = HD_CVAR.try_on()
+        && ENABLED.swap(on, Ordering::AcqRel) != on
+    {
+        if on && let Err(why) = install() {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
+                ))
+            };
         }
+        settings_changed(&format!("{HD_NAME} {}", on as u8));
     }
     if let Some(bytes) = style_cvar_bytes() {
         let hash = fnv1a32(&[bytes]);
@@ -814,7 +814,7 @@ struct LastReplaced {
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
 /// `ds_debug_hd_misses`: lists every texture that kept its original this
-/// session, and why. Registered in `commands.rs`.
+/// session, and why. Registered in `commands/install.rs`.
 pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
 
@@ -1538,6 +1538,56 @@ fn fnv1a32(parts: &[&[u8]]) -> u32 {
         }
     }
     hash
+}
+
+/// The HD key of a texture: its replacement's file name without `.tga`,
+/// `<name>_<hash>`, as every miss message and `ds_debug_texture` spell it.
+pub(crate) fn hd_key(name: &str, hash: u32) -> String {
+    format!("{}_{hash:08x}", file_stem_name(name))
+}
+
+/// The pixel hash of the last world texture uploaded under each name
+/// (lowercased), noted by [`decide`]: what [`world_hd`] answers with. The
+/// latest upload of a name wins, so after a map change it is that map's.
+static WORLD_KEYS: Mutex<std::collections::BTreeMap<String, u32>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn note_world_key(name: &str, hash: u32) {
+    if let Ok(mut keys) = WORLD_KEYS.lock() {
+        keys.insert(name.to_ascii_lowercase(), hash);
+    }
+}
+
+/// What the HD swap knows of the world texture `name`, for
+/// `ds_debug_texture` (#1309).
+pub(crate) enum WorldHd {
+    /// The swap hook isn't installed, so no upload was hashed.
+    NoHook,
+    /// No world texture of that name has been uploaded since the hook went in.
+    NotUploaded,
+    /// Its key, and the HD file the active style has for it, if any (`None`
+    /// also while HD is off and no folder has been indexed).
+    Known { key: String, file: Option<PathBuf> },
+}
+
+pub(crate) fn world_hd(name: &str) -> WorldHd {
+    if !HOOK_ACTIVE.load(Ordering::Acquire) {
+        return WorldHd::NoHook;
+    }
+    let Some(hash) = WORLD_KEYS
+        .lock()
+        .ok()
+        .and_then(|keys| keys.get(&name.to_ascii_lowercase()).copied())
+    else {
+        return WorldHd::NotUploaded;
+    };
+    let file = INDEX
+        .peek()
+        .and_then(|index| index.files.get(&(file_stem_name(name), hash)).cloned());
+    WorldHd::Known {
+        key: hd_key(name, hash),
+        file,
+    }
 }
 
 /// A texture name as it appears in a replacement's filename: lowercased, with
@@ -2495,14 +2545,21 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let palette = arg(0x24) as *const u8;
 
     // What this world texture's record holds, for `keep_cached` to compare
-    // the next map's same-named texture against. Every world upload, whether
-    // or not it's replaced.
+    // the next map's same-named texture against, and its key by name for
+    // `ds_debug_texture`. Every world upload, whether or not it's replaced.
     if texture_type == GLT_WORLD
-        && !record.is_null()
         && let Some(hash) = unsafe { upload_hash(data, palette, width, height) }
-        && let Ok(mut hashes) = RECORD_HASH.lock()
     {
-        hashes.insert(record as usize, hash);
+        if !record.is_null()
+            && let Ok(mut hashes) = RECORD_HASH.lock()
+        {
+            hashes.insert(record as usize, hash);
+        }
+        if !name_ptr.is_null() {
+            // Safety: the identifier every caller passes is a NUL-terminated name.
+            let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+            note_world_key(&name, hash);
+        }
     }
     if !enabled() {
         return std::ptr::null();
@@ -2655,14 +2712,15 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
                 return skip(
                     Miss::WrongVersion,
                     &format!(
-                        "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
+                        "replacement(s) named {stem:?} exist, none for this content (needs {}.tga)",
+                        hd_key(&stem, hash)
                     ),
                 );
             }
             None => {
                 return skip(
                     Miss::NoFile,
-                    &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
+                    &format!("no replacement (would be {}.tga)", hd_key(&stem, hash)),
                 );
             }
         },
@@ -4519,6 +4577,12 @@ mod tests {
             Some(("under_score".to_string(), 0xdead_beef))
         );
         assert_eq!(parse_file_name("nohash.tga"), None);
+        // The key a miss message and ds_debug_texture print is the file's stem.
+        assert_eq!(hd_key("+0Lambda", 0x1a2b_3c4d), "+0lambda_1a2b3c4d");
+        assert_eq!(
+            parse_file_name(&format!("{}.tga", hd_key("XCONCRETE_C54_Y", 7))),
+            Some(("xconcrete_c54_y".to_string(), 7))
+        );
         assert_eq!(parse_file_name("x_123.tga"), None);
         assert_eq!(parse_file_name("x_1a2b3c4d.png"), None);
     }

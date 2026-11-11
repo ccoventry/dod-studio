@@ -248,3 +248,34 @@ describe('names for takes', () => {
     expect(timeWord(754.9)).toBe('12m34s');
   });
 });
+
+describe('Use as names (#686)', () => {
+  const ID = '76561197961831029';
+  const useAs = (id) => (id === ID ? 'Chris' : null);
+
+  it('replace both {name} and {player} for a player with one', () => {
+    const s = streak({ target_player: 'dicE[: :]m00cat :D', steam_id: ID });
+    const v = highlightValues(demo([s]), s, { useAs });
+    expect(v.name).toBe('Chris');
+    expect(v.full_name).toBe('Chris');
+  });
+
+  it('leave everyone else, and a player without a SteamID, as they were', () => {
+    const other = streak({ steam_id: '76561197960265729' });
+    expect(highlightValues(demo([other]), other, { useAs }).name).toBe('krod');
+    const none = streak();
+    expect(highlightValues(demo([none]), none, { useAs }).full_name).toBe('krod');
+  });
+
+  it(':first, :lower and :upper apply after it, and file-name characters are cleaned', () => {
+    const s = streak({ steam_id: ID });
+    const name = (template, alias) => {
+      const values = highlightValues(demo([s]), s, { useAs: () => alias });
+      return buildName(parseTemplate(template), values).name;
+    };
+    expect(name('{name:first}', 'Chris D')).toBe('Chris');
+    expect(name('{name:lower}', 'Chris')).toBe('chris');
+    expect(name('{player:upper}', 'Chris')).toBe('CHRIS');
+    expect(name('{name}', 'a/b:c')).toBe('a_b_c');
+  });
+});

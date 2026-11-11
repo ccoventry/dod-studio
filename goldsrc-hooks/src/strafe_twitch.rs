@@ -50,32 +50,21 @@
 //! origin written there never reached the gait estimate).
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEntityS, CvarSPartial, Vec3};
+use crate::engine::{self, ClEntityS, Vec3};
 use crate::names::console_name;
+use crate::setting::Setting;
 
 /// The switch: 1 holds the models on a step-back frame (#927).
 pub const NAME: &str = console_name!("player_fix_model_flicker");
 
-/// The fallback toggle, when the cvar could not be registered.
-pub static FIX_MODEL_FLICKER: AtomicBool = AtomicBool::new(true);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+/// The cvar, or its default (on) when it could not be registered.
+pub static FIX_MODEL_FLICKER: Setting = Setting::new(NAME, true);
 
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
-/// Whether the switch is on: the cvar, or the fallback toggle without one.
+/// Whether the switch is on: the cvar, or its default without one.
 pub fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        FIX_MODEL_FLICKER.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
+    FIX_MODEL_FLICKER.on()
 }
 
 /// GoldSrc's player slots, entity indices 1..=32.
@@ -84,8 +73,7 @@ const MAX_PLAYERS: usize = 32;
 /// A step back larger than this is a seek or a new demo, not jitter.
 const MAX_STEP_BACK: f64 = 0.05;
 
-/// `int StudioDrawPlayer(int flags, entity_state_t *pplayer)`.
-type DrawPlayerFn = unsafe extern "C" fn(i32, *mut c_void) -> i32;
+use crate::spec_xray::DrawPlayerFn;
 /// `cl_entity_t *GetCurrentEntity(void)`.
 type CurrentEntityFn = unsafe extern "C" fn() -> *mut ClEntityS;
 /// `void GetTimes(int *framecount, double *current, double *old)`.
@@ -203,6 +191,16 @@ pub unsafe fn install(interface: *mut *mut c_void) {
     }
 }
 
+/// The renderer's own `StudioDrawPlayer`, after the x-ray glow
+/// (`spec_xray`), which draws the same player first and so has to see the
+/// origin this frame holds him at.
+///
+/// Safety: as the renderer's own function.
+unsafe fn draw(real: DrawPlayerFn, flags: i32, pplayer: *mut c_void) -> i32 {
+    unsafe { crate::spec_xray::before_player_drawn(real, flags, pplayer) };
+    unsafe { real(flags, pplayer) }
+}
+
 unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
     let real = REAL_DRAW_PLAYER.load(Ordering::Acquire);
     if real == 0 {
@@ -211,22 +209,22 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
     // Safety: the renderer's own function, with its own arguments.
     let real: DrawPlayerFn = unsafe { std::mem::transmute(real) };
     if !enabled() || crate::anim_fix::pov_demo_playing() {
-        return unsafe { real(flags, pplayer) };
+        return unsafe { draw(real, flags, pplayer) };
     }
     let Some(studio) = engine::engine_studio() else {
-        return unsafe { real(flags, pplayer) };
+        return unsafe { draw(real, flags, pplayer) };
     };
     let current_slot = studio.slots_before_view_info()[0];
     let times_slot = studio.slots_before_view_info()[4];
     if current_slot.is_null() || times_slot.is_null() {
-        return unsafe { real(flags, pplayer) };
+        return unsafe { draw(real, flags, pplayer) };
     }
     // Safety: the engine's own accessors, called on its render thread.
     let current: CurrentEntityFn = unsafe { std::mem::transmute(current_slot) };
     let get_times: GetTimesFn = unsafe { std::mem::transmute(times_slot) };
     let ent = unsafe { current() };
     if ent.is_null() {
-        return unsafe { real(flags, pplayer) };
+        return unsafe { draw(real, flags, pplayer) };
     }
     let (mut frame, mut now, mut old) = (0i32, 0f64, 0f64);
     unsafe { get_times(&mut frame, &mut now, &mut old) };
@@ -240,7 +238,7 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
     let e = unsafe { &mut *ent };
     let index = e.index;
     if !(1..=MAX_PLAYERS as i32).contains(&index) {
-        return unsafe { real(flags, pplayer) };
+        return unsafe { draw(real, flags, pplayer) };
     }
     let slot = index as usize;
     let mut track = Track {
@@ -254,7 +252,7 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
     LAST_CLOCK[slot].store(track.last_drawn, Ordering::Relaxed);
     HELD_CLOCK[slot].store(track.last_held, Ordering::Relaxed);
     if !hold {
-        let result = unsafe { real(flags, pplayer) };
+        let result = unsafe { draw(real, flags, pplayer) };
         let store = &MARK_ORIGIN[slot];
         store[0].store(e.origin.x.to_bits(), Ordering::Relaxed);
         store[1].store(e.origin.y.to_bits(), Ordering::Relaxed);
@@ -275,7 +273,7 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
         y: f32::from_bits(held[1].load(Ordering::Relaxed)),
         z: f32::from_bits(held[2].load(Ordering::Relaxed)),
     };
-    let result = unsafe { real(flags, pplayer) };
+    let result = unsafe { draw(real, flags, pplayer) };
     // Safety: the same entity; still this call's.
     let e = unsafe { &mut *ent };
     e.origin = saved;
@@ -389,16 +387,16 @@ mod tests {
         // anim_fix's tests mutate LEVEL too; cargo runs tests in parallel.
         let _statics = crate::anim_fix::tests::lock_statics();
         let level = crate::anim_fix::LEVEL.load(Ordering::Relaxed);
-        assert!(CVAR.load(Ordering::Acquire).is_null());
+        assert!(FIX_MODEL_FLICKER.value().is_none());
         assert!(enabled(), "on by default");
         for match_pov in [0, 1] {
             crate::anim_fix::LEVEL.store(match_pov, Ordering::Relaxed);
-            FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+            FIX_MODEL_FLICKER.fallback.store(true, Ordering::Relaxed);
             assert!(enabled(), "match_pov {match_pov}");
-            FIX_MODEL_FLICKER.store(false, Ordering::Relaxed);
+            FIX_MODEL_FLICKER.fallback.store(false, Ordering::Relaxed);
             assert!(!enabled(), "match_pov {match_pov}");
         }
-        FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+        FIX_MODEL_FLICKER.fallback.store(true, Ordering::Relaxed);
         crate::anim_fix::LEVEL.store(level, Ordering::Relaxed);
     }
 }

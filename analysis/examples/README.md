@@ -27,6 +27,7 @@ documented in its own `//!` header.
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `capture_area_probe` | Which capture-area messages (`ClientAreas`, `PlayersIn`, `CurMarker`) does a demo carry, and about whom? (#1132) |
+| `capture_area_timing_probe` | How often does `ClientAreas` repeat while the recorder stands in an area, and do `PlayersIn` drops line up with deaths well enough to tag kills? (#1132) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |
@@ -36,6 +37,7 @@ documented in its own `//!` header.
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
 | `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
+| `position_data_survey` | Over many demos: field tables, origin refresh rate and step size, kill coverage POV vs HLTV, parse cost (#448; `docs/position_data_in_demos.md`) |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and
@@ -97,7 +99,7 @@ that panics the parser cannot take down the run:
 | `writer_fidelity` | Does dem's writer reproduce GoldSrc's real bytes? |
 | `packet_entity_probe` | Peak packet-entity count against the engine limit that crashes playback. |
 | `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
-| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). |
+| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). The R&D probe; Studio's own trim is `native::patch::entity_trim`. |
 
 `shared/entity_carry.rs` is not a probe: it carries each snapshot's entity set
 forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.

@@ -313,22 +313,10 @@ pub(super) fn wants_death_msg() -> bool {
 
 /// After a `DeathMsg` has been handed to the game: `victim` as recorded.
 pub(super) fn on_death(victim: i32) {
-    if !DEATH.enabled() || !is_watched_player(victim) {
+    if !DEATH.enabled() || !super::is_watched_player(victim) {
         return;
     }
     DEATH.fire(hud_time(), newest_stamp());
-}
-
-/// Whether `victim` is the player whose view the demo shows.
-fn is_watched_player(victim: i32) -> bool {
-    if victim <= 0 {
-        return false;
-    }
-    if super::is_hltv() {
-        crate::spectator_target::in_eye_target() == Some(victim)
-    } else {
-        super::resolve(victim, false).is_own_pov
-    }
 }
 
 /// `RoundState`'s first byte: 0 is the reset that starts a round.

@@ -65,10 +65,10 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 /// Hides the spectator panel: the bands and everything on them.
 pub const NAME: &str = console_name!("spec_hide_bars");
@@ -92,7 +92,7 @@ const WRAPPER_CLASS: &str = ".?AVVPanelWrapper@@";
 /// and the menu row are all its children, so not painting it hides them all.
 const FRAME: &[u8] = b"SpectatorGUI";
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static HIDE: AtomicBool = AtomicBool::new(false);
 
 /// The stock functions, captured at install.
@@ -102,11 +102,6 @@ static GET_NAME: AtomicUsize = AtomicUsize::new(0);
 static INSTALL_FAILED: AtomicBool = AtomicBool::new(false);
 /// Paints skipped so far, for `ds_debug_status`.
 static SKIPPED: AtomicU32 = AtomicU32::new(0);
-
-/// Called once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 fn installed() -> bool {
     STOCK_PAINT_TRAVERSE.load(Ordering::Acquire) != 0
@@ -301,11 +296,9 @@ mod hook {
 /// Reads the cvar and installs the filter the first time it is on. Called
 /// every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if HIDE.swap(wanted, Ordering::Relaxed) != wanted {
         let state = if wanted { "1 (hidden)" } else { "0 (shown)" };
         unsafe { crate::debug::report(&format!("spectator_bars: {NAME} = {state}")) };

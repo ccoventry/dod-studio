@@ -59,10 +59,55 @@ test.describe('master_pane multi-map demos (#217)', () => {
     await expect(r.locator('.multimap-split-btn')).toBeVisible();
   });
 
+  test('a demo whose maps were already split shows a quiet note naming the files, not the button', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = {
+        demo_split_status: () => ({ split: true, files: ['here_split1_lennon2.dem', 'here_split2_lennon2.dem'] }),
+      };
+    });
+    await gotoHarness(page);
+    const r = row(page, 'here.dem');
+    const note = r.locator('.multimap-split-note');
+    await expect(note).toHaveText('Already split');
+    await expect(note).toHaveAttribute('title', /already split next to it: here_split1_lennon2\.dem, here_split2_lennon2\.dem/);
+    await expect(r.locator('.multimap-split-btn')).toBeHidden();
+    expect(await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'demo_split_status')?.args))
+      .toEqual({ path: 'C:\\demos\\here.dem', maps: ['dod_lennon2', 'dod_lennon2'], minSeconds: 60 });
+  });
+
+  test('split pieces deleted later bring the Split button back on the next redraw', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__splitFiles = ['here_split1_lennon2.dem', 'here_split2_lennon2.dem'];
+      window.__mockInvokeHandlers = {
+        demo_split_status: () => ({ split: window.__splitFiles.length === 2, files: window.__splitFiles }),
+      };
+    });
+    await gotoHarness(page);
+    const r = row(page, 'here.dem');
+    await expect(r.locator('.multimap-split-note')).toBeVisible();
+    await page.evaluate(() => { window.__splitFiles = []; });
+    // An answer is reused for RECHECK_AFTER_MS (3 s), then asked again.
+    await page.waitForTimeout(3200);
+    await page.evaluate(() => window.__rerender());
+    await expect(row(page, 'here.dem').locator('.multimap-split-btn')).toBeVisible();
+    await expect(row(page, 'here.dem').locator('.multimap-split-note')).toBeHidden();
+  });
+
+  test('a demo not split yet keeps the button, which says only the first map is used', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }) };
+    });
+    await gotoHarness(page);
+    const split = row(page, 'here.dem').locator('.multimap-split-btn');
+    await expect(split).toBeVisible();
+    await expect(split).toHaveAttribute('title', /use the first map only/);
+    await expect(row(page, 'here.dem').locator('.multimap-split-note')).toBeHidden();
+  });
+
   test('a one-map demo, or one saved before the map list existed, has none', async ({ page }) => {
     await gotoHarness(page);
-    await expect(row(page, 'moved.dem').locator('.multimap-split-btn')).toHaveCount(0);
-    await expect(row(page, 'gone.dem').locator('.multimap-split-btn')).toHaveCount(0);
+    await expect(row(page, 'moved.dem').locator('.multimap-hint')).toHaveCount(0);
+    await expect(row(page, 'gone.dem').locator('.multimap-hint')).toHaveCount(0);
   });
 });
 
@@ -76,11 +121,11 @@ test.describe('master_pane Status and Review counts', () => {
     await expect(cells(page).nth(1)).toHaveAttribute('title', '2 not reviewed, 1 Keep, 0 Maybe, 1 Skip');
   });
 
-  test('a count is in its colour, and grey at zero', async ({ page }) => {
+  test('a count is in its colour token (the harness loads no stylesheet), and grey at zero', async ({ page }) => {
     await gotoHarness(page);
     const numbers = cells(page).nth(0).locator('span:not(.count-slash)');
-    await expect(numbers.nth(0)).toHaveCSS('color', 'rgb(255, 167, 38)');
-    await expect(numbers.nth(2)).toHaveCSS('color', 'rgb(85, 85, 85)');
+    await expect(numbers.nth(0)).toHaveAttribute('style', /color: var\(--warn-orange\)/);
+    await expect(numbers.nth(2)).toHaveAttribute('style', /color: var\(--text-dim\)/);
   });
 
   test('the headers carry the matching legend letters', async ({ page }) => {
@@ -124,3 +169,27 @@ test.describe('master_pane search clear button (#529)', () => {
     await expect(rows(page)).toHaveCount(3);
   });
 });
+
+test.describe('master_pane totals row', () => {
+  test('adds up each column under the header, for the demos listed', async ({ page }) => {
+    await gotoHarness(page);
+    const cells = page.locator('#master-totals-row td');
+    // One cell per column of the real table: checkbox, Demo File, Highlights,
+    // Selected, Status, Review, Actions.
+    await expect(cells).toHaveCount(7);
+    await expect(cells.nth(1)).toHaveText('Total: 3 demos');
+    await expect(cells.nth(2)).toHaveText('4');
+    await expect(cells.nth(3)).toHaveText('0');
+    await expect(cells.nth(4)).toHaveText('1 / 1 / 0');
+    await expect(cells.nth(4)).toHaveAttribute('title', '1 Pending, 1 Captured, 0 Rendered');
+    await expect(cells.nth(5)).toHaveText('2 / 1 / 0 / 1');
+  });
+
+  test('follows the search: totals of what is listed, out of the queue', async ({ page }) => {
+    await gotoHarness(page);
+    await page.fill('#demo-search-input', 'here');
+    await page.evaluate(() => document.querySelector('#demo-search-input').dispatchEvent(new Event('input')));
+    await expect(page.locator('#master-totals-row td').nth(1)).toHaveText('Total: 1 of 3 demos');
+  });
+});
+

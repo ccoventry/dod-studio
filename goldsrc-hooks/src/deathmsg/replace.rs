@@ -32,7 +32,8 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
-use super::{COMMAND, Player, WEAPON_SPRITES, Who, parse_player, parse_weapon, rejoin_colons};
+use super::{COMMAND, Player, WEAPON_SPRITES, Who, parse_player, parse_weapon};
+use crate::console_tokens::rejoin_colons;
 
 /// How far `at` may be from the kill, in seconds of the demo clock.
 const AT_TOLERANCE: f64 = 2.0;

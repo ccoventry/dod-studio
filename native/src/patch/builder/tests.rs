@@ -510,6 +510,7 @@ fn clips_that_fit_one_at_a_time_are_planned_when_renders_free_space_while_captur
     std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
     config.capture_directories = vec![temp_drive.clone()];
     let room = crate::sys::disk::get_available_bytes(&temp_drive)
+        .expect("the temp drive's free space is readable")
         .saturating_sub(crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES);
     assert!(
         room > 1_000_000_000,
@@ -757,20 +758,72 @@ fn the_movie_modes_record_aliases_are_unchanged_by_agr_mode() {
 }
 
 #[test]
-fn agr_mode_pins_the_timestep_to_the_agr_fps_and_never_records_a_movie() {
+fn agr_mode_starts_the_agr_and_its_sound_on_one_frame_at_the_agr_fps() {
     let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
     config.capture_fps = 300;
     config.agr_fps = 30;
-    let lines = record_alias_lines(&config);
+    // The timestep first, then both recordings on the same command line.
     assert_eq!(
-        lines,
+        route_alias_line(&config, "dodstudio_chain_01", 4, 1),
         format!(
-            "alias sys_record_start \"host_framerate {}\"\n\
-             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
-            1.0f32 / 30.0
+            "alias dodstudio_chain_01_route_4 \"host_framerate {}; mirv_movie_filename \
+             _route_1/dodstudio_chain_01_b4; mirv_agr start {}; mirv_recordmovie_start\"\n",
+            1.0f32 / 30.0,
+            agr_route_path(1, "dodstudio_chain_01", 4)
         )
     );
-    assert!(!lines.contains("mirv_recordmovie"), "{lines}");
+    assert_eq!(
+        record_alias_lines(&config),
+        "alias sys_record_start \"stopsound\"\n\
+         alias sys_record_stop \"mirv_agr stop; mirv_recordmovie_stop; host_framerate 0\"\n"
+    );
+    // The movie recorder pins the timestep to 1 / mirv_movie_fps.
+    assert!(final_init_commands(&config).contains(&"mirv_movie_fps 30".to_string()));
+}
+
+#[test]
+fn agr_mode_sends_the_picture_to_ffmpegs_null_muxer_and_keeps_the_sound() {
+    let dir = std::env::temp_dir().join("dod_test_agr_sound_lines");
+    let agr = helper_cfg_preamble(&config_in_mode(crate::patch::CaptureMode::Agr), &dir);
+    assert!(agr.contains("mirv_movie_ffmpeg all enabled 1\n"), "{agr}");
+    assert!(
+        agr.contains("mirv_movie_ffmpeg all options \"-c:v rawvideo -f null NUL\"\n"),
+        "{agr}"
+    );
+    let frames = helper_cfg_preamble(
+        &config_in_mode(crate::patch::CaptureMode::FrameSequence),
+        &dir,
+    );
+    assert!(!frames.contains("enabled 1"), "{frames}");
+}
+
+/// A batch in a game already open (#725) inherits the batch before it's
+/// `mirv_movie_ffmpeg`: after AGR's null muxer, a frame-sequence batch
+/// would write no frame. Every mode says what it wants, last.
+#[test]
+fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
+    let dir = std::env::temp_dir().join("dod_test_ffmpeg_pipe_per_mode");
+    let pipe = |mode| {
+        let cfg = helper_cfg_preamble(&config_in_mode(mode), &dir);
+        cfg.lines()
+            .rfind(|l| l.starts_with("mirv_movie_ffmpeg all enabled "))
+            .map(str::to_string)
+    };
+    use crate::patch::CaptureMode::*;
+    for mode in [FrameSequence, Obs] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 0"),
+            "{mode:?}"
+        );
+    }
+    for mode in [DirectToVideo, Agr] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 1"),
+            "{mode:?}"
+        );
+    }
 }
 
 #[test]
@@ -797,9 +850,9 @@ fn the_agr_path_survives_goldsrcs_tokenizer_as_one_argument() {
     for (drive, block) in [(0, 0), (3, 17), (12, 250)] {
         let line = route_alias_line(&config, "dodstudio_chain_12", block, drive);
         let path = agr_route_path(drive, "dodstudio_chain_12", block);
-        assert_eq!(
-            line,
-            format!("alias dodstudio_chain_12_route_{block} \"mirv_agr start {path}\"\n")
+        assert!(
+            line.contains(&format!("; mirv_agr start {path}; ")),
+            "{line}"
         );
         assert!(
             !path
@@ -868,7 +921,23 @@ fn an_agr_batch_patches_the_same_demos_as_a_frame_sequence_batch() {
     assert_eq!(agr_jobs.len(), seq_jobs.len());
     for (a, s) in agr_jobs.iter().zip(&seq_jobs) {
         assert_eq!(a.scheduled_commands, s.scheduled_commands);
-        assert_eq!(a.init_commands, s.init_commands);
+        // All but the movie rate, which AGR mode's sound runs at (#450).
+        let others = |commands: &[String]| -> Vec<String> {
+            commands
+                .iter()
+                .filter(|c| !c.starts_with("mirv_movie_fps "))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(others(&a.init_commands), others(&s.init_commands));
+        // The primer job sets no movie rate at all.
+        assert!(
+            a.init_commands
+                .iter()
+                .all(|c| !c.starts_with("mirv_movie_fps ") || c == "mirv_movie_fps 60"),
+            "{:?}",
+            a.init_commands
+        );
         for (tick, cmd) in &a.scheduled_commands {
             assert!(
                 cmd.len() < crate::patch::MAX_CONSOLE_CMD_SAFE_LEN,
@@ -876,6 +945,11 @@ fn an_agr_batch_patches_the_same_demos_as_a_frame_sequence_batch() {
             );
         }
     }
+    assert!(
+        agr_jobs
+            .iter()
+            .any(|j| j.init_commands.contains(&"mirv_movie_fps 60".to_string()))
+    );
 }
 
 #[test]
@@ -907,20 +981,11 @@ fn an_agr_batch_routes_each_block_into_its_own_take_folder_and_makes_it() {
         );
         assert!(
             cfg.contains(&format!(
-                "alias {}_route_{} \"mirv_agr start {rel}\"\n",
-                block.demo_name, block.block_index
+                "; mirv_agr start {rel}; mirv_recordmovie_start\"\n"
             )),
             "{cfg}"
         );
     }
-    assert!(!cfg.contains("mirv_movie_filename _route_"), "{cfg}");
-    assert!(
-        cfg.contains(&format!(
-            "alias sys_record_start \"host_framerate {}\"",
-            1.0f32 / 60.0
-        )),
-        "{cfg}"
-    );
 }
 
 #[test]
@@ -1975,7 +2040,7 @@ fn test_two_capture_folders_on_one_drive_get_one_block_of_room() {
         std::path::PathBuf::from(r"C:\a"),
         std::path::PathBuf::from(r"C:\b"),
     ];
-    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| 15);
+    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| Some(15));
     let mut active_drive_idx = 0usize;
 
     let result = allocate_blocks_first_fit_decreasing(
@@ -2456,4 +2521,392 @@ fn a_take_of_merged_highlights_plans_every_kill_it_records() {
     assert_eq!(job.blocks.len(), 1);
     let plan = job.blocks[0].plan.as_ref().expect("a plan");
     assert_eq!(plan.kill_offsets_secs.len(), 4, "{plan:?}");
+}
+
+// -- Pins on build_batch_queue's phases before the split (#1177) ---------
+
+/// One HLTV demo, two clips far apart, with a Scheduled Command before each:
+/// the whole schedule, in order, as a capture plays it.
+fn two_clip_hltv_job() -> PatchJob {
+    let mut config = mock_config();
+    config.custom_commands = vec![crate::patch::CustomCommand {
+        command: "echo early".to_string(),
+        offset: 0.5,
+        relation: CommandRelation::Before,
+    }];
+    let mut first = streak_with_kills(1000, 1200, &[1000, 1200]);
+    let mut second = streak_with_kills(5000, 5200, &[5000, 5200]);
+    for s in [&mut first, &mut second] {
+        s.spectated = true;
+        s.player_index = 3;
+        s.total_demo_frames = 8000;
+    }
+    let (jobs, _) = build_batch_queue(
+        vec![first, second],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    jobs.into_iter().find(|j| !j.blocks.is_empty()).unwrap()
+}
+
+/// Every command and its place in the order: the stable sort by tick keeps
+/// each tick's commands in the order they were added, and the engine runs
+/// them in that order.
+#[test]
+fn a_two_clip_hltv_demo_schedules_every_stage_in_this_order() {
+    let echo = |s: &str| format!("echo \"[dod-studio] {s}\"");
+    let expected: Vec<(i32, String)> = vec![
+        (0, echo("BREADCRUMB - Tick 0")),
+        (300, "sys_fast_forward".into()),
+        (300, "spec_mode 4".into()),
+        (300, "ds_spec_target 4".into()),
+        (300, echo("DEMO_START 1 1 2")),
+        (300, echo("NEXT_CLIP 1 1 1 2")),
+        (800, "spec_mode 4".into()),
+        (800, "ds_spec_target 4".into()),
+        (800, "sys_normal_speed".into()),
+        (800, echo("SPEED_FLUSH - Tick 800")),
+        (801, "sys_normal_speed".into()),
+        (802, "sys_normal_speed".into()),
+        (900, "sys_sound".into()),
+        (900, echo("AUDIO_SYNC - Tick 900")),
+        (950, echo("CUSTOM_CMD1_BEFORE - Tick 950")),
+        (950, "echo early".into()),
+        (1000, "dodstudio_chain_01_route_0".into()),
+        (1000, "sys_record_start".into()),
+        (1000, echo("START_RECORD - Tick 1000")),
+        (1200, "sys_record_stop".into()),
+        (1200, echo("STOP_RECORD - Tick 1200")),
+        (1260, "sys_fast_forward".into()),
+        (1260, echo("FAST_FORWARD - Tick 1260")),
+        (1260, echo("NEXT_CLIP 1 1 2 2")),
+        (4800, "spec_mode 4".into()),
+        (4800, "ds_spec_target 4".into()),
+        (4800, "sys_normal_speed".into()),
+        (4800, echo("SPEED_FLUSH - Tick 4800")),
+        (4801, "sys_normal_speed".into()),
+        (4802, "sys_normal_speed".into()),
+        (4900, "sys_sound".into()),
+        (4900, echo("AUDIO_SYNC - Tick 4900")),
+        (4950, echo("CUSTOM_CMD1_BEFORE - Tick 4950")),
+        (4950, "echo early".into()),
+        (5000, "dodstudio_chain_01_route_1".into()),
+        (5000, "sys_record_start".into()),
+        (5000, echo("START_RECORD - Tick 5000")),
+        (5000, echo("BREADCRUMB - Tick 5000")),
+        (5200, "sys_record_stop".into()),
+        (5200, echo("STOP_RECORD - Tick 5200")),
+        (5260, "sys_fast_forward".into()),
+        (5260, echo("FAST_FORWARD - Tick 5260")),
+        (5260, echo("BATCH_COMPLETE")),
+        (5261, "dodstudio_chain_01_next".into()),
+    ];
+    assert_eq!(two_clip_hltv_job().scheduled_commands, expected);
+}
+
+#[test]
+fn director_events_label_each_highlight_and_mark_the_match_start_and_demo_end_in_tick_order() {
+    let mut config = mock_config();
+    config.custom_commands.clear();
+    let mut first = streak_with_kills(5000, 5200, &[5000, 5200]);
+    first.timeline_string = "0:50 - 0:52".to_string();
+    let mut second = streak_with_kills(1000, 1100, &[1000, 1050, 1100]);
+    second.timeline_string = "0:10 - 0:11".to_string();
+    for s in [&mut first, &mut second] {
+        s.total_demo_frames = 8000;
+        s.match_start_tick = Some(2000);
+    }
+    let (jobs, _) = build_batch_queue(
+        vec![first, second],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    // Labels number the highlights in tick order, not the order passed in;
+    // the match start comes from the first highlight.
+    assert_eq!(
+        job.director_events,
+        vec![
+            (1000, "#1: 3 kills: 0:10 - 0:11".to_string()),
+            (2000, "echo [dod-studio] MATCH_START".to_string()),
+            (5000, "#2: 2 kills: 0:50 - 0:52".to_string()),
+            (8000, "echo [dod-studio] DEMO_END".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn breadcrumbs_echo_from_tick_0_every_interval_short_of_the_demo_end() {
+    let config = mock_config();
+    let mut streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    streak.total_demo_frames = 2 * crate::patch::BREADCRUMB_INTERVAL_TICKS + 1;
+    let (jobs, _) =
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+    let crumbs: Vec<i32> = jobs[1]
+        .scheduled_commands
+        .iter()
+        .filter(|(_, c)| c.contains("BREADCRUMB"))
+        .map(|(t, _)| *t)
+        .collect();
+    let step = crate::patch::BREADCRUMB_INTERVAL_TICKS;
+    assert_eq!(crumbs, vec![0, step, 2 * step]);
+}
+
+#[test]
+fn the_last_demo_completes_the_batch_and_hands_over_to_the_capture_done_alias() {
+    let config = mock_config();
+    let mut second_demo = streak_with_kills(3000, 3200, &[3000, 3200]);
+    second_demo.source_demo = "demo2.dem".to_string();
+    let (jobs, _) = build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200]), second_demo],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let root = config.primary_media_dir.clone().unwrap();
+    let cfg = std::fs::read_to_string(root.join("dod").join("dodstudio_helper.cfg")).unwrap();
+    assert!(
+        cfg.contains("alias dodstudio_chain_01_next \"playdemo dodstudio_chain_02\"\n"),
+        "{cfg}"
+    );
+    assert!(
+        cfg.contains("alias dodstudio_chain_02_next \"sys_capture_done_path\"\n"),
+        "{cfg}"
+    );
+
+    // An earlier demo moves on at its last post-roll end, with no BATCH_COMPLETE.
+    let first = &jobs[1];
+    let post_roll_end = *ticks_for(first, "sys_fast_forward").last().unwrap();
+    assert_eq!(
+        ticks_for(first, "dodstudio_chain_01_next"),
+        vec![post_roll_end]
+    );
+    assert!(
+        !first
+            .scheduled_commands
+            .iter()
+            .any(|(_, c)| c.contains("BATCH_COMPLETE"))
+    );
+
+    // The last waits one tick per BATCH_COMPLETE echo after its post-roll end.
+    let last = &jobs[2];
+    let post_roll_end = *ticks_for(last, "sys_fast_forward").last().unwrap();
+    let complete: Vec<i32> = last
+        .scheduled_commands
+        .iter()
+        .filter(|(_, c)| c.contains("BATCH_COMPLETE"))
+        .map(|(t, _)| *t)
+        .collect();
+    assert_eq!(complete.first(), Some(&post_roll_end));
+    assert_eq!(
+        ticks_for(last, "dodstudio_chain_02_next"),
+        vec![post_roll_end + complete.len() as i32]
+    );
+}
+
+#[test]
+fn a_post_roll_past_the_demo_end_stops_five_frames_short_of_it() {
+    let config = mock_config();
+    let mut streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    // The post-roll would run to 1260; the demo ends at 1262.
+    streak.total_demo_frames = 1262;
+    let (jobs, _) =
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+    let job = &jobs[1];
+    let exit_frame = 1262 - 5;
+    assert_eq!(ticks_for(job, "sys_record_stop"), vec![1200]);
+    assert_eq!(
+        ticks_for(job, "sys_fast_forward").last(),
+        Some(&exit_frame),
+        "the post-roll ends at the exit frame"
+    );
+    // Cut short, the hand-over waits for no BATCH_COMPLETE echo.
+    assert_eq!(ticks_for(job, "dodstudio_chain_01_next"), vec![exit_frame]);
+}
+
+#[test]
+fn a_scheduled_command_landing_on_a_stage_tick_runs_one_tick_after_it() {
+    let mut config = mock_config();
+    config.record_start_lead = 1.0;
+    config.record_stop_trail = 1.0;
+    // Exactly the record start's and record stop's offsets.
+    config.custom_commands = vec![
+        crate::patch::CustomCommand {
+            command: "echo on_start".to_string(),
+            offset: 1.0,
+            relation: CommandRelation::Before,
+        },
+        crate::patch::CustomCommand {
+            command: "echo on_stop".to_string(),
+            offset: 1.0,
+            relation: CommandRelation::After,
+        },
+    ];
+    let (jobs, _) = build_batch_queue(
+        vec![streak_with_kills(3000, 3200, &[3000, 3200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let job = &jobs[1];
+    assert_eq!(ticks_for(job, "sys_record_start"), vec![2900]);
+    assert_eq!(ticks_for(job, "sys_record_stop"), vec![3300]);
+    assert_eq!(ticks_for(job, "echo on_start"), vec![2901]);
+    assert_eq!(ticks_for(job, "echo on_stop"), vec![3301]);
+    for marker in [
+        "CUSTOM_CMD1_BEFORE - Tick 2901",
+        "CUSTOM_CMD2_AFTER - Tick 3301",
+    ] {
+        assert!(
+            job.scheduled_commands
+                .iter()
+                .any(|(_, c)| c.contains(marker)),
+            "{marker} missing"
+        );
+    }
+}
+
+#[test]
+fn demos_play_in_the_order_of_their_first_highlight() {
+    let config = mock_config();
+    let mut late = streak_with_kills(9000, 9200, &[9000, 9200]);
+    late.source_demo = "late.dem".to_string();
+    let mut early = streak_with_kills(2000, 2200, &[2000, 2200]);
+    early.source_demo = "early.dem".to_string();
+    let mut early_player = streak_with_kills(4000, 4200, &[4000, 4200]);
+    early_player.source_demo = "late.dem".to_string();
+    early_player.target_player = Some("Other".to_string());
+    let (jobs, _) = build_batch_queue(
+        vec![late, early, early_player],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let order: Vec<(&str, Option<&str>)> = jobs[1..]
+        .iter()
+        .map(|j| (j.source_demo.as_str(), j.target_player.as_deref()))
+        .collect();
+    assert_eq!(
+        order,
+        vec![
+            ("early.dem", None),
+            ("late.dem", Some("Other")),
+            ("late.dem", None)
+        ]
+    );
+    // The primer loads the first demo played.
+    assert_eq!(jobs[0].source_demo, "early.dem");
+}
+
+#[test]
+fn the_previous_batchs_cfg_files_are_removed_and_nothing_else() {
+    let config = mock_config();
+    let dod = config.primary_media_dir.clone().unwrap().join("dod");
+    let stale = [
+        "dodstudio_capture_done.cfg",
+        "dod_quit.cfg",
+        "dodstudio_chain_07.cfg",
+    ];
+    for name in stale {
+        std::fs::write(dod.join(name), "x").unwrap();
+    }
+    std::fs::write(dod.join("dodstudio_chain_notes.txt"), "keep").unwrap();
+    build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    for name in stale {
+        assert!(!dod.join(name).exists(), "{name} left behind");
+    }
+    assert!(dod.join("dodstudio_chain_notes.txt").exists());
+    assert!(dod.join("dodstudio_helper.cfg").exists());
+}
+
+#[test]
+fn block_routes_carry_each_blocks_highlight_bounds_and_drive() {
+    let config = mock_config();
+    let (jobs, _) = build_batch_queue(
+        vec![
+            streak_with_kills(1000, 1200, &[1000, 1200]),
+            streak_with_kills(5000, 5300, &[5000, 5300]),
+        ],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let mut routes = jobs[1].block_routes.clone();
+    routes.sort_unstable();
+    assert_eq!(routes, vec![(1000, 1200, 0), (5000, 5300, 0)]);
+}
+
+/// A Scheduled Command whose "after" offset runs past the demo's end is left
+/// out of the schedule with a note naming the offset, not left for the
+/// patcher to blame the highlights for (#1192).
+#[test]
+fn an_after_command_past_the_demo_end_is_left_out_and_explained() {
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-fixtures/ci_fixture.dem"
+    ));
+    let ((_, streaks, ..), _) =
+        crate::patch::scanner::scan_demo_for_highlights_with_analysis(path).expect("fixture scans");
+    let last_frame = streaks[0].total_demo_frames;
+
+    let mut config = mock_config();
+    config.custom_commands = vec![crate::patch::CustomCommand {
+        command: "echo late".to_string(),
+        offset: 40.0,
+        relation: CommandRelation::After,
+    }];
+    let (jobs, _) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new()).unwrap();
+    let late: Vec<i32> = jobs
+        .iter()
+        .flat_map(|j| &j.scheduled_commands)
+        .filter(|(_, c)| c.contains("echo late") || c.contains("CUSTOM_CMD1_AFTER"))
+        .map(|(t, _)| *t)
+        .collect();
+    let blocks: usize = jobs.iter().map(|j| j.blocks.len()).sum();
+    assert!(
+        late.len() < 2 * blocks,
+        "some command passed the end, so some are dropped"
+    );
+    assert!(
+        late.iter().all(|t| *t <= last_frame),
+        "nothing is scheduled past the last frame: {late:?} vs {last_frame}"
+    );
+
+    // The note for the last highlight names the command, offset, anchor and
+    // the demo's end.
+    let last = streaks.iter().max_by_key(|s| s.end_tick).unwrap();
+    let window = schedule::clip_window(last, &last.frame_times, &config, last.demo_fps);
+    let tick = schedule::custom_command_tick(
+        &config.custom_commands[0],
+        &window,
+        &last.frame_times,
+        last.demo_fps,
+    );
+    let note = schedule::past_demo_end_note(&config.custom_commands[0], tick, &window, last)
+        .expect("40 s after the last highlight is past the end");
+    assert!(
+        note.contains("echo late") && note.contains("40.0s after"),
+        "{note}"
+    );
+    assert!(
+        note.contains(&format!("ends at frame {}", window.last_frame)),
+        "{note}"
+    );
+    assert!(!note.contains("don't match"), "{note}");
+
+    // An offset inside the demo gets no note.
+    let near = crate::patch::CustomCommand {
+        offset: 0.1,
+        ..config.custom_commands[0].clone()
+    };
+    let t = schedule::custom_command_tick(&near, &window, &last.frame_times, last.demo_fps);
+    assert!(schedule::past_demo_end_note(&near, t, &window, last).is_none());
 }

@@ -162,7 +162,7 @@ static WANTED: Mutex<Wanted> = Mutex::new(Wanted::None);
 
 /// True whenever [`WANTED`] is not [`Wanted::None`] -- lets [`poll`] skip the
 /// lock on the overwhelmingly common case (logging off) without changing
-/// behaviour, the same shape `commands.rs`' other `poll_*` helpers use.
+/// behaviour, the same shape `commands/poll.rs`' other `poll_*` helpers use.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The last payload logged per message name, for the identical-repeat
@@ -368,7 +368,7 @@ fn status() -> String {
 
 /// Folded into `ds_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `ds_spec_match_pov`) can treat this the same way -- see `commands.rs`.
+/// `ds_spec_match_pov`) can treat this the same way -- see `commands/status.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;

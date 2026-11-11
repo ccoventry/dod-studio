@@ -12,7 +12,7 @@
 //! [`Highlights::all`] keeps every player's for a caller that filters itself.
 
 use crate::headshot::headshot_of;
-use crate::{Analysis, Connection, Headshot, Weapon};
+use crate::{Analysis, Connection, FlagTag, Headshot, Weapon, flag_tags_of};
 
 /// Which version of highlight detection a scan used. Studio saves it with
 /// each scanned demo and, on opening a project, offers to rescan the demos
@@ -25,7 +25,7 @@ use crate::{Analysis, Connection, Headshot, Weapon};
 /// A change to what `kill.rs` caches needs both bumps, or the rescan reads
 /// the old highlights back out of the analyzer cache. Mirrored in
 /// `studio/src/scan_version.js`; a test checks the two agree.
-pub const HIGHLIGHTS_VERSION: u32 = 2;
+pub const HIGHLIGHTS_VERSION: u32 = 3;
 
 /// One kill in a highlight.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +41,9 @@ pub struct HighlightKill {
     /// Whether it was a headshot, from the helmet event (#1128); `Unknown`
     /// when the demo can't say (see `headshot.rs`).
     pub headshot: Headshot,
+    /// What was going on at the flags (#1132): only what the demo shows,
+    /// so empty for most kills (see `capture_area.rs`).
+    pub flag_tags: Vec<FlagTag>,
 }
 
 /// One life's kills by one player.
@@ -155,6 +158,7 @@ pub fn highlights(analysis: &Analysis) -> Highlights {
                             viewdemo_secs: time.viewdemo_offset.as_secs_f32(),
                             weapon: weapon.clone(),
                             headshot: headshot_of(&analysis.state.kill_positions, time, victim),
+                            flag_tags: flag_tags_of(&analysis.state.kill_positions, time, victim),
                         })
                         .collect();
                     Highlight {
@@ -216,6 +220,7 @@ mod tests {
                 viewdemo_secs: at,
                 weapon: Weapon::K98,
                 headshot: Headshot::No,
+                flag_tags: Vec::new(),
             }],
         }
     }
@@ -253,6 +258,7 @@ mod tests {
             viewdemo_secs: 4.0,
             weapon: Weapon::K98,
             headshot: Headshot::Yes,
+            flag_tags: vec![FlagTag::ClearedFlag],
         });
         assert_eq!(h.headshot_counts(), (1, 0));
         assert_eq!(h.first_kill_secs(), 4.0);

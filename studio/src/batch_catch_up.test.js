@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { capturedTakes, applyCaughtUpBatch, createBatchCatchUp, isBatchStillRunningInGame } from './batch_catch_up.js';
 import { streakUid } from './take_index.js';
+import { captureOf } from './take_record.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { STRINGS } from './strings.js';
 
 const streak = (player, first, last, extra = {}) => ({
   player_index: player,
@@ -36,7 +38,7 @@ function batch(d, extra = {}) {
 describe('capturedTakes', () => {
   it('maps each captured block to the highlights it covers', () => {
     const d = demos();
-    expect(capturedTakes(batch(d))).toEqual([
+    expect(capturedTakes(batch(d))).toMatchObject([
       { takeKey: 'session_x/chain_01_b0', uids: [uid('a.dem', d[0].streaks[0]), uid('a.dem', d[0].streaks[1])] },
     ]);
   });
@@ -52,10 +54,26 @@ describe('applyCaughtUpBatch', () => {
     const d = demos();
     const takeIndex = {};
     const result = applyCaughtUpBatch(batch(d), d, takeIndex);
-    expect(result).toEqual({ captured: 1, total: 2, marked: 2, changed: true });
+    expect(result).toEqual({ captured: 1, total: 2, marked: 2, markedRendered: 0, changed: true });
     expect(d[0].streaks.map((s) => s.status)).toEqual([HIGHLIGHT_STATUS.CAPTURED, HIGHLIGHT_STATUS.CAPTURED, undefined]);
     expect(d[1].streaks[0].status).toBeUndefined();
     expect(Object.keys(takeIndex)).toEqual(['session_x/chain_01_b0']);
+  });
+
+  it('marks Rendered a take whose clip was rendered and deleted before Studio closed (#861)', () => {
+    const d = demos();
+    const b = batch(d);
+    b.blocks[0].rendered = true;
+    const result = applyCaughtUpBatch(b, d, {});
+    expect(d[0].streaks.map((s) => s.status)).toEqual([HIGHLIGHT_STATUS.RENDERED, HIGHLIGHT_STATUS.RENDERED, undefined]);
+    expect(result).toMatchObject({ marked: 2, markedRendered: 2 });
+  });
+
+  it('says how many were marked each way', () => {
+    const say = STRINGS.BATCH_CATCH_UP.caughtUp;
+    expect(say(129, 342, 129, 35)).toContain('94 highlight(s) marked Captured. 35 highlight(s) marked Rendered');
+    expect(say(2, 2, 2)).toContain('2 highlight(s) marked Captured.');
+    expect(say(2, 2, 2)).not.toContain('Rendered');
   });
 
   it('keeps a verified Rendered and overrules a hand-set one', () => {
@@ -77,6 +95,7 @@ function fakeIo(overrides = {}) {
     catchUp: vi.fn(async () => ({ batches: [], waiting_for_game: false })),
     readProject: vi.fn(),
     writeProject: vi.fn(async () => {}),
+    exists: vi.fn(async (paths) => paths.map((path) => path === 'C:/projects/match.json')),
     listen: vi.fn(async () => () => {}),
     toast: vi.fn(),
     ...overrides,
@@ -97,6 +116,43 @@ describe('createBatchCatchUp', () => {
     expect(io.listen).toHaveBeenCalledWith('batch_catch_up', expect.any(Function));
   });
 
+  it('keeps keys this build does not know, backing a schema 1 file up first', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ version: '0.12.0', demos: saved, settings: { a: 1 }, profile: 'FOTW' });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    const [[backup, backedUp], [path, written]] = io.writeProject.mock.calls;
+    expect(backup).toMatch(/^C:\/projects\/match\.before-v2-.*\.dodstudio$/);
+    expect(backedUp).toBe(file);
+    expect(path).toBe('C:/projects/match.json');
+    expect(JSON.parse(written)).toMatchObject({ schema: 2, saveNeeds: 1, settings: { a: 1 }, profile: 'FOTW' });
+    expect(io.toast).toHaveBeenCalledWith(expect.stringContaining(`Backup: ${backup}`), 'info');
+  });
+
+  it('keeps the schema of a newer file, with no backup', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ schema: 9, saveNeeds: 1, demos: saved, settings: { a: 1 } });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    expect(io.writeProject).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(io.writeProject.mock.calls[0][1])).toMatchObject({ schema: 9, settings: { a: 1 } });
+  });
+
+  it('leaves a file that needs a newer build alone, and says so', async () => {
+    const saved = demos();
+    const file = JSON.stringify({ schema: 9, saveNeeds: 2, demos: saved });
+    const io = fakeIo({ readProject: vi.fn(async () => file) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
+
+    expect(io.writeProject).not.toHaveBeenCalled();
+    expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('needs a newer DoD Studio'), 'error');
+  });
+
   it('marks a batch in its project file when that project is not open', async () => {
     const saved = demos();
     const file = JSON.stringify({ version: '0.12.0', demos: saved });
@@ -106,7 +162,7 @@ describe('createBatchCatchUp', () => {
     await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
 
     expect(io.readProject).toHaveBeenCalledWith('C:/projects/match.json');
-    const [path, written] = io.writeProject.mock.calls[0];
+    const [path, written] = io.writeProject.mock.calls.at(-1);
     expect(path).toBe('C:/projects/match.json');
     const data = JSON.parse(written);
     expect(data.demos[0].streaks[0].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
@@ -124,6 +180,28 @@ describe('createBatchCatchUp', () => {
     expect(io.readProject).not.toHaveBeenCalled();
     expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
     expect(onStatusChange).toHaveBeenCalled();
+  });
+
+  it('saves the open project when the marks are its only change, and says so (#1344)', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const onStatusChange = vi.fn();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: true }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange, saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(saveIfOnlyChange).toHaveBeenCalledTimes(1);
+    expect(onStatusChange).toHaveBeenCalled();
+    expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
+    expect(io.toast.mock.calls[0][0]).toContain('Saved them in the open project.');
+  });
+
+  it('says nothing of saving when the open project had other unsaved edits', async () => {
+    const d = demos();
+    const io = fakeIo();
+    const saveIfOnlyChange = vi.fn(async (change) => ({ result: await change(), saved: false }));
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange: vi.fn(), saveIfOnlyChange, io });
+    await c.applyBatches([batch(d, { project_path: 'p.json' })]);
+    expect(io.toast.mock.calls[0][0]).not.toContain('Saved');
   });
 
   it('says so when the project file cannot be read', async () => {
@@ -198,5 +276,18 @@ describe('createBatchCatchUp', () => {
     await c.start();
     err.mockRestore();
     expect(isBatchStillRunningInGame()).toBe(false);
+  });
+});
+
+describe('a caught-up batch keeps how it was captured (#439)', () => {
+  it('records the batch settings and the take folder, but no capture time it cannot know', () => {
+    const d = demos();
+    const takeIndex = {};
+    const b = batch(d, { session_id: 'session_x', capture_mode: 'agr', capture_fps: 300, agr_fps: 120 });
+    b.blocks[0].take_folder = 'D:/caps/session_x/chain_01_b0';
+    applyCaughtUpBatch(b, d, takeIndex);
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
+    expect(record).toMatchObject({ session_id: 'session_x', capture_mode: 'agr', capture_fps: 120, take_folder: 'D:/caps/session_x/chain_01_b0' });
+    expect(record.captured_at).toBeUndefined();
   });
 });

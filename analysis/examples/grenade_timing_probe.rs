@@ -44,6 +44,7 @@ fn delta_u32(delta: &dem::types::Delta, field: &str) -> Option<u32> {
         .and_then(|(_, v)| (v.len() >= 4).then(|| u32::from_le_bytes([v[0], v[1], v[2], v[3]])))
 }
 
+// R&D probe, not shipped code.
 #[allow(clippy::too_many_arguments)]
 fn note_sequence(
     entity: u16,

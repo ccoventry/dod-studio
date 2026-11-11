@@ -93,6 +93,10 @@ pub struct KillPosition {
     /// before it existed.
     #[serde(default)]
     pub headshot: crate::headshot::Headshot,
+    /// Who was capping at the kill, as far as the demo says (#1132).
+    /// Defaulted (all unknown) in an entry cached before it existed.
+    #[serde(default)]
+    pub capture_area: crate::capture_area::KillAreaTags,
 }
 
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -143,9 +147,9 @@ pub fn use_position_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 .then(|| origin(death.killer_client_index))
                 .flatten();
 
-            let victim = state.find_player_by_client_index(death.victim_client_index - 1);
+            let victim = state.find_player_by_wire_index(death.victim_client_index);
             let killer = by_other
-                .then(|| state.find_player_by_client_index(death.killer_client_index - 1))
+                .then(|| state.find_player_by_wire_index(death.killer_client_index))
                 .flatten();
             let victim_team = victim.and_then(|p| p.team.clone());
             let killer_team = killer.and_then(|p| p.team.clone());
@@ -165,6 +169,7 @@ pub fn use_position_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                     .zip(victim_origin)
                     .map(|(a, b)| distance(a, b)),
                 headshot: Default::default(),
+                capture_area: Default::default(),
             };
             state.kill_positions.push(kill);
         }

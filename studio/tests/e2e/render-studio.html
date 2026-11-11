@@ -20,6 +20,7 @@
 <body>
   <div id="render-status-row">
     <button id="scan-render-btn">Scan for Takes</button>
+    <button id="vegas-script-install-btn">Add Nameplate Script to VEGAS</button>
     <button id="start-render-btn" disabled>Start Render Batch</button>
     <button id="cancel-render-btn" disabled>Cancel (0)</button>
     <button id="retry-render-btn" disabled>Retry (0)</button>
@@ -62,6 +63,12 @@
     <input type="text" id="ffmpeg-override-path-input" />
     <span id="render-export-pool-free">0.0 GB</span>
   </div>
+
+  <!-- The folder fields that Configuration holds in the real app (#25). -->
+  <div class="input-row"><input type="text" id="drive-path-input" /><button id="add-drive-btn">Add</button></div>
+  <div id="target-drive-list"></div>
+  <div class="input-row"><input type="text" id="render-export-dir-input" /><button id="add-render-export-dir-btn">Add</button></div>
+  <div id="render-export-dir-list"></div>
 
   <table id="render-jobs-table">
     <thead>

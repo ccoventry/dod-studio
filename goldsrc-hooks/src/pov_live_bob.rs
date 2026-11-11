@@ -77,11 +77,12 @@
 //! relative to the camera; in an HLTV demo watched in first person the same
 //! for the view `client.dll` works out live, to compare against.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial, RefParamsPartial};
+use crate::engine::{self, RefParamsPartial};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("view_use_cl_bob");
 pub const LOG_NAME: &str = console_name!("debug_log_view_bob");
@@ -162,8 +163,8 @@ const BOB_SWING: f32 = 0.7;
 
 type OverrideFn = unsafe extern "C" fn(*mut View, *mut [f32; 3], *mut i32);
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static LOG_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
+pub static LOG_CVAR: Cvar = Cvar::new();
 /// The override's own address, once the call is redirected.
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
@@ -180,33 +181,15 @@ static TILT_PENDING: AtomicBool = AtomicBool::new(false);
 static TILT_VIEW_YAW: AtomicU32 = AtomicU32::new(0);
 static TILT_VIEW_ROLL: AtomicU32 = AtomicU32::new(0);
 /// `cl_bob`, `cl_bobcycle` and `cl_bobup`, once looked up.
-static BOB_CVARS: [AtomicPtr<CvarSPartial>; 3] = [
-    AtomicPtr::new(std::ptr::null_mut()),
-    AtomicPtr::new(std::ptr::null_mut()),
-    AtomicPtr::new(std::ptr::null_mut()),
-];
+static BOB_CVARS: [Cvar; 3] = [Cvar::new(), Cvar::new(), Cvar::new()];
 const BOB_CVAR_NAMES: [&std::ffi::CStr; 3] = [c"cl_bob", c"cl_bobcycle", c"cl_bobup"];
 
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
-pub fn set_log_cvar(cvar: *mut CvarSPartial) {
-    LOG_CVAR.store(cvar, Ordering::Release);
-}
-
-fn cvar_on(cvar: &AtomicPtr<CvarSPartial>) -> bool {
-    let cvar = cvar.load(Ordering::Acquire);
-    // Safety: the engine owns the cvar for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
-}
-
 fn on() -> bool {
-    cvar_on(&CVAR)
+    CVAR.on()
 }
 
 fn logging() -> bool {
-    cvar_on(&LOG_CVAR)
+    LOG_CVAR.on()
 }
 
 fn log(line: &str) {
@@ -241,18 +224,16 @@ struct BobCvars {
 fn bob_cvars() -> Option<BobCvars> {
     let mut values = [0.0; 3];
     for (i, slot) in BOB_CVARS.iter().enumerate() {
-        let mut cvar = slot.load(Ordering::Acquire);
-        if cvar.is_null() {
+        if slot.ptr().is_null() {
             let engfuncs = engine::engfuncs()?;
             // Safety: a plain lookup by name; null when not registered.
-            cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(BOB_CVAR_NAMES[i].as_ptr()) };
+            let cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(BOB_CVAR_NAMES[i].as_ptr()) };
             if cvar.is_null() {
                 return None;
             }
-            slot.store(cvar, Ordering::Release);
+            slot.set(cvar);
         }
-        // Safety: the engine owns the cvar for the session.
-        values[i] = unsafe { (*cvar).value };
+        values[i] = slot.value()?;
     }
     let [bob, cycle, up] = values;
     Some(BobCvars { bob, cycle, up })

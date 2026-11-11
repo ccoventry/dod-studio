@@ -3,9 +3,7 @@ import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPo
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
-import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
-import { confirmOverLimit } from './packet_entity_limit.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
@@ -16,11 +14,12 @@ import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked } from './obs_status.js';
 import { runObsConnectionTest, launchObsAndRetry, setObsCheckListener } from './obs_connection_ui.js';
 import { initClearPreviewsModal } from './orphaned_previews_modal.js';
-import { describeProblemPaths } from './capture_pane_logic.js';
 import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
+import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
+import { captureRateOf } from './take_record.js';
 import { STRINGS } from './strings.js';
+import { MAX_PROBLEM_PATHS_SHOWN } from './capture_pane_logic.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
@@ -29,15 +28,17 @@ import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_setting.js';
-import { setStatusLine, uiStatusText } from './status_line.js';
+import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { startObsDropRate } from './obs_drop_rate.js';
+import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
+import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
@@ -58,6 +59,12 @@ let captureProgress = null;
 /** Whether a capture batch is running right now (#545's close prompt). */
 export function isCaptureRunning() {
   return capturingInFlight;
+}
+
+/** Whether Start Capture's checks are running, before the batch's first
+ *  report (#1085: the project can't change under them). */
+export function isCaptureStarting() {
+  return !!precheck?.isChecking();
 }
 
 // Start Capture Batch's click, once initCaptureUI has wired it.
@@ -336,6 +343,13 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
+  // Only once something is picked to capture: a fresh install with nothing
+  // set up yet is not an error screen.
+  syncCaptureFieldErrors({
+    hlPath: document.querySelector('#hl-path-input')?.value,
+    hlaePath: document.querySelector('#hlae-path-input')?.value,
+    driveCount: effectiveDrivePool.length,
+  }, !noHighlightsSelected);
   const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
@@ -349,46 +363,46 @@ export async function refreshLaunchGuard(state) {
     // First of all, ahead of even the calm cases below: a banned command is
     // an active correctness bug, not an incomplete-but-normal state.
     if (bannedCommandsPresent) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
       warningEl.style.display = 'block';
     } else if (pathsMissing) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.OBS_NOT_CONNECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noHighlightsSelected) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       warningEl.textContent = STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noDrivesConfigured) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.NO_DRIVES_CONFIGURED_WARNING;
       warningEl.style.display = 'block';
     } else if (noUsableSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = problemPaths.length > 0
-        ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
+        ? STRINGS.CAPTURE.NO_USABLE_OUTPUT_FOLDER_WARNING
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
       warningEl.style.display = 'block';
     } else if (makesRoom) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       const wontBeUsed = problemPaths.length === 1 ? STRINGS.CAPTURE.ENTRY_WONT_BE_USED_SINGULAR : STRINGS.CAPTURE.ENTRY_WONT_BE_USED_PLURAL;
-      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed, describeProblemPaths(problemPaths));
+      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed);
       warningEl.style.display = 'block';
     } else if (willBeCreatedPaths.length > 0) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       const shown = willBeCreatedPaths.slice(0, MAX_PROBLEM_PATHS_SHOWN).map((d) => `"${d.path}"`);
       const remaining = willBeCreatedPaths.length - MAX_PROBLEM_PATHS_SHOWN;
       if (remaining > 0) shown.push(STRINGS.CAPTURE.andNMore(remaining));
@@ -407,7 +421,7 @@ export async function refreshLaunchGuard(state) {
   if (footerRequiredEl) {
     const requiredGb = gigabytes(requiredBytes);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
-    footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
+    footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
   return { requiredBytes, availableBytes, blocked, noHighlightsSelected };
@@ -509,7 +523,7 @@ async function initStandaloneLaunchButton() {
     try {
       await launchStandaloneGame();
       showToast(STRINGS.HIGHLIGHTS.LAUNCHING_HLAE_TOAST, 'info');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     } finally {
       btn.textContent = originalLabel;
@@ -524,7 +538,7 @@ async function initStandaloneLaunchButton() {
     let engineAlreadyRunning = false;
     try {
       engineAlreadyRunning = await checkEngineProcesses();
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js — fail open rather than blocking
       // a legitimate launch just because the detector itself errored.
     }
@@ -570,7 +584,7 @@ function initImportCfgButton() {
       notifySettingsChange();
       refreshInitCommandWarnings();
       showToast(STRINGS.CAPTURE_CONFIG.importedCfgToast(lines.length), 'success');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     }
   });
@@ -625,6 +639,8 @@ export function batchSettingsPayload(state) {
   const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
   const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
 
+  // Mark the fields for when the user goes to Configuration; the toast says now.
+  syncCaptureFieldErrors({ hlPath: hlPathVal, hlaePath: hlaePathVal, driveCount: (state.targetDrives || []).filter(Boolean).length });
   if (!hlaePathVal || !hlPathVal) {
     showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
     return null;
@@ -730,6 +746,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   precheck = createCapturePrecheck({ startBtn, statusEl, progressContainer, refreshStart: () => refreshLaunchGuard() });
   captureProgress = createCaptureProgress({ statusEl, container: progressContainer, log: logFrontendEvent });
   startObsDropRate({ el: document.querySelector('#obs-drop-rate'), listen, toast: (text) => showToast(text, 'warning', 12000) });
+  startKillfeedLayoutWarning({ el: document.querySelector('#killfeed-layout-warning'), listen, toast: (text) => showToast(text, 'warning', 20000) });
   initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
@@ -1018,7 +1035,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });
@@ -1094,6 +1111,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths, kill_gaps: settings.kill_gaps };
     // The finish step (#440) picks its codec by the mode this batch used.
     lastDispatch.captureMode = settings.capture_mode;
+    // The rate the mode really records at, for the take's capture history (#439).
+    lastDispatch.captureFps = captureRateOf(settings.capture_mode, settings);
     return {
       ...settings,
       streaks: selectedStreaks,
@@ -1177,8 +1196,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // A demo may have moved since the queue was loaded (#21). main.js looks
       // for it the same way Load Project does and offers the match; a demo
       // still missing after that stops the batch, since its highlights
-      // cannot be captured. A picked demo with more than one map stops it
-      // too (#217); main.js has said why then ('handled').
+      // cannot be captured. A picked demo with more than one map goes ahead
+      // on its first map (#217).
       precheck.step('demos');
       const demosReady = pickedDemosPresent
         ? await pickedDemosPresent({ onProgress: (p) => precheck.step('demos', p?.done, p?.total) })
@@ -1195,12 +1214,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         .filter((d) => (d.streaks || []).some((s) => s.selected === true))
         .map((d) => d.path);
       if (!(await confirmCrashMaps(pickedPaths))) return;
-      // A demo with more entities in a snapshot than this game's engine takes
-      // closes the game when it gets there (#207). Ask before patching.
+      // A demo over the game's entity limit needs no ask: the batch plays
+      // a trimmed copy of it (#207, trimmed_demos.rs). One with no camera
+      // data captures a frozen view (#920).
       const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
-      const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
-      if (!(await confirmOverLimit(picked, hlPathNow))) return;
-      // One with no camera data captures a frozen view (#920).
       if (!(await confirmNoCameraData(picked))) return;
 
       precheck.step('paths');
@@ -1238,7 +1255,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js — fail open rather than blocking a
         // legitimate batch because the detector itself errored.
       }

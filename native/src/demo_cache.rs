@@ -123,15 +123,15 @@ pub fn cache_demos(
             .iter()
             .map(|(why, n)| format!("{n}: {why}"))
             .collect();
-        crate::log_markdown(&format!(
-            "Cache demos: upgraded {} of {} older cache entries{}",
+        let parsing_rest = if reasons.is_empty() {
+            String::new()
+        } else {
+            crate::messages::cache_parsing_the_rest(&reasons)
+        };
+        crate::log_markdown(&crate::messages::cache_entries_upgraded(
             upgrade.upgraded,
             upgrade.total,
-            if reasons.is_empty() {
-                String::new()
-            } else {
-                format!("; parsing the rest ({})", reasons.join(", "))
-            }
+            &parsing_rest,
         ));
     }
     let plan = WorkPlan::new(&root, &paths);
@@ -273,9 +273,9 @@ fn cache_demos_with(
                             Ok(false) => {}
                             Err(why) => {
                                 p.failed += 1;
-                                crate::log_markdown(&format!(
-                                    "Cache demos: could not analyse {}: {why}",
-                                    path.display()
+                                crate::log_markdown(&crate::messages::cache_could_not_analyse(
+                                    path.display(),
+                                    why,
                                 ));
                             }
                         }

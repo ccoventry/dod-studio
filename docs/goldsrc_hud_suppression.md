@@ -137,7 +137,7 @@ sessions, five load lines, none mid-session — so this guards against whatever
 After the first scan the check is a short byte compare, so the cost is
 nothing either way.
 
-`commands.rs`'s `poll_code_patch` is that shared loop; `apply` returns whether
+`commands/poll.rs`'s `poll_code_patch` is that shared loop; `apply` returns whether
 it wrote, so the log line stays change-triggered.
 
 For the spectator crosshair (`docs/goldsrc_crosshair.md` §2) the same loop earns its keep twice over: polling is also how it notices

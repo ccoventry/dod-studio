@@ -17,10 +17,12 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use super::marker_gate::MarkerGate;
 
 /// Prefix `build_safe_echos` puts on every marker.
 const LOG_TAG: &str = "[dod-studio]";
@@ -111,56 +113,6 @@ pub struct Marker {
     pub at: std::time::Instant,
 }
 
-/// Which source's markers go on to the capture loop (#434).
-///
-/// Both carry the same lines in the same order: the hook forwards every
-/// tagged `echo`, and the log holds every one the engine printed. The log is
-/// the source until the events pipe connects; from then on the pipe is, and
-/// the log's markers are dropped. The pipe replays everything since the game
-/// started, so its first `log_delivered` markers are ones the log already
-/// sent, and are skipped.
-#[derive(Default)]
-pub struct MarkerGate {
-    inner: Mutex<GateState>,
-}
-
-#[derive(Default)]
-struct GateState {
-    pipe_active: bool,
-    log_delivered: usize,
-}
-
-impl MarkerGate {
-    /// Whether a marker read from the log goes on, counting it if it does.
-    pub fn admit_from_log(&self) -> bool {
-        let Ok(mut state) = self.inner.lock() else {
-            return true;
-        };
-        if state.pipe_active {
-            return false;
-        }
-        state.log_delivered += 1;
-        true
-    }
-
-    /// Hands the stream to the pipe. Returns how many of the pipe's first
-    /// markers the log already delivered (0 on a reconnect).
-    pub fn switch_to_pipe(&self) -> usize {
-        let Ok(mut state) = self.inner.lock() else {
-            return 0;
-        };
-        if state.pipe_active {
-            return 0;
-        }
-        state.pipe_active = true;
-        state.log_delivered
-    }
-
-    pub fn pipe_active(&self) -> bool {
-        self.inner.lock().map(|s| s.pipe_active).unwrap_or(false)
-    }
-}
-
 /// Tails `qconsole.log` and sends every `[dod-studio]` marker onward.
 pub struct LogTailer {
     path: PathBuf,
@@ -245,7 +197,7 @@ impl LogTailer {
     pub fn run(mut self, tx: Sender<Marker>, cancel: Arc<AtomicBool>, gate: Arc<MarkerGate>) {
         while !cancel.load(Ordering::Relaxed) {
             for marker in self.poll() {
-                if !gate.admit_from_log() {
+                if !gate.admit_from_log(&marker.label) {
                     continue;
                 }
                 if tx.send(marker).is_err() {
@@ -257,7 +209,9 @@ impl LogTailer {
     }
 }
 
-pub(crate) fn parse_marker(line: &str) -> Option<Marker> {
+/// One console line as a marker, or `None` when it carries no `[dod-studio]`
+/// tag. Also read by the catch-up after a restart, over a whole log (#20).
+pub fn parse_marker(line: &str) -> Option<Marker> {
     let line = line.trim_end_matches('\r').trim();
     let (_, rest) = line.split_once(LOG_TAG)?;
     let label = rest.trim().to_string();

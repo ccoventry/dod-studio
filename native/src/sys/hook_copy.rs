@@ -39,37 +39,62 @@ pub fn for_launch(source: &Path) -> PathBuf {
     let root = crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR);
     match launch_copy_in(&root, source) {
         Ok(copy) => {
-            let removed = match folders_games_run() {
-                Some(mut keep) => {
-                    // The source too, should the Hooks DLL setting point
-                    // into one of the copies' folders.
-                    keep.extend(copy.parent().map(Path::to_path_buf));
-                    keep.extend(source.parent().map(Path::to_path_buf));
-                    remove_unused(&root, &keep, SystemTime::now())
-                }
-                None => 0,
-            };
-            if removed > 0 {
-                crate::log_markdown(&format!(
-                    "goldsrc-hooks: removed {removed} hook DLL cop{} no game uses from {}",
-                    if removed == 1 { "y" } else { "ies" },
-                    root.display()
-                ));
-            }
-            crate::log_markdown(&format!(
-                "goldsrc-hooks: launching from a copy, {} (of {})",
+            // The source too, should the Hooks DLL setting point into one of
+            // the copies' folders.
+            let own = copy
+                .parent()
+                .into_iter()
+                .chain(source.parent())
+                .map(Path::to_path_buf)
+                .collect();
+            remove_idle_copies(&root, own);
+            crate::log_markdown(&crate::messages::hooks_launching_from_copy(
                 copy.display(),
-                source.display()
+                source.display(),
             ));
             copy
         }
         Err(e) => {
-            crate::log_markdown(&format!(
-                "⚠️ goldsrc-hooks: {e}; launching from {} itself, which stays locked while the game runs",
-                source.display()
-            ));
+            crate::log_markdown(&crate::messages::hooks_copy_failed(e, source.display()));
             source.to_path_buf()
         }
+    }
+}
+
+/// Removes the copies left by earlier launches (and by an uninstalled or
+/// replaced Studio's last run) at start-up, so they do not wait for the next
+/// launch to go. The same rules as a launch's clean-up: nothing a game has
+/// loaded and nothing launched from in the last [`KEEP_AFTER_LAST_USE`].
+///
+/// `configured` is the Hooks DLL setting: its folder is kept, as a launch
+/// keeps its source's, since the setting may point into a copy's folder.
+pub fn clean_at_start(configured: Option<&Path>) {
+    let root = crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR);
+    remove_idle_copies(&root, folder_of(configured));
+}
+
+/// The folder of the DLL at `dll`, as a keep-list.
+fn folder_of(dll: Option<&Path>) -> Vec<PathBuf> {
+    dll.and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect()
+}
+
+/// Removes the copies under `root` no game uses, but those in `keep`, and
+/// says so in the activity log. Does nothing when a game's modules could not
+/// be read, as no copy is then known to be free.
+fn remove_idle_copies(root: &Path, mut keep: Vec<PathBuf>) {
+    let Some(running) = folders_games_run() else {
+        return;
+    };
+    keep.extend(running);
+    let removed = remove_unused(root, &keep, SystemTime::now());
+    if removed > 0 {
+        crate::log_markdown(&crate::messages::hook_copies_removed(
+            removed,
+            root.display(),
+        ));
     }
 }
 
@@ -77,14 +102,14 @@ pub fn for_launch(source: &Path) -> PathBuf {
 /// earlier launch made) and returns the copy's path.
 pub fn launch_copy_in(root: &Path, source: &Path) -> Result<PathBuf, String> {
     let bytes = std::fs::read(source)
-        .map_err(|e| format!("could not read the hook DLL {}: {e}", source.display()))?;
+        .map_err(|e| crate::messages::could_not_read_hook_dll(source.display(), e))?;
     let name = source
         .file_name()
-        .ok_or_else(|| format!("{} names no file", source.display()))?;
+        .ok_or_else(|| crate::messages::hook_dll_names_no_file(source.display()))?;
     let dir = root.join(folder_name(&bytes));
     let copy = dir.join(name);
     std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("could not make the folder {}: {e}", dir.display()))?;
+        .map_err(|e| crate::messages::could_not_make_hook_folder(dir.display(), e))?;
     let up_to_date = std::fs::read(&copy).is_ok_and(|existing| existing == bytes);
     if !up_to_date {
         // Written beside it and renamed into place, so a copy cut short by a
@@ -92,10 +117,10 @@ pub fn launch_copy_in(root: &Path, source: &Path) -> Result<PathBuf, String> {
         let partial = dir.join(format!("{}.partial", name.to_string_lossy()));
         std::fs::write(&partial, &bytes)
             .and_then(|()| std::fs::rename(&partial, &copy))
-            .map_err(|e| format!("could not copy the hook DLL to {}: {e}", copy.display()))?;
+            .map_err(|e| crate::messages::could_not_copy_hook_dll(copy.display(), e))?;
     }
     std::fs::write(dir.join(SOURCE_FILE), source.to_string_lossy().as_bytes())
-        .map_err(|e| format!("could not write {} in {}: {e}", SOURCE_FILE, dir.display()))?;
+        .map_err(|e| crate::messages::could_not_write_hook_source(SOURCE_FILE, dir.display(), e))?;
     Ok(copy)
 }
 
@@ -141,15 +166,23 @@ fn folders_games_run() -> Option<Vec<PathBuf>> {
             modules
                 .iter()
                 .filter(|m| {
-                    m.file_name().is_some_and(|n| {
-                        n.to_string_lossy()
-                            .eq_ignore_ascii_case(crate::patch::batch_reuse::HOOK_DLL_NAME)
-                    })
+                    m.file_name()
+                        .is_some_and(|n| is_hook_dll_name(&n.to_string_lossy()))
                 })
                 .filter_map(|m| m.parent().map(Path::to_path_buf)),
         );
     }
     Some(folders)
+}
+
+/// Whether `name` is a hook DLL's file name: the plain one, or a labelled
+/// test build (`dodstudio_goldsrc_hooks_910.dll`, `hook_dll_list.rs`), which
+/// keeps its name in its copy.
+fn is_hook_dll_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let plain = crate::patch::batch_reuse::HOOK_DLL_NAME;
+    let stem = plain.trim_end_matches(".dll");
+    name == plain || (name.starts_with(&format!("{stem}_")) && name.ends_with(".dll"))
 }
 
 /// Removes every copy under `root` but those in `keep` (the one being
@@ -347,6 +380,48 @@ mod tests {
     fn a_dll_that_is_not_a_copy_has_no_source() {
         let (_, source) = setup("not_a_copy", b"MZ");
         assert_eq!(source_of(&source), None);
+    }
+
+    #[test]
+    fn an_idle_copy_the_setting_points_at_survives_the_start_up_clean_up() {
+        let (root, source) = setup("configured", b"MZ DSHOOKBUILD:0.10.0+aaa\0 one");
+        let copy = launch_copy_in(&root, &source).unwrap();
+        let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
+        assert_eq!(remove_unused(&root, &folder_of(Some(&copy)), later), 0);
+        assert_eq!(copies(&root).len(), 1);
+        // With no setting pointing there, the idle copy goes.
+        assert_eq!(remove_unused(&root, &folder_of(None), later), 1);
+    }
+
+    #[test]
+    fn a_labelled_hook_dll_counts_as_a_hook_dll() {
+        for name in [
+            "dodstudio_goldsrc_hooks.dll",
+            "dodstudio_goldsrc_hooks_910.dll",
+            "DODSTUDIO_GOLDSRC_HOOKS_test-910b.DLL",
+        ] {
+            assert!(is_hook_dll_name(name), "{name}");
+        }
+        for name in [
+            "dodstudio_goldsrc_hooks.dll.old",
+            "dodstudio_goldsrc_hooks_910.txt",
+            "dodstudio_goldsrc_hooks910.dll",
+            "AfxHookGoldSrc.dll",
+        ] {
+            assert!(!is_hook_dll_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_labelled_copy_is_made_under_its_own_name_and_removed_when_idle() {
+        let (root, source) = setup("labelled", b"MZ DSHOOKBUILD:0.10.0+aaa\0 one");
+        let labelled = source.with_file_name("dodstudio_goldsrc_hooks_910.dll");
+        std::fs::rename(&source, &labelled).unwrap();
+        let copy = launch_copy_in(&root, &labelled).unwrap();
+        assert_eq!(copy.file_name().unwrap(), "dodstudio_goldsrc_hooks_910.dll");
+        let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
+        assert_eq!(remove_unused(&root, &[], later), 1);
+        assert!(copies(&root).is_empty());
     }
 
     #[test]

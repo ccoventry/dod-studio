@@ -64,7 +64,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use crate::engine::{self, ClEntityS};
 use crate::names::console_name;
 
-/// The cvar name. Registered in `commands.rs`.
+/// The cvar name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("player_hide_hand_signals");
 
 /// Set from the cvar by `commands::poll`.

@@ -1,6 +1,6 @@
 // strings.js — subset of studio/src/strings.js's STRINGS.ANALYZER,
 // copied verbatim so render.js can be a faithful, low-diff port of
-// analyzer_pane.js's render functions. Keep in sync by hand; there is no
+// analyzer_report.js's render functions. Keep in sync by hand; there is no
 // shared build step between this static site and the desktop app.
 // studio/src/web_analyzer_copy.test.js fails when the two disagree (#238).
 export const STRINGS = {
@@ -101,6 +101,14 @@ export const STRINGS = {
     COL_WAVE: 'Wave',
     COL_TIME: 'Time',
     COL_DURATION: 'Duration',
+    // #448: engagement distance in the kill list and the player's tables.
+    COL_DISTANCE: 'Distance',
+    COL_AVG_DISTANCE: 'Avg. distance',
+    AVG_DISTANCE_TITLE: 'Avg. Distance',
+    DISTANCE_UNKNOWN_TITLE: 'Position unknown',
+    DISTANCE_AVERAGE_NOTE: 'Averaged over the kills where the position of both players is known; team kills are left out.',
+    distanceMeasured: (measured, total) => `${measured} of ${total} kills`,
+    metres: (m) => `${m.toFixed(1)} m`,
     WEAPON_CATEGORY_GRENADES: 'Grenades',
     WEAPON_CATEGORY_MELEE: 'Melee',
     WEAPON_CATEGORY_ALLIED: 'Allied',

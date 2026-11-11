@@ -330,6 +330,11 @@ pub struct SerializedStreak {
     /// before it existed: `scanIsCurrent` rescans it.
     #[serde(default)]
     pub headshots: Vec<::analysis::Headshot>,
+    /// What was going on at the flags at each kill (#1132): `while_capping`,
+    /// `flag_defence`, `cleared_flag`. Empty on a demo scanned before it
+    /// existed: `scanIsCurrent` rescans it.
+    #[serde(default)]
+    pub flag_tags: Vec<Vec<::analysis::FlagTag>>,
     /// The scanned file's size and start hash, checked against the file on
     /// disk before a batch or preview patches it (#196). Absent from
     /// projects saved before it existed.
@@ -608,14 +613,19 @@ pub enum CutBy {
     /// The batch stopped on an error with the game still up (a stall, OBS
     /// lost, an error box): the engine ended the game.
     Stopped,
+    /// DoD Studio closed while OBS recorded the clip, so nobody stopped the
+    /// recording at the clip's end (#20). Only a catch-up after a restart
+    /// says this.
+    StudioClosed,
 }
 
 impl CutBy {
-    fn log_text(self) -> &'static str {
+    pub(crate) fn log_text(self) -> &'static str {
         match self {
             CutBy::Cancel => "was cut short by Cancel",
             CutBy::GameClosed => "was cut short when the game closed",
             CutBy::Stopped => "was cut short when the batch stopped",
+            CutBy::StudioClosed => "was still recording in OBS when DoD Studio closed",
         }
     }
 }
@@ -663,7 +673,7 @@ fn mark_short_takes(
 
 /// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
 /// demo's blocks are contiguous and demos play in the manifest's order.
-fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
+pub(crate) fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
     let mut ordinal = 0u32;
     blocks
         .iter()
@@ -691,7 +701,7 @@ fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> 
 /// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
 /// reported, for a Cancel (#1081).
 #[derive(Debug, Default, Clone, Copy)]
-struct Records {
+pub(crate) struct Records {
     started: usize,
     stopped: usize,
     /// The demo tick the last `START_RECORD` named: its block's
@@ -707,18 +717,18 @@ impl Records {
     /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
     /// playing mid-clip, and the hook's batch skipped on) is over, so a
     /// Cancel later in the batch can't count it as still recording.
-    fn demo_started(&mut self, job_idx: u32) {
+    pub(crate) fn demo_started(&mut self, job_idx: u32) {
         self.stopped = self.stopped.max(self.started);
         self.demo = Some(job_idx);
     }
 
-    fn clip_started(&mut self, tick: Option<i64>) {
+    pub(crate) fn clip_started(&mut self, tick: Option<i64>) {
         self.started += 1;
         self.last_start_tick = tick;
         self.last_start_demo = self.demo;
     }
 
-    fn clip_stopped(&mut self) {
+    pub(crate) fn clip_stopped(&mut self) {
         self.stopped += 1;
     }
 
@@ -820,7 +830,7 @@ fn mark_started_late(verified: &mut [VerifiedBlock], late_starts: &[native::obs:
 /// clip can sit further on than the count says (#861's `resolve_block` does
 /// the same). With no tick, or none matching, the block at `stopped`.
 /// Without markers both counts are 0 and nothing changes.
-fn mark_cut_short(
+pub(crate) fn mark_cut_short(
     manifest: &CaptureManifest,
     verified: &mut [VerifiedBlock],
     records: Records,
@@ -1027,12 +1037,9 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
-            log_markdown(&format!(
-                "[take-verify] could not record capture settings at {} — {}. Render Studio will \
-                 not be able to warn about an FPS mismatch for this take.",
-                folder.display(),
-                e
-            ));
+            log_markdown(
+                &crate::messages::capture::take_verify_settings_not_recorded(folder.display(), e),
+            );
         }
     }
 }
@@ -1090,24 +1097,24 @@ fn check_takes(
     mark_started_late(&mut blocks, &end.late_starts);
     for block in &blocks {
         if let Some(ms) = block.started_late_ms {
-            log_markdown(&format!(
-                "[take-verify] {}: OBS started recording {ms} ms after the clip's first frame, so \
-                 the take is missing its opening: not counted as captured. It is left at {}.",
-                block.take_key, block.take_folder
+            log_markdown(&crate::messages::capture::take_verify_started_late(
+                &block.take_key,
+                ms,
+                &block.take_folder,
             ));
         }
     }
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
-            Some(s) => format!(
-                "stopped writing video early ({:.2} s of video, {:.2} s of audio)",
-                s.video_secs, s.audio_secs
-            ),
+            Some(s) => {
+                crate::messages::capture::take_stopped_writing_video(s.video_secs, s.audio_secs)
+            }
             None => block.cut_by.unwrap_or(end.cut_by).log_text().to_string(),
         };
-        log_markdown(&format!(
-            "[take-verify] {} {why}: not counted as captured. Its partial take is left at {}.",
-            block.take_key, block.take_folder
+        log_markdown(&crate::messages::capture::take_verify_cut_short(
+            &block.take_key,
+            why,
+            &block.take_folder,
         ));
     }
     let captured_count = blocks.iter().filter(|b| b.captured).count();
@@ -1115,20 +1122,25 @@ fn check_takes(
     // missed.
     let renderable_count = blocks.iter().filter(|b| b.renderable || b.rendered).count();
 
-    log_markdown(&format!(
-        "[take-verify] session {}: {}/{} takes on disk or rendered while capturing, {} renderable or rendered",
-        manifest.session_id,
+    log_markdown(&crate::messages::capture::take_verify_session_summary(
+        &manifest.session_id,
         captured_count,
         blocks.len(),
-        renderable_count
+        renderable_count,
     ));
     for block in &blocks {
-        log_markdown(&format!(
-            "[take-verify] {} captured={} renderable={} at {}",
-            block.take_key, block.captured, block.renderable, block.take_folder
+        log_markdown(&crate::messages::capture::take_verify_block_line(
+            &block.take_key,
+            block.captured,
+            block.renderable,
+            &block.take_folder,
         ));
     }
 
+    // An AGR take's sound goes beside its `.agr` (#450).
+    if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::agr_take::place_batch_sounds(&manifest.blocks);
+    }
     record_capture_settings(&manifest, &blocks);
     crate::manifest_file::write(&manifest, outcome, Some(&blocks));
 
@@ -1366,7 +1378,7 @@ pub async fn start_capture_batch_impl(
         if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks)
             .map_err(crate::messages::failed_to_check_demo_sources)
         {
-            log_markdown(&format!("[capture] {}", e));
+            log_markdown(&crate::messages::capture::capture_error_line(&e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1442,7 +1454,7 @@ pub async fn start_capture_batch_impl(
         ) {
             Ok(v) => v,
             Err(e) => {
-                log_markdown(&format!("[capture] build_batch_queue failed: {}", e));
+                log_markdown(&crate::messages::capture::build_batch_queue_failed(&e));
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
                 let _ = app_handle_clone.emit(
@@ -1489,22 +1501,53 @@ pub async fn start_capture_batch_impl(
         }
 
         if patch_jobs.is_empty() {
-            log_markdown("[capture] build_batch_queue produced no jobs");
+            log_markdown(crate::messages::capture::BUILD_BATCH_QUEUE_NO_JOBS);
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
                 serde_json::json!({
                     "running": false,
-                    "status": "No jobs produced"
+                    "status": crate::messages::capture::STATUS_NO_JOBS
                 }),
             );
             return;
         }
 
+        // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
+        let crate::trimmed_demos::BatchCopies {
+            copies: trimmed,
+            pins: trim_pins,
+        } = match crate::trimmed_demos::for_batch(
+            &app_handle_clone,
+            &patch_jobs,
+            &patcher_config.game_path,
+            &cancel_token_arc,
+        ) {
+            Ok(batch) => batch,
+            Err(status) => {
+                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": status
+                    }),
+                );
+                return;
+            }
+        };
+
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
-            match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
+            match crate::hook_batch::prepare(
+                &patch_jobs,
+                &planned_streaks,
+                &patcher_config,
+                &trimmed,
+            ) {
                 Ok(mut batch) => {
                     batch.reuse_game = reuse_game_pid;
                     Some(batch)
@@ -1513,7 +1556,7 @@ pub async fn start_capture_batch_impl(
                 // can't run in the open game the frontend picked (#725).
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
-                    log_markdown(&format!("⚠️ **Batch not started** — {status}"));
+                    log_markdown(&crate::messages::capture::batch_not_started_line(&status));
                     let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                     *running = false;
                     let _ = app_handle_clone.emit(
@@ -1527,8 +1570,8 @@ pub async fn start_capture_batch_impl(
                     return;
                 }
                 Err(why) => {
-                    log_markdown(&format!(
-                        "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
+                    log_markdown(&crate::messages::capture::batch_patched_instead_of_seeking(
+                        why,
                     ));
                     // The Commands tab checked these for a seeking batch, which
                     // runs them all; a patched one puts them in the demo, where
@@ -1619,11 +1662,18 @@ pub async fn start_capture_batch_impl(
         // Every way out before the engine starts ends it too.
         let mut room_guard = RoomGuard(capture_room.clone());
         // The hook plays the original demos: nothing to patch or copy.
-        let patch_jobs = if runtime_batch.is_some() {
+        let mut patch_jobs = if runtime_batch.is_some() {
             Vec::new()
         } else {
             patch_jobs
         };
+        // A patched demo over the entity limit is patched from its trimmed
+        // copy (#207). Its frames are the original's, so every tick holds.
+        for job in &mut patch_jobs {
+            if let Some(copy) = trimmed.get(&job.source_demo) {
+                job.source_demo = copy.to_string_lossy().into_owned();
+            }
+        }
         let total_patch_jobs = patch_jobs.len() as u32;
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching
@@ -1759,7 +1809,10 @@ pub async fn start_capture_batch_impl(
         let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
 
         if let Some((source_demo, e)) = failure {
-            log_markdown(&format!("[capture] Failed to patch {}: {}", source_demo, e));
+            log_markdown(&crate::messages::capture::patch_failed_line(
+                &source_demo,
+                &e,
+            ));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1767,7 +1820,7 @@ pub async fn start_capture_batch_impl(
                 serde_json::json!({
                     "running": false,
                     "error": true,
-                    "status": format!("Failed to patch {}: {}", source_demo, e)
+                    "status": crate::messages::capture::patch_failed_status(&source_demo, &e)
                 }),
             );
             return;
@@ -1816,6 +1869,8 @@ pub async fn start_capture_batch_impl(
         std::thread::spawn(move || {
             // Ends Render While Capturing however the listener ends.
             let _room_guard = RoomGuard(room.clone());
+            // The batch's trimmed copies can't be pruned until it ends (#207).
+            let _trim_pins = trim_pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per
@@ -1973,6 +2028,13 @@ pub async fn start_capture_batch_impl(
                         EngineEvent::GameClosed => {
                             game_closed = true;
                         }
+                        // Once per change in the game (#1339): no throttle.
+                        EngineEvent::KillfeedLayout(warning) => {
+                            let _ = app_emitter.emit(
+                                "capture_killfeed_layout",
+                                serde_json::json!({ "warning": warning }),
+                            );
+                        }
                         EngineEvent::ObsStartedLate(late) => {
                             if let Some(room) = &room {
                                 room.clip_started_late(&late.take_folder);
@@ -2045,10 +2107,7 @@ pub async fn start_capture_batch_impl(
                     .map(|s| s.to_string())
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                log_markdown(&format!(
-                    "[capture] Event listener thread panicked: {}",
-                    msg
-                ));
+                log_markdown(&crate::messages::capture::listener_panicked_line(&msg));
                 let mut running = is_running_for_panic
                     .lock()
                     .unwrap_or_else(|p| p.into_inner());
@@ -2058,7 +2117,7 @@ pub async fn start_capture_batch_impl(
                     serde_json::json!({
                         "running": false,
                         "error": true,
-                        "status": format!("Internal error in capture event listener: {}", msg)
+                        "status": crate::messages::capture::listener_panicked_status(&msg)
                     }),
                 );
             }
@@ -2141,7 +2200,7 @@ fn collapse_whitespace_outside_quotes(line: &str) -> String {
 pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+            .map_err(|e| crate::messages::failed_to_read_file(&path, e))?;
         Ok(content
             .lines()
             .map(str::trim)

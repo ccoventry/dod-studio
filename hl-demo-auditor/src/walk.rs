@@ -143,6 +143,7 @@ fn has_extension(path: &Path, wanted: &str) -> bool {
 
 /// One folder's listing: its demos into `demos`, its archives (`.zip`,
 /// `.7z`, `.rar`) into `zips` when given, the folders to walk next into `subdirs`.
+// One internal seam; each argument is an independent output or filter of the walk.
 #[allow(clippy::too_many_arguments)]
 fn list_dir(
     dir: &Path,

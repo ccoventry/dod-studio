@@ -330,10 +330,11 @@ risk in the document and it is now closed on evidence rather than on the absence
 target process has exited records black into a file that is valid in every other respect — right
 resolution, right frame rate, right duration, sometimes real audio from another source. Two probe
 recordings were wasted that way before the cause was understood, and the second one looked exactly
-like a hook collision. dod-studio owns the game's lifecycle, and *any* rebuild of the workspace while
-`tauri dev` is watching takes `hl.exe` down with it — including a `git checkout` that touches
-`Cargo.toml`. The game having been launched earlier in a session is not evidence that it is running
-now, which is why `probe_obs` checks and says so.
+like a hook collision. dod-studio owns the game's lifecycle, and at the time *any* rebuild of the
+workspace while `tauri dev` was watching took `hl.exe` down with it — including a `git checkout` that
+touches `Cargo.toml` (a dev build now starts the game outside cargo's job, so it survives, #545). The
+game having been launched earlier in a session is not evidence that it is running now, which is why
+`probe_obs` checks and says so.
 
 ---
 
@@ -678,6 +679,11 @@ process all three are the same event: dod-studio is gone and OBS is still record
 is on the way *back in* — `obs::recover` asks OBS at start-up whether it is recording into a folder
 shaped like `<take>/take0000/all`, which is a path only this app produces, and offers to stop it and
 fold the file. Anything else is somebody's own recording and is left alone.
+
+That folded take is not the clip as planned: nobody stopped it at the clip's end. So the session
+writes `dodstudio_obs_take.json` into the block folder while OBS records (`obs::take_state`), and
+removes it at the stop; a late start (#1109) is kept in it after the stop. The next start's catch-up
+(#20) reads it and counts neither take as captured.
 
 Two smaller ones found on the way:
 

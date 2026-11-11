@@ -76,11 +76,12 @@
 //! caller pops the argument, and that nothing branches into the call.
 
 use std::ffi::c_char;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::hw_call_site::{Build, CALL_LEN, CallSite, call_bytes};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_plugin_text");
 
@@ -111,7 +112,7 @@ const LOGGED_MAX: u32 = 20;
 
 static SITE: CallSite = CallSite::new("TE_TEXTMESSAGE's call to CL_HudMessage", &BUILDS);
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what [`filtered_hud_message`] reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Set the first time the cvar is on, so a session that never asks for it
@@ -127,11 +128,6 @@ static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 type HudMessageFn = unsafe extern "C" fn(name: *const c_char);
-
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether the cvar is on: `map_text` reads the map's strings for it then,
 /// and `voice_menus` hides plugin menus.
@@ -217,11 +213,9 @@ unsafe extern "C" fn filtered_hud_message(name: *const c_char) {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(

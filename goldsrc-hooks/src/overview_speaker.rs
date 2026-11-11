@@ -34,11 +34,12 @@
 //! skipped block draws the handle `CHudSpectator::VidInit` loads from
 //! `speakerIcon.spr`, and that nothing branches into the span.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_overview_hide_speaker");
 
@@ -57,7 +58,7 @@ const STOCK: [u8; 5] = [0x8b, 0x46, 0x04, 0x85, 0xc0];
 /// The `jne rel8` whose target is the "no speaker" exit.
 const JNE_AT: usize = 80;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The span's address, 0 before a successful scan.
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -70,10 +71,6 @@ static HIDDEN: AtomicU64 = AtomicU64::new(0);
 static TOUCHED: AtomicBool = AtomicBool::new(false);
 static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// `jmp rel32` from the span at `span` to `target`.
 fn jmp_to(span: usize, target: usize) -> [u8; 5] {
@@ -139,11 +136,9 @@ fn set_hidden(base: usize, hidden: bool) -> Result<bool, String> {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);
     } else if !TOUCHED.load(Ordering::Relaxed) {

@@ -2,7 +2,7 @@
 //!
 //! The DoD Studio window's Review tab has **From the start** and **From
 //! here** while no review runs (`ds_demo_review ask start` / `ask here`).
-//! Each sends DoD Studio a request over its game pipe ([`STUDIO_PIPE`],
+//! Each sends DoD Studio a request over its game pipe (`studio_pipe`,
 //! `native::sys::game_review_requests` on Studio's side): the loaded demo's
 //! full path, and for From here the demo player's clock now. Studio reviews
 //! that demo as its Review highlights button would, scanning it first if
@@ -23,7 +23,7 @@
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Where the review starts.
@@ -73,8 +73,15 @@ pub(crate) enum Status {
     Asking(String),
     /// Studio sent the review, at this time; the game starts it in a moment.
     Sent(Instant),
+    /// Studio answered the request with this failure.
     Failed(String),
+    /// The game never asked: an ask waiting for its demo gave up, for this
+    /// reason. Studio wasn't part of it, so the tab doesn't blame it.
+    NotAsked(String),
 }
+
+/// What `send` and `wait_for_demo` answer while a request is on its way.
+const STILL_WORKING: &str = "DoD Studio is still working on the last request";
 
 static STATUS: RwLock<Status> = RwLock::new(Status::Idle);
 
@@ -135,9 +142,6 @@ fn set_end(end: Status, starts_then: u32) {
 /// Whether a request is on its way, so a second click doesn't send another.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-/// DoD Studio's game pipe; the same as `streaks::STUDIO_PIPE`.
-const STUDIO_PIPE: &str = crate::streaks::STUDIO_PIPE;
-
 /// How often [`studio_running`] looks again.
 const LOOK_EVERY: Duration = Duration::from_secs(1);
 /// When it last looked, as milliseconds since [`epoch`], and what it saw.
@@ -158,22 +162,9 @@ pub(crate) fn studio_running() -> bool {
     let last = LOOKED_MS.load(Ordering::Relaxed);
     if last == 0 || now.saturating_sub(last) >= LOOK_EVERY.as_millis() as u64 {
         LOOKED_MS.store(now, Ordering::Relaxed);
-        RUNNING.store(pipe_exists(), Ordering::Relaxed);
+        RUNNING.store(crate::studio_pipe::studio_serves(), Ordering::Relaxed);
     }
     RUNNING.load(Ordering::Relaxed)
-}
-
-#[cfg(windows)]
-fn pipe_exists() -> bool {
-    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
-    let wide: Vec<u16> = STUDIO_PIPE.encode_utf16().chain([0]).collect();
-    // Safety: a NUL-terminated name; a 1 ms wait at most.
-    unsafe { WaitNamedPipeW(wide.as_ptr(), 1) != 0 }
-}
-
-#[cfg(not(windows))]
-fn pipe_exists() -> bool {
-    false
 }
 
 /// One line of Studio's answer.
@@ -204,7 +195,7 @@ fn parse_reply(line: &str) -> Reply {
 /// already on its way.
 pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     if IN_FLIGHT.swap(true, Ordering::AcqRel) {
-        return Err("DoD Studio is still working on the last request".to_string());
+        return Err(STILL_WORKING.to_string());
     }
     set_status(Status::Asking("Asking DoD Studio...".to_string()));
     let line = request_line(&demo, start);
@@ -225,6 +216,97 @@ pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     Ok(())
 }
 
+/// The demo player as an ask waiting for it sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DemoNow {
+    /// A demo is in the player and read.
+    Playing,
+    /// A demo is still being read.
+    Loading,
+    /// No demo.
+    Absent,
+}
+
+/// What an ask waiting for its demo does this frame.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WaitStep {
+    Ask,
+    Wait,
+    GiveUp(String),
+}
+
+/// How long an ask waits for its demo to load: as long as the review waits
+/// for one it loads itself.
+const WAIT_FOR_DEMO: Duration = Duration::from_secs(180);
+
+/// The ask waiting for the demo to finish loading: 0 for none, 1 for
+/// [`Start::First`], 2 for [`Start::At`] the time in [`WAITING_AT_BITS`]. An
+/// atomic, since the review's poll looks every frame.
+static WAITING: AtomicU8 = AtomicU8::new(0);
+/// The clock time of a waiting From here, as `f64` bits: taken when it was
+/// asked, since the demo plays while it still loads and the clock moves on
+/// meanwhile.
+static WAITING_AT_BITS: AtomicU64 = AtomicU64::new(0);
+/// When it started waiting, as milliseconds since [`epoch`].
+static WAITING_SINCE_MS: AtomicU64 = AtomicU64::new(0);
+
+/// What a waiting ask does with the demo as it is, `waited` after it was
+/// asked (#1152's follow-up: an ask sent while the demo still loaded was
+/// answered "no demo is playing").
+pub(crate) fn wait_step(demo: DemoNow, waited: Duration) -> WaitStep {
+    match demo {
+        DemoNow::Playing => WaitStep::Ask,
+        DemoNow::Loading if waited < WAIT_FOR_DEMO => WaitStep::Wait,
+        DemoNow::Loading => {
+            WaitStep::GiveUp("the demo did not finish loading in three minutes".to_string())
+        }
+        DemoNow::Absent => WaitStep::GiveUp("the demo stopped loading".to_string()),
+    }
+}
+
+/// Asks once the loading demo plays; the tab says so meanwhile, with its
+/// buttons greyed. Refused, as [`send`] refuses, while a request is on its
+/// way: its end would overwrite the wait's status and ungrey the buttons
+/// with the wait still pending. A request's thread sets its end before it
+/// clears [`IN_FLIGHT`], so once that is clear, no end can come later.
+pub(crate) fn wait_for_demo(start: Start) -> Result<(), String> {
+    if IN_FLIGHT.load(Ordering::Acquire) {
+        return Err(STILL_WORKING.to_string());
+    }
+    WAITING_SINCE_MS.store(epoch().elapsed().as_millis() as u64, Ordering::Relaxed);
+    let mode = match start {
+        Start::First => 1,
+        Start::At(seconds) => {
+            WAITING_AT_BITS.store(seconds.to_bits(), Ordering::Relaxed);
+            2
+        }
+    };
+    WAITING.store(mode, Ordering::Release);
+    set_status(Status::Asking(
+        "Waiting for the demo to load, then asking DoD Studio...".to_string(),
+    ));
+    Ok(())
+}
+
+/// The ask waiting for its demo, and how long it has waited.
+pub(crate) fn waiting() -> Option<(Start, Duration)> {
+    let start = match WAITING.load(Ordering::Acquire) {
+        1 => Start::First,
+        2 => Start::At(f64::from_bits(WAITING_AT_BITS.load(Ordering::Relaxed))),
+        _ => return None,
+    };
+    let since = WAITING_SINCE_MS.load(Ordering::Relaxed);
+    let now = epoch().elapsed().as_millis() as u64;
+    Some((start, Duration::from_millis(now.saturating_sub(since))))
+}
+
+/// Ends the wait: `why` it gave up, or none when it asks now or a review
+/// started meanwhile.
+pub(crate) fn stop_waiting(why: Option<String>) {
+    WAITING.store(0, Ordering::Release);
+    set_status(why.map_or(Status::Idle, Status::NotAsked));
+}
+
 /// To the hook's log only: this runs off the game's thread, where the
 /// console can't be printed to.
 fn log(line: &str) {
@@ -235,11 +317,7 @@ fn log(line: &str) {
 /// One request, start to end: the status it ends on.
 fn ask(line: &str) -> Status {
     use std::io::{BufRead, BufReader, Write};
-    let Ok(mut pipe) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(STUDIO_PIPE)
-    else {
+    let Ok(mut pipe) = crate::studio_pipe::connect() else {
         return Status::Failed("DoD Studio isn't running".to_string());
     };
     if let Err(e) = pipe.write_all(line.as_bytes()) {
@@ -318,11 +396,74 @@ mod tests {
     }
 
     #[test]
-    fn the_pipe_is_studios() {
-        let server = include_str!("../../native/src/sys/analysis_server.rs");
-        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
+    fn the_requests_are_the_ones_studio_reads() {
         let requests = include_str!("../../native/src/sys/game_review_requests.rs");
         assert!(requests.contains("`review start <absolute path to the .dem>`"));
         assert!(requests.contains("`review at <seconds> <absolute path>`"));
+    }
+
+    #[test]
+    fn an_ask_while_the_demo_loads_waits_for_it_to_play() {
+        let s = Duration::from_secs;
+        assert_eq!(wait_step(DemoNow::Loading, s(6)), WaitStep::Wait);
+        assert_eq!(wait_step(DemoNow::Playing, s(6)), WaitStep::Ask);
+        assert!(matches!(
+            wait_step(DemoNow::Loading, s(181)),
+            WaitStep::GiveUp(_)
+        ));
+        assert!(matches!(
+            wait_step(DemoNow::Absent, s(1)),
+            WaitStep::GiveUp(_)
+        ));
+    }
+
+    /// The tests below share the module's statics.
+    static STATICS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn statics() -> std::sync::MutexGuard<'static, ()> {
+        STATICS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn a_waiting_ask_greys_the_buttons_until_it_ends() {
+        let _statics = statics();
+        // From here keeps the clock it was asked at: the demo plays on while
+        // it loads.
+        wait_for_demo(Start::At(42.5)).unwrap();
+        assert_eq!(waiting().map(|(start, _)| start), Some(Start::At(42.5)));
+        assert!(matches!(status(), Status::Asking(_)));
+        stop_waiting(None);
+        assert_eq!(waiting(), None);
+        assert_eq!(status(), Status::Idle);
+    }
+
+    /// A wait that gives up says the game never asked, not that Studio
+    /// failed.
+    #[test]
+    fn a_wait_that_gives_up_ends_not_asked() {
+        let _statics = statics();
+        wait_for_demo(Start::First).unwrap();
+        stop_waiting(Some("the demo stopped loading".into()));
+        assert_eq!(waiting(), None);
+        assert_eq!(
+            status(),
+            Status::NotAsked("the demo stopped loading".into())
+        );
+        stop_waiting(None);
+    }
+
+    /// With a request on its way, an ask doesn't wait: that request's end
+    /// would overwrite the wait's status and ungrey the buttons.
+    #[test]
+    fn an_ask_doesnt_wait_while_a_request_is_on_its_way() {
+        let _statics = statics();
+        set_status(Status::Asking("Scanning the demo...".into()));
+        IN_FLIGHT.store(true, Ordering::Release);
+        let waited = wait_for_demo(Start::First);
+        IN_FLIGHT.store(false, Ordering::Release);
+        assert_eq!(waited, Err(STILL_WORKING.to_string()));
+        assert_eq!(waiting(), None);
+        assert_eq!(status(), Status::Asking("Scanning the demo...".into()));
+        set_status(Status::Idle);
     }
 }

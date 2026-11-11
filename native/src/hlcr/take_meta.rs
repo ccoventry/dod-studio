@@ -56,9 +56,11 @@ const OLDEST_FORMAT: u32 = 1;
 pub const TAKE_FILE: &str = "dodstudio_take.json";
 
 /// Whether a directory entry is one of ours, and so must not be mistaken for
-/// captured output. `take_folder_has_content` asks this.
+/// captured output. `take_folder_has_content` asks this. OBS mode's take
+/// state (`obs::take_state`) sits beside this file and is ours too.
 pub fn is_metadata(file_name: &std::ffi::OsStr) -> bool {
     file_name.eq_ignore_ascii_case(TAKE_FILE)
+        || file_name.eq_ignore_ascii_case(crate::obs::take_state::FILE)
 }
 
 /// How far up from a take folder to look. HLAE nests its own `take0000` inside
@@ -622,6 +624,9 @@ mod tests {
         // report a capture that never happened.
         assert!(is_metadata(std::ffi::OsStr::new(TAKE_FILE)));
         assert!(is_metadata(std::ffi::OsStr::new("DODSTUDIO_TAKE.JSON")));
+        assert!(is_metadata(std::ffi::OsStr::new(
+            crate::obs::take_state::FILE
+        )));
         assert!(!is_metadata(std::ffi::OsStr::new("00000.bmp")));
         assert!(!is_metadata(std::ffi::OsStr::new("sound.wav")));
     }

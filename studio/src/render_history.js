@@ -38,7 +38,8 @@ export function historySummary(history, currentAttempt = null) {
   return { label, bytes };
 }
 
-function when(unixMs) {
+/** `2026-10-30 14:05`, local time. */
+export function formatWhen(unixMs) {
   const d = new Date(unixMs);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -64,6 +65,6 @@ export function historyLines(history, formatSize, currentAttempt = null) {
       const outcome = STRINGS.RENDER.HISTORY_OUTCOME[key] || key;
       result = h.error ? `${outcome}: ${h.error}` : outcome;
     }
-    return `${when(h.started_unix_ms)} · ${settings} · ${result}`;
+    return `${formatWhen(h.started_unix_ms)} · ${settings} · ${result}`;
   });
 }

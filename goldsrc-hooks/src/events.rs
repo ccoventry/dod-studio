@@ -108,7 +108,10 @@ unsafe extern "C" fn wrapped_echo() {
     if let Some(line) = marker_line(&cmd_list::args()) {
         crate::batch_end::on_marker(&line);
         crate::schedule::note_marker(&line);
-        emit(line);
+        // After the marker itself, so the clip's summary follows its
+        // STOP_RECORD on the pipe.
+        emit(line.clone());
+        crate::clip_log::on_marker(&line);
     }
     unsafe { call_real(&REAL_ECHO) };
 }

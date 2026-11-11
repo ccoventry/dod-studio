@@ -80,6 +80,32 @@ pub(crate) fn is_shown() -> bool {
     SHOWN.load(Ordering::Acquire)
 }
 
+/// Whether the demo was playing (in the player and read) at the last look
+/// while the form showed.
+static DEMO_WAS_PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// Notes whether the demo plays as the form opens.
+pub(crate) fn note_demo_at_open(playing: bool) {
+    DEMO_WAS_PLAYING.store(playing, Ordering::Release);
+}
+
+/// Whether a demo load ended the clip the form is for, with the demo
+/// playing now or not: it played at the last look and doesn't now. A demo
+/// loaded by hand mid-review (when the review's lock couldn't wrap
+/// `viewdemo`) keeps the review on the same highlight, so the highlight check
+/// alone leaves the form up over another demo. A form opened while its demo
+/// still loads stays up until it has played.
+pub(crate) fn demo_load_ended(playing_now: bool) -> bool {
+    load_ended(
+        DEMO_WAS_PLAYING.swap(playing_now, Ordering::AcqRel),
+        playing_now,
+    )
+}
+
+fn load_ended(was_playing: bool, playing_now: bool) -> bool {
+    was_playing && !playing_now
+}
+
 /// How long after the form's Esc a menu coming up is Esc's doing. The engine
 /// brings the menu up on the same Esc that cancels the form (seen live on
 /// PRE), within a frame or two.
@@ -169,6 +195,32 @@ pub(crate) fn kill_count_text(kills: usize) -> String {
     }
 }
 
+/// The screen height the layout file's sizes are drawn for: the height at
+/// which a GameUI that scales its font with the screen draws it as the
+/// pre-Anniversary one does (22 px list rows there, 44 px at 1440, #781).
+const LAYOUT_SCREEN_TALL: i32 = 720;
+
+/// How much bigger to make the form than its layout file says, as a
+/// fraction: on a build whose font grows with the screen, by as much as the
+/// font, so the text fits its boxes (the form drew its text past them at
+/// 1440 lines); never smaller, and as laid out everywhere else.
+pub(crate) fn layout_scale(screen_tall: i32, font_scales: bool) -> (i32, i32) {
+    if font_scales && screen_tall > LAYOUT_SCREEN_TALL {
+        (screen_tall, LAYOUT_SCREEN_TALL)
+    } else {
+        (1, 1)
+    }
+}
+
+/// A panel's place and size, `(x, y, wide, tall)`, at `scale`.
+pub(crate) fn scaled_rect(
+    rect: (i32, i32, i32, i32),
+    (num, den): (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let s = |v: i32| v.saturating_mul(num) / den.max(1);
+    (s(rect.0), s(rect.1), s(rect.2), s(rect.3))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +269,32 @@ mod tests {
         assert!(menu_is_from_esc());
         ESC_AT.store(0, Ordering::Release);
         assert!(!menu_is_from_esc(), "never pressed");
+    }
+
+    #[test]
+    fn a_demo_that_stops_playing_under_the_form_ends_its_clip() {
+        assert!(load_ended(true, false), "loading another demo");
+        assert!(!load_ended(true, true), "still playing");
+        assert!(!load_ended(false, false), "opened while the demo loads");
+        assert!(!load_ended(false, true), "the demo it opened over is read");
+        note_demo_at_open(true);
+        assert!(!demo_load_ended(true));
+        assert!(demo_load_ended(false));
+        assert!(!demo_load_ended(false), "said once");
+    }
+
+    #[test]
+    fn the_form_grows_with_a_font_that_grows_with_the_screen() {
+        let at_1440 = layout_scale(1440, true);
+        assert_eq!(scaled_rect((10, 34, 36, 24), at_1440), (20, 68, 72, 48));
+        assert_eq!(
+            scaled_rect((0, 0, 520, 130), layout_scale(1080, true)),
+            (0, 0, 780, 195)
+        );
+        // The pre-Anniversary font keeps its size: so does the form.
+        assert_eq!(layout_scale(1440, false), (1, 1));
+        // Never smaller than laid out.
+        assert_eq!(layout_scale(600, true), (1, 1));
     }
 
     #[test]

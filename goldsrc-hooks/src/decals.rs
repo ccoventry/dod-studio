@@ -75,11 +75,12 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use crate::commands::console_print;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The command name. Registered in `commands.rs`.
+/// The command name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("map_clear_decals");
 
 /// `hw+0x4a000`, the engine's remove-every-decal-with-this-flag loop. The
@@ -336,6 +337,21 @@ pub fn status() -> String {
 /// Whether a clear has run this session.
 pub fn has_run() -> bool {
     LAST_CLEARED.load(Ordering::Relaxed) != usize::MAX
+}
+
+/// `ds_map_clear_decals` -- takes no arguments and holds no state, so a
+/// command is the whole of what it needs to be.
+pub(crate) unsafe extern "C" fn command() {
+    match clear() {
+        Ok(removed) => {
+            console_print(&format!("{NAME}: removed {removed} decal(s)\n"));
+            unsafe { crate::debug::report(&format!("commands: {NAME} removed {removed}")) };
+        }
+        Err(why) => {
+            console_print(&format!("{NAME}: {why}\n"));
+            unsafe { crate::debug::report(&format!("commands: {NAME} failed -- {why}")) };
+        }
+    }
 }
 
 #[cfg(test)]

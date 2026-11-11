@@ -68,10 +68,12 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
+use crate::console_tokens::rejoin_colons;
 use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+use crate::steam_id;
 
 mod backdrop;
 mod butt;
@@ -79,6 +81,7 @@ mod clear;
 mod colour;
 mod even;
 mod font;
+mod layout_report;
 mod name_cap;
 mod replace;
 mod scale;
@@ -87,6 +90,7 @@ mod scale;
 #[cfg(target_arch = "x86")]
 pub(crate) use backdrop::fill as fill_box;
 pub(crate) use clear::on_round_state;
+pub(crate) use layout_report::report_again as report_layout_again;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -291,24 +295,13 @@ impl std::fmt::Display for Player {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Player::Slot(slot) => write!(f, "{slot}"),
-            Player::SteamId(id) => match classic_steam_id(*id) {
+            Player::SteamId(id) => match steam_id::classic(*id) {
                 Some(classic) => f.write_str(&classic),
                 None => write!(f, "{id}"),
             },
             Player::OwnPov => f.write_str("self"),
         }
     }
-}
-
-/// A SteamID64 in the `STEAM_0:Y:Z` form GoldSrc's own `status` prints, the
-/// one players and server admins recognise (#537). `None` for an id that
-/// isn't a player's own account, such as the HLTV proxy's: that form only
-/// exists for individual accounts, base + a 32-bit account number.
-pub(crate) fn classic_steam_id(id: u64) -> Option<String> {
-    let account = id
-        .checked_sub(STEAM_ID64_BASE)
-        .filter(|&a| a <= u64::from(u32::MAX))?;
-    Some(format!("STEAM_0:{}:{}", account % 2, account / 2))
 }
 
 /// One block-list entry for `status`: slots as `slot N`, SteamIDs in the
@@ -360,50 +353,12 @@ fn current_name(player: Player) -> Option<String> {
     }
 }
 
-/// SteamID64 of account number 0 in the public universe; an individual
-/// account's SteamID64 is this plus its account number.
-const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
-
-/// A SteamID in any form a user is likely to paste: the 17-digit SteamID64,
-/// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
-/// the engine that printed it and does not change the account), or the newer
-/// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
-pub(crate) fn parse_steam_id(text: &str) -> Option<u64> {
-    let bare = text
-        .strip_prefix('[')
-        .and_then(|t| t.strip_suffix(']'))
-        .unwrap_or(text);
-    if bare.len() > 4 && bare[..4].eq_ignore_ascii_case("U:1:") {
-        let n: u64 = bare[4..].parse().ok()?;
-        return n.checked_add(STEAM_ID64_BASE);
-    }
-    if text.len() >= 6 && text[..6].eq_ignore_ascii_case("STEAM_") {
-        let mut parts = text[6..].split(':');
-        let (Some(universe), Some(y), Some(z), None) =
-            (parts.next(), parts.next(), parts.next(), parts.next())
-        else {
-            return None;
-        };
-        universe.parse::<u8>().ok()?;
-        let y: u64 = y.parse().ok().filter(|y| *y <= 1)?;
-        let z: u64 = z.parse().ok()?;
-        return z
-            .checked_mul(2)
-            .and_then(|z2| z2.checked_add(y))
-            .and_then(|n| n.checked_add(STEAM_ID64_BASE));
-    }
-    if text.len() == 17 && text.bytes().all(|b| b.is_ascii_digit()) {
-        return text.parse().ok();
-    }
-    None
-}
-
 /// One `block` argument, without its `!`: `self`, a SteamID, or a slot.
 fn parse_player(text: &str) -> Option<Player> {
     if text.eq_ignore_ascii_case("self") {
         return Some(Player::OwnPov);
     }
-    if let Some(id) = parse_steam_id(text) {
+    if let Some(id) = steam_id::parse(text) {
         return Some(Player::SteamId(id));
     }
     // Slots are 1..=32; a longer number is a mistyped SteamID, not a slot.
@@ -471,46 +426,6 @@ fn is_hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
-/// Bytes of a player's userinfo string (`MAX_INFO_STRING`).
-const USERINFO_LEN: usize = 256;
-
-/// The SteamID in the userinfo stored just before a player's name.
-///
-/// The engine's player record (0x250 bytes, the same on both `hw.dll`
-/// builds) is `userid`, then `userinfo[256]`, then `name[32]`, and
-/// `pfnGetPlayerInfo` hands out a pointer to `name`. So the userinfo is the
-/// 256 bytes before it. It's only trusted when it really is this player's:
-/// its `name` key must equal the name. Otherwise 0.
-///
-/// Safety: `name` is the pointer `pfnGetPlayerInfo` returned, into the
-/// engine's static player array, whose earlier bytes are always mapped.
-pub(crate) unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
-    if name.is_null() {
-        return 0;
-    }
-    let userinfo =
-        unsafe { std::slice::from_raw_parts((name as *const u8).sub(USERINFO_LEN), USERINFO_LEN) };
-    let name = unsafe { CStr::from_ptr(name) }.to_bytes();
-    sid_from_userinfo(userinfo, name).unwrap_or(0)
-}
-
-/// `*sid` from a `\key\value\...` userinfo buffer, if its `name` is `name`.
-fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
-    let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
-    let text = buffer[..end].strip_prefix(b"\\")?;
-    let mut fields = text.split(|&b| b == b'\\');
-    let mut sid = None;
-    let mut name_ok = false;
-    while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
-        match key {
-            b"name" => name_ok = value == name,
-            b"*sid" => sid = std::str::from_utf8(value).ok()?.parse::<u64>().ok(),
-            _ => {}
-        }
-    }
-    sid.filter(|&id| name_ok && id != 0)
-}
-
 /// A `block` argument list: the players, and whether it's `!` (hide everyone
 /// else). The console's pieces are rejoined first, so every check below sees
 /// whole ids: counting `!` on the raw pieces once read `!STEAM_0 : 1 :
@@ -544,28 +459,6 @@ fn parse_block_args(rest: &[String]) -> Result<(Vec<Player>, bool), String> {
     Ok((players, negations != 0))
 }
 
-/// Puts `STEAM_0:1:1234567` back together. GoldSrc's console tokenizer makes
-/// `:` a token of its own, so typed unquoted it arrives as `STEAM_0`, `:`,
-/// `1`, `:`, `1234567` (seen live 2026-09-30). Any token that is `:`, or
-/// follows one, is glued onto the one before it.
-fn rejoin_colons(tokens: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
-    let mut glue_next = false;
-    for token in tokens {
-        match out.last_mut() {
-            Some(last) if token == ":" => {
-                last.push(':');
-                glue_next = true;
-                continue;
-            }
-            Some(last) if glue_next => last.push_str(token),
-            _ => out.push(token.clone()),
-        }
-        glue_next = false;
-    }
-    out
-}
-
 /// `players`: every occupied slot with the name and SteamID `block` would
 /// match against right now. For finding the id to block, and for checking
 /// that the engine hands SteamIDs over at all (0 means it didn't).
@@ -587,7 +480,7 @@ fn players() -> String {
         let id = if who.steam_id == 0 {
             "SteamID unknown (0)".to_string()
         } else {
-            match classic_steam_id(who.steam_id) {
+            match steam_id::classic(who.steam_id) {
                 Some(classic) => format!("{} ({classic})", who.steam_id),
                 None => format!("{} (not a player account)", who.steam_id),
             }
@@ -626,7 +519,7 @@ fn lookup(slot: i32, hltv: bool) -> Option<(String, Who)> {
     who.steam_id = if info.steam_id != 0 {
         info.steam_id
     } else {
-        unsafe { steam_id_from_record(info.name) }
+        unsafe { steam_id::from_record(info.name) }
     };
     who.is_own_pov = !hltv && info.thisplayer != 0;
     let name = unsafe { CStr::from_ptr(info.name) }
@@ -1053,6 +946,20 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     handled
 }
 
+/// Whether player `index` is the one whose view the demo shows: the POV
+/// recorder, or the player an HLTV demo watches in first person. Used by
+/// `clear_on death` and `ds_sound_headshot_pov_farther` (#1353).
+pub(crate) fn is_watched_player(index: i32) -> bool {
+    if index <= 0 {
+        return false;
+    }
+    if is_hltv() {
+        crate::spectator_target::in_eye_target() == Some(index)
+    } else {
+        resolve(index, false).is_own_pov
+    }
+}
+
 /// [`hooked_death_msg`]'s filtering and forwarding: what the game's handler
 /// returned, and the three bytes it was handed (`None` when the message was
 /// hidden, blocked or too short to read).
@@ -1069,6 +976,7 @@ unsafe fn forward_death_msg(
         // The death happened whether or not the feed shows it, and as it was
         // recorded, whatever `replace` shows.
         crate::spectator_deathcam::note_death(original[0] as i32, original[1] as i32);
+        crate::headshot_sound::note_kill(original[0] as i32, original[1] as i32);
         let rules = replace::live();
         let shown = if rules.is_empty() {
             original
@@ -1141,11 +1049,13 @@ fn install_hook() {
 pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
     // installed while that switch is on too, with an empty block list; so
-    // does the even layout, for the butt stroke's per-line icon (#1088).
+    // does the even layout, for the butt stroke's per-line icon (#1088), and
+    // the headshot sound kept to the POV player's kills (#1353).
     if HOOK_WANTED.load(Ordering::Relaxed)
         || crate::spectator_deathcam::enabled()
         || clear::wants_death_msg()
         || even::wanted()
+        || crate::headshot_sound::wants_kills()
     {
         install_hook();
     }
@@ -1847,34 +1757,6 @@ mod tests {
     }
 
     #[test]
-    fn the_steam_id_comes_from_the_matching_userinfo_only() {
-        // As recorded in wsod25_grp5_h1_hltv.dem.
-        let mut record = [0u8; USERINFO_LEN];
-        let info = b"\\model\\us-inf\\name\\dicE[: :]m00cat :D\\*sid\\76561197962734863\\*hltv\\0";
-        record[..info.len()].copy_from_slice(info);
-        assert_eq!(
-            sid_from_userinfo(&record, b"dicE[: :]m00cat :D"),
-            Some(76_561_197_962_734_863)
-        );
-        assert_eq!(
-            sid_from_userinfo(&record, b"someone else"),
-            None,
-            "not this player's"
-        );
-        assert_eq!(sid_from_userinfo(&[0u8; 16], b"x"), None, "empty");
-        assert_eq!(
-            sid_from_userinfo(b"\\name\\bot\\*sid\\0", b"bot"),
-            None,
-            "a bot's 0"
-        );
-        assert_eq!(
-            sid_from_userinfo(b"name\\bot", b"bot"),
-            None,
-            "not userinfo"
-        );
-    }
-
-    #[test]
     fn a_pasted_classic_steam_id_is_one_negated_player_not_a_mix() {
         let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let me = 76_561_197_962_734_863;
@@ -1928,48 +1810,6 @@ mod tests {
     }
 
     #[test]
-    fn a_classic_steam_id_split_at_its_colons_is_put_back_together() {
-        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            rejoin_colons(&argv(&["!STEAM_0", ":", "1", ":", "1234567", "13"])),
-            argv(&["!STEAM_0:1:1234567", "13"])
-        );
-        assert_eq!(
-            rejoin_colons(&argv(&["!self", "!STEAM_0:1:1234567"])),
-            argv(&["!self", "!STEAM_0:1:1234567"]),
-            "quoted: already whole"
-        );
-        assert_eq!(
-            rejoin_colons(&argv(&[":", "3"])),
-            argv(&[":", "3"]),
-            "nothing to glue onto"
-        );
-    }
-
-    #[test]
-    fn steam_ids_parse_in_both_forms() {
-        assert_eq!(parse_steam_id("76561197975574370"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:0:7654321"), Some(ME));
-        assert_eq!(parse_steam_id("steam_1:0:7654321"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:1:7654321"), Some(ME + 1));
-        assert_eq!(parse_steam_id("STEAM_0:2:7654321"), None);
-        assert_eq!(parse_steam_id("STEAM_0:0"), None);
-        // SteamID3: account number 15308642 = 2 * 7654321.
-        assert_eq!(parse_steam_id("[U:1:15308642]"), Some(ME));
-        assert_eq!(parse_steam_id("U:1:15308642"), Some(ME));
-        assert_eq!(parse_steam_id("[u:1:15308642]"), Some(ME));
-        assert_eq!(parse_steam_id("[U:1:]"), None);
-        assert_eq!(
-            parse_steam_id("[G:1:15308642]"),
-            None,
-            "a group, not a user"
-        );
-        assert_eq!(parse_steam_id("STEAM_0:0:1:2"), None);
-        assert_eq!(parse_steam_id("7656119797793012"), None, "16 digits");
-        assert_eq!(parse_steam_id("12"), None);
-    }
-
-    #[test]
     fn block_arguments_are_a_slot_a_steam_id_or_self() {
         assert_eq!(parse_player("3"), Some(Player::Slot(3)));
         assert_eq!(parse_player("self"), Some(Player::OwnPov));
@@ -1982,15 +1822,7 @@ mod tests {
     }
 
     #[test]
-    fn only_player_accounts_get_the_classic_form() {
-        assert_eq!(
-            classic_steam_id(76_561_197_962_734_863).as_deref(),
-            Some("STEAM_0:1:1234567")
-        );
-        // The HLTV proxy's id from a real demo's `players` list: not an
-        // individual account, so no STEAM_0 form (#539 live test).
-        assert_eq!(classic_steam_id(90_071_996_842_377_220), None);
-        assert_eq!(classic_steam_id(12), None);
+    fn a_non_player_id_displays_as_the_raw_number() {
         assert_eq!(
             Player::SteamId(90_071_996_842_377_220).to_string(),
             "90071996842377220"

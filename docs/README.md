@@ -14,9 +14,11 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [command_tiers.md](command_tiers.md) — which commands Initial and Scheduled Commands refuse, warn about or ignore, and why.
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
 - [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: the settings Studio gives OBS, OBS measured against HLAE, how it is driven, failure modes, open questions.
+- [vegas_nameplates.md](vegas_nameplates.md) — each player's nameplate picture on its own track above their clips in VEGAS Pro: setting it on the Players tab, the clip list the EDL export saves, and the VEGAS script (#429).
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
+- [position_data_in_demos.md](position_data_in_demos.md) — what player position data demos carry (fields, rates, POV vs HLTV coverage) and what stats it allows (#448).
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
@@ -38,11 +40,13 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
+- [goldsrc_player_info.md](goldsrc_player_info.md) — `client.dll`'s per-player record `g_PlayerExtraInfo` (layout, who writes `health`), what POV and HLTV demos fill in it, and the name plates drawn from it (#1130).
 - [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — the HUD elements' vftable stub (`ds_hud_hide_teammate_info`), what each element draws, and where `ds_hud_hide_element`'s names went when #342 retired it.
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.
 - [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, the in-eye camera on a prone or crouching player (#329, #1144), the death cam when he dies, and the chase cameras drawing the players around them (#918).
+- [goldsrc_xray.md](goldsrc_xray.md) — X-ray (`ds_spec_xray_show`): what CS:GO's GOTV X-ray does, and how DoD Studio draws players through walls with the game's glow shell (#1297).
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.

@@ -101,6 +101,8 @@ describe('takesFoundMissing (#1081)', () => {
     );
     expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
     expect(STRINGS.BATCH_RESULTS.cutShortBy(null)).toBe(STRINGS.BATCH_RESULTS.STATUS.cut_short);
+    // An OBS recording nobody stopped, found by the catch-up after a restart (#20).
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('studio_closed')).toBe('Cut short: DoD Studio closed while OBS recorded it (not captured)');
   });
 
   it('says a take OBS started late is missing its opening, not missing (#1109)', () => {

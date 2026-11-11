@@ -182,10 +182,7 @@ pub fn serve(line: &str, writer: &mut impl Write) {
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
         .insert(id, sender);
-    crate::log_markdown(&format!(
-        "Review from the game: {} ({start:?})",
-        demo.display()
-    ));
+    crate::log_markdown(&crate::messages::review_from_game(demo.display(), &start));
     handler(ReviewRequest { id, demo, start });
     forward(&receiver, writer, FIRST_ANSWER_TIMEOUT, ANSWER_TIMEOUT);
     if let Some(map) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {

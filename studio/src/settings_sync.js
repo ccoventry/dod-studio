@@ -119,6 +119,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       kept_json_projects: getKeptJsonProjects(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
+      capture_split_left_permille: state.captureSplitLeftPermille ?? null,
+      analyzer_demos_height_px: state.analyzerDemosHeightPx ?? null,
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
@@ -418,5 +420,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
-  setRenderWhileCapturing(settings.render_while_capturing);
+  setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
 }

@@ -1127,7 +1127,7 @@ pub(crate) mod tests {
     /// survivable while the statics only held pointers; it stopped being so
     /// once the level became a thing tests deliberately vary.
     ///
-    /// `pub(crate)`: `commands.rs`'s own test also stores into `LEVEL`
+    /// `pub(crate)`: `commands/status.rs`'s test also stores into `LEVEL`
     /// directly (issue #321) and needs this same lock, not a second one --
     /// two independent mutexes would serialise each module's tests against
     /// themselves but not against each other, which is exactly the race

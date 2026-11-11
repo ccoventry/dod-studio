@@ -32,7 +32,7 @@ fn field(delta: &dem::types::Delta, name: &str) -> Option<Vec<u8>> {
     delta
         .iter()
         .find(|(k, _)| k.trim_matches(|c: char| c == '\0' || c.is_whitespace()) == name)
-        .map(|(_, v)| v.clone())
+        .map(|(_, v)| v.to_vec())
 }
 
 fn as_i32(v: &[u8]) -> Option<i32> {

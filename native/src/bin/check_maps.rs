@@ -9,6 +9,7 @@
 //! or is the wrong build, verifying each one against the demo that wants it
 //! before it is installed.
 
+use native::messages;
 use native::patch::map_check::{MapStatus, check_demo};
 use native::patch::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 
@@ -16,14 +17,11 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let fetch = args.iter().any(|a| a == "--fetch");
     let mut args = args.into_iter().filter(|a| !a.starts_with("--"));
-    let target = std::path::PathBuf::from(
-        args.next()
-            .expect("usage: check_maps <demo-or-folder> [maps-dir] [--fetch]"),
-    );
+    let target = std::path::PathBuf::from(args.next().expect(messages::CHECK_MAPS_USAGE));
 
     let demos: Vec<std::path::PathBuf> = if target.is_dir() {
         let mut found: Vec<_> = std::fs::read_dir(&target)
-            .expect("read folder")
+            .expect(messages::MAPS_READ_FOLDER_FAILED)
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
             .collect();
@@ -45,8 +43,8 @@ fn main() {
             base.join("maps")
         });
 
-    println!("maps: {}", maps_dir.display());
-    println!("demos: {}\n", demos.len());
+    println!("{}", messages::maps_dir_line(maps_dir.display()));
+    println!("{}", messages::maps_demo_count(demos.len()));
 
     let (mut ok, mut wrong, mut missing, mut unverifiable, mut unreadable, mut failed) =
         (0, 0, 0, 0, 0, 0);
@@ -78,57 +76,59 @@ fn main() {
                     MapStatus::Unreadable { .. } => unreadable += 1,
                 }
                 if !matches!(status, MapStatus::Ok { .. }) {
-                    println!("{:<52} {}", name, status.summary(&reference.map_name));
+                    println!(
+                        "{}",
+                        messages::maps_demo_status(&name, status.summary(&reference.map_name))
+                    );
                 }
             }
             Err(e) => {
                 failed += 1;
-                println!("{:<52} unreadable demo: {}", name, e);
+                println!("{}", messages::maps_unreadable_demo(&name, e));
             }
         }
     }
 
     println!(
-        "\nok {}  wrong-build {}  missing {}  unverifiable {}  unreadable-map {}  unreadable-demo {}",
-        ok, wrong, missing, unverifiable, unreadable, failed
+        "{}",
+        messages::maps_totals(ok, wrong, missing, unverifiable, unreadable, failed)
     );
     if needed.is_empty() {
         return;
     }
 
-    println!("\nmaps to fetch:");
+    println!("{}", messages::MAPS_TO_FETCH);
     for (map, (count, want)) in &needed {
         let url = map_url(DEFAULT_MIRROR, map).unwrap_or_else(|e| e);
         match want {
-            Some(sum) => println!(
-                "  {:<24} build {:08x}, {} demo(s)  {}",
-                map, sum, count, url
-            ),
-            None => println!("  {:<24} build unstated, {} demo(s)  {}", map, count, url),
+            Some(sum) => println!("{}", messages::maps_to_fetch_row(map, *sum, *count, url)),
+            None => println!("{}", messages::maps_to_fetch_row_unstated(map, *count, url)),
         }
     }
 
     if !fetch {
-        println!("\npass --fetch to download these.");
+        println!("{}", messages::MAPS_PASS_FETCH);
         return;
     }
 
     println!();
     for (map, (_, want)) in &needed {
         match fetch_map(map, *want, &maps_dir, DEFAULT_MIRROR) {
-            Ok(o) if o.already_correct => println!("  {:<24} already correct", map),
+            Ok(o) if o.already_correct => println!("{}", messages::maps_already_correct(map)),
             Ok(o) => {
                 println!(
-                    "  {:<24} installed {:08x} ({:.1} MB){}",
-                    map,
-                    o.checksum,
-                    o.bytes as f64 / (1024.0 * 1024.0),
-                    o.replaced
-                        .map(|p| format!(", previous kept at {}", p.display()))
-                        .unwrap_or_default()
+                    "{}",
+                    messages::maps_installed(
+                        map,
+                        o.checksum,
+                        o.bytes as f64 / (1024.0 * 1024.0),
+                        &o.replaced
+                            .map(|p| messages::maps_previous_kept_at(p.display()))
+                            .unwrap_or_default()
+                    )
                 );
             }
-            Err(e) => println!("  {:<24} FAILED: {}", map, e),
+            Err(e) => println!("{}", messages::maps_fetch_failed(map, e)),
         }
     }
 }

@@ -208,6 +208,7 @@ fn serialized_demo(
             serialized.victims = facts.victims;
             serialized.victim_factions = facts.victim_factions;
             serialized.headshots = facts.headshots;
+            serialized.flag_tags = facts.flag_tags;
             serialized
         })
         .collect();
@@ -262,6 +263,7 @@ impl From<CaptureStreak> for SerializedStreak {
             victims: Vec::new(),
             victim_factions: Vec::new(),
             headshots: Vec::new(),
+            flag_tags: Vec::new(),
             source_key: c.source_key,
             spectated: c.spectated,
             steam_id: c.steam_id,
@@ -869,9 +871,8 @@ pub async fn scan_directory_impl(
             if missing.len() == paths.len() {
                 return Err(crate::messages::scan_path_not_found(&missing[0]));
             }
-            log_markdown(&format!(
-                "[scan] Skipped paths that no longer exist: {}",
-                missing.join(", ")
+            log_markdown(&crate::messages::scan::skipped_missing_paths(
+                missing.join(", "),
             ));
         }
 
@@ -1125,7 +1126,10 @@ pub async fn scan_directory_impl(
                         }
                         let scanned = scan_demo_for_highlights_with_analysis(file);
                         if let Err(reason) = &scanned {
-                            log_markdown(&format!("[scan] Skipped {}: {}", file.display(), reason));
+                            log_markdown(&crate::messages::scan::skipped_demo(
+                                file.display(),
+                                reason,
+                            ));
                             skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
                                 idx,
                                 file_name.clone(),

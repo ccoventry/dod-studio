@@ -66,7 +66,7 @@ pub fn field<'a>(delta: &'a Delta, key_with_nul: &str) -> Option<&'a [u8]> {
     delta
         .get(key_with_nul)
         .or_else(|| delta.get(key_with_nul.trim_end_matches('\0')))
-        .map(Vec::as_slice)
+        .map(|v| v.as_slice())
 }
 
 /// A decoded float field: the decoder stores every float as 4 LE bytes.

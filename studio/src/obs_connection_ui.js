@@ -25,10 +25,10 @@ export function setObsCheckListener(fn) {
  * way `obs_check_orphan` is quiet at startup: "OBS is not running yet" is
  * the ordinary case here, not something to interrupt the user over.
  *
- * Lives here rather than main.js (where the OBS Connection UI is otherwise
- * wired up) specifically so Start Capture Batch's click handler in
- * capture_pane.js can call it directly — main.js already imports from
- * capture_pane.js, so importing this back the other way would be circular.
+ * Lives in its own module so Start Capture Batch's click handler in
+ * capture_pane.js and the config wiring can both call it directly. The
+ * reverse call, to capture_pane.js's launch gate after a check, goes through
+ * the listener above, because importing capture_pane.js here would be circular.
  */
 export async function runObsConnectionTest({ auto = false } = {}) {
   const btn = document.querySelector('#obs-test-btn');
@@ -135,7 +135,7 @@ export async function launchObsAndRetry() {
 
   try {
     await launchObs();
-  } catch (err) {
+  } catch {
     // Already toasted by ipc_bridge.js (missing/invalid path, etc.) — nothing
     // was launched, so there is nothing to wait for.
     return false;

@@ -61,10 +61,11 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_map_text");
 
@@ -84,7 +85,7 @@ const TEXT_CLASSES: [&[u8]; 3] = [b"dod_score_ent", b"env_message", b"game_text"
 /// (`dod_lennon4`); anything past this is not an entity lump.
 const MAX_ENTITY_LUMP: usize = 2 * 1024 * 1024;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what the message handler reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Hash of the level [`TEXT`] was read for, or 0 before the first read.
@@ -100,11 +101,6 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 struct MapText {
     map: String,
     strings: BTreeSet<Vec<u8>>,
-}
-
-/// Called by `commands.rs` once `ds_hud_hide_map_text` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 // ── Pure parsing ─────────────────────────────────────────────────────────────
@@ -383,11 +379,9 @@ fn install_hook() {
 /// Called every frame from `commands::poll`. Follows the cvar, reads the
 /// map's strings once per level while it is on, and keeps the hook in place.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
@@ -421,11 +415,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let hidden = HIDDEN.load(Ordering::Relaxed);
     if !wanted && hidden == 0 {
         return None;

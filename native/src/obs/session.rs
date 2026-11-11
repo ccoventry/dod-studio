@@ -25,6 +25,7 @@ use crate::patch::ObsConfig;
 use super::client::{ObsClient, ObsError, ObsPreflight};
 use super::log_tail::{Marker, MarkerKind};
 use super::provision;
+use super::take_state::{self, ObsTakeState};
 use super::{STOP_MARKER, TRIGGER_MARKER};
 
 /// Stream folder a single-stream OBS take lands in.
@@ -108,6 +109,9 @@ pub struct ObsSession {
     /// When OBS said the recording in progress started, until the clip's
     /// `START_RECORD` marker is held against it.
     obs_started: Option<std::time::Instant>,
+    /// How late OBS started the recording in progress, once its
+    /// `START_RECORD` said so: kept in the take's state file at the stop.
+    active_late_ms: Option<u64>,
     /// Scene that was active before the batch switched away, to restore.
     previous_scene: Option<String>,
     /// Profile that was active before the batch switched away, to restore.
@@ -178,7 +182,7 @@ impl ObsSession {
         }
 
         for warning in &preflight.warnings {
-            log_markdown(&format!("⚠️ **OBS** — {warning}"));
+            log_markdown(&crate::messages::obs_preflight_warning(warning));
         }
 
         Ok((
@@ -192,6 +196,7 @@ impl ObsSession {
                 active: None,
                 active_since: None,
                 obs_started: None,
+                active_late_ms: None,
                 previous_scene,
                 previous_profile,
                 frame_stats_baseline: None,
@@ -236,11 +241,18 @@ impl ObsSession {
         let obs_started = self.obs_started.take()?;
         let late = started_late(obs_started, clip_started)?;
         let take_folder = take_folder_of(self.active.as_ref()?);
-        log_markdown(&format!(
-            "⚠️ **OBS** — started recording {} ms after the clip's first frame, so `{}` is \
-             missing the clip's opening; it won't count as captured.",
+        let late_ms = late.as_millis() as u64;
+        self.active_late_ms = Some(late_ms);
+        take_state::save(
+            &take_folder,
+            ObsTakeState {
+                recording: true,
+                started_late_ms: Some(late_ms),
+            },
+        );
+        log_markdown(&crate::messages::obs_started_late(
             late.as_millis(),
-            take_folder.display()
+            take_folder.display(),
         ));
         Some(LateStart { take_folder, late })
     }
@@ -251,10 +263,7 @@ impl ObsSession {
             // STOP_RECORD was missed. Closing the current one first is the only
             // way the next block gets its own file rather than being appended
             // to its predecessor.
-            log_markdown(
-                "⚠️ **OBS** — a new block started while still recording; closing the previous \
-                 take first. A `STOP_RECORD` marker was missed.",
-            );
+            log_markdown(crate::messages::OBS_BLOCK_STARTED_WHILE_RECORDING);
             self.end_block();
         }
         let Some(take_folder) = self.take_folders.get(self.next_block).cloned() else {
@@ -295,6 +304,16 @@ impl ObsSession {
         };
 
         self.obs_started = Some(started);
+        self.active_late_ms = None;
+        // Until the stop: a catch-up after Studio closed mid-clip finds it
+        // and knows nobody stopped this recording (#20).
+        take_state::save(
+            &take_folder,
+            ObsTakeState {
+                recording: true,
+                started_late_ms: None,
+            },
+        );
         self.active = Some(dest);
         self.active_since = Some(std::time::Instant::now());
         // Best-effort, and deliberately after start_record rather than
@@ -325,6 +344,15 @@ impl ObsSession {
             return;
         };
         self.obs_started = None;
+        // Studio has seen this recording end, however the stop below goes:
+        // only a late start is left to say.
+        take_state::save(
+            &take_folder_of(&dest),
+            ObsTakeState {
+                recording: false,
+                started_late_ms: self.active_late_ms.take(),
+            },
+        );
         let seconds = self
             .active_since
             .take()
@@ -346,11 +374,9 @@ impl ObsSession {
                         // reports "partial file" with a broken audio frame at
                         // the very end. Truncated, not destroyed — so the
                         // wording promises recovery, not integrity.
-                        log_markdown(&format!(
-                            "⚠️ **OBS** — lost the connection mid-block ({e}). Salvaged \
-                             `{}`. It will be short and its last moment damaged, because the \
-                             recording was cut off rather than stopped.",
-                            video.display()
+                        log_markdown(&crate::messages::obs_lost_connection_salvaged(
+                            &e,
+                            video.display(),
                         ));
                         let take_folder = take_folder_of(&dest);
                         self.recorded.push(RecordedBlock {
@@ -436,12 +462,11 @@ impl ObsSession {
         } else {
             "the recorded clip stutters"
         };
-        log_markdown(&format!(
-            "⚠️ **OBS** — this block dropped {skipped_delta}/{total_delta} frames \
-             ({:.1}%) due to encoding lag: {effect}. The encoder can't keep up with \
-             OBS Capture FPS on this PC; lower it (Configuration → Output Format), \
-             or the resolution.",
-            rate * 100.0
+        log_markdown(&crate::messages::obs_frames_dropped(
+            skipped_delta,
+            total_delta,
+            rate * 100.0,
+            effect,
         ));
     }
 
@@ -459,6 +484,29 @@ impl ObsSession {
     /// playing the demo to the end capturing nothing, then reporting success.
     pub fn is_dead(&self) -> bool {
         self.dead || self.refused.is_some()
+    }
+
+    /// A session whose OBS went away and couldn't be reached again, for the
+    /// capture engine's tests of how a batch ends on that.
+    #[cfg(test)]
+    pub(crate) fn lost_for_tests() -> Self {
+        Self {
+            client: Arc::new(Mutex::new(None)),
+            cfg: ObsConfig::default(),
+            dead: true,
+            refused: None,
+            take_folders: Vec::new(),
+            next_block: 0,
+            active: None,
+            active_since: None,
+            obs_started: None,
+            active_late_ms: None,
+            previous_scene: None,
+            previous_profile: None,
+            frame_stats_baseline: None,
+            recorded: Vec::new(),
+            skipped: Vec::new(),
+        }
     }
 
     /// Why OBS refused to start recording, when that is what ended the batch.
@@ -494,7 +542,7 @@ impl ObsSession {
             }
         };
         if ok {
-            log_markdown("🔌 **OBS** — the connection dropped and was re-established.");
+            log_markdown(crate::messages::OBS_RECONNECTED);
         } else {
             self.dead = true;
         }
@@ -680,6 +728,7 @@ mod tests {
             active: Some(dest.to_path_buf()),
             active_since: Some(obs_started),
             obs_started: Some(obs_started),
+            active_late_ms: None,
             previous_scene: None,
             previous_profile: None,
             frame_stats_baseline: None,
@@ -699,25 +748,53 @@ mod tests {
     /// first frame is reported once, with the take it belongs to.
     #[test]
     fn a_recording_that_started_after_the_clip_is_reported_late_once() {
-        let dest = Path::new("D:/takes/chain_01_b0")
-            .join(TAKE_FOLDER)
-            .join(STREAM_FOLDER);
+        let root = scratch("late");
+        let block = root.join("chain_01_b0");
+        let dest = block.join(TAKE_FOLDER).join(STREAM_FOLDER);
+        std::fs::create_dir_all(&dest).unwrap();
         let clip = std::time::Instant::now();
         let obs = clip + std::time::Duration::from_millis(120);
         let mut session = session_recording(&dest, obs);
         assert_eq!(
             session.on_marker(&start_record_at(clip)),
             Some(LateStart {
-                take_folder: PathBuf::from("D:/takes/chain_01_b0"),
+                take_folder: block.clone(),
                 late: std::time::Duration::from_millis(120),
             })
         );
         assert_eq!(session.on_marker(&start_record_at(clip)), None, "once");
+        // Kept beside the take for a catch-up after a restart (#20).
+        assert_eq!(
+            take_state::read(&block),
+            Some(ObsTakeState {
+                recording: true,
+                started_late_ms: Some(120),
+            })
+        );
+        // The stop ends the recording and keeps the late start.
+        session.finish();
+        assert_eq!(
+            take_state::read(&block),
+            Some(ObsTakeState {
+                recording: false,
+                started_late_ms: Some(120),
+            })
+        );
 
         // OBS ahead of the clip, as the lead-in (and the game's wait) leaves it.
         let mut session = session_recording(&dest, clip);
         let first_frame = clip + std::time::Duration::from_millis(900);
         assert_eq!(session.on_marker(&start_record_at(first_frame)), None);
+        // A recording stopped in time leaves no state file.
+        take_state::save(
+            &block,
+            ObsTakeState {
+                recording: true,
+                started_late_ms: None,
+            },
+        );
+        session.finish();
+        assert_eq!(take_state::read(&block), None);
         assert_eq!(
             started_late(clip, clip),
             None,

@@ -313,13 +313,59 @@ def check_black_fill(path):
     ]
 
 
+DRAWN_FOV_RUST = Path(__file__).resolve().parent.parent / "src" / "demo_scope" / "drawn_fov.rs"
+ENTRY = 0x46696
+IN_FOV = 0x18A85C
+# gHUD (+0x1080b0, CHudAmmo's `mov ecx` at +0x46742) plus m_iFOV's +0x234,
+# what CHud::Think writes at +0x36d24.
+HUD_FOV = 0x1082E4
+
+
+def check_drawn_fov(path):
+    """`drawn_fov.rs` (the zoom-settled test against the drawn FOV): its
+    entry pattern matches once at the function's start, its first operand is
+    in_fov (what CHud::UpdateClientData stores at +0x3a2aa, the only other
+    reference), and the edi it compares is gHUD.m_iFOV."""
+    text = DRAWN_FOV_RUST.read_text(encoding="utf-8")
+    m = re.search(r'const ENTRY_PATTERN: &str = "((?:[^"\\]|\\.)*)";', text, re.S)
+    if not m:
+        return [f"{path}: no ENTRY_PATTERN in {DRAWN_FOV_RUST}"]
+    entry_pattern = " ".join(m.group(1).replace(chr(92), " ").split())
+    offsets = {}
+    for name in ["IN_FOV_OPERAND_AT", "HUD_FOV_OPERAND_AT"]:
+        n = re.search(rf"const {name}: usize = (\d+);", text)
+        if not n:
+            return [f"{path}: no {name} in {DRAWN_FOV_RUST}"]
+        offsets[name] = int(n.group(1))
+    pe = pefile.PE(str(path), fast_load=True)
+    image = bytes(pe.get_memory_mapped_image())
+    base = pe.OPTIONAL_HEADER.ImageBase
+    hits = [h.start() for h in compile_pattern(entry_pattern).finditer(image)]
+    if hits != [ENTRY]:
+        return [f"{path}: ENTRY_PATTERN matches at {[hex(h) for h in hits]}, expected [+{ENTRY:#x}]"]
+    in_fov = struct.unpack_from("<I", image, ENTRY + offsets["IN_FOV_OPERAND_AT"])[0] - base
+    hud_fov = struct.unpack_from("<I", image, ENTRY + offsets["HUD_FOV_OPERAND_AT"])[0] - base
+    stored = struct.unpack_from("<I", image, 0x3A2AA + 2)[0] - base
+    problems = []
+    if in_fov != IN_FOV or stored != IN_FOV:
+        problems.append(f"fld reads +{in_fov:#x}, UpdateClientData stores +{stored:#x}, expected +{IN_FOV:#x}")
+    if hud_fov != HUD_FOV:
+        problems.append(f"edi is loaded from +{hud_fov:#x}, not gHUD.m_iFOV +{HUD_FOV:#x}")
+    if problems:
+        return [f"{path}: {p}" for p in problems]
+    return [
+        f"{path.parents[2].name}: OK -- entry +{ENTRY:#x}; the settled test's fld reads in_fov "
+        f"+{IN_FOV:#x}, its edi gHUD.m_iFOV +{HUD_FOV:#x}"
+    ]
+
+
 def main():
     dlls = [Path(p) for p in sys.argv[1:]] or DEFAULT_DLLS
     pattern, in_eye_at, je_at, ids = constants()
     failed = False
     for dll in dlls:
         lines = check(dll, pattern, in_eye_at, je_at, ids) + check_view_operands(dll)
-        for line in lines + check_black_fill(dll):
+        for line in lines + check_black_fill(dll) + check_drawn_fov(dll):
             print(line)
             failed |= ": OK --" not in line
     sys.exit(1 if failed else 0)

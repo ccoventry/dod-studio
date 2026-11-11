@@ -175,45 +175,43 @@ mod reg {
 pub fn dem_open_with_status() -> Result<DemOpenWith, String> {
     #[cfg(windows)]
     {
-        let exe = std::env::current_exe()
-            .map_err(|e| format!("Could not find DoD Studio's own exe: {e}"))?;
-        let classes = reg::user_classes()
-            .map_err(|e| format!("Could not open HKCU\\Software\\Classes: {e}"))?;
+        let exe =
+            std::env::current_exe().map_err(crate::messages::open_with::could_not_find_own_exe)?;
+        let classes =
+            reg::user_classes().map_err(crate::messages::open_with::could_not_open_classes_key)?;
         Ok(reg::status(&classes, &exe))
     }
     #[cfg(not(windows))]
-    Err("Open With for .dem files is Windows-only".to_string())
+    Err(crate::messages::open_with::OPEN_WITH_WINDOWS_ONLY.to_string())
 }
 
 #[tauri::command(async)]
 pub fn set_dem_open_with(enabled: bool) -> Result<DemOpenWith, String> {
     #[cfg(windows)]
     {
-        let exe = std::env::current_exe()
-            .map_err(|e| format!("Could not find DoD Studio's own exe: {e}"))?;
-        let classes = reg::user_classes()
-            .map_err(|e| format!("Could not open HKCU\\Software\\Classes: {e}"))?;
+        let exe =
+            std::env::current_exe().map_err(crate::messages::open_with::could_not_find_own_exe)?;
+        let classes =
+            reg::user_classes().map_err(crate::messages::open_with::could_not_open_classes_key)?;
         let result = if enabled {
             reg::register(&classes, &exe)
-                .map_err(|e| format!("Could not add DoD Studio to Open With for .dem files: {e}"))
+                .map_err(crate::messages::open_with::could_not_add_open_with)
         } else {
-            reg::unregister(&classes).map_err(|e| {
-                format!("Could not remove DoD Studio from Open With for .dem files: {e}")
-            })
+            reg::unregister(&classes)
+                .map_err(crate::messages::open_with::could_not_remove_open_with)
         };
         reg::notify_shell();
         result?;
-        native::log_markdown(&format!(
-            "📂 **Open With** — DoD Studio {} for .dem files ({})",
-            if enabled { "listed" } else { "removed" },
-            exe.display()
+        native::log_markdown(&crate::messages::open_with::open_with_changed(
+            enabled,
+            exe.display(),
         ));
         Ok(reg::status(&classes, &exe))
     }
     #[cfg(not(windows))]
     {
         let _ = enabled;
-        Err("Open With for .dem files is Windows-only".to_string())
+        Err(crate::messages::open_with::OPEN_WITH_WINDOWS_ONLY.to_string())
     }
 }
 
@@ -247,6 +245,11 @@ mod tests {
 
         const TEST_PARENT: &str = r"Software\DoDStudioTest";
 
+        /// Creating a key makes the parent first, and another test's drop may
+        /// delete that parent in between while it is still empty (the key
+        /// create then fails). Creating and the parent's removal take turns.
+        static PARENT_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
         struct TestRoot {
             name: String,
             key: RegKey,
@@ -259,6 +262,7 @@ mod tests {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0);
                 let name = format!(r"{TEST_PARENT}\{tag}-{}-{nanos}", std::process::id());
+                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
                 let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
                     .create_subkey(&name)
                     .expect("create the test key");
@@ -268,6 +272,7 @@ mod tests {
 
         impl Drop for TestRoot {
             fn drop(&mut self) {
+                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
                 let hkcu = RegKey::predef(HKEY_CURRENT_USER);
                 let _ = hkcu.delete_subkey_all(&self.name);
                 // Only when no other test still has a key in it.

@@ -430,3 +430,53 @@ fn a_highlight_counts_its_headshots() {
     assert!(total > 0 && total <= kills);
     assert!(highlights.all.iter().all(|h| h.headshot_counts().1 == 0));
 }
+
+#[test]
+fn a_kill_by_another_player_carries_a_plausible_distance() {
+    let kills = &analysis().state.kill_positions;
+    let measured: Vec<f32> = kills.iter().filter_map(|k| k.distance).collect();
+    // The recorder is in most of the demo's kills, so some have both origins.
+    assert!(!measured.is_empty(), "no kill has a distance");
+    // One world unit is an inch: a fight on dod_anzio is between 0 and 100 m.
+    let limit = 100.0 / 0.0254;
+    assert!(
+        measured.iter().all(|d| *d > 0.0 && *d < limit),
+        "{measured:?}"
+    );
+    // A distance needs a killer other than the victim, and both origins.
+    for k in kills.iter().filter(|k| k.distance.is_some()) {
+        assert!(k.killer.is_some() && k.killer != k.victim);
+        assert!(k.killer_origin.is_some() && k.victim_origin.is_some());
+    }
+}
+
+#[test]
+fn capture_areas() {
+    // #1132: the recorder's own kills and deaths say whether they were
+    // capping (the demo has ClientAreas for them), nobody else's do, and with
+    // no cancelled capture nothing cleared a flag.
+    let state = &analysis().state;
+    let recorder = &player("CI_FIXTURE DEMO TESTER").id;
+    let mut capping = (0, 0);
+    for kill in &state.kill_positions {
+        let tags = kill.capture_area;
+        let by_recorder = kill.killer.as_ref() == Some(recorder);
+        let of_recorder = kill.victim.as_ref() == Some(recorder);
+        assert_eq!(tags.killer_capping != Capping::Unknown, by_recorder);
+        assert_eq!(tags.victim_capping != Capping::Unknown, of_recorder);
+        assert!(!tags.cleared_flag);
+        capping.0 += usize::from(tags.killer_capping == Capping::Yes);
+        capping.1 += usize::from(tags.victim_capping == Capping::Yes);
+    }
+    let visits: Vec<_> = state
+        .capture_areas
+        .recorder_visits
+        .iter()
+        .map(|v| (v.area, v.left.is_some()))
+        .collect();
+    // Three of the recorder's eight kills came while on a flag.
+    assert_eq!(capping, (3, 0));
+    assert_eq!(visits.len(), 8);
+    assert!(visits.iter().all(|(area, left)| *area <= 1 && *left));
+    assert_eq!(state.capture_areas.attackers.len(), 21);
+}

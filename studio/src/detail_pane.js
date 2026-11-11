@@ -1,6 +1,6 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
+import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame, takeCaptureStates, locateRenderedVideos, revealInExplorer } from './ipc_bridge.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
@@ -8,7 +8,7 @@ import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus,
 import { STRINGS } from './strings.js';
 import { automaticClipName } from './clip_name.js';
 import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
-import { confirmOverLimit } from './packet_entity_limit.js';
+import { watchPreviewTrim } from './preview_trim_status.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
 import { clockFloor, clockRound, durationText } from './time_format.js';
@@ -17,7 +17,9 @@ import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
 import { playersOf, matchesPlayer } from './detail_player_filter.js';
 import { headshotsCell } from './headshots.js';
+import { flagTagChips } from './flag_tags.js';
 import { fileNameOf } from './path_display.js';
+import { createCaptureHistory } from './capture_history.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -40,13 +42,18 @@ let currentOnDirty = null;
 // The project's Teams list (#445), for the automatic clip name's
 // {team_name} and {opponent}.
 let currentGetProjectTeams = () => null;
+// Each row's capture history (#439), made once the project's take index is known.
+let captureHistory = null;
 
-// The first argument (every demo) fed Generate All Previews, which a preview
-// that plays the demo in place made unnecessary; main.js still passes it.
-export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
+// The first argument (every demo) names the highlights a take is shared with
+// (capture_history.js).
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
+  captureHistory = getTakeIndex
+    ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, locateVideos: locateRenderedVideos, reveal: revealInExplorer })
+    : null;
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -173,12 +180,17 @@ export function updateStreakVisuals(streak) {
  *  each of those became its own chained demo: one 15-row table produced five
  *  passes over the same file. */
 function selectAllVisibleStreaks() {
-  if (!currentDemo || !currentDemo.streaks) return;
+  if (!currentDemo || !currentDemo.streaks) return 0;
+  let changed = 0;
   currentDemo.streaks.forEach(s => {
     // A Skip row stays unticked: it's locked out of every batch (#44).
-    if (isVisibleStreak(currentDemo, s) && !isSkipped(s)) s.selected = true;
+    if (isVisibleStreak(currentDemo, s) && !isSkipped(s) && !s.selected) {
+      s.selected = true;
+      changed += 1;
+    }
   });
   renderDetailView(currentDemo, currentDemoIdx);
+  return changed;
 }
 
 /** Deselects every streak in `currentDemo` — the header checkbox's
@@ -187,9 +199,16 @@ function selectAllVisibleStreaks() {
  *  not show, this is what clears it. Erring wide costs nothing here; erring
  *  narrow leaves a capture running that nobody asked for. */
 function deselectAllStreaks() {
-  if (!currentDemo || !currentDemo.streaks) return;
-  currentDemo.streaks.forEach(s => { s.selected = false; });
+  if (!currentDemo || !currentDemo.streaks) return 0;
+  let changed = 0;
+  currentDemo.streaks.forEach(s => {
+    if (s.selected) {
+      s.selected = false;
+      changed += 1;
+    }
+  });
   renderDetailView(currentDemo, currentDemoIdx);
+  return changed;
 }
 
 // Initialize event listeners for detail pane buttons
@@ -203,12 +222,16 @@ window.addEventListener("DOMContentLoaded", () => {
     const originalLabel = btnLaunchPreview.textContent;
     btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    // A demo over the engine's entity limit plays a trimmed copy (#207),
+    // made first: the button shows its steps.
+    const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
       await launchDemoPreview(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
       showToast(STRINGS.HIGHLIGHTS.PREVIEW_LAUNCHING_TOAST, 'info');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     } finally {
+      stopTrimStatus();
       btnLaunchPreview.textContent = originalLabel;
       updatePreviewButtonStates();
     }
@@ -222,6 +245,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const originalLabel = btnLaunchPreview.textContent;
     btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
       const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
       if (sent) {
@@ -229,10 +253,11 @@ window.addEventListener("DOMContentLoaded", () => {
         return true;
       }
       return false;
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js; the prompt still offers a way on.
       return false;
     } finally {
+      stopTrimStatus();
       btnLaunchPreview.textContent = originalLabel;
       updatePreviewButtonStates();
     }
@@ -248,8 +273,6 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       if (!currentDemo || !currentDemo.streaks) return;
       const highlights = allPreviewableStreaks(currentDemo);
-      // The game closes on a demo over its entity limit (#207).
-      if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
       // A demo with no camera data plays as a frozen view (#920).
       if (!(await confirmNoCameraData([currentDemo], { preview: true }))) return;
       // A game started with other launch settings is never sent the preview
@@ -261,7 +284,7 @@ window.addEventListener("DOMContentLoaded", () => {
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js — fail open rather than blocking
         // a legitimate launch just because the detector itself errored.
       }
@@ -288,7 +311,7 @@ window.addEventListener("DOMContentLoaded", () => {
       processModalForceRelaunchBtn.disabled = true;
       try {
         await killEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js.
       }
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -388,7 +411,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // says exactly that; repeating it in the title was pure redundancy.
     titleEl.textContent = STRINGS.HIGHLIGHTS.DEFAULT_TITLE;
     titleEl.title = '';
-    container.innerHTML = `<p style="color: #888;">${STRINGS.HIGHLIGHTS.EMPTY_SELECT_DEMO}</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted);">${STRINGS.HIGHLIGHTS.EMPTY_SELECT_DEMO}</p>`;
     return;
   }
 
@@ -400,7 +423,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
   container.innerHTML = '';
 
   if (!demo.streaks || demo.streaks.length === 0) {
-    container.innerHTML = `<p style="color: #888;">${STRINGS.HIGHLIGHTS.EMPTY_NO_STREAKS}</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted);">${STRINGS.HIGHLIGHTS.EMPTY_NO_STREAKS}</p>`;
     return;
   }
 
@@ -424,7 +447,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
+        <th class="col-clip-name">${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
         <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
@@ -461,7 +484,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const rowNum = renderedRowNum;
 
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #333';
+    tr.style.borderBottom = '1px solid var(--border-soft)';
     // #44: a Skip row is dimmed, unticked and locked.
     const skipped = isSkipped(streak);
     if (skipped) {
@@ -486,14 +509,14 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
     // Set by capture_pane.js's capture_takes_verified handler when this
     // highlight's take was an overlap merge covering more than one highlight
-    // (builder.rs's merge loop) — surfaced so it's obvious at a glance why
+    // (builder/blocks.rs's cut_blocks) — surfaced so it's obvious at a glance why
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
-      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
+      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:var(--warn-deep);border:1px solid var(--warn-deep);border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
       : '';
 
     const byHandMark = streak.statusByHand
-      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:var(--text-subtle);cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
       : '';
 
     tr.innerHTML = `
@@ -502,20 +525,20 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
       <td style="padding: 8px;">
-        <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:#ff9800;' : ''}">
+        <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:var(--warn-deep);' : ''}">
           <input type="number" class="kr-start-input" min="1" max="${maxKillIdx + 1}"
-                 value="${streak.start_index + 1}" style="width:38px;background:#1a1a1a;color:inherit;border:1px solid #444;border-radius:2px;" />
+                 value="${streak.start_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
           <span>-</span>
           <input type="number" class="kr-end-input" min="1" max="${maxKillIdx + 1}"
-                 value="${streak.end_index + 1}" style="width:38px;background:#1a1a1a;color:inherit;border:1px solid #444;border-radius:2px;" />
-          ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid #555;border-radius:2px;color:#aaa;cursor:pointer;">↺</button>` : ''}
+                 value="${streak.end_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
+          ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid var(--border-accent);border-radius:2px;color:var(--text-subtle);cursor:pointer;">↺</button>` : ''}
         </div>
       </td>
-      <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      <td class="streak-kills" style="padding: 8px;"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
       <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
       ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
-      <td style="padding: 8px;">${durationText(durSecs)}</td>
+      <td class="streak-duration" style="padding: 8px;">${durationText(durSecs)}</td>
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
@@ -525,7 +548,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
-        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
       </td>
       <td style="padding: 8px;">
         <select class="streak-curation-select" style="font-size: 0.85em;">
@@ -643,6 +666,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
 
     tbody.appendChild(tr);
+    captureHistory?.attach(tr, demo, streak);
   });
 
   // Header checkbox tri-state, reflecting only the same visible rows the
@@ -656,8 +680,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
     selectAllHeaderCb.checked = visibleStreaks.length > 0 && selectedVisible === visibleStreaks.length;
     selectAllHeaderCb.indeterminate = selectedVisible > 0 && selectedVisible < visibleStreaks.length;
     selectAllHeaderCb.addEventListener('change', (e) => {
-      if (e.target.checked) selectAllVisibleStreaks();
-      else deselectAllStreaks();
+      const changed = e.target.checked ? selectAllVisibleStreaks() : deselectAllStreaks();
+      // Ticks are saved in the project, so they mark it unsaved as a row's
+      // own checkbox does; without this a quiet save (#1346, #1347) wrote
+      // them with no "unsaved" shown first.
+      if (changed > 0 && currentOnDirty) currentOnDirty();
     });
   }
 
@@ -673,14 +700,14 @@ function playerFilterRow(demo) {
   const row = document.createElement('div');
   row.className = 'detail-player-filter-row';
   // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
-  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:#1e1e1e;';
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:var(--bg-panel);';
   const label = document.createElement('label');
   label.htmlFor = 'detail-player-filter';
   label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
   const select = document.createElement('select');
   select.id = 'detail-player-filter';
   select.title = STRINGS.HIGHLIGHTS.PLAYER_FILTER_TITLE;
-  select.style.cssText = 'padding:3px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:3px;max-width:260px;';
+  select.style.cssText = 'padding:3px 6px;font-size:12px;background:var(--surface-inset);color:var(--text-strong);border:1px solid var(--border-mid);border-radius:3px;max-width:260px;';
   const total = players.reduce((n, p) => n + p.count, 0);
   const all = new Option(STRINGS.HIGHLIGHTS.playerFilterAll(total), '');
   select.append(all, ...players.map((p) => new Option(STRINGS.HIGHLIGHTS.playerFilterOption(p.name, p.count), p.name)));

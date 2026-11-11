@@ -39,6 +39,10 @@
 //! `cl_particlefx` below 2 says so in the console, since the game then draws
 //! no weather at all.
 //!
+//! The first forced value also gives each snowflake a start time, which the
+//! game leaves unset: snow after rain on one map hung the game without it
+//! (#1369, `map_weather/snow_time.rs`).
+//!
 //! The patch runs from `commands::poll` on the engine thread. A frame where
 //! the cvar hasn't changed costs one float compare.
 //!
@@ -50,11 +54,14 @@
 //! `client+0x4d340`, which the same BSP parse calls), so a forced rain falls
 //! straight on a map with no wind of its own.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+mod snow_time;
+
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("map_weather");
 
@@ -83,7 +90,7 @@ const OPERAND_AT: usize = 16;
 /// The weather type the patched read sees. The client code holds its
 /// address, so it stays a plain 4-byte static.
 static FORCED: AtomicI32 = AtomicI32::new(NONE);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's raw f32 bits the last time it was acted on; NaN until then.
 static SEEN: AtomicU32 = AtomicU32::new(0x7fc0_0000);
 /// The operand's address, for the `client.dll` base in [`SCANNED_BASE`].
@@ -93,10 +100,6 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// first write.
 static STOCK_OPERAND: AtomicU32 = AtomicU32::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The level a cvar value asks for, and whether it had to be clamped to get
 /// there. A fraction rounds down; NaN and infinities read as 0.
@@ -173,6 +176,9 @@ fn apply(level: i32) -> Result<bool, String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     let address = operand_address(base)?;
     let ours = &FORCED as *const AtomicI32 as usize as u32;
+    // Before any forced weather: rain then snow on one map, forced or the
+    // map's own after forced rain, hangs without it (#1369).
+    snow_time::ensure(base)?;
     if let Some(weather_type) = forced_type(level) {
         FORCED.store(weather_type, Ordering::Release);
     }
@@ -253,12 +259,12 @@ fn applied_message(level: i32, particlefx: Option<f32>) -> String {
 
 /// Once a frame from `commands::poll`, on the engine thread.
 pub fn poll() {
-    let ptr = CVAR.load(Ordering::Acquire);
-    if ptr.is_null() || GAVE_UP.load(Ordering::Relaxed) {
+    let Some(raw) = CVAR.value() else {
+        return;
+    };
+    if GAVE_UP.load(Ordering::Relaxed) {
         return;
     }
-    // Safety: the engine owns the cvar for the session.
-    let raw = unsafe { (*ptr).value };
     if SEEN.load(Ordering::Relaxed) == raw.to_bits() {
         return;
     }

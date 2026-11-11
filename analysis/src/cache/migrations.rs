@@ -70,6 +70,8 @@ pub const MIGRATIONS: &[Migration] = &[
     // rescan estimate counts them as full reads (an "upgradable" entry is
     // estimated at milliseconds), and the stale-cache sweep can delete the
     // old folders. The steps below still run in tests.
+    // No step to 15 either (#1132): who was capping at a kill comes from the
+    // demo's ClientAreas messages, which no entry keeps.
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
@@ -415,10 +417,14 @@ mod tests {
     /// headshot from, so it, and every older one, is a miss. An "upgradable"
     /// entry would be estimated at milliseconds by the rescan prompt while
     /// it re-parses in full, and would keep its old folder from the sweep.
+    /// Nor v15 (#1132): a v14 entry has no `ClientAreas` to tell who was
+    /// capping at a kill. Nor v16: a v15 entry counts a KTP HLTV demo's
+    /// post-pause replay twice, and only the demo's frames tell which of its
+    /// kills, chat and captures were the replay's.
     #[test]
-    fn no_entry_older_than_14_upgrades() {
-        assert_eq!(super::super::SCHEMA_VERSION, 14);
-        for version in 0..14 {
+    fn no_entry_older_than_16_upgrades() {
+        assert_eq!(super::super::SCHEMA_VERSION, 16);
+        for version in 0..16 {
             assert!(!upgrades_from(version), "v{version}");
         }
     }

@@ -45,7 +45,7 @@ impl TeamScores {
 pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     match event {
         AnalyzerEvent::UserMessage(UserMessage::PClass(p_class)) => {
-            let player = state.find_player_by_client_index_mut(p_class.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(p_class.client_index);
 
             if let Some(player) = player {
                 player.class = Some(p_class.class.clone());
@@ -54,7 +54,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
 
         AnalyzerEvent::UserMessage(UserMessage::PTeam(p_team)) => {
             let allies_are_british = state.allies_are_british;
-            let player = state.find_player_by_client_index_mut(p_team.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(p_team.client_index);
 
             if let Some(player) = player {
                 let mut team = p_team.team.clone();
@@ -66,7 +66,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
         }
 
         AnalyzerEvent::UserMessage(UserMessage::ScoreShort(score_short)) => {
-            let player = state.find_player_by_client_index_mut(score_short.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(score_short.client_index);
 
             if let Some(player) = player {
                 player.update_session_stats(
@@ -79,7 +79,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
 
         AnalyzerEvent::UserMessage(UserMessage::ScoreInfo(score_info)) => {
             let allies_are_british = state.allies_are_british;
-            let player = state.find_player_by_client_index_mut(score_info.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(score_info.client_index);
 
             if let Some(player) = player {
                 let mut team = score_info.team.clone();
@@ -98,7 +98,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
 
         AnalyzerEvent::UserMessage(UserMessage::ScoreInfoLong(score_info_long)) => {
             let allies_are_british = state.allies_are_british;
-            let player = state.find_player_by_client_index_mut(score_info_long.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(score_info_long.client_index);
 
             if let Some(player) = player {
                 let mut team = score_info_long.team.clone();
@@ -116,7 +116,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
         }
 
         AnalyzerEvent::UserMessage(UserMessage::ObjScore(obj_score)) => {
-            let player = state.find_player_by_client_index_mut(obj_score.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(obj_score.client_index);
 
             if let Some(player) = player {
                 player.update_obj_score(obj_score.score as i32);
@@ -124,7 +124,7 @@ pub fn use_scoreboard_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
         }
 
         AnalyzerEvent::UserMessage(UserMessage::Frags(frags)) => {
-            let player = state.find_player_by_client_index_mut(frags.client_index - 1);
+            let player = state.find_player_by_wire_index_mut(frags.client_index);
 
             if let Some(player) = player {
                 player.update_frags(frags.frags as i32);

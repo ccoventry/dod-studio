@@ -36,14 +36,17 @@ pub mod encoder;
 #[cfg(test)]
 mod fake_obs;
 pub mod log_tail;
+pub mod marker_gate;
 pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
 pub mod session;
+pub mod take_state;
 
 pub use client::{ObsClient, ObsError};
 pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};
-pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};
+pub use log_tail::{LogTailer, Marker, MarkerKind};
+pub use marker_gate::MarkerGate;
 pub use pipe_tail::PipeTailer;
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};
 pub use recover::{OrphanReport, check as check_orphan, recover as recover_orphan};
@@ -62,7 +65,7 @@ pub use session::{LateStart, ObsSession, RecordedBlock};
 /// 1.0s of lead against OBS's measured 59-85 ms start latency is a ~14x margin.
 /// A margin is not a guarantee, so with the hook running the batch the game
 /// also waits at this marker until OBS is recording (#1109,
-/// `capture_engine::RecordingGoAhead`).
+/// `capture_engine::markers::RecordingGoAhead`).
 pub const TRIGGER_MARKER: MarkerKind = MarkerKind::AudioSync;
 
 /// Marker that ends a block's recording.

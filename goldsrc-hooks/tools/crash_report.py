@@ -64,6 +64,8 @@ KNOWN_ERRORS = {
                                      "check whether it is there now",
     "Illegible server message - svc_bad": "expected for recovered/spliced demos from the demo-salvage R&D; "
                                           "anywhere else it is a damaged demo",
+    "COM_LoadFile: not enough space": "#1232: the game ran out of address space after many map loads (DoD's client "
+                                      "leaks each map's .bsp); map_file_leak frees them, so check its log line",
 }
 # Log lines that are only noise when reading what led up to a crash.
 NOISE = re.compile(r"texture_hires: (world|model|sprite) \"|texture_hires: detail gfx|still cached from|"

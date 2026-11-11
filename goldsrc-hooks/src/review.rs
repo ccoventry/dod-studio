@@ -12,7 +12,8 @@
 //! the answer keys (`review_keys`, #660), or with `ds_ui_review_keys 0` on
 //! the DoD Studio window's Review tab, which it opens. The keys answer while
 //! the highlight plays too, ending it early (#1141), but not for [`LOCKOUT`]
-//! after it starts.
+//! after it starts. Once each seek has landed, `stopsound` ends whatever was
+//! still playing from before it ([`hush_once_landed`]).
 //!
 //! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
@@ -76,7 +77,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
-use crate::review_keys::KeyMode;
+use crate::review_keys::{KeyMode, KillClock, kill_lines, now_text};
 
 pub const NAME: &str = console_name!("demo_review");
 
@@ -504,6 +505,9 @@ struct Review {
     loaded: Option<String>,
     /// When the answer keys come on for the highlight playing ([`LOCKOUT`]).
     keys_from: Instant,
+    /// Whether the sound left over from before the highlight's seek has been
+    /// stopped ([`hush_once_landed`]).
+    hushed: bool,
 }
 
 static REVIEW: Mutex<Option<Review>> = Mutex::new(None);
@@ -583,10 +587,11 @@ impl IdleFacts {
         }
     }
 
-    /// Whether From the start and From here may be pressed.
+    /// Whether From the start and From here may be pressed: not while a
+    /// request or a wait for the demo is on its way.
     pub(crate) fn can_ask(&self) -> bool {
         use crate::review_ask::Status;
-        self.studio && self.demo && matches!(self.ask, Status::Idle | Status::Failed(_))
+        self.studio && self.demo && !matches!(self.ask, Status::Asking(_) | Status::Sent(_))
     }
 
     /// The tab's second line with no review running.
@@ -598,7 +603,11 @@ impl IdleFacts {
             Status::Failed(why) if self.studio => {
                 return format!("DoD Studio couldn't start it: {why}");
             }
-            Status::Failed(_) | Status::Idle => {}
+            // The game gave up before asking: Studio never had the request.
+            Status::NotAsked(why) if self.studio => {
+                return format!("Not sent to DoD Studio: {why}");
+            }
+            Status::Failed(_) | Status::NotAsked(_) | Status::Idle => {}
         }
         // One line that fits the default window's 520-pixel label (about 85
         // characters); the buttons' tooltips say the rest.
@@ -621,23 +630,82 @@ fn loaded_demo() -> Option<(String, f64)> {
     crate::demo_reload::current_demo().map(|name| (name, clock.now))
 }
 
-/// `ask start` / `ask here`: asks DoD Studio to review the demo playing.
+/// The demo player as an ask sees it.
+fn demo_now() -> crate::review_ask::DemoNow {
+    use crate::review_ask::DemoNow;
+    match crate::demo_seek::clock() {
+        Some(c) if c.loading => DemoNow::Loading,
+        Some(c) if c.active => DemoNow::Playing,
+        _ => DemoNow::Absent,
+    }
+}
+
+/// `ask start` / `ask here`: asks DoD Studio to review the demo playing, or
+/// once the demo loading now plays.
 fn ask(what: &str) {
+    use crate::review_ask::Start;
     if lock().is_some() {
         say("a review is running already");
         return;
     }
-    let Some((name, now)) = loaded_demo() else {
-        say("no demo is playing: play one with viewdemo first");
-        return;
-    };
-    let start = match what {
-        "start" => crate::review_ask::Start::First,
-        "here" => crate::review_ask::Start::At(now),
+    // From here is the clock as asked, even while the demo still loads: it
+    // plays meanwhile, so the clock when it is read has moved on.
+    let now = crate::demo_seek::clock()
+        .filter(|c| c.active)
+        .map(|c| c.now);
+    let start = match (what, now) {
+        ("start", _) => Start::First,
+        ("here", Some(now)) => Start::At(now),
+        ("here", None) => Start::First,
         _ => {
             say(&format!("usage: {NAME} ask start | ask here"));
             return;
         }
+    };
+    if demo_now() == crate::review_ask::DemoNow::Loading {
+        match crate::review_ask::wait_for_demo(start) {
+            Ok(()) => say("the demo is still loading: DoD Studio is asked once it plays"),
+            Err(why) => say(&why),
+        }
+        return;
+    }
+    // An ask still waiting would go out a second time on the next frame.
+    if crate::review_ask::waiting().is_some() {
+        crate::review_ask::stop_waiting(None);
+    }
+    send_ask(start);
+}
+
+/// An ask waiting for its demo to load, every frame: sent once the demo
+/// plays, dropped when a review starts meanwhile or the demo goes.
+fn poll_waiting_ask() {
+    use crate::review_ask::WaitStep;
+    let Some((start, waited)) = crate::review_ask::waiting() else {
+        return;
+    };
+    if lock().is_some() {
+        crate::review_ask::stop_waiting(None);
+        trace("ask: a review started while the demo loaded; not asking");
+        return;
+    }
+    match crate::review_ask::wait_step(demo_now(), waited) {
+        WaitStep::Wait => {}
+        WaitStep::Ask => {
+            crate::review_ask::stop_waiting(None);
+            send_ask(start);
+        }
+        WaitStep::GiveUp(why) => {
+            say(&format!("not asking DoD Studio: {why}"));
+            crate::review_ask::stop_waiting(Some(why));
+        }
+    }
+}
+
+/// Sends the ask for the demo playing now.
+fn send_ask(start: crate::review_ask::Start) {
+    let Some((name, _)) = loaded_demo() else {
+        say("no demo is playing: play one with viewdemo first");
+        return;
     };
     let demo = crate::review_ask::demo_path(&crate::texture_hires::game_dir(), &name);
     match crate::review_ask::send(demo.clone(), start) {
@@ -796,6 +864,7 @@ fn play(review: &mut Review) {
                 fast: false,
             };
             review.keys_from = Instant::now() + LOCKOUT;
+            review.hushed = false;
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -874,12 +943,15 @@ fn advance(guard: &mut Option<Review>) {
 /// Runs every frame: an answer key pressed since the last frame, the
 /// review's own step, then what the on-screen panel shows (#660).
 pub fn poll() {
+    // A key let go while the menu or a load had the keyboard (#1320).
+    crate::review_keys::forget_released();
     if let Some(action) = crate::review_keys::take_pending() {
         key_action(action);
     }
     if let Some(saved) = crate::review_form::take_saved() {
         apply_saved(saved);
     }
+    poll_waiting_ask();
     let mut guard = lock();
     step(&mut guard);
     let (panel, mode) = match guard.as_ref() {
@@ -962,73 +1034,26 @@ fn panel_view(
         live: mode == KeyMode::Live,
         can_go_back: review.at > 0,
         kills: Vec::new(),
+        xray: crate::spec_xray::XRAY.on(),
     };
     let h = &review.queue[review.at];
+    // The clock beside the kills' times, so the next kill's says how soon.
+    let now = clock.map_or_else(String::new, now_text);
     let shown = match review.phase {
         // With the keys off, the Review tab is open for the answer.
         Phase::Waiting => keys.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, KillClock::Ended),
-            ..panel("")
+            ..panel(&now)
         }),
         // The Review tab is open for why this one failed.
         Phase::Failed(_) => None,
         Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
         Phase::Playing { .. } => info.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, clock.map_or(KillClock::Unknown, KillClock::At)),
-            ..panel("")
+            ..panel(&now)
         }),
     };
     (shown, mode)
-}
-
-/// Where the highlight is, for which of its kills is next.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum KillClock {
-    /// The demo player's clock, while the highlight plays.
-    At(f64),
-    /// Played to its end.
-    Ended,
-    /// No clock to read.
-    Unknown,
-}
-
-/// A time on the demo player's clock as its VCR bar shows it: `5:56`.
-fn clock_text(seconds: f64) -> String {
-    let whole = seconds.max(0.0) as u64;
-    format!("{}:{:02}", whole / 60, whole % 60)
-}
-
-/// The box's kill list (#1140): each kill's number, time, victim and weapon,
-/// with the next one still to come stood out. A kill counts as come once
-/// the clock reaches it.
-fn kill_lines(h: &Highlight, clock: KillClock) -> Vec<crate::review_keys::KillLine> {
-    use crate::review_keys::{KillLine, KillState};
-    let next = match clock {
-        KillClock::At(now) => h.kills.iter().position(|&t| t > now),
-        KillClock::Ended | KillClock::Unknown => None,
-    };
-    h.kills
-        .iter()
-        .enumerate()
-        .map(|(i, &t)| {
-            let mut text = format!("{}  {}", i + 1, clock_text(t));
-            if let Some(d) = h.details.get(i) {
-                for part in [&d.victim, &d.weapon] {
-                    if !part.is_empty() {
-                        text.push_str("  ");
-                        text.push_str(part);
-                    }
-                }
-            }
-            let state = match (clock, next) {
-                (KillClock::Unknown, _) => KillState::Later,
-                (_, Some(n)) if i == n => KillState::Next,
-                (_, Some(n)) if i > n => KillState::Later,
-                _ => KillState::Past,
-            };
-            KillLine { text, state }
-        })
-        .collect()
 }
 
 /// What an answer key asks for, if the keys still answer: the key may have
@@ -1052,6 +1077,11 @@ fn key_action(action: crate::review_keys::Action) {
         Action::Back => back(),
         Action::Next => next(),
         Action::Stop => stop(),
+        Action::Xray => {
+            if !crate::spec_xray::toggle() {
+                trace("X-ray: the engine's command buffer is not available");
+            }
+        }
     }
 }
 
@@ -1082,6 +1112,24 @@ fn watch_menu(mode: KeyMode) {
     }
 }
 
+/// Stops every sound once a highlight's seek has landed: a sound from before
+/// the seek (the last round's win music, a stepped seek's gunfire) would
+/// otherwise play on over the clip. Once per highlight played, so the clip's
+/// own sounds are left alone. `stopsound` also ends the map's looping
+/// ambience until the next demo load, which a review can do without.
+fn hush_once_landed(review: &mut Review) {
+    if review.hushed
+        || !matches!(review.phase, Phase::Playing { .. })
+        || crate::demo_seek::seeking()
+    {
+        return;
+    }
+    review.hushed = true;
+    if !run("stopsound\n") {
+        trace("stopsound: the engine's command buffer is not available");
+    }
+}
+
 /// The review's step for this frame.
 fn step(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
@@ -1090,6 +1138,7 @@ fn step(guard: &mut Option<Review>) {
     if matches!(review.phase, Phase::Playing { .. }) && crate::demo_seek::seeking() {
         review.keys_from = Instant::now() + LOCKOUT;
     }
+    hush_once_landed(review);
     match review.phase.clone() {
         Phase::Loading {
             since,
@@ -1429,6 +1478,7 @@ fn start(path: &str) {
         phase: Phase::Waiting,
         loaded: None,
         keys_from: Instant::now(),
+        hushed: false,
     });
     go_to(review, at);
 }
@@ -1436,6 +1486,7 @@ fn start(path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::review_keys::clock_text;
 
     fn queue_text(lines: &[&str]) -> String {
         std::iter::once(QUEUE_HEADER)
@@ -1548,6 +1599,17 @@ mod tests {
     }
 
     #[test]
+    fn the_box_shows_the_clock_beside_the_kills() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let status = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").status;
+        assert_eq!(status(&review, Some(341.6)), "Now 5:41");
+        assert_eq!(status(&review, None), "");
+        review.phase = Phase::Waiting;
+        assert_eq!(status(&review, Some(370.0)), "Now 6:10");
+    }
+
+    #[test]
     fn an_hltv_highlight_names_the_player_the_camera_goes_on() {
         let (queue, _) = parse_queue(&queue_text(&[
             "h.dem\t1\tgskiLL\t5\t1\t1\t-\t\t7",
@@ -1644,6 +1706,7 @@ mod tests {
         let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
         assert!(facts(true, true, Status::Idle).can_ask());
         assert!(facts(true, true, Status::Failed("x".into())).can_ask());
+        assert!(facts(true, true, Status::NotAsked("x".into())).can_ask());
         assert!(!facts(false, true, Status::Idle).can_ask());
         assert!(!facts(true, false, Status::Idle).can_ask());
         assert!(!facts(true, true, Status::Asking("Scanning".into())).can_ask());
@@ -1677,6 +1740,11 @@ mod tests {
             facts(true, true, Status::Failed("no highlights".into())).detail(),
             "DoD Studio couldn't start it: no highlights"
         );
+        // A wait that gave up in the game doesn't blame Studio.
+        let gave_up = "the demo did not finish loading in three minutes";
+        let line = facts(true, true, Status::NotAsked(gave_up.into())).detail();
+        assert_eq!(line, format!("Not sent to DoD Studio: {gave_up}"));
+        assert!(line.len() <= 88, "{line}");
         // A failure from before Studio closed gives way to why nothing works.
         assert!(
             facts(false, true, Status::Failed("x".into()))
@@ -1909,6 +1977,7 @@ mod tests {
             phase,
             loaded: Some("a".to_string()),
             keys_from: Instant::now(),
+            hushed: true,
         }
     }
 

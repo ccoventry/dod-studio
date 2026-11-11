@@ -144,6 +144,8 @@ pub mod decal_probe;
 pub mod decal_strip;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod entity_trim;
 pub mod game_dir;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
@@ -163,6 +165,8 @@ pub mod scanner;
 pub mod sound_mute;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source_copies;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod trimmed_copies;
 pub mod viewdemo_clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod viewdemo_refresh;

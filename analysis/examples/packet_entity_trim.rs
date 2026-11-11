@@ -51,11 +51,11 @@ const DEFAULT_TARGET: usize = 246;
 /// Player positions are deduplicated on this grid, in world units.
 const GRID: f32 = 64.0;
 
-fn field<'a>(delta: &'a Delta, name: &str) -> Option<&'a Vec<u8>> {
+fn field<'a>(delta: &'a Delta, name: &str) -> Option<&'a [u8]> {
     delta
         .iter()
         .find(|(k, _)| k.trim_end_matches('\0') == name)
-        .map(|(_, v)| v)
+        .map(|(_, v)| v.as_slice())
 }
 
 fn field_i32(delta: &Delta, name: &str) -> Option<i32> {

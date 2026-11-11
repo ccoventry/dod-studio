@@ -27,10 +27,9 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            crate::log_markdown(&format!(
-                "[cleanup] Failed to remove session_junction {}: {}",
+            crate::log_markdown(&crate::messages::cleanup_session_junction_failed(
                 self.session_junction.display(),
-                e
+                e,
             ));
         }
         // Unlink every dod_pool_N and _route_N junction. `remove_dir` unlinks a
@@ -44,10 +43,9 @@ impl Drop for WorkspaceGuard {
             if let Err(e) = std::fs::remove_dir(junction)
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                crate::log_markdown(&format!(
-                    "[cleanup] Failed to remove pool junction {}: {}",
+                crate::log_markdown(&crate::messages::cleanup_pool_junction_failed(
                     junction.display(),
-                    e
+                    e,
                 ));
             }
         }
@@ -56,10 +54,9 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            crate::log_markdown(&format!(
-                "[cleanup] Failed to remove exit_trigger {}: {}",
+            crate::log_markdown(&crate::messages::cleanup_exit_trigger_failed(
                 self.exit_trigger.display(),
-                e
+                e,
             ));
         }
         if let Some(game_root) = self.exit_trigger.parent() {
@@ -72,6 +69,48 @@ impl Drop for WorkspaceGuard {
             );
         }
     }
+}
+
+/// Makes the `_route_<N>` junction beside `hl.exe` for every drive in
+/// `drives` that is a configured capture directory, pointing at its session
+/// folder (`<capture_dir>/<session_id>`, made if missing), so a block's
+/// `mirv_movie_filename _route_<N>/...` lands on that drive. A junction left
+/// from an earlier batch is replaced. Errors only when a capture directory's
+/// path can't be made absolute; a junction that fails to link shows up as a
+/// take that never arrives.
+pub(super) fn make_route_junctions(
+    config: &PatcherConfig,
+    drives: &std::collections::HashSet<usize>,
+) -> std::io::Result<()> {
+    let game_path_buf = std::path::PathBuf::from(&config.game_path);
+    let hl_exe_parent = game_path_buf.parent().unwrap_or(std::path::Path::new(""));
+    for &drive_idx in drives {
+        if let Some(out_dir) = config.capture_directories.get(drive_idx) {
+            let absolute_drive = std::path::absolute(out_dir)?;
+            let session_dir = if !config.session_id.is_empty() {
+                absolute_drive.join(&config.session_id)
+            } else {
+                absolute_drive
+            };
+
+            if !session_dir.exists() {
+                let _ = std::fs::create_dir_all(&session_dir);
+            }
+
+            let junction_path = hl_exe_parent.join(format!("_route_{}", drive_idx));
+            let _ = std::fs::remove_dir(&junction_path);
+
+            let junction_str = junction_path.to_str().unwrap_or_default();
+            let target_str = session_dir.to_str().unwrap_or_default();
+
+            if !junction_str.is_empty() && !target_str.is_empty() {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J", junction_str, target_str])
+                    .output();
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── Channel-based worker spawner ──────────────────────────────────────────────

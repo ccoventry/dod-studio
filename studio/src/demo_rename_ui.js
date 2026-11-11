@@ -18,6 +18,7 @@ import { parseClock } from './scan_progress.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { onUseAsChange } from './player_alias.js';
 import { setAuditorFooter } from './auditor_footer.js';
 import { fileNameOf } from './path_display.js';
 
@@ -367,6 +368,8 @@ async function undoLast() {
  */
 export function initDemoRenamePane({ projectTeams, onChange } = {}) {
   if (projectTeams) getProjectTeams = projectTeams;
+  // A Use as name edited on the Players tab (#686) changes the new names.
+  onUseAsChange(refresh);
   const inputs = [
     ['#rename-pov-template', '#rename-pov-reset', DEFAULT_POV_TEMPLATE],
     ['#rename-hltv-template', '#rename-hltv-reset', DEFAULT_HLTV_TEMPLATE],
