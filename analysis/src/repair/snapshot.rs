@@ -197,6 +197,31 @@ fn ramp_client_data(template: &SvcClientData, client: &ClientState, first: bool)
     })))
 }
 
+/// The most frames a ramp is moved back over: the non-network frames that
+/// open the stretch after a hole, ahead of its first network frame.
+const MAX_HEAD_FRAMES: usize = 32;
+
+/// Where a ramp goes in `frames` (everything before the join so far): before
+/// the frames timed after `ramp_middle`, the ramp's middle frame, which are
+/// the ones from after the hole. The stretch after
+/// a hole opens with a few client-data and demo-buffer frames before its first
+/// network frame; a ramp after them would hold playback on their time for the
+/// whole hole and then play every ramp frame at once. Before them, frame times
+/// rise through the join, as in the R&D builds, which sorted every frame by
+/// time (#15). Never moved past a network frame.
+fn ramp_position(frames: &[Frame], ramp_middle: Option<f32>) -> usize {
+    let Some(middle) = ramp_middle else {
+        return frames.len();
+    };
+    let head = frames
+        .iter()
+        .rev()
+        .take(MAX_HEAD_FRAMES)
+        .take_while(|f| f.time > middle && !matches!(f.frame_data, FrameData::NetworkMessage(_)))
+        .count();
+    frames.len() - head
+}
+
 fn is_delta_packet(m: &NetMessage) -> bool {
     matches!(m, NetMessage::EngineMessage(em) if matches!(**em, EngineMessage::SvcDeltaPacketEntities(_)))
 }
@@ -233,7 +258,8 @@ pub(crate) fn inject(demo: &mut Demo, joins: &[Join], states: &[JoinState]) -> V
                     client: &states[ramped].client,
                 });
                 reports[ramped].ramp_frames = ramp_frames.len();
-                frames.extend(ramp_frames);
+                let at = ramp_position(&frames, ramp_frames.get(ramp_frames.len() / 2).map(|f| f.time));
+                frames.splice(at..at, ramp_frames);
                 ramped += 1;
             }
             if placed < joins.len()
@@ -268,6 +294,26 @@ mod tests {
             state.entities.insert(i, EntityFields::default());
         }
         state
+    }
+
+    fn frame_at(time: f32, data: FrameData) -> Frame {
+        Frame {
+            time,
+            frame: 0,
+            frame_data: data,
+        }
+    }
+
+    #[test]
+    fn a_ramp_goes_before_the_frames_that_open_the_stretch_after_the_hole() {
+        let frames = [
+            frame_at(10.0, FrameData::NextSection),
+            frame_at(10.1, FrameData::NextSection),
+            frame_at(40.0, FrameData::NextSection),
+            frame_at(40.1, FrameData::NextSection),
+        ];
+        assert_eq!(ramp_position(&frames, Some(25.0)), 2);
+        assert_eq!(ramp_position(&frames, None), 4);
     }
 
     #[test]
