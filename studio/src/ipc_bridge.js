@@ -61,6 +61,18 @@ export async function takeOpenFiles() {
     });
 }
 
+/** Keeps `snapshot` as the settings snapshot older projects start from
+ *  (#1085, project_settings_snapshot.js) unless one was taken before.
+ *  Resolves `{ snapshot, taken }`, the snapshot in effect; rejects with the
+ *  backend's error, which the caller logs. */
+export async function keepProjectSettingsSnapshot(snapshot) {
+  return invoke("keep_project_settings_snapshot", { snapshot })
+    .catch((err) => {
+      console.error("IPC Execution Error (keep_project_settings_snapshot):", err);
+      throw err;
+    });
+}
+
 /** The `.dodstudio` name a just-loaded `.json` project could switch to
  *  (#528, project_convert.js), or null when there's nothing to offer or the
  *  check failed. */
@@ -1864,6 +1876,16 @@ export async function splitDemoAuto(path, minSeconds) {
   return invoke("split_demo_auto", { path, minSeconds })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_auto):", err);
+      throw err;
+    });
+}
+
+// Whether a multi-map demo's maps were already split next to it:
+// `{ split, files }` (split_status.js).
+export async function demoSplitStatus(path, maps, minSeconds) {
+  return invoke("demo_split_status", { path, maps, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_split_status):", err);
       throw err;
     });
 }

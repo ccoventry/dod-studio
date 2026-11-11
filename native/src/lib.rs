@@ -47,6 +47,9 @@ pub mod demo_maps_scan;
 /// Splitting a demo that recorded more than one map (#624).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
+/// Whether a demo's maps were already split next to it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split_status;
 
 /// The Demo Auditor's renamer: facts, renames and the undo log (#469).
 #[cfg(not(target_arch = "wasm32"))]
@@ -64,6 +67,11 @@ pub mod preview_in_place;
 /// into `dod_addon` at every launch (#465).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_bar_res;
+
+/// The louder headshot sounds, written into `dod_addon` at every launch
+/// from the game's own (#1353).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod headshot_louder;
 
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]

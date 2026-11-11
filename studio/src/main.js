@@ -59,7 +59,7 @@ import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
-import { inEffect } from './project_settings.js';
+import { inEffect, startProjectSettingsSnapshot } from './project_settings.js';
 import { createProjectSettingsPage } from './project_settings_page.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
@@ -237,6 +237,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
+      startProjectSettingsSnapshot(); // What older projects start from (#1085): Configuration as it is now, once.
     }
   } catch (err) {
     console.error("Error loading startup settings:", err);

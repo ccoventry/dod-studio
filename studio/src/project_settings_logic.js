@@ -114,7 +114,8 @@ export function resolveSettings(form, block, pcId = '') {
 
 /**
  * A whole block from the settings file's values (`form`, persistAppSettings'
- * payload): what an old project gets copied in once (decision 6), and what a
+ * payload): the snapshot older projects take (decision 6,
+ * project_settings_snapshot.js, which builds it with no `pcId`), and what a
  * project saved for the first time starts with. The folders go under `pcId`;
  * `madeWith` is the install it was made with (madeWithOf), or null.
  */

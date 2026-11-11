@@ -69,6 +69,10 @@ pub enum EngineEvent {
     Held,
     /// The hook's batch went on after `go`.
     Going,
+    /// What the kill feed's layout shows, from the hook (#1339): the
+    /// warning to show while `ds_hud_deathmsg layout even` can't draw and
+    /// the game's own layout shows, or `None` once nothing is wrong.
+    KillfeedLayout(Option<String>),
     /// OBS mode: OBS started recording a clip after the clip's first frame
     /// (#1109), so its take is missing the opening and isn't captured.
     ObsStartedLate(crate::obs::LateStart),

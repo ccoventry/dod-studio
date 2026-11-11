@@ -27,6 +27,7 @@
 
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
+use crate::crosshair_scale::Zoom;
 use crate::hud_sprites::Wrect;
 use crate::names::console_name;
 use crate::player_crosshair::Sheet;
@@ -114,22 +115,21 @@ pub unsafe fn of_draw(sheet: Sheet, prc: *const Wrect) -> Option<Outline> {
     })
 }
 
-/// Draws the border under `zoom`, the crosshair's own zoom if it has one
-/// (`crosshair_scale::zoom`): `draw` is the crosshair's draw, given the tint to
-/// use, and runs once for each copy. An offset is in the frame's pixels, since
-/// it is applied outside the zoom.
+/// Draws the border under `zoom`, the crosshair's own zoom
+/// (`crosshair_scale::zoom`, which every crosshair draw has): `draw` is the
+/// crosshair's draw, given the tint to use, and runs once for each copy. An
+/// offset is in the frame's pixels, since it is applied after the zoom, so
+/// each copy lands on the same whole pixels as the crosshair, moved.
 ///
 /// # Safety
 ///
 /// Only from a HUD draw, on the engine's thread with its GL context current.
-pub unsafe fn draw(outline: Outline, zoom: Option<(f32, f32, f32)>, draw: impl Fn([i32; 3])) {
-    let (cx, cy, scale) = zoom.unwrap_or((0.0, 0.0, 1.0));
+pub unsafe fn draw(outline: Outline, zoom: Zoom, draw: impl Fn([i32; 3])) {
     // Safety: the caller's.
     unsafe {
         flat_colour(outline.rgb, || {
             for (x, y) in offsets(outline.size) {
-                let to = (cx + x as f32, cy + y as f32);
-                if !crate::gl_zoom::mapped((cx, cy), to, scale, || draw(outline.rgb)) {
+                if !zoom.shifted(x, y).run(|| draw(outline.rgb)) {
                     return;
                 }
             }

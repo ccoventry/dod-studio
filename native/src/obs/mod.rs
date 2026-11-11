@@ -36,6 +36,7 @@ pub mod encoder;
 #[cfg(test)]
 mod fake_obs;
 pub mod log_tail;
+pub mod marker_gate;
 pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
@@ -44,7 +45,8 @@ pub mod take_state;
 
 pub use client::{ObsClient, ObsError};
 pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};
-pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};
+pub use log_tail::{LogTailer, Marker, MarkerKind};
+pub use marker_gate::MarkerGate;
 pub use pipe_tail::PipeTailer;
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};
 pub use recover::{OrphanReport, check as check_orphan, recover as recover_orphan};

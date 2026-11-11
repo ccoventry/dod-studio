@@ -19,7 +19,10 @@ import { logFrontendEvent } from './ipc_bridge.js';
 import {
   resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
 } from './project_settings_logic.js';
-import { projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine } from './project_log.js';
+import {
+  projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine, projectSettingsFromSnapshotLine,
+} from './project_log.js';
+import { snapshotInEffect, blockFromSnapshot, startSnapshot } from './project_settings_snapshot.js';
 
 // The open project's block, or null when no project is open or a new one
 // hasn't been saved yet: everything then resolves to the form, as before #1085.
@@ -165,44 +168,69 @@ export function applyBlockFromPage(next) {
   markDirty();
 }
 
+/** Keeps the form as it is now as the snapshot older projects start from,
+ *  unless one was taken before (project_settings_snapshot.js). main.js calls
+ *  it once, as soon as the settings are in the form. */
+export function startProjectSettingsSnapshot() {
+  return startSnapshot(formNow);
+}
+
 /**
  * The open session's side: `markDirty()` marks the project unsaved.
  * @returns {{
- *   open: (raw: object|undefined, path: string) => { copied: boolean },
+ *   open: (raw: object|undefined, path: string) => Promise<{ copied: boolean, snapshotTakenAt: string|null }>,
  *   toSave: () => object,
  *   clear: () => void,
  *   block: () => object|null,
  *   setBlock: (next: object) => void,
  * }}
  *   `open` takes a loaded file's `settings`: a file without one (made before
- *   #1085) gets today's Configuration copied in once (decision 6), `copied`
- *   then true; it is written with the next save. `toSave` is the block to
+ *   #1085) takes the one snapshot of Configuration every older project
+ *   starts from (decision 6, project_settings_snapshot.js), `copied` then
+ *   true and `snapshotTakenAt` its time; with no snapshot (it failed), it
+ *   takes Configuration as it is now. It is written with the next save. `toSave` is the block to
  *   write, made from the form for a project saved the first time. `clear`
  *   is New Session.
  */
 export function createProjectSettings({ markDirty: mark }) {
   markDirty = mark;
 
-  function open(raw, path) {
-    const copied = openBlock(raw, path);
+  async function open(raw, path) {
+    const opened = await openBlock(raw, path);
     onReplaced();
-    return { copied };
+    return opened;
   }
 
-  /** Makes `raw` the open block, or Configuration's copy for a file without
-   *  one. Returns whether it copied. */
-  function openBlock(raw, path) {
+  /** Makes `raw` the open block, or for a file without one the snapshot
+   *  older projects start from (Configuration's copy when there is none).
+   *  Returns `{ copied, snapshotTakenAt }`. */
+  async function openBlock(raw, path) {
+    // Waited for before anything else, so the form read below and the block
+    // set here belong to the same moment.
+    const snapshot = raw && typeof raw === 'object' ? null : await snapshotInEffect();
     const form = formNow();
     formAtLastLook = form;
     if (raw && typeof raw === 'object') {
       block = raw;
-      const differs = form ? keysDifferingFromForm(form, block, pcId) : [];
-      if (differs.length > 0) logFrontendEvent(projectSettingsDifferLine(path, differs));
-      return false;
+      logDiffering(form, path);
+      return { copied: false, snapshotTakenAt: null };
+    }
+    if (snapshot) {
+      block = blockFromSnapshot(snapshot, pcId);
+      logFrontendEvent(projectSettingsFromSnapshotLine(path, snapshot));
+      logDiffering(form, path);
+      return { copied: true, snapshotTakenAt: snapshot.takenAt };
     }
     block = form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null;
     if (block) logFrontendEvent(projectSettingsCopiedLine(path));
-    return !!block;
+    return { copied: !!block, snapshotTakenAt: null };
+  }
+
+  /** Names, in the activity log, the settings the open block sets other
+   *  than Configuration's: a capture uses the block's. */
+  function logDiffering(form, path) {
+    const differs = form ? keysDifferingFromForm(form, block, pcId) : [];
+    if (differs.length > 0) logFrontendEvent(projectSettingsDifferLine(path, differs));
   }
 
   function toSave() {

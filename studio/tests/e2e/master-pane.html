@@ -47,7 +47,11 @@
         await new Promise((resolve) => { window.__finishRowSplit = resolve; });
       }
     );
-    renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
+    const render = () => renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
+    render();
+    // A redraw, as the queue does after a change (the multi-map row asks
+    // demo_split_status again then).
+    window.__rerender = render;
     window.__harnessReady = true;
   </script>
 </body>

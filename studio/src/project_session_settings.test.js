@@ -16,6 +16,13 @@ vi.mock('./ipc_bridge.js', () => ({
   takeCaptureStates: vi.fn(async () => []),
   logFrontendEvent: vi.fn(),
   findInstalls: vi.fn(async () => []),
+  getAppVersion: vi.fn(async () => '0.12.0'),
+  // The backend keeps the first snapshot it is given (project_settings_snapshot.rs).
+  keepProjectSettingsSnapshot: vi.fn(async (snapshot) => {
+    const taken = !globalThis.__keptSnapshot;
+    if (taken) globalThis.__keptSnapshot = snapshot;
+    return { snapshot: globalThis.__keptSnapshot, taken };
+  }),
 }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 vi.mock('./pick_path.js', () => ({ pickPath: vi.fn() }));
@@ -32,6 +39,7 @@ vi.mock('./project_open_progress.js', () => ({
 globalThis.document = { querySelector: () => null };
 
 const { createProjectSession } = await import('./project_session.js');
+const snapshots = await import('./project_settings_snapshot.js');
 const settings = await import('./project_settings.js');
 const ipc = await import('./ipc_bridge.js');
 const { showToast } = await import('./toast.js');
@@ -75,6 +83,8 @@ beforeEach(() => {
   settings.loadPcId('pc-a');
   ipc.writeProjectFile.mockClear();
   vi.mocked(showToast).mockClear();
+  snapshots.resetSnapshotForTests();
+  globalThis.__keptSnapshot = undefined;
 });
 
 describe('a project made before #1085', () => {
@@ -109,6 +119,74 @@ describe('a project made before #1085', () => {
     const session = openSession(projectText());
     await session.openProject(PATH);
     expect(session.needsSavePrompt()).toBe(false);
+  });
+});
+
+describe('a project made before #1085, with the snapshot taken (decision 6)', () => {
+  // Configuration set up for another movie after the snapshot was taken.
+  const otherMovie = () => appForm({ resolution_width: 2560, resolution_height: 1440, target_drives: ['F:/other'] });
+
+  it('takes the snapshot, not Configuration as it is when it opens', async () => {
+    await settings.startProjectSettingsSnapshot();
+    form = otherMovie();
+    const session = openSession(projectText());
+    await session.openProject(PATH);
+    expect(settings.effectiveSetting('resolution_width', 2560)).toBe(1920);
+    expect(settings.effectiveSetting('target_drives', ['F:/other'])).toEqual(['E:/captures']);
+    expect(session.needsSavePrompt()).toBe(false);
+    session.markProjectDirty();
+    await session.saveProjectSession();
+    const saved = lastWritten();
+    expect(saved.settings.picture).toMatchObject({ width: 1920, height: 1080 });
+    expect(saved.settings.folders).toEqual({ 'pc-a': { destinations: ['E:/captures'], exports: [] } });
+    expect(saved.settings.install.madeWith.hlExe).toBe(PRE);
+  });
+
+  it('uses a snapshot still being kept when a project opens at once (a fresh install)', async () => {
+    settings.startProjectSettingsSnapshot();
+    const session = openSession(projectText());
+    await session.openProject(PATH);
+    expect(ipc.keepProjectSettingsSnapshot).toHaveBeenCalled();
+    expect(settings.effectiveSetting('resolution_width', 1)).toBe(1920);
+  });
+
+  it('gives every older project the same settings, whichever opens first', async () => {
+    await settings.startProjectSettingsSnapshot();
+    const session = openSession(projectText());
+    form = otherMovie();
+    await session.openProject(PATH);
+    form = appForm({ resolution_width: 800 });
+    await session.openProject(PATH);
+    expect(settings.effectiveSetting('resolution_width', 800)).toBe(1920);
+  });
+
+  it('keeps the snapshot another window took first', async () => {
+    globalThis.__keptSnapshot = snapshots.snapshotFromForm(appForm({ capture_fps: 60 }), { takenAt: '2026-11-01T12:00:00.000Z', schema: 3 });
+    await settings.startProjectSettingsSnapshot();
+    const session = openSession(projectText());
+    await session.openProject(PATH);
+    expect(settings.effectiveSetting('capture_fps', 120)).toBe(60);
+  });
+
+  it('names the day of the snapshot in the one-time summary and the log', async () => {
+    globalThis.__keptSnapshot = snapshots.snapshotFromForm(appForm(), { takenAt: '2026-11-11T18:00:00.000Z', appVersion: '0.12.0', schema: 3 });
+    await settings.startProjectSettingsSnapshot();
+    const session = openSession(projectText());
+    await session.openProject(PATH);
+    session.markProjectDirty();
+    await session.saveProjectSession();
+    const toasts = vi.mocked(showToast).mock.calls.map(([text]) => text);
+    expect(toasts.some((t) => t.includes('the ones Configuration had on November 11, 2026, the same for every older project'))).toBe(true);
+    const lines = vi.mocked(ipc.logFrontendEvent).mock.calls.map(([line]) => line);
+    expect(lines.some((l) => l.includes('took the snapshot of Configuration taken 2026-11-11T18:00:00.000Z by 0.12.0'))).toBe(true);
+    expect(lines.some((l) => l.includes('settings from the snapshot taken 2026-11-11T18:00:00.000Z'))).toBe(true);
+  });
+
+  it('leaves a project with its own settings alone', async () => {
+    await settings.startProjectSettingsSnapshot();
+    const session = openSession(projectText({ schema: 3, settings: { picture: { width: 640 } } }));
+    await session.openProject(PATH);
+    expect(settings.effectiveSetting('resolution_width', 1920)).toBe(640);
   });
 });
 
