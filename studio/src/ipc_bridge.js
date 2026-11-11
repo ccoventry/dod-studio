@@ -1866,3 +1866,13 @@ export async function splitDemoAuto(path, minSeconds) {
       throw err;
     });
 }
+
+// Whether a multi-map demo's maps were already split next to it:
+// `{ split, files }` (split_status.js).
+export async function demoSplitStatus(path, maps, minSeconds) {
+  return invoke("demo_split_status", { path, maps, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_split_status):", err);
+      throw err;
+    });
+}
