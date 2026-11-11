@@ -1,7 +1,6 @@
 // patch/types.rs
 // Pure data layer: structs, enums, and their direct impl blocks.
-// No file I/O, no thread spawning. All types except PatchEvent and
-// CaptureWorker are WASM-safe.
+// No file I/O, no thread spawning.
 
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -422,8 +421,8 @@ impl KillGaps {
 /// container, the cost of being wrong is a lost take, and the cost of being
 /// generous is a second of connective footage inside a merged clip.
 ///
-/// Lives here rather than beside the client so the patcher can read it on every
-/// target — `patch` compiles for wasm32, `obs` does not.
+/// Lives here rather than beside the client so the patcher can read it without
+/// depending on the `obs` module.
 pub const OBS_TAKE_SEPARATION_SECONDS: f32 = 2.0;
 
 /// Where OBS is and how to talk to it.
@@ -1002,7 +1001,6 @@ pub struct HighlightRules {
 
 // ── Worker event channel types (native-only: require std threading) ───────────
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub enum PatchEvent {
     Starting(usize),
@@ -1012,7 +1010,6 @@ pub enum PatchEvent {
     Error(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct CaptureWorker {
     pub receiver: std::sync::mpsc::Receiver<PatchEvent>,
     pub is_running: bool,
