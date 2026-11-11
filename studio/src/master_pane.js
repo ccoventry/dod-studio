@@ -11,7 +11,7 @@ import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
-import { multiMapSplitButton } from './queue_multimap.js';
+import { multiMapHint } from './queue_multimap.js';
 import { damagedRepairButton } from './queue_repair.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { renderQueueTotals } from './queue_totals.js';
@@ -531,9 +531,9 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const cameraBadge = noCameraDataBadge(demo);
     if (cameraBadge) tdName.appendChild(cameraBadge);
 
-    // More than one map: the game stops at the first map change (#217).
-    const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
-    if (splitBtn) tdName.appendChild(splitBtn);
+    // More than one map: only the first is used until it's split (#217).
+    const multiMap = multiMapHint(demo, currentOnSplitDemo);
+    if (multiMap) tdName.appendChild(multiMap);
 
     // Damaged partway: it plays only up to its first gap (#15).
     const repairBtn = damagedRepairButton(demo, currentOnRepairDemo);
