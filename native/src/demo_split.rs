@@ -206,6 +206,11 @@ pub fn segments(demo: &Demo) -> Vec<MapSegment> {
             let (map, crc) = if i == 0 {
                 (header_map.clone(), demo.header.map_checksum)
             } else {
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "the first segment of a split always starts with a server-info frame"
+                )]
                 let info = server_info(&demo.directory.entries[ei].frames[fi]).expect("a start");
                 (
                     map_stem(&String::from_utf8_lossy(&info.map_file_name)),
@@ -590,6 +595,11 @@ pub struct Written {
 
 /// A path next to `dir/name.dem` that doesn't exist yet: `name.dem`, then
 /// `name (2).dem`, and so on.
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "an unbounded range always yields a free name"
+)]
 fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     let first = dir.join(format!("{name}.dem"));
     if !first.exists() {

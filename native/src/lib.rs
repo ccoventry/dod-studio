@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -455,6 +457,11 @@ pub fn log_markdown(msg: &str) {
             // Same session, but the date rolled over since the last log line —
             // leave a pointer in both files so this doesn't just look like the
             // session stopped mid-file to someone reading yesterday's log.
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "the else-if condition just checked that last_date is Some"
+            )]
             let prev_path = dir.join(format!("activity_{}.md", last_date.as_deref().unwrap()));
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .append(true)
@@ -473,6 +480,11 @@ pub fn log_markdown(msg: &str) {
                 .create(true)
                 .open(&log_path_md)
             {
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "last_date is Some on this path (the same check as above)"
+                )]
                 let _ = writeln!(
                     f,
                     "(continued from activity_{}.md — same session, crossed midnight)\n",
