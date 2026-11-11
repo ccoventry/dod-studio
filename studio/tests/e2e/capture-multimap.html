@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--
+  Harness for Start Capture Batch with a pick in a demo that recorded more
+  than one map (#217): capture_pane.js' initCaptureUI with the Capture footer
+  (as capture-precheck.html), its demo check being queue_split.js's real
+  captureDemosReady over window.__state's queue. The missing/changed-demo
+  check it wraps answers true. See tests/e2e/README.md.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>capture multi-map test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="hlae-path-input" value="C:\HLAE\hlae.exe" />
+  <input id="hl-path-input" value="C:\Games\Half-Life\hl.exe" />
+  <div class="input-row"><input id="hl-install-choice" /></div>
+  <div class="input-row"><input id="drive-path-input" /></div>
+  <div id="target-drive-list"></div>
+  <div id="init-commands-list"></div>
+  <div id="custom-commands-list"></div>
+  <button id="start-capture-btn" class="primary-btn">Start Capture Batch</button>
+  <button id="cancel-batch-btn" disabled>Cancel Batch</button>
+  <p id="batch-status" class="status-text">Status: Waiting...</p>
+  <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
+    <div id="capture-progress-bar" class="progress-bar-fill"></div>
+  </div>
+
+  <script type="module">
+    import { initCaptureUI } from '/src/capture_pane.js';
+    import { createQueueSplit } from '/src/queue_split.js';
+
+    const pick = { selected: true, start_index: 0, end_index: 0, kills: [], viewdemo_times: [10] };
+    window.__state = {
+      scanPaths: [],
+      targetDrives: ['D:\\captures'],
+      currentScannedDemos: [
+        { path: 'C:\\demos\\two_maps.dem', signon_maps: ['dod_harrington', 'dod_anzio'], streaks: [pick] },
+        { path: 'C:\\demos\\one_map.dem', signon_maps: ['dod_anzio'], streaks: [{ ...pick }] },
+      ],
+    };
+    const { captureDemosReady } = createQueueSplit({
+      getDemos: () => window.__state.currentScannedDemos,
+      removeDemo: () => {},
+      scan: async () => {},
+      getTakeIndex: () => ({}),
+      refreshQueue: () => {},
+      pickedDemosPresent: async () => true,
+    });
+    initCaptureUI(() => window.__state, () => {}, () => {}, () => null, () => {}, captureDemosReady);
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
