@@ -16,7 +16,18 @@
 //!   a message runs past its end.
 //!
 //! A healthy `playdemo` ends through `Host_EndGame("End of demo.")` from the
-//! reader's last `NextSection`, which is not on the list.
+//! reader's last `NextSection`, which is not on the list (11 healthy demos,
+//! POV and HLTV, measured on PRE).
+//!
+//! ## What it does not catch yet
+//!
+//! - `viewdemo`: `DemoPlayer`'s loader (`Core.dll`) reads the whole file at
+//!   load, prints `WARNING! DemoFile::ReadDemoPacket: ...` there, and plays
+//!   the part before the damage; neither function is called.
+//! - A file cut short: it has lost its directory, so `playdemo` refuses it at
+//!   the start (`Error: Corrupt demo file.`) and nothing plays.
+//! - `timedemo` goes through the same reader and is caught, but the hook does
+//!   not track its demo name, so its event carries no path.
 //!
 //! ## The hook
 //!
