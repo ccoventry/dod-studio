@@ -691,7 +691,7 @@ mod tests {
         assert!((settled - 36.0).abs() < 1e-3);
     }
 
-    /// A backward seek in an HLTV demo rewinds to the start and steps
+    /// A backward seek rewinds to the start and steps
     /// forward 5 s a frame (#1137); landing just after a flip, the camera is
     /// where the game puts it, not part-way down an ease.
     #[test]

@@ -267,7 +267,25 @@ sent, then step forward to the target as above. Every message before the
 landing arrives in order. On `wsod25_grp2_h1_hltv` a jump back to 15:40
 took 182 steps, 1.4 s on PRE and 1.7 s on POST. The table is also cleared
 whenever a demo is loaded, since `client.dll` stays loaded between demos.
-POV demos and `ds_demo_seek_skip_between 1` still jump back at once.
+
+### Backward jumps in a POV demo (#1085)
+
+A POV demo is not harmless either: a jump back kept the later position's
+flags, capture icons and scoreboard (an Allied star on a flag the Axis held,
+later kills and deaths in every row; PRE and POST, tested 2026-11-06 on 4 POV
+demos from 4 players). So every backward jump now starts over, POV included;
+only `ds_demo_seek_skip_between 1` still jumps back at once.
+
+A POV demo starts over from its first recorded frame, not the clock's start:
+its clock starts at the LOADING frames, often minutes before the recording
+(#893, `demo_seek.rs`), and stepping through that gap costs 10 waited frames per 5 s
+step with nothing to send (7-15 s a rewind). Jumping to 0.01 s before the
+first frame after the gap, as the player's own gap jump would, skips no
+message (the LOADING frames' sign-on was read at load) and took 1.0-2.6 s on
+5 POV demos from 5 players. Each rewind empties the kill feed before its last
+step, so the feed shows only the kills of the 5 s before the landing, not the
+last few the steps replayed from earlier. A capture batch goes back with its
+`back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)
 

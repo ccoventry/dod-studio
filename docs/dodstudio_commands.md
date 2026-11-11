@@ -322,8 +322,10 @@ A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
 game; a 20-minute jump takes a few hundred frames. The console commands it
 replays (a POV demo's key presses) are dropped and the keys let go on landing,
-since the engine would run them one a frame long after it (#702). Anything
-after the time is
+since the engine would run them one a frame long after it (#702). A jump
+back starts over and steps forward the same way (#830, #1085), from the
+demo's first recorded frame, so flags, scores and zoom are right where it
+lands; it takes a second or two. Anything after the time is
 a command to run once the jump has landed:
 `ds_demo_seek_to 1335.3 ds_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
