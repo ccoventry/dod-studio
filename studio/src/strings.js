@@ -1791,6 +1791,13 @@ export const STRINGS = {
     NO_INSTALL: 'No install',
   },
 
+  // ── The New UI switch (new_ui.js, #1085) ──
+  NEW_UI: {
+    LABEL: 'Show the new pages (work in progress)',
+    TITLE: "Shows the pages of the new DoD Studio as they are built, starting with Project Settings in the File menu. They are not finished. Turn this off to hide them and get today's app back; a project keeps any settings you changed there.",
+    switchedLine: (on) => `[settings] New UI switch turned ${on ? 'on: the new pages show' : 'off: the new pages are hidden'}`,
+  },
+
   // ── The Project settings page (project_settings_page.js, #1085) ──
   PROJECT_SETTINGS_PAGE: {
     MENU_ITEM: 'Project Settings…',

@@ -61,6 +61,7 @@ import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
 import { inEffect, startProjectSettingsSnapshot } from './project_settings.js';
 import { createProjectSettingsPage } from './project_settings_page.js';
+import { createNewUi } from './new_ui.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
@@ -283,6 +284,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  createNewUi({ persist: () => persistAppSettings() }); // The New UI switch (#1085): new pages show only while it is on.
   // Configuration > Players (#428): players_ui.js.
   createPlayersUi({
     getDemos: queue.getDemos,

@@ -27,6 +27,7 @@ import { getPickFolders, setPickFolders } from './pick_path.js';
 import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
 import { getKeptJsonProjects, setKeptJsonProjects } from './project_convert.js';
 import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
+import { isNewUiOn, loadNewUi } from './new_ui.js';
 import { loadPcId, getPcId, setFormReader, noteFormSaved } from './project_settings.js';
 
 /**
@@ -189,6 +190,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       setup_dismissed: !!state.setupDismissed,
       pc_id: getPcId(),
       pinned_folders_reviewed: getPinnedReviewed(),
+      new_ui: isNewUiOn(),
       players: getPlayers(),
       hidden_installs: getHiddenInstalls(),
       pick_folders: getPickFolders(),
@@ -375,6 +377,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   const lookInZipsEl = document.querySelector('#audit-look-in-zips');
   if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
   setPinnedReviewed(settings.pinned_folders_reviewed);
+  loadNewUi(settings.new_ui);
   const subfoldersEl = document.querySelector('#scan-include-subfolders');
   if (subfoldersEl) subfoldersEl.checked = settings.scan_include_subfolders !== false;
   if (settings.record_start_lead != null) {

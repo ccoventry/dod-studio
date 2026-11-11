@@ -18,6 +18,8 @@ test.beforeEach(async ({ page }) => {
         resolution_height: 1080,
         capture_fps: 120,
         pc_id: 'pc-test',
+        // The page shows only with the New UI switch on (new_ui.js).
+        new_ui: true,
       }),
       calculate_export_pool_space: () => 10 * gib,
       system_memory_bytes: () => 16 * gib,
