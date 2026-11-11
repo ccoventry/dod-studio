@@ -7,7 +7,9 @@ demo ends (an end line, a crash or the time budget), then read the run's
 report for:
 
 - the last demo-clock stamp the hook logged (`[demo N]`: where it stopped);
-- clock jumps between stamps (forward more than 8 s or back more than 1 s);
+- clock jumps between stamps (forward more than 8 s or back more than 1 s).
+  Stamps come only with the hook's own log lines, so a forward jump can be a
+  quiet stretch, not a hole; a step back is real. The end line is the verdict;
 - the end line: Host_EndGame, Host_Error or End of demo, else "end of file"
   when only the engine's routine next-demo line follows (a clean end);
 - crashes (the hook's CRASH: lines) and known-bad console lines (svc_bad,
