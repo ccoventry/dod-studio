@@ -197,19 +197,38 @@ static RELEASED_COUNT: AtomicU32 = AtomicU32::new(0);
 /// the next map's clock shows; 0 while not waiting.
 static WAITING_FROM_END: AtomicU64 = AtomicU64::new(0);
 
-/// `ds_debug_status`'s line, once `Core.dll` has been seen.
+/// `ds_debug_status`'s line, while a `viewdemo` demo is in the player or
+/// once the patch is in.
 pub fn status_line() -> Option<String> {
-    if CORE_BASE.load(Ordering::Relaxed) == 0 {
+    let installed = CORE_BASE.load(Ordering::Relaxed) != 0;
+    let playing = crate::demo_seek::clock().is_some_and(|c| c.active);
+    if !installed && !playing {
         return None;
     }
-    let build = BUILD_NAME.lock().map(|name| *name).unwrap_or_default();
+    let build = match BUILD_NAME.lock().map(|name| *name).unwrap_or_default() {
+        "" => "not installed".to_string(),
+        name => format!("{name} Core.dll"),
+    };
     let state = match wanted() {
         Mode::Off => "off (viewdemo stops at a map change)",
         Mode::On => "on",
         Mode::OnWithReconnect => "on, with the engine's reconnect",
     };
+    // The player's clock, so a probe can read where playback is and whether
+    // it moves, with the setting on or off.
+    let clock = match crate::demo_seek::clock() {
+        Some(c) if c.active => format!(
+            "; clock {:.2} s of {:.2}-{:.2}{}{}",
+            c.now,
+            c.start,
+            c.end,
+            if c.loading { ", loading" } else { ", loaded" },
+            if c.paused { ", paused" } else { "" }
+        ),
+        _ => String::new(),
+    };
     Some(format!(
-        "demo next map: {state} ({build} Core.dll); {} map changes reached, {} played into{}",
+        "demo next map: {state} ({build}); {} map changes reached, {} played into{}{clock}",
         HELD_COUNT.load(Ordering::Relaxed),
         RELEASED_COUNT.load(Ordering::Relaxed),
         if HELD_SERVER.load(Ordering::Relaxed) != 0 {
@@ -330,6 +349,10 @@ mod installed {
             return;
         }
         if CORE_BASE.load(Ordering::Relaxed) != base {
+            // Nothing is touched until the setting is first on.
+            if wanted() == Mode::Off {
+                return;
+            }
             let found = find(base).and_then(|(build, site)| Ok((build, site, wrap(build)?)));
             let (build, site) = match found {
                 Ok((build, site, true)) => (build, site),
