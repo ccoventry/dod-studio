@@ -1075,6 +1075,7 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
+            demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,
             cancel_audit,
