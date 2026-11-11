@@ -42,6 +42,17 @@ def studio_appdata(env=os.environ):
     return Path(override) if override else Path(env.get("APPDATA", "")) / "dod-studio"
 
 
+def agents_cache(env=os.environ):
+    """Where kit tools keep what they fetched (GitHub lists, PR file lists):
+    DS_AGENT_CACHE, else beside the shared game lock, outside every checkout so
+    all worktrees reuse one copy. Safe to delete at any time."""
+    override = env.get("DS_AGENT_CACHE")
+    if override:
+        return Path(override)
+    base = env.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "dod-studio-agents" / "cache"
+
+
 def main_checkout(repo=REPO):
     """The main checkout of the repo this kit runs from, also from a worktree.
 
