@@ -50,6 +50,5 @@ describe('CLIP_SETTINGS_ROWS', () => {
     const lines = cleanClipsLines();
     expect(lines.length).toBeGreaterThan(20);
     for (const line of lines) expect(ROW_CVARS.includes(parseSetting(line)?.name), line).toBe(true);
-    expect(lines).toContain('mirv_movie_sound_volume 0.25');
   });
 });

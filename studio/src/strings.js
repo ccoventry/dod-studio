@@ -1999,7 +1999,7 @@ export const STRINGS = {
       mute_victory: ['Mute victory music', ''],
       mute_flags: ['Mute flag announcements', ''],
       restore_gunshots: ['Restore missing gunshots', 'Shots a demo left silent'],
-      recording_volume: ['Recording volume', "HLAE's sound level in each take, 0 to 1. Clean clips records at 0.25 so gunfire doesn't clip"],
+      recording_volume: ['Recording volume', "HLAE's sound level in each take, 0 to 1. About 0.25 keeps gunfire from clipping"],
     },
     // Each select row's choices, in its values' order.
     CHOICES: {

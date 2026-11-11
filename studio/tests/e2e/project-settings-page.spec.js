@@ -40,7 +40,8 @@ async function openPage(page) {
 test('File > Project Settings opens the page on the Project tab, Apply greyed', async ({ page }) => {
   await openPage(page);
   await expect(pageRoot(page).locator('.ps-tab-on')).toHaveText('Project');
-  await expect(pageRoot(page).locator('.ps-tab:disabled')).toHaveCount(2);
+  // Players and sprays is the one tab not built yet (step 7).
+  await expect(pageRoot(page).locator('.ps-tab:disabled')).toHaveCount(1);
   await expect(chip(page, 'size', '1080p')).toHaveAttribute('aria-pressed', 'true');
   await expect(chip(page, 'rate', '120')).toHaveAttribute('aria-pressed', 'true');
   await expect(footer(page, 'apply')).toBeDisabled();
