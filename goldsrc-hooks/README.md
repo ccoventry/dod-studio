@@ -370,8 +370,8 @@ to tell two builds at one path apart before reusing the game (#1143).
 > [!WARNING]
 > **Never join a server from a game you loaded this DLL into, and never load
 > it into a game you are about to play online with.** This DLL patches the
-> game in memory, which is what VAC detects. Only use a separate movie copy of
-> Half-Life. The DLL refuses `connect` once it has hooked the engine, but
+> game in memory, which is what VAC detects. Only use a movie copy of
+> the `dod` folder (or of Half-Life). The DLL refuses `connect` once it has hooked the engine, but
 > don't rely on that alone. See [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 The DLL has to be in the game **before `client.dll` starts**: it reaches the
