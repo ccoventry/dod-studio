@@ -326,7 +326,9 @@ pub fn find_first_hole(bytes: &[u8]) -> Option<FirstHole> {
     let end = frame_walk::frames_end(bytes);
     let run = frame_walk::walk(bytes, frame_walk::DEMO_HEADER_SIZE, end, usize::MAX);
     (run.cut < end.saturating_sub(bridge::END_SLACK_BYTES)).then(|| FirstHole {
-        after_secs: run.last_time.unwrap_or(0.0),
+        after_secs: bridge::time_at_end(bytes, frame_walk::DEMO_HEADER_SIZE, run.cut)
+            .or(run.last_time)
+            .unwrap_or(0.0),
         byte_offset: run.cut as u64,
         bytes_unread: (end - run.cut) as u64,
     })

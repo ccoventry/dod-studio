@@ -176,3 +176,16 @@ fn the_monday_demos_repair_with_their_holes_found() {
         );
     }
 }
+
+#[test]
+fn the_first_hole_is_found_where_the_frames_stop_reading() {
+    let original = crate::tests_fixture::fixture();
+    assert_eq!(find_first_hole(&original), None);
+    let at = original.len() / 2;
+    let hole = find_first_hole(&damaged_fixture(at, 300_000)).expect("a hole");
+    assert!(
+        hole.byte_offset as usize <= at && hole.byte_offset as usize > at - 70_000,
+        "{hole:?}"
+    );
+    assert!(hole.after_secs > 60.0, "{hole:?}");
+}

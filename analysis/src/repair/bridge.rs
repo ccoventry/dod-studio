@@ -335,6 +335,15 @@ fn cuts_between(bytes: &[u8], segments: &[Segment], pieces: &[Segment]) -> Vec<C
         .collect()
 }
 
+/// The recording time where the frames from `start` to `stop` end: the
+/// median of the last few, so a damaged frame right before a hole (stamped
+/// 0.000 s at `m1_h2`'s first) doesn't speak for the rest.
+pub(crate) fn time_at_end(bytes: &[u8], start: usize, stop: usize) -> Option<f32> {
+    let frames = timed_frames(bytes, Segment { start, stop });
+    let last: Vec<&TimedFrame> = frames.iter().rev().take(EDGE_FRAMES * 3).collect();
+    median_time(&last)
+}
+
 /// The median of the frames' times: what a side of a hole reads, whatever a
 /// few damaged frames among them say.
 fn median_time(frames: &[&TimedFrame]) -> Option<f32> {
