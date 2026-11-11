@@ -25,7 +25,7 @@ download `DoD.Studio_<version>_x64-setup.exe` and run it. Windows 10 or 11, 64-b
 
 - **Day of Defeat on Steam.** Pre-Anniversary and 25th Anniversary are both
   supported.
-- **A movie copy of your `dod` folder** is highly recommended. It keeps your
+- **A movie copy of your `dod` folder** is recommended. It keeps your
   movie configs, models and sounds away from the game you play online. Setup's
   **Make a movie copy...** button makes one for you; copying the whole
   Half-Life folder by hand works too.
