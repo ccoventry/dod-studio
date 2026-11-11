@@ -99,15 +99,29 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
 
   // Start Capture Batch's demo check: missing or changed demos (#21), as
   // project_demos.js answers it. A picked demo with more than one map goes
-  // ahead like any other, on its first map; the activity log says how many
-  // there are once the batch is cleared to start. `options.onProgress`
-  // counts the changed-demo check (#953).
+  // ahead like any other, on its first map; once the batch is cleared to
+  // start, the activity log names each such demo with the map captured and
+  // the maps left out, or counts them when there are many.
+  // `options.onProgress` counts the changed-demo check (#953).
   async function captureDemosReady(options = {}) {
     const ready = await pickedDemosPresent(options);
-    const multi = pickedMultiMapDemos(getDemos());
-    if (ready === true && multi.length > 0) logFrontendEvent(STRINGS.MAIN.captureFirstMapOnly(multi.length));
+    if (ready === true) logFirstMapOnly(pickedMultiMapDemos(getDemos()));
     return ready;
   }
 
   return { splitQueuedDemo, captureDemosReady };
+}
+
+/** Past this many multi-map demos in one batch, the log counts them in one
+ *  line instead of a line each. */
+export const FIRST_MAP_LINES_MAX = 5;
+
+function logFirstMapOnly(multi) {
+  if (multi.length > FIRST_MAP_LINES_MAX) {
+    logFrontendEvent(STRINGS.MAIN.captureFirstMapOnly(multi.length));
+    return;
+  }
+  for (const demo of multi) {
+    logFrontendEvent(STRINGS.MAIN.captureFirstMapOnlyDemo(demo.name || fileNameOf(demo.path), demo.signon_maps));
+  }
 }

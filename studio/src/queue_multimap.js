@@ -63,6 +63,15 @@ export function alreadySplitNoteTitle(demo, answer) {
   return isAlreadySplit(answer) ? STRINGS.WORKSPACE.multiMapAlreadySplitTitle(demo.signon_maps, answer.files) : null;
 }
 
+/** Why the right-click menu's Split Maps can't run for this queue row, from
+ *  its hint: the "Already split" note's tooltip (naming the pieces) while
+ *  that note shows, a line while the row's split runs, else false. */
+export function splitBlockedReason(row) {
+  const note = row.querySelector('.multimap-split-note');
+  if (note && !note.hidden) return note.title || STRINGS.WORKSPACE.MULTI_MAP_ALREADY_SPLIT;
+  return row.querySelector('.multimap-split-btn')?.disabled ? STRINGS.WORKSPACE.MULTI_MAP_SPLITTING : false;
+}
+
 /** The "2 maps · Split" button itself. */
 function splitButton(demo, onSplit) {
   const btn = document.createElement('button');

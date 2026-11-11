@@ -219,6 +219,7 @@ export const STRINGS = {
     MULTI_MAP_ALREADY_SPLIT: 'Already split',
     multiMapAlreadySplitTitle: (maps, files) => `This demo recorded ${maps.length} maps (${maps.join(', ')}), already split next to it: `
       + `${files.join(', ')}. This row uses the first map only.`,
+    MULTI_MAP_SPLITTING: 'This demo is being split.',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
@@ -2098,8 +2099,16 @@ export const STRINGS = {
     queueSplitHead: (name) => `Splitting ${name}`,
     QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
     queueSplitDoneLine: (elapsed) => `Done in ${elapsed}: split 1 demo`,
-    // #217: the activity log's line when picks are in demos with several maps.
-    captureFirstMapOnly: (n) => `[capture] Using the first map of ${n} demo${n === 1 ? '' : 's'} that recorded more than one map`,
+    // #217: the activity log's lines when picks are in demos with several
+    // maps: one per demo naming what is captured and what is left out, or
+    // one count when there are more than queue_split.js's FIRST_MAP_LINES_MAX.
+    captureFirstMapOnlyDemo: (name, maps) => {
+      const rest = maps.slice(1);
+      return `[capture] ${name} recorded ${maps.length} maps: capturing ${maps[0]} only; `
+        + `${rest.join(', ')} ${rest.length === 1 ? 'is' : 'are'} left out (split the demo to capture ${rest.length === 1 ? 'it' : 'them'})`;
+    },
+    captureFirstMapOnly: (n) => `[capture] Capturing only the first map of ${n} demos that recorded more than one map; `
+      + 'split them to capture the maps after it',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 

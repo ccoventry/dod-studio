@@ -9,7 +9,7 @@ vi.mock('./detail_pane.js', () => ({ updateStreakVisuals: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 vi.mock('./queue_progress.js', () => ({ SPLIT_SHARE: 70, nest: vi.fn(), placed: vi.fn(), queueProgress: vi.fn(() => ({})) }));
 
-const { createQueueSplit } = await import('./queue_split.js');
+const { createQueueSplit, FIRST_MAP_LINES_MAX } = await import('./queue_split.js');
 const { logFrontendEvent, splitDemoAuto } = await import('./ipc_bridge.js');
 
 const demo = (name, maps, picked) => ({
@@ -42,7 +42,7 @@ describe('captureDemosReady', () => {
     expect(splitDemoAuto).not.toHaveBeenCalled();
   });
 
-  it('says in the activity log how many picked demos use only their first map', async () => {
+  it('names each picked multi-map demo in the activity log, with the map captured and the maps left out', async () => {
     const { captureDemosReady } = queueSplit([
       demo('two.dem', ['dod_armory', 'dod_anzio'], true),
       demo('three.dem', ['dod_flash', 'dod_flash', 'dod_avalanche'], true),
@@ -50,8 +50,19 @@ describe('captureDemosReady', () => {
       demo('one.dem', ['dod_anzio'], true),
     ]);
     await captureDemosReady();
-    expect(logFrontendEvent).toHaveBeenCalledTimes(1);
-    expect(logFrontendEvent).toHaveBeenCalledWith('[capture] Using the first map of 2 demos that recorded more than one map');
+    expect(logFrontendEvent.mock.calls.map((c) => c[0])).toEqual([
+      '[capture] two.dem recorded 2 maps: capturing dod_armory only; dod_anzio is left out (split the demo to capture it)',
+      '[capture] three.dem recorded 3 maps: capturing dod_flash only; dod_flash, dod_avalanche are left out (split the demo to capture them)',
+    ]);
+  });
+
+  it('counts them in one line when there are more than FIRST_MAP_LINES_MAX', async () => {
+    const many = Array.from({ length: FIRST_MAP_LINES_MAX + 1 }, (_, i) => demo(`m${i}.dem`, ['dod_armory', 'dod_anzio'], true));
+    const { captureDemosReady } = queueSplit(many);
+    await captureDemosReady();
+    expect(logFrontendEvent.mock.calls.map((c) => c[0])).toEqual([
+      `[capture] Capturing only the first map of ${FIRST_MAP_LINES_MAX + 1} demos that recorded more than one map; split them to capture the maps after it`,
+    ]);
   });
 
   it('logs nothing when no picked demo has more than one map', async () => {
