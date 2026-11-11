@@ -11,8 +11,8 @@
 //! ```
 //!
 //! `CHud::GetOverviewMapBounds` hands one of the two back depending on
-//! `CHud::OverviewMapMode` (`_cl_minimap`'s value, while a spectator predicate
-//! holds). So placing the map is writing four integers into `.data`. Nothing
+//! `CHud::OverviewMapMode` (`_cl_minimap`'s value, while the renderer is
+//! hardware). So placing the map is writing four integers into `.data`. Nothing
 //! executable is touched, no signature is overwritten, and putting it back is
 //! letting `VidInit` recompute.
 //!
@@ -21,7 +21,7 @@
 //! Not a bug in this module, and not something a rect edit can fix.
 //! `CHud::OverviewMapMode` (`+0x228e0`, `goldsrc-hooks/tools/survey_client_dll.py`'s
 //! own `KNOWN_FUNCTIONS` table) only returns `_cl_minimap`'s value while a
-//! spectator predicate holds **and `gHUD`'s FOV field is still 90** -- a
+//! renderer is hardware **and `gHUD`'s FOV field is still 90** -- a
 //! sniper scope changes FOV away from 90, so the engine's own gate takes the
 //! map down regardless of where this module put it, and hands it back once
 //! the FOV returns to 90. Preventing that would mean hooking
@@ -104,10 +104,10 @@ const FULL_AT: usize = 0x238;
 const MINI_AT: usize = 0x248;
 
 /// `CHud::OverviewMapMode`'s inputs (`+0x228e0`; see
-/// `docs/goldsrc_objective_icons.md` §5): the spectator predicate it calls (a
-/// `.data` function pointer the engine fills), `gHUD`'s FOV field, and
+/// `docs/goldsrc_objective_icons.md` §5): `IsHardware`, the engine function it
+/// calls (a `.data` function pointer, slot 40 of `engine_studio_api_t`), `gHUD`'s FOV field, and
 /// `gHUD`'s cached `_cl_minimap` `cvar_t*`.
-const SPECTATOR_PREDICATE_RVA: usize = 0x19_5e40;
+const IS_HARDWARE_RVA: usize = 0x19_5e40;
 const FOV_AT: usize = 0x234;
 const MINIMAP_CVAR_AT: usize = 0x6_e280;
 /// `cvar_t::value`.
@@ -366,19 +366,19 @@ pub fn apply() -> Result<usize, String> {
 
 /// Which map is up, the way `CHud::OverviewMapMode` decides it: 0 for none,
 /// 1 for the full map, 2 for the minimap. `_cl_minimap`'s value, but only while
-/// the spectator predicate holds and the FOV is 90 (a scope takes the map down).
+/// the renderer is hardware and the FOV is 90 (a scope takes the map down).
 pub fn mode() -> Option<i32> {
     let base = engine::client_module_base()?;
     let ghud = ghud().ok()?;
     // Safety: a dword in client.dll's .data, read-only here.
-    let predicate = unsafe { ((base + SPECTATOR_PREDICATE_RVA) as *const usize).read_unaligned() };
-    if predicate == 0 {
+    let is_hardware = unsafe { ((base + IS_HARDWARE_RVA) as *const usize).read_unaligned() };
+    if is_hardware == 0 {
         return Some(0);
     }
     // Safety: the engine filled this slot with a function `OverviewMapMode`
     // itself calls with no arguments, every frame, on this same thread.
-    let predicate: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(predicate) };
-    if unsafe { predicate() } == 0 {
+    let is_hardware: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(is_hardware) };
+    if unsafe { is_hardware() } == 0 {
         return Some(0);
     }
     // Safety: fields of the object the engine writes here itself.
