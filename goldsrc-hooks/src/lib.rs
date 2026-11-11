@@ -287,6 +287,7 @@ mod demo_bar_progress;
 mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
+mod demo_next_map;
 mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;

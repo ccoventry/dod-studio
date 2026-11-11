@@ -434,6 +434,9 @@ pub fn poll() {
     // Patches Core.dll's packet loop once viewdemo loads it, and logs each
     // load's time (#798).
     crate::fast_load::poll();
+    // Holds viewdemo's loader at a map change and lets it go when playback
+    // gets there (#1372); one module lookup a frame while it is off.
+    crate::demo_next_map::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
