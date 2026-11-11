@@ -42,14 +42,20 @@ pub fn split_status(demo: &Path, maps: &[String], min_seconds: f32) -> Result<Sp
         let segments = quick_demo_segments(demo)?;
         // The pieces are named after the maps the demo's own signons give.
         let segment_maps: Vec<String> = segments.iter().map(|s| s.map.clone()).collect();
-        every_kept_map_found(&split_files(demo, &segment_maps), &keep_at_least(&segments, min_seconds))
+        every_kept_map_found(
+            &split_files(demo, &segment_maps),
+            &keep_at_least(&segments, min_seconds),
+        )
     };
     Ok(SplitStatus { split, files })
 }
 
 /// Whether each map in `keep` (indexes into `found`) has its piece.
 fn every_kept_map_found(found: &[Option<String>], keep: &[usize]) -> bool {
-    !keep.is_empty() && keep.iter().all(|&i| found.get(i).is_some_and(Option::is_some))
+    !keep.is_empty()
+        && keep
+            .iter()
+            .all(|&i| found.get(i).is_some_and(Option::is_some))
 }
 
 #[cfg(test)]
@@ -59,7 +65,8 @@ mod tests {
     /// A folder of its own, with `m.dem` (not a real demo: these cases never
     /// read it) and the named pieces next to it.
     fn folder_with(name: &str, pieces: &[&str]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("demo_split_status_{name}_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("demo_split_status_{name}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("m.dem"), b"x").unwrap();
@@ -81,7 +88,10 @@ mod tests {
             status,
             SplitStatus {
                 split: true,
-                files: vec!["m_split1_armory.dem".to_string(), "m_split2_anzio.dem".to_string()],
+                files: vec![
+                    "m_split1_armory.dem".to_string(),
+                    "m_split2_anzio.dem".to_string()
+                ],
             }
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -91,7 +101,13 @@ mod tests {
     fn a_demo_with_no_piece_next_to_it_is_not_split() {
         let dir = folder_with("none", &["other_split1_armory.dem"]);
         let status = split_status(&dir.join("m.dem"), &maps(), 60.0).unwrap();
-        assert_eq!(status, SplitStatus { split: false, files: vec![] });
+        assert_eq!(
+            status,
+            SplitStatus {
+                split: false,
+                files: vec![]
+            }
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -113,9 +129,18 @@ mod tests {
     #[test]
     fn split_when_every_map_a_split_keeps_has_its_piece() {
         let found = [Some("a.dem".to_string()), None];
-        assert!(every_kept_map_found(&found, &[0]), "the short second map is left out");
-        assert!(!every_kept_map_found(&found, &[0, 1]), "the long second map has no piece");
+        assert!(
+            every_kept_map_found(&found, &[0]),
+            "the short second map is left out"
+        );
+        assert!(
+            !every_kept_map_found(&found, &[0, 1]),
+            "the long second map has no piece"
+        );
         assert!(!every_kept_map_found(&found, &[]));
-        assert!(!every_kept_map_found(&found, &[5]), "an index past the list");
+        assert!(
+            !every_kept_map_found(&found, &[5]),
+            "an index past the list"
+        );
     }
 }
