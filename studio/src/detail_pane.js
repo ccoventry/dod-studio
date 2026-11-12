@@ -443,14 +443,15 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_HEADSHOTS_TITLE}">${STRINGS.HIGHLIGHTS.COL_HEADSHOTS}</th>
-        ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
-        <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
+        ${showPlayer ? `<th class="col-wide" title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
+        <th class="col-wide">${STRINGS.HIGHLIGHTS.COL_TIME}</th>
+        <th class="col-wide">${STRINGS.HIGHLIGHTS.COL_DUR}</th>
+        <th class="col-stack">${showPlayer ? STRINGS.HIGHLIGHTS.COL_STACK_PLAYER : STRINGS.HIGHLIGHTS.COL_STACK}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
         <th class="col-clip-name">${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
         <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
+        <th class="col-details">${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -536,9 +537,13 @@ export function renderDetailView(demo, selectedDemoIdx) {
       </td>
       <td class="streak-kills" style="padding: 8px;"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
       <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
-      ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
-      <td style="padding: 8px;">${timeStr}</td>
-      <td class="streak-duration" style="padding: 8px;">${durationText(durSecs)}</td>
+      ${showPlayer ? `<td class="streak-player col-wide" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
+      <td class="col-wide" style="padding: 8px;">${timeStr}</td>
+      <td class="streak-duration col-wide" style="padding: 8px;">${durationText(durSecs)}</td>
+      <td class="col-stack streak-stack" style="padding: 8px;" title="${escapeHtml(timelineText)}">
+        ${showPlayer ? `<div class="streak-stack-player" title="${escapeHtml(streak.target_player || '')}">${escapeHtml(streak.target_player || '')}</div>` : ''}
+        <div class="streak-stack-when">${timeStr} · ${durationText(durSecs)}</div>
+      </td>
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
@@ -561,7 +566,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td style="padding: 8px;">
         <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
-      <td class="details-cell" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
+      <td class="details-cell col-details" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
     `;
 
     const cb = tr.querySelector('.streak-select-cb');
