@@ -793,3 +793,6 @@ mod blocks_tests;
 
 #[cfg(test)]
 mod golden_tests;
+
+#[cfg(test)]
+mod rule_tests;
