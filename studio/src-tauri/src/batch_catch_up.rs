@@ -48,6 +48,14 @@ pub struct CaughtUpBatch {
     pub streak_uids: Vec<String>,
     pub streak_sources: Vec<String>,
     pub blocks: Vec<VerifiedBlock>,
+    /// The manifest's mode and rates, which `batch_catch_up.js` records with
+    /// each take as a watched batch does.
+    pub capture_mode: String,
+    pub capture_fps: i32,
+    pub agr_fps: i32,
+    /// What the batch captured with (part of #1085); `None` for a manifest
+    /// from before it was recorded.
+    pub capture_settings: Option<native::hlcr::take_settings::CaptureSettings>,
 }
 
 /// What the startup check found.
@@ -102,6 +110,10 @@ fn catch_up_one(
         streak_uids: manifest.streak_uids,
         streak_sources: manifest.streak_sources,
         blocks,
+        capture_mode: manifest.capture_mode,
+        capture_fps: manifest.capture_fps,
+        agr_fps: manifest.agr_fps,
+        capture_settings: manifest.settings,
     }
 }
 
@@ -235,6 +247,7 @@ mod tests {
             streak_uids: uids.iter().map(|s| s.to_string()).collect(),
             streak_sources: uids.iter().map(|_| "a.dem".to_string()).collect(),
             project_path: Some("p.json".to_string()),
+            settings: None,
         }
     }
 
@@ -265,6 +278,36 @@ mod tests {
 
         // Rewritten as unwatched, so the next start leaves it alone.
         assert!(catch_up_in(&manifests, None, &no_log()).is_empty());
+    }
+
+    #[test]
+    fn a_caught_up_batch_records_the_settings_it_captured_with() {
+        let manifests = Scratch::new("catch_up_settings");
+        let takes = Scratch::new("catch_up_settings_takes");
+        let done = takes.path().join("b0");
+        std::fs::create_dir_all(&done).unwrap();
+        std::fs::write(done.join("00000.tga"), b"x").unwrap();
+        let settings = native::hlcr::take_settings::CaptureSettings {
+            width: 1920,
+            lines: vec!["mirv_fov 90".to_string()],
+            hash: "v1-0123456789abcdef".to_string(),
+            ..Default::default()
+        };
+        let mut m = manifest("session_s", vec![block(&done, 0, vec![0])], &["u0"]);
+        m.capture_fps = 120;
+        m.capture_mode = "frame_sequence".to_string();
+        m.settings = Some(settings.clone());
+        crate::manifest_file::write_in(&manifests, &m, "planned", None).unwrap();
+
+        let batches = catch_up_in(&manifests, None, &no_log());
+        let b = &batches[0];
+        assert_eq!(b.capture_settings.as_ref(), Some(&settings));
+        assert_eq!(
+            (b.capture_mode.as_str(), b.capture_fps),
+            ("frame_sequence", 120)
+        );
+        let beside = native::hlcr::take_meta::read_for_take(&done).expect("take file");
+        assert_eq!(beside.settings, Some(settings));
     }
 
     #[test]
