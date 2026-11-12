@@ -33,6 +33,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
 | `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
+| `demo_gaps` | Where does this demo's clock jump, where do its frames stop, which maps does it sign on to, and does a strict parse read it? A raw frame walk that gets past damage (#15) |
 
 ### HLTV and the director channel
 

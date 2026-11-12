@@ -43,6 +43,25 @@ describe('capturedTakes', () => {
     ]);
   });
 
+  it('records the settings the manifest captured with, and their rate', () => {
+    const d = demos();
+    const settings = { hash: 'v1-0123456789abcdef', fps: 60, width: 1920, lines: ['mirv_fov 90'] };
+    const takeIndex = {};
+    applyCaughtUpBatch(batch(d, { capture_mode: 'obs', capture_fps: 300, capture_settings: settings }), d, takeIndex);
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
+    expect(record.settings).toEqual(settings);
+    expect(record.capture_fps).toBe(60);
+  });
+
+  it('a manifest from before the settings records none', () => {
+    const d = demos();
+    const takeIndex = {};
+    applyCaughtUpBatch(batch(d, { capture_mode: 'frame_sequence', capture_fps: 300, capture_settings: null }), d, takeIndex);
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
+    expect(record.settings).toBeUndefined();
+    expect(record.capture_fps).toBe(300);
+  });
+
   it('skips a block whose indices are out of range', () => {
     const b = { streak_uids: ['u0'], blocks: [{ take_key: 'k', captured: true, source_streak_indices: [5] }] };
     expect(capturedTakes(b)).toEqual([]);

@@ -66,18 +66,18 @@ describe('normalizePlayers', () => {
     const d = defaultPlayers();
     expect(normalizePlayers(undefined)).toEqual(d);
     expect(d.use_in_game).toBe(true);
-    expect(d.pov_fallback).toBe('own');
+    expect(d.pov_fallback).toBe('png');
     expect(d.hltv_fallback).toBe('png');
     expect(d.crosshair_fallback).toBe('game');
     expect(d.crosshair_fallback_sprite).toBe('customXHair.spr');
     expect(d.crosshair_fallback_tile).toBe(1);
   });
 
-  it('never offers "their own" for HLTV, and drops rows with nobody', () => {
+  it('reads "their own" as the default in either fallback, and drops rows with nobody', () => {
     const t = normalizePlayers({
       use_in_game: false,
       hltv_fallback: 'own',
-      pov_fallback: 'sometimes',
+      pov_fallback: 'own',
       crosshair_fallback: 'other',
       crosshair_fallback_tile: 40,
       players: [
@@ -87,7 +87,7 @@ describe('normalizePlayers', () => {
     });
     expect(t.use_in_game).toBe(false);
     expect(t.hltv_fallback).toBe('png');
-    expect(t.pov_fallback).toBe('own');
+    expect(t.pov_fallback).toBe('png');
     expect(t.crosshair_fallback).toBe('game');
     expect(t.crosshair_fallback_tile).toBe(1);
     expect(t.players).toEqual([{ steam_id: '', name: 'Bot', png: 'b.png', crosshair_sprite: 'x.spr', crosshair_tile: 3, use_as: '', nameplate: '' }]);
@@ -165,6 +165,7 @@ describe('rows', () => {
         { steam_id: '', name: 'b', png: 'gone.png', crosshair_sprite: 'unused.spr', crosshair_tile: 0 },
       ],
       hltv_fallback_png: 'team.png',
+      pov_fallback: 'none',
       pov_fallback_png: 'unused.png',
       crosshair_fallback: 'sprite',
       crosshair_fallback_sprite: 'gone.spr',

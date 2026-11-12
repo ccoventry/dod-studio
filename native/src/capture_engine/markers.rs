@@ -117,7 +117,6 @@ impl RecordingGoAhead {
 /// file's directory entry is not necessarily updated while a handle to it is
 /// open, and the engine holds this one open for the whole session. `LogTailer`
 /// reads its length the same way, for the same reason.
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn console_log_len(path: &Path) -> u64 {
     std::fs::File::open(path)
         .and_then(|f| f.metadata())
