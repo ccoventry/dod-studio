@@ -1,5 +1,3 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 //! Render autosave schema.
 //! Defined here (inside the native library) so both `hlcr::ui` and the GUI
 //! binary can access the types without a crate-private binary-path import.

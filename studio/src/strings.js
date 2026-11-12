@@ -254,6 +254,24 @@ export const STRINGS = {
     UNKNOWN_HIGHLIGHT: 'a highlight no longer in the queue',
     NO_RENDERS: 'not rendered',
     REVEAL_FAILED: 'Could not show that in Explorer.',
+    // The full settings a take was captured with (part of #1085).
+    capturedWith: (text) => `Captured with: ${text}`,
+    NOT_RECORDED: 'not recorded',
+    NOT_RECORDED_TITLE: 'This take was captured before Studio kept the full settings of each capture. It is never marked as different from another take.',
+    size: (width, height) => `${width}×${height}`,
+    fov: (degrees) => `FOV ${degrees}`,
+    hook: (name) => `hook ${name}`,
+    NO_HOOK: 'no hook DLL',
+    clipLength: (before, after) => `${before} s before, ${after} s after`,
+    gapsFastForward: (speed, over) => `gaps over ${over} s at ${speed}x`,
+    commandCounts: (initial, scheduled) =>
+      `${initial} Initial ${initial === 1 ? 'Command' : 'Commands'}, ${scheduled} Scheduled`,
+    INITIAL_HEADING: 'Initial Commands:',
+    SCHEDULED_HEADING: 'Scheduled Commands:',
+    NONE: '  (none)',
+    initialLine: (line) => `  ${line}`,
+    scheduledCommand: (after, seconds, command) => `  ${seconds} s ${after ? 'after the clip' : 'before the clip'}: ${command}`,
+    hash: (hash, version) => `Settings hash ${hash}${version ? ` · DoD Studio ${version}` : ''}`,
   },
 
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────
@@ -1237,6 +1255,108 @@ export const STRINGS = {
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
     SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
+  },
+
+  // #15: repairing a demo damaged partway (repair_view.js, repair_pane.js,
+  // queue_repair.js, analyzer_damage.js).
+  REPAIR: {
+    TAB: 'Damaged Demos',
+    TITLE: 'Damaged Demos',
+    HINT: 'A demo damaged on disk stops playing (or crashes the game) at its first gap. Repair cuts the gaps out and joins the rest so it plays to the end. The repair is saved next to the original as <name>_repaired.dem; the original is never changed.',
+    RECURSIVE: 'Include subfolders',
+    FIND_BUTTON: 'Find Damaged Demos',
+    CANCEL_BUTTON: 'Cancel',
+    REPAIR_CHECKED_BUTTON: 'Repair Checked',
+    REPAIR_BUTTON: 'Repair',
+    CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
+    CANCELLING: 'Cancelling…',
+    COL_DEMO: 'Demo',
+    COL_BREAKS: 'Breaks at',
+    COL_SIZE: 'Size',
+    COL_RESULT: 'Repair',
+    BREAKS_TITLE: 'Where the first gap starts, in time since the recording started. Everything after it is unreadable until repaired.',
+    breaksAt: (clock, rest) => `${clock} (${rest} unread)`,
+    scanning: (done, total, demo) => `Checking demos: ${done} of ${total}${demo ? ` (${demo})` : ''}`,
+    found: (n) => (n === 0 ? 'No damaged demo here.' : `${n} damaged demo${n === 1 ? '' : 's'}.`),
+    cancelledFound: (n) => `Cancelled: ${n} damaged demo${n === 1 ? '' : 's'} found before it stopped.`,
+    scanFailed: (e) => `Couldn't check the folder: ${e}`,
+    footer: (damaged, repaired) => `Damaged demos: ${damaged} | Repaired: ${repaired}`,
+    ALREADY_REPAIRED_CHIP: 'Repaired before',
+    alreadyRepairedTitle: (name) => `A repair is already saved next to it: ${name}. Repairing again saves a new copy beside it.`,
+    NOTHING_TICKED: 'Tick at least one demo to repair.',
+    repairingN: (i, n, name) => `Repairing ${i} of ${n}: ${name}`,
+    repairedN: (done, n) => `Repaired ${done} of ${n} demo${n === 1 ? '' : 's'}.`,
+    // A repair's progress line, one per step (analysis::repair::RepairStep).
+    STEP: {
+      finding_holes: 'Finding the gaps',
+      reading: 'Reading the recording',
+      rebuilding_joins: 'Joining the recording across the gaps',
+      writing: 'Writing the repaired demo',
+      checking: 'Checking the repaired demo',
+    },
+    progressLine: (step, pct) => `${step}… ${pct}%`,
+    // What a repair came to.
+    gap: (from, to, lost) => `${from}–${to} (${lost} s)`,
+    repaired: (gaps, lost, kept, name) => `Repaired: ${gaps} gap${gaps === 1 ? '' : 's'} cut out (${gaps === 1 ? '' : 'in all '}${lost} s of recording lost, ${kept}% kept). Saved as ${name}.`,
+    gapsTitle: (list) => `Gaps, in time since the recording started: ${list}`,
+    ENDS_AT_LAST_GAP: 'After that the recording breaks once more and never resumes, so the repair ends at that break.',
+    repairedEndCutOff: (kept, name) => `Repaired: the recording breaks and never resumes, so the repair ends at the break (${kept}% kept). Saved as ${name}.`,
+    NOT_DAMAGED: 'Not damaged: nothing to repair, nothing saved.',
+    refused: (reasons) => `Not saved: the repaired demo failed a check (${reasons.join('; ')}).`,
+    CANCELLED: 'Cancelled. Nothing was saved.',
+    failed: (e) => `Repair failed: ${e}`,
+    SHOW_IN_FOLDER: 'Show in folder',
+    // The Master Queue's row button (queue_repair.js).
+    QUEUE_BUTTON: 'Damaged · Repair',
+    queueButtonTitle: (clock) => `This demo is damaged at ${clock} on the playback clock: it plays, and its highlights cover it, up to there. Repair cuts the damage out and swaps in the repaired copy (saved next to it as <name>_repaired.dem), keeping the highlights' marks, notes and status.`,
+    queueHead: (name) => `Repairing ${name}`,
+    QUEUE_ADDING: 'adding the repaired demo to the queue',
+    queueDoneLine: (elapsed) => `Done in ${elapsed}: repaired 1 demo`,
+    queueFailed: (name, err) => `Could not repair ${name}: ${err}`,
+    queueNotSaved: (name, why) => `${name} was not repaired: ${why}`,
+    carryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the repaired demo; their marks and notes are listed in the activity log (View Logs).`,
+    carryLog: (name, kept, total, repaired) => `[repair] ${name} -> ${repaired}: kept the work on ${kept} of ${total} highlight(s)`,
+    narrowedLog: (time, player, piece) => `[repair]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    uncarriedLog: (time, player, timeline, reason, work) => `[repair]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    UNCARRIED_REASON: {
+      'no-piece': 'the repaired demo did not scan',
+      'not-found': 'no highlight in the repaired demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: "another highlight's work went to the same highlight",
+    },
+    queueStartLog: (name) => `[repair] queue: repairing ${name}`,
+    queueEndLog: (name, elapsed) => `[repair] queue: ${name} swapped for its repair in ${elapsed}`,
+    // The Demo Analyzer's damaged-demo notice (analyzer_damage.js).
+    ANALYZER_BUTTON: 'Repair now',
+    ANALYZER_BUTTON_TITLE: 'Cut the damage out and save the repaired demo next to this one (<name>_repaired.dem), then open it. This demo is not changed.',
+    analyzerDone: (name) => `Repaired, saved as ${name}`,
+    // A demo both damaged and multi-map: repair first, then split (#15).
+    SPLIT_NEEDS_REPAIR: 'Repair it first: the damage stops a split. Repair & Split does both.',
+    // A damaged demo with no break for the repair to cut out (repair_status.js):
+    // the damage is inside a frame, so Repair is not offered.
+    CANNOT_REPAIR: "Repair can't fix this one: the damage is inside the recording rather than a break in it, so there is no gap to cut out.",
+    // Its Split stays greyed out too: the split parses the whole demo and
+    // stops at the same damage.
+    SPLIT_DAMAGE_CANNOT_REPAIR: "The damage stops a split, and Repair can't cut it out.",
+    // The Demo Analyzer's damage notice once the repair's maps were split
+    // next to the demo (analyzer_damage.js): nothing is left to repair.
+    analyzerAlreadySplit: (maps) => `Already repaired and split into its ${maps.length} maps (${maps.join(', ')}) next to it.`,
+    cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it, and Split stays greyed out (the damage stops a split too)`,
+    // The analyzer's map list stops at the damage; the repair check's byte
+    // scan found the maps after it (repair_status.js).
+    mapsPastDamageLog: (path, maps) => `Repair: ${path} recorded ${maps.length} maps (${maps.join(', ')}), some after its damage; Repair & Split is offered for it`,
+    REPAIR_SPLIT_BUTTON: 'Repair & Split',
+    REPAIR_SPLIT_TITLE: 'Repair the damage, then split the repaired demo into one demo per map. Both are saved next to this one, which is not changed.',
+    repairSplitRepairing: (text) => `Repairing: ${text}`,
+    repairSplitSplitting: (text) => `Splitting the repaired demo: ${text}`,
+    repairSplitDone: (gaps, names) => `Repaired (${gaps} gap${gaps === 1 ? '' : 's'} cut out) and split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    queueRepairSplitHead: (name) => `Repairing and splitting ${name}`,
+    QUEUE_REPAIR_SPLIT_ADDING: 'adding its maps to the queue',
+    queueRepairSplitDoneLine: (elapsed, pieces) => `Done in ${elapsed}: repaired 1 demo and split it into ${pieces}`,
+    repairSplitFailed: (e) => `Repair & Split failed: ${e}`,
+    mapsCount: (n) => `${n} maps`,
   },
 
   AUDITOR: {
@@ -3429,13 +3549,13 @@ export const STRINGS = {
     pngsMissing: (names) => `Not in the logos folder: ${names.join(', ')}. Those sprays stay as the game draws them.`,
     spritesMissing: (names) => `Not in the sprites folder: ${names.join(', ')}. Those crosshairs stay the game's own.`,
     HLTV_FALLBACK_UNSET: 'HLTV demos: pick the fallback spray. Without one, players not listed show no spray (with nobody listed at all, the game\'s bullet hole).',
-    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray, or players not listed keep their own (no spray where the demo saved none).',
+    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray. Without one, players not listed keep the spray the demo saved, and show none where it saved none.',
     NOT_IN_GAME: "Use in the game is off: the game draws its own sprays and crosshairs.",
-    POV_FALLBACK_LABEL: 'Spray, players not listed, POV demos:',
-    POV_FALLBACK_TITLE: 'Their own spray is the one the demo saved, drawn as it is. A player who joined before the recording started has none saved and shows no spray, never a bullet hole.',
-    HLTV_FALLBACK_LABEL: 'Spray, players not listed, HLTV demos:',
-    HLTV_FALLBACK_TITLE: 'An HLTV demo records that a player sprayed, never the picture, so "their own" is not offered.',
-    FALLBACK_OWN: 'Their own spray',
+    POV_FALLBACK_LABEL: 'Fallback spray, POV demos:',
+    HLTV_FALLBACK_LABEL: 'Fallback spray, HLTV demos:',
+    FALLBACK_HINT: 'Used for players not listed, and when From the demo finds none.',
+    FALLBACK_TITLE: "Used for players not listed, and when From the demo finds none. A stock lambda spray names no player, so it gets this too, unless it's the POV recorder's own, which gets their row.",
+    POV_OWN_SPRAY_RETIRED: 'Your POV fallback spray was "Their own spray", which is gone, so it is now "No spray". Change it in Configuration > Players.',
     FALLBACK_PNG: 'One fallback spray',
     FALLBACK_NONE: 'No spray',
     CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
@@ -3466,7 +3586,7 @@ export const STRINGS = {
     crosshairAdded: (file) => `Added ${file}. Pick it in a crosshair list above.`,
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
-    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback spray for that demo type.",
   },
   // A file dialog that is slow to appear (dialog_wait.js).
   FILE_DIALOG: {

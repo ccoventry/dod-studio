@@ -2545,7 +2545,6 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "clap",
- "console_error_panic_hook",
  "dem",
  "dirs 5.0.1",
  "dod",
@@ -2553,7 +2552,6 @@ dependencies = [
  "flate2",
  "hl-demo-auditor",
  "humantime",
- "js-sys",
  "keepawake",
  "log",
  "open",
@@ -2567,9 +2565,6 @@ dependencies = [
  "tungstenite",
  "ureq",
  "walkdir",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
  "zip",
 ]
 

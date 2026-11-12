@@ -1,5 +1,3 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 pub mod agr_take;
 pub mod autosave;
 pub mod capture_room;
@@ -15,5 +13,6 @@ pub mod take_frames;
 pub mod take_length;
 pub mod take_meta;
 pub mod take_plan;
+pub mod take_settings;
 
 pub use autosave::{RenderJob, RenderJobStatus, RenderSessionData};

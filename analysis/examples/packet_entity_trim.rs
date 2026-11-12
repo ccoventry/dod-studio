@@ -40,9 +40,7 @@ use dem::open_demo_from_bytes;
 use dem::types::{Delta, Demo, EngineMessage, FrameData, MessageData, NetMessage};
 use std::collections::{HashMap, HashSet};
 
-#[path = "shared/entity_carry.rs"]
-mod entity_carry;
-use entity_carry::Carry;
+use analysis::repair::entity_carry::Carry;
 
 /// Pre-Anniversary `MAX_PACKET_ENTITIES`.
 const LEGACY_LIMIT: usize = 256;

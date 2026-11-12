@@ -1,3 +1,6 @@
+// Fixed-width slices of the demo bytes; error paths for these are tracked on #1179.
+#![allow(clippy::unwrap_used)]
+
 // patch/scanner.rs
 // Life-bounded highlight scanner, HLTV detection, and the check that a
 // scanned demo is still the same file when a batch starts.
