@@ -4,6 +4,7 @@ mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
+mod capture_guards;
 mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
