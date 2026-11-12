@@ -3,7 +3,7 @@
 //!
 //! A demo that parses via `dem::open_demo_from_bytes` after `write_to_bytes`
 //! only proves the writer and reader agree with EACH OTHER -- not that either
-//! agrees with the real GoldSrc wire format. `snapshot_inject` hand-constructs
+//! agrees with the real GoldSrc wire format. The repair (`analysis::repair`, once `snapshot_inject`) hand-constructs
 //! a brand new `SvcPacketEntities` (absolute indexing on every entity, fields
 //! assembled from scratch) rather than editing an existing message's fields in
 //! place, which is a code path nothing has verified against real bytes.

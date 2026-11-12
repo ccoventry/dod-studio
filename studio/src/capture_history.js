@@ -60,6 +60,9 @@ function lineElement(line, reveal) {
   if (line.shared.length) {
     row.append(' · ', el('span', STRINGS.CAPTURE_HISTORY.sharedWith(line.shared), { title: STRINGS.CAPTURE_HISTORY.SHARED_TITLE }));
   }
+  const settings = el('div', line.capturedWith.text, { title: line.capturedWith.title, className: 'capture-history-settings' });
+  settings.style.cssText = 'margin-left:18px;font-size:0.9em;opacity:0.85;';
+  row.append(settings);
   const renders = el('div', null, { className: 'capture-history-renders' });
   renders.style.cssText = 'margin-left:18px;font-size:0.9em;opacity:0.85;';
   if (line.status !== 'checking' && line.renders.length === 0) renders.textContent = STRINGS.CAPTURE_HISTORY.NO_RENDERS;

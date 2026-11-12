@@ -6,6 +6,10 @@
 use std::fmt::Display;
 use std::path::Path;
 
+/// Settings migration 3 changed a used table's POV fallback (#1322).
+pub const POV_OWN_SPRAY_RETIRED: &str =
+    "[settings] POV fallback spray: \"Their own spray\" is gone, so it is now \"No spray\" (#1322)";
+
 pub fn players_table_not_written(err: impl Display) -> String {
     format!("⚠️ **Players** — {err}. The game keeps the table it last read.")
 }

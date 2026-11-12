@@ -35,8 +35,18 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
 
     // Both pipes are set to piped by `ffmpeg_command`, so `take()` has them.
     // Stderr is read on its own task so a full pipe can't stall FFmpeg.
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "ffmpeg_command pipes stderr and stdout, so take() has them"
+    )]
     let stderr_log = collect_stderr(child.stderr.take().unwrap());
     // Held until the job ends: FFmpeg's stdout stays open while it exits.
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "ffmpeg_command pipes stderr and stdout, so take() has them"
+    )]
     let mut reader = BufReader::new(child.stdout.take().unwrap());
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));

@@ -1,7 +1,7 @@
 import { configurePickPath } from './pick_path.js';
 import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
-import { renderMasterList, initMasterPane } from './master_pane.js';
+import { renderMasterList, initMasterPane, setRepairDemoHandlers } from './master_pane.js';
 import { startDemoContextMenu } from './demo_context_menu.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
@@ -18,6 +18,8 @@ import { initRenderWhileCapturing } from './render_while_capturing.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
+import { createRepairPane } from './repair_pane.js';
+import { createQueueRepair } from './queue_repair.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
@@ -168,6 +170,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initAuditorPane({ getDemos: queue.getDemos, onSettingsChange: () => persistAppSettings() });
   initAuditorTabs();
   initSplitPane();
+  createRepairPane(); // Damaged Demos (#15)
   initDemoRenamePane({
     projectTeams: () => projectTeams,
     onChange: () => persistAppSettings(),
@@ -278,6 +281,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     getTakeIndex: () => takeIndex,
     refreshQueue: () => queue.refreshAfterRelocation(true),
     pickedDemosPresent,
+  });
+
+  // Demos damaged partway (#15): queue_repair.js; the row's buttons run it.
+  const { repairQueuedDemo, repairAndSplitQueuedDemo } = createQueueRepair({
+    getDemos: queue.getDemos,
+    removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    getTakeIndex: () => takeIndex,
+    refreshQueue: () => queue.refreshAfterRelocation(true),
+    renderQueue: queue.renderQueue,
+  });
+  setRepairDemoHandlers({
+    repair: (demo, update) => repairQueuedDemo(demo, { update }),
+    repairSplit: (demo, update) => repairAndSplitQueuedDemo(demo, { update }),
   });
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.

@@ -1,7 +1,7 @@
 # System Architecture Decisions
 
 ## Tech Stack Core
-- **Language/Runtime:** Rust targeting native desktop, plus a `wasm32-unknown-unknown` compilation gate retained in `native/` for cfg-isolating non-wasm-safe code (no active wasm GUI target).
+- **Language/Runtime:** Rust targeting native desktop, plus `web-analyzer`, which compiles `analysis`, `dod` and `dem-patch` (not `native`) to `wasm32-unknown-unknown` for the browser analyzer.
 - **UI Framework:** Tauri v2 backend + Vite/JS frontend (`studio/`), current since the `feature/tauri-migration` merge to `dev` (2026-08-18).
 
 ## Workspace Module Boundaries

@@ -81,7 +81,7 @@ fn quantize(p: [f32; 3]) -> (i32, i32, i32) {
 /// deduplicated onto a coarse grid.
 ///
 /// Reads `SvcPacketEntities`/`SvcDeltaPacketEntities` directly rather than
-/// requiring a full accumulated entity table (`snapshot_inject`'s approach) --
+/// requiring a full accumulated entity table (`analysis::repair`'s approach) --
 /// a delta's `origin[N]` already names an absolute value on this wire, not an
 /// offset, so no baseline replay is needed to make sense of one in isolation.
 /// A gap where an axis does not change between updates just means that axis

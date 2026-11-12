@@ -1,6 +1,6 @@
 //! How does a REAL svc_packetentities encode entity 0 (world)? (#224)
 //!
-//! `snapshot_inject` sets `is_absolute_entity_index: Some(true)` for every
+//! `snapshot_inject` (the R&D probe that became `analysis::repair`, #15) set `is_absolute_entity_index: Some(true)` for every
 //! entity in its synthesized packet, entity 0 included -- deliberate, per the
 //! module doc, to avoid depending on incremental-index arithmetic. But entity 0
 //! is always the FIRST entity in a real full snapshot, and a real server may

@@ -2203,8 +2203,11 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
         estimate_batch_capture_blocks(&streaks, &config),
         vec![2 * one]
     );
+    // Another player is another job: `build_batch_queue` groups by the
+    // player's name, and the estimate now asks the same planner.
     let mut other_player = streak(1000, 1200);
     other_player.player_index = 1;
+    other_player.target_player = Some("Nifty".to_string());
     let spread = vec![
         streak(2500, 2700),
         streak(1000, 1200),

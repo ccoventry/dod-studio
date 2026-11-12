@@ -54,7 +54,15 @@ export function capturedTakes(batch) {
     .filter((block) => block.captured)
     .map((block) => ({
       takeKey: block.take_key,
-      meta: { session_id: batch.session_id, capture_mode: batch.capture_mode, capture_fps: captureRateOf(batch.capture_mode, batch), take_folder: block.take_folder },
+      meta: {
+        session_id: batch.session_id,
+        capture_mode: batch.capture_mode,
+        // The settings' own rate is the one the mode recorded at (the
+        // manifest has no OBS rate); a manifest from before them has none.
+        capture_fps: batch.capture_settings?.fps || captureRateOf(batch.capture_mode, batch),
+        take_folder: block.take_folder,
+        settings: batch.capture_settings,
+      },
       uids: (block.source_streak_indices || []).map((i) => uids[i]).filter(Boolean),
       rendered: block.rendered === true,
     }))
