@@ -32,16 +32,7 @@ const PLACEHOLDERS: &[&str] = &[
 ];
 
 /// `(file, reason)` pairs whose hits are deliberate. Keep it short.
-const ALLOWED: &[(&str, &str)] = &[
-    (
-        "studio/src/tree_loads.test.js",
-        "fixture folder tree in a JS test; real name predates this check, to be made a placeholder",
-    ),
-    (
-        "studio/src/vegas_edl.test.js",
-        "fixture clip folder in a JS test; real name predates this check, to be made a placeholder",
-    ),
-];
+const ALLOWED: &[(&str, &str)] = &[];
 
 #[derive(Debug, PartialEq)]
 struct Hit {
@@ -91,7 +82,7 @@ fn find_hits(text: &str) -> Vec<Hit> {
             // A segment ends at a separator; one cut off by the line end or by
             // a quote or space is still a name, so only trim trailing quotes.
             let segment = segment
-                .trim_end_matches(['"', '\'', '`', ')', ',', ';'])
+                .trim_end_matches(['"', '\'', '`', ')', ']', '}', ',', ';'])
                 .to_string();
             if !segment.is_empty() && !is_placeholder(&segment) {
                 hits.push(Hit {
