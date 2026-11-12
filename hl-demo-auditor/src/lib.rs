@@ -9,6 +9,8 @@ mod duplicates;
 mod key_cache;
 mod keys;
 mod lanes;
+pub mod messages;
+pub mod repair;
 mod walk;
 mod zips;
 /// The demo key's hash, defined once in `analysis` (#1107).

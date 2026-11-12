@@ -1,5 +1,5 @@
 //! How many entities does a snapshot actually describe, and how does the set
-//! evolve? Checking the assumption behind snapshot_inject's reconstruction.
+//! evolve? Checking the assumption behind the join snapshot's reconstruction (`analysis::repair`, once the `snapshot_inject` probe).
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};

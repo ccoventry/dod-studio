@@ -481,6 +481,8 @@ pub fn poll() {
     crate::own_blood::poll();
     // A float compare unless ds_map_weather changed (#1129).
     crate::map_weather::poll();
+    // Two float loads and a level-name hash unless ds_map_wind changed.
+    crate::map_wind::poll();
     crate::map_sounds::poll();
     // A level-name hash and a few byte compares once applied (#1312).
     crate::map_light::poll();

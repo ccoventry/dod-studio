@@ -17,6 +17,13 @@ struct Args {
     #[arg(long)]
     integrity: bool,
 
+    /// Repair damaged demos (#15): cut out each hole, rebuild the joins, and
+    /// write `<name>_repaired.dem` next to each demo. The original is never
+    /// changed and no file is overwritten. Non-zero exit if any demo could not
+    /// be repaired.
+    #[arg(long, conflicts_with = "integrity")]
+    repair: bool,
+
     /// Folders to scan for .dem files (with --integrity, demo files too)
     paths: Vec<PathBuf>,
 }
@@ -24,11 +31,14 @@ struct Args {
 fn main() {
     let args = Args::parse();
     if args.paths.is_empty() {
-        eprintln!("Usage: hl-demo-auditor [--integrity] <folder-or-demo> ...");
+        eprintln!("Usage: hl-demo-auditor [--integrity | --repair] <folder-or-demo> ...");
         std::process::exit(1);
     }
     if args.integrity {
         std::process::exit(run_integrity(&args.paths));
+    }
+    if args.repair {
+        std::process::exit(run_repair(&args.paths));
     }
 
     println!("Scanning directories...");
@@ -127,5 +137,66 @@ fn run_integrity(paths: &[PathBuf]) -> i32 {
         1
     } else {
         0
+    }
+}
+
+/// `--repair`: repairs each demo named (each folder's demos too), printing what
+/// it found as it goes, and returns the exit code, 1 if any could not be
+/// repaired.
+fn run_repair(paths: &[PathBuf]) -> i32 {
+    use hl_demo_auditor::messages as text;
+    use hl_demo_auditor::repair::{FileRepair, repair_file};
+    let (demos, missing) = collect_demos(paths);
+    for path in &missing {
+        eprintln!("{}", text::no_such_path(&path.display().to_string()));
+    }
+    let (mut repaired, mut not_damaged, mut failed) = (0, 0, 0);
+    for path in &demos {
+        let name = path.display().to_string();
+        let outcome = analysis::repair::no_hooks(|hooks| repair_file(path, hooks));
+        match outcome {
+            Ok(FileRepair::NotDamaged) => {
+                not_damaged += 1;
+                println!("{}", text::not_damaged(&name));
+            }
+            Ok(FileRepair::Repaired { path: out, report }) => {
+                repaired += 1;
+                println!("{}", text::repaired(&name, &out.display().to_string()));
+                print_holes(&report);
+                println!("{}", text::summary_line(&report));
+            }
+            Ok(FileRepair::Refused { report, reasons }) => {
+                failed += 1;
+                println!("{}", text::refused(&name));
+                for reason in &reasons {
+                    println!("  {}", text::refusal(reason));
+                }
+                print_holes(&report);
+            }
+            Err(e) => {
+                failed += 1;
+                println!("{e}");
+            }
+        }
+    }
+    println!(
+        "{}",
+        text::repair_totals(demos.len(), repaired, not_damaged, failed)
+    );
+    if failed > 0 || !missing.is_empty() || demos.is_empty() {
+        1
+    } else {
+        0
+    }
+}
+
+/// The holes a repair found, one line each.
+fn print_holes(report: &analysis::repair::RepairReport) {
+    use hl_demo_auditor::messages as text;
+    for (n, hole) in report.holes.iter().enumerate() {
+        println!("{}", text::hole_line(n + 1, hole));
+    }
+    if report.ends_at_last_hole {
+        println!("{}", text::ends_at_break(report.holes.len()));
     }
 }
