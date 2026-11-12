@@ -190,6 +190,11 @@ impl CaptureStreak {
         self.end_tick = slice[slice.len() - 1].0;
         self.kill_count = slice.len();
 
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "the slice has at least one kill"
+        )]
         let total_secs = (slice.last().unwrap().1 - slice[0].1).max(0.0).round() as i32;
         self.duration_string = format!("{}:{:02}", total_secs / 60, total_secs % 60);
 
