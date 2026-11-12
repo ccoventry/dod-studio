@@ -15,7 +15,7 @@ import { videosToExport, clipsOfVideos } from './project_vegas_logic.js';
 import { vegasEdl, edlDefaultPath, EDL_SAVE_FILTER } from './vegas_edl.js';
 import { probeLengths, saveManifest } from './vegas_edl_export.js';
 import { nameplateCount } from './clip_manifest.js';
-import { projectEdlStartLine, projectEdlExportedLine } from './project_log.js';
+import { projectEdlStartLine, projectEdlExportedLine, projectEdlNotWrittenLine } from './project_log.js';
 
 const defaultIo = {
   locate: locateRenderedVideos,
@@ -66,7 +66,7 @@ export function createProjectVegasExport({
     const missing = chosen.length - found.length;
     if (found.length === 0) {
       io.toast(STRINGS.RENDER.exportProjectNone(chosen.length), 'info');
-      io.log(projectEdlExportedLine(0, scope, missing, 0, io.now() - started));
+      io.log(projectEdlNotWrittenLine('missing', chosen.length, scope, io.now() - started));
       return false;
     }
     io.toast(STRINGS.RENDER.exportEdlProbing(found.length), 'info');
@@ -74,10 +74,14 @@ export function createProjectVegasExport({
     const { clips, skipped } = clipsOfVideos(found, takeIndex, lengths);
     if (clips.length === 0) {
       io.toast(STRINGS.RENDER.exportEdlNone(skipped), 'info');
+      io.log(projectEdlNotWrittenLine('unreadable', chosen.length, scope, io.now() - started));
       return false;
     }
     const path = await io.pickPath(clips);
-    if (!path) return false;
+    if (!path) {
+      io.log(projectEdlNotWrittenLine('cancelled', chosen.length, scope, io.now() - started));
+      return false;
+    }
     try {
       await io.write(path, vegasEdl(clips));
     } catch (err) {

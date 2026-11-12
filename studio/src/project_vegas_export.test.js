@@ -46,6 +46,13 @@ describe('createProjectVegasExport', () => {
     expect(await exporter.run()).toBe(false);
     expect(io.write).not.toHaveBeenCalled();
     expect(io.toast).toHaveBeenLastCalledWith(expect.stringContaining('None of the 3 videos'), 'info');
+    expect(io.log).toHaveBeenLastCalledWith(expect.stringContaining('wrote no EDL: none of the 3 video(s) found'));
+  });
+  it('logs an end line when FFmpeg reads no length', async () => {
+    const { io, exporter } = setUp({ located: ['D:/v/a.mov', null, null], lengths: {} });
+    expect(await exporter.run()).toBe(false);
+    expect(io.write).not.toHaveBeenCalled();
+    expect(io.log).toHaveBeenLastCalledWith(expect.stringContaining('wrote no EDL: FFmpeg could not read'));
   });
   it('writes nothing when the save dialog is cancelled', async () => {
     const { io, exporter } = setUp({
@@ -55,5 +62,6 @@ describe('createProjectVegasExport', () => {
     });
     expect(await exporter.run()).toBe(false);
     expect(io.write).not.toHaveBeenCalled();
+    expect(io.log).toHaveBeenLastCalledWith(expect.stringContaining('wrote no EDL: the save dialog was cancelled'));
   });
 });
