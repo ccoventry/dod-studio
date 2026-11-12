@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Only Start Capture Batch's demo check is tested here; the split itself is
 // covered by master-pane.spec.js and split_carry.test.js.
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
-vi.mock('./ipc_bridge.js', () => ({ logFrontendEvent: vi.fn(), splitDemoAuto: vi.fn(), demoSplitStatus: vi.fn() }));
+vi.mock('./ipc_bridge.js', () => ({ logFrontendEvent: vi.fn(), splitDemoAuto: vi.fn(), demoSplitStatus: vi.fn(), demoRepairable: vi.fn() }));
 vi.mock('./split_pane.js', () => ({ SHORT_MAP_SECONDS: 60 }));
 vi.mock('./detail_pane.js', () => ({ updateStreakVisuals: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));

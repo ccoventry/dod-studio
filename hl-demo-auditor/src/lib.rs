@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -9,6 +11,8 @@ mod duplicates;
 mod key_cache;
 mod keys;
 mod lanes;
+pub mod messages;
+pub mod repair;
 mod walk;
 mod zips;
 /// The demo key's hash, defined once in `analysis` (#1107).

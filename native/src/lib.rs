@@ -1,12 +1,10 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg(not(target_arch = "wasm32"))]
 use analysis::Analysis;
-#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 pub mod patch;
@@ -14,7 +12,6 @@ pub mod patch;
 /// What a highlight's clip name can say beyond the streak itself (#441).
 pub mod clip_facts;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
 pub mod shared;
@@ -26,90 +23,68 @@ pub mod utils;
 #[doc(hidden)]
 pub mod messages;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod game_handoff;
 
 /// Maps a session crashed on with a known cause, for the next batch's warning
 /// (#207).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod crash_maps;
 
 /// Caching many demos ahead of time (#569).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_cache;
 
 /// Which demos in a folder recorded more than one map (#624).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_maps_scan;
 /// Splitting a demo that recorded more than one map (#624).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
 /// Whether a demo's maps were already split next to it.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split_status;
 
 /// The Demo Auditor's renamer: facts, renames and the undo log (#469).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
 /// Which match and half each demo of a list is (#685).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod match_groups;
 
 /// Launch Preview without patching (#434, step 2).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
 
 /// The demo player bar's layout with the loading progress controls, written
 /// into `dod_addon` at every launch (#465).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod demo_bar_res;
 
 /// The louder headshot sounds, written into `dod_addon` at every launch
 /// from the game's own (#1353).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod headshot_louder;
 
 /// The HD texture files: what is built, and fetching the upscaler (#372).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
 
 /// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod blender;
 
 /// Installing the VEGAS Pro nameplate script into its script menu (#429).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod vegas;
 
 /// Driving OBS Studio as an alternate capture path (#65).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
 /// A map's overview image and its placement, for the Demo Analyzer (#448).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod map_overview;
 
 /// Map overviews made from the BSP, for the Overviews page (#371).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod overview;
 
 /// Players tab, "Add a crosshair file…": a made crosshair into the addon
 /// folder's sprites (#842).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod crosshair_import;
 /// Configuration › Paths: the Anniversary menus at the pre-Anniversary size,
 /// through a scheme copy in the addon folder (#985).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod menu_scale;
 /// Who is in a demo, from a small index beside the analyzer cache (#437).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod player_index;
 /// Configuration > Players and the file the hook DLL reads it from (#428).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod player_overrides;
 /// The review mode's queue and answers (#623).
 pub mod review_queue;
@@ -121,15 +96,12 @@ mod test_support;
 
 /// The demo file an analysis came from; defined beside the cache it is
 /// saved in, which the hook DLL reads too.
-#[cfg(not(target_arch = "wasm32"))]
 pub use analysis::cache::FileInfo;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer(demo_path: &PathBuf) -> Result<(FileInfo, Analysis), String> {
     run_analyzer_with_progress(demo_path, |_, _| {})
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer_with_progress<F>(
     demo_path: &PathBuf,
     progress_cb: F,
@@ -142,7 +114,6 @@ where
 
 /// `run_analyzer_with_progress`, decoding the demo's sounds or not
 /// (`analysis::Sounds`: the same analysis either way).
-#[cfg(not(target_arch = "wasm32"))]
 fn run_analyzer_decoding<F>(
     demo_path: &PathBuf,
     sounds: analysis::Sounds,
@@ -168,14 +139,12 @@ where
 }
 
 /// Where the analyzer cache lives: `analysis::cache` holds the format.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn analyzer_cache_root() -> PathBuf {
     crate::shared::paths::get_appdata_dir().join("analyzer_cache")
 }
 
 /// The file `demo_path`'s analyzer cache entry lives in, or `None` when the
 /// demo can't be found (the key is its canonical path).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn analyzer_cache_path(demo_path: &std::path::Path) -> Option<PathBuf> {
     analysis::cache::entry_path(&analyzer_cache_root(), demo_path)
 }
@@ -185,7 +154,6 @@ pub(crate) fn analyzer_cache_path(demo_path: &std::path::Path) -> Option<PathBuf
 /// straight to a ~10-15ms file read + deserialize instead of the full ~1.3s
 /// parse; `progress_cb` is not invoked on the cache-hit path. Returns whether
 /// the result came from cache as the third tuple element.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer_cached<F>(
     demo_path: &PathBuf,
     progress_cb: F,
@@ -199,7 +167,6 @@ where
 /// `run_analyzer_cached`, decoding the demo's sounds or not on a miss.
 /// Every caller skips them (#37), the default; the entry is the same either
 /// way, since no analyzer reads a sound.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer_cached_decoding<F>(
     demo_path: &PathBuf,
     sounds: analysis::Sounds,
@@ -226,7 +193,6 @@ where
 /// that isn't a `v<N>` folder alone, and a folder whose entries can still be
 /// upgraded to the current schema (`analysis::cache::migrations`): its
 /// demos would need a full parse again without it. Best-effort.
-#[cfg(not(target_arch = "wasm32"))]
 fn sweep_stale_analyzer_caches(cache_root: &std::path::Path, current: u32) -> usize {
     sweep_stale_analyzer_caches_older_than(
         cache_root,
@@ -236,10 +202,8 @@ fn sweep_stale_analyzer_caches(cache_root: &std::path::Path, current: u32) -> us
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 const STALE_CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
-#[cfg(not(target_arch = "wasm32"))]
 fn sweep_stale_analyzer_caches_older_than(
     cache_root: &std::path::Path,
     current: u32,
@@ -280,7 +244,6 @@ fn sweep_stale_analyzer_caches_older_than(
 /// Saves an analysis to the cache, and once per run clears out the folders
 /// older schemas left: nothing reads them again, and they had grown to
 /// hundreds of MB.
-#[cfg(not(target_arch = "wasm32"))]
 fn store_in_analyzer_cache(
     root: &std::path::Path,
     demo_path: &std::path::Path,
@@ -304,7 +267,6 @@ fn store_in_analyzer_cache(
 /// new name. Without it the renamed demo is parsed again on its next open,
 /// and the old entry is never read again. Best-effort and silent: a miss
 /// only costs that parse.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::path::Path) {
     let Some(new_cache) = analyzer_cache_path(new_demo) else {
         return;
@@ -338,7 +300,6 @@ pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::pa
 /// cache, so a later `run_analyzer_cached` call for the same demo hits the
 /// ~10-15ms cache path instead of re-parsing. Best-effort and silent on any
 /// failure — cache warming must never affect the caller's own result.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn warm_analyzer_cache(demo_path: &std::path::Path, analysis: &Analysis) {
     let Ok(file_info) = FileInfo::of(demo_path) else {
         return;
@@ -346,23 +307,19 @@ pub fn warm_analyzer_cache(demo_path: &std::path::Path, analysis: &Analysis) {
     store_in_analyzer_cache(&analyzer_cache_root(), demo_path, &file_info, analysis);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 static SESSION_HEADER_WRITTEN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Date string (`YYYYMMDD`) `log_markdown` last wrote to, so a session
 /// running past midnight can be detected and cross-referenced between the
 /// two days' files instead of just silently stopping mid-file.
-#[cfg(not(target_arch = "wasm32"))]
 static LAST_LOG_DATE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// How many days' worth of activity logs to keep on disk — older files are
 /// pruned the first time a given app launch logs anything.
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_RETAINED_ACTIVITY_LOG_DAYS: usize = 30;
 
 /// Directory `log_markdown` writes into.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn activity_log_dir() -> std::path::PathBuf {
     redirected_log_dir().unwrap_or_else(|| crate::shared::paths::get_appdata_dir().join("logs"))
 }
@@ -383,7 +340,6 @@ pub fn activity_log_dir() -> std::path::PathBuf {
 /// The env var is checked first so a test binary compiled *without* `cfg(test)`
 /// (an integration test, or another crate's tests linking this one as an
 /// ordinary dependency) can still be pointed somewhere safe.
-#[cfg(not(target_arch = "wasm32"))]
 fn redirected_log_dir() -> Option<std::path::PathBuf> {
     if let Some(dir) = std::env::var_os("DOD_STUDIO_LOG_DIR") {
         return Some(std::path::PathBuf::from(dir));
@@ -400,7 +356,6 @@ fn redirected_log_dir() -> Option<std::path::PathBuf> {
 /// pointing at tomorrow's file on its own if a session runs past midnight.
 /// Exposed so the frontend can offer a "View Logs" affordance without
 /// duplicating the path logic.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn activity_log_path() -> std::path::PathBuf {
     use chrono::Local;
     activity_log_dir().join(format!("activity_{}.md", Local::now().format("%Y%m%d")))
@@ -409,7 +364,6 @@ pub fn activity_log_path() -> std::path::PathBuf {
 /// Deletes `activity_*.md` files beyond `MAX_RETAINED_ACTIVITY_LOG_DAYS` —
 /// filenames are zero-padded `YYYYMMDD` dates, so lexical sort order is
 /// chronological order.
-#[cfg(not(target_arch = "wasm32"))]
 fn prune_old_activity_logs(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -433,7 +387,6 @@ fn prune_old_activity_logs(dir: &std::path::Path) {
 }
 
 pub fn log_markdown(msg: &str) {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         use chrono::Local;
         use std::io::Write;
@@ -455,6 +408,11 @@ pub fn log_markdown(msg: &str) {
             // Same session, but the date rolled over since the last log line —
             // leave a pointer in both files so this doesn't just look like the
             // session stopped mid-file to someone reading yesterday's log.
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "the else-if condition just checked that last_date is Some"
+            )]
             let prev_path = dir.join(format!("activity_{}.md", last_date.as_deref().unwrap()));
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .append(true)
@@ -473,6 +431,11 @@ pub fn log_markdown(msg: &str) {
                 .create(true)
                 .open(&log_path_md)
             {
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "last_date is Some on this path (the same check as above)"
+                )]
                 let _ = writeln!(
                     f,
                     "(continued from activity_{}.md — same session, crossed midnight)\n",
@@ -502,13 +465,9 @@ pub fn log_markdown(msg: &str) {
             let _ = f.sync_all();
         }
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        log::info!("{}", msg);
-    }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod activity_log_tests {
     use super::*;
 
@@ -608,11 +567,7 @@ mod activity_log_tests {
                     let macro_call = ["trace", "debug", "info", "warn", "error"]
                         .iter()
                         .any(|level| code.contains(&format!("log::{level}!(")));
-                    // `log_markdown`'s own wasm32 branch, where a browser
-                    // console logger can pick it up.
-                    let wasm_branch = path == manifest.join("src").join("lib.rs")
-                        && code == concat!("log", "::info!(\"{}\", msg);");
-                    if macro_call && !wasm_branch {
+                    if macro_call {
                         found.push(format!("{}:{}", path.display(), n + 1));
                     }
                 }
@@ -625,7 +580,7 @@ mod activity_log_tests {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod analyzer_cache_tests {
     use super::*;
     use crate::test_support::Scratch;

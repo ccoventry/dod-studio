@@ -21,7 +21,7 @@ const { HIGHLIGHTS_VERSION } = await import('./scan_version.js');
 const { STRINGS } = await import('./strings.js');
 
 const current = (path) => ({
-  path, file_key: '1-abc', map_name: 'dod_anzio', teams: [], signon_maps: ['dod_anzio'], no_camera_data: false,
+  path, file_key: '1-abc', map_name: 'dod_anzio', teams: [], signon_maps: ['dod_anzio'], no_camera_data: false, damage: null,
   highlights_version: HIGHLIGHTS_VERSION, streaks: [],
 });
 const old = (path) => ({ path, file_key: '1-abc', streaks: [] });

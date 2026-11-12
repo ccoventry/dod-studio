@@ -69,6 +69,11 @@ impl Clock<'_> {
                 return (at + offsets[offsets.len() / 2]).max(0.0);
             }
         }
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "anchors is non-empty on this path"
+        )]
         let anchor = self
             .anchors
             .iter()

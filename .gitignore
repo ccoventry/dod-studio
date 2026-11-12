@@ -22,8 +22,10 @@ hlcr_config.json
 # resolved at runtime by render_manager.rs's resolve_ffmpeg(): user override,
 # then `local/tools/ffmpeg.exe` beside the *installed* binary (under /local/,
 # already ignored below), then bare `ffmpeg` on PATH. Nothing ever read this
-# folder, and tauri.conf.json never bundled it.
-/tools/
+# folder, and tauri.conf.json never bundled it. tools/agent-kit/ is the one
+# tracked folder in it: dev-only test helpers (its README).
+/tools/*
+!/tools/agent-kit/
 
 # === Demo Files ===
 # Guard against demos landing anywhere outside /demos/ (gitignored scratch

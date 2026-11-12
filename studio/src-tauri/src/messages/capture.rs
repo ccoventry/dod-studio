@@ -15,6 +15,29 @@ pub fn take_verify_settings_not_recorded(folder: impl Display, err: impl Display
     )
 }
 
+/// The settings a batch records beside each of its takes (part of #1085).
+pub fn take_settings_recorded(s: &native::hlcr::take_settings::CaptureSettings) -> String {
+    let hook = if s.hook.is_empty() {
+        "none found"
+    } else {
+        s.hook.as_str()
+    };
+    format!(
+        "[capture] Each take records the settings it was captured with: {mode} {width}x{height} at {fps} fps, FOV {fov}, {install}, hook DLL {hook}, {lines} Initial Commands, {commands} Scheduled Commands, {before} s before and {after} s after. Hash {hash}.",
+        mode = s.mode,
+        width = s.width,
+        height = s.height,
+        fps = s.fps,
+        fov = s.fov,
+        install = s.install,
+        lines = s.lines.len(),
+        commands = s.commands.len(),
+        before = s.before,
+        after = s.after,
+        hash = s.hash,
+    )
+}
+
 /// OBS began recording after the clip's first frame.
 pub fn take_verify_started_late(take_key: &str, ms: impl Display, folder: &str) -> String {
     format!(

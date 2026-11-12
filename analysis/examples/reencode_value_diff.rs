@@ -1,6 +1,6 @@
 //! Do a full round-trip's *values* survive, not just message counts, for the
 //! real untouched tail content in a window? Matches frames between the
-//! pre-injection splice (raw bytes, multi_bridge's own output -- ground truth)
+//! pre-injection splice (raw bytes, multi_bridge's own output, now `analysis::repair`'s bridge -- ground truth)
 //! and the post-injection file (fully re-encoded by snapshot_inject) using
 //! `incoming_sequence`, which is untouched for real frames in either file, and
 //! diffs their Debug-formatted message content.
