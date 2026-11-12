@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clipVerdictToasts, failedClipCount, NAMED_IN_A_TOAST } from './clip_verdict_toasts.js';
+import { clipVerdictToasts, failedClipCount, shortClipCount, NAMED_IN_A_TOAST } from './clip_verdict_toasts.js';
 
 const dispatch = {
   streaks: [
@@ -36,5 +36,11 @@ describe('clipVerdictToasts (#1401)', () => {
     expect(clipVerdictToasts({ blocks: [block(0, { captured: true })] }, dispatch)).toEqual([]);
     expect(clipVerdictToasts({}, dispatch)).toEqual([]);
     expect(failedClipCount({ blocks: [block(0, { captured: true })] })).toBe(0);
+  });
+
+  it('counts the short clips, so the all-verified toast can be skipped', () => {
+    expect(shortClipCount({ blocks: [short(0), short(1), block(2, { captured: true })] })).toBe(2);
+    expect(shortClipCount({ blocks: [block(0, { captured: true })] })).toBe(0);
+    expect(shortClipCount({})).toBe(0);
   });
 });

@@ -32,7 +32,7 @@ import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_settin
 import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind, completedToast } from './capture_progress.js';
-import { clipVerdictToasts, failedClipCount } from './clip_verdict_toasts.js';
+import { clipVerdictToasts, failedClipCount, shortClipCount } from './clip_verdict_toasts.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -1075,7 +1075,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate, failedClipCount(payload))}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
-      } else {
+      } else if (shortClipCount(payload) === 0) {
+        // A short clip's own warning toast follows; "all verified" would contradict it.
         showToast(`${STRINGS.CAPTURE.allTakesVerified(total)}${marked}`, 'success');
       }
       // Which highlights the game's failed and short clips are (#1401).

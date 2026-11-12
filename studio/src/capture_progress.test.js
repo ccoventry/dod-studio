@@ -142,6 +142,13 @@ describe('createCaptureProgress', () => {
     expect(progress.isRunning()).toBe(false);
     expect(statusEl.textContent).toBe('Done in 6 min 12 s: 2 clips captured');
     expect(log).toHaveBeenLastCalledWith('[capture] completed after 6 min 12 s: 2 of 2 clip(s) captured');
+
+    // The log line carries the footer's failed and short counts (#1401).
+    const log2 = vi.fn();
+    const p2 = createCaptureProgress({ statusEl, container: null, now: () => t, log: log2 });
+    p2.update({ running: true, stage: 'capturing', index: 0, total: 3 });
+    p2.end({ running: false, status: 'Complete', clips_captured: 2, clips_total: 3, clips_short: 1 });
+    expect(log2).toHaveBeenLastCalledWith('[capture] completed after 0.0 s: 2 of 3 clip(s) captured, 1 failed, 1 shorter than planned');
   });
 
   it('keeps the hold line on through the clock and later reports', () => {

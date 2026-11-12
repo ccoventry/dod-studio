@@ -36,3 +36,9 @@ export function clipVerdictToasts(payload, dispatch) {
 export function failedClipCount(payload) {
   return (payload?.blocks || []).filter((b) => b.clip_verdict?.failed && !b.captured).length;
 }
+
+/// How many captured takes the game reported short, so the summary can skip
+/// the green "all verified" toast when any clip was not whole.
+export function shortClipCount(payload) {
+  return (payload?.blocks || []).filter((b) => b.clip_verdict?.short && b.captured).length;
+}

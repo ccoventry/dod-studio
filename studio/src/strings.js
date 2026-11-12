@@ -3361,7 +3361,12 @@ export const STRINGS = {
       return short > 0 ? `${head}, ${short} shorter than planned` : head;
     },
     startLog: () => '[capture] started',
-    endLog: (outcome, elapsed, captured, total, short = 0) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}${short > 0 ? `, ${short} shorter than planned` : ''}`,
+    // Same wording as the footer: failed only for a batch that ran to its end.
+    endLog: (outcome, elapsed, captured, total, short = 0) => {
+      const failed = outcome === 'completed' && total != null ? total - captured : 0;
+      const counts = total == null ? '' : `: ${captured} of ${total} clip(s) captured`;
+      return `[capture] ${outcome} after ${elapsed}${counts}${failed > 0 ? `, ${failed} failed` : ''}${short > 0 ? `, ${short} shorter than planned` : ''}`;
+    },
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
