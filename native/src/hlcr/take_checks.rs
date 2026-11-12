@@ -33,8 +33,6 @@
 //! Every finding says whether re-capturing helps ([`Cause::Capture`]) or the
 //! demo itself is the reason ([`Cause::Demo`]), because the fix differs.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

@@ -255,6 +255,7 @@ mod tests {
                 .collect(),
             streak_sources: blocks.iter().map(|_| "a.dem".to_string()).collect(),
             project_path: None,
+            settings: None,
             blocks,
         }
     }

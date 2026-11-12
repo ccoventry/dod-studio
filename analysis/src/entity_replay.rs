@@ -217,6 +217,7 @@ impl<S: EntityFields> EntityReplay<S> {
                 self.counters.delta_snapshots += 1;
 
                 let mut out = self.take_buffer(slot);
+                #[allow(clippy::expect_used, reason = "the reference frame was checked above")]
                 let old = &self.frames[reference]
                     .as_ref()
                     .expect("checked above")

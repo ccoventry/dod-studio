@@ -20,9 +20,10 @@ weapon, and goes where render_icon's would: painted into the HD sheet
                      (42) for both rifles' butt strokes, so the even layout
                      carries four variants (BUTT_VARIANTS) and the hook
                      picks one per line from the killer's held rifle and
-                     the victim's team (deathmsg/butt.rs); the HD sheet's
-                     one rect holds the commonest, a Garand on an Axis head.
-                     British heads are #1089.
+                     the victim's team (deathmsg/butt.rs), and two more
+                     with a British head for an Allied victim on a British
+                     map (#1089); the HD sheet's one rect holds the
+                     commonest, a Garand on an Axis head.
 
 The mortars have a weapon model of their own (p_mortar.mdl, the carried
 mortar) and are in killfeed_icons.ICONS.
@@ -47,6 +48,8 @@ BUTT_VARIANTS = {
     "d_garandbutt_us": ("garand", "us"),
     "d_k43butt_axis": ("k43", "axis"),
     "d_k43butt_us": ("k43", "us"),
+    "d_garandbutt_brit": ("garand", "brit"),
+    "d_k43butt_brit": ("k43", "brit"),
 }
 BUTT_RECT = "d_garandbutt"
 
@@ -59,6 +62,7 @@ BUTT_RIFLES = {"garand": "d_garand", "k43": "d_k43"}
 HEADS = {
     "axis": ("axis-inf", 2, "helmet_axis.mdl"),
     "us": ("us-inf", 3, "helmet_us.mdl"),
+    "brit": ("brit-inf", 2, "helmet_brit.mdl"),
 }
 HEAD_TURN, HEAD_CHIN_UP = 60.0, 35.0  # degrees: the face towards the viewer, as Valve's cartoon
 HELMET_VIEW = (20.0, 10.0, -40.0)  # turn, tip back, roll: "tipped, flying back"

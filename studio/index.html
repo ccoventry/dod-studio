@@ -934,22 +934,22 @@
               <div id="players-list" class="players-list"></div>
               <div id="players-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 12px;">
-                <label for="players-pov-fallback" data-str="PLAYERS.POV_FALLBACK_LABEL" data-str-title="PLAYERS.POV_FALLBACK_TITLE">Spray, players not listed, POV demos:</label>
+                <label for="players-pov-fallback" data-str="PLAYERS.POV_FALLBACK_LABEL" data-str-title="PLAYERS.FALLBACK_TITLE">Fallback spray, POV demos:</label>
                 <select id="players-pov-fallback">
-                  <option value="own" data-str="PLAYERS.FALLBACK_OWN">Their own spray</option>
                   <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
                   <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
                 </select>
                 <span id="players-pov-fallback-png"></span>
               </div>
               <div class="input-row">
-                <label for="players-hltv-fallback" data-str="PLAYERS.HLTV_FALLBACK_LABEL" data-str-title="PLAYERS.HLTV_FALLBACK_TITLE">Spray, players not listed, HLTV demos:</label>
+                <label for="players-hltv-fallback" data-str="PLAYERS.HLTV_FALLBACK_LABEL" data-str-title="PLAYERS.FALLBACK_TITLE">Fallback spray, HLTV demos:</label>
                 <select id="players-hltv-fallback">
                   <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
                   <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
                 </select>
                 <span id="players-hltv-fallback-png"></span>
               </div>
+              <p class="hd-hint" data-str="PLAYERS.FALLBACK_HINT">Used for players not listed, and when From the demo finds none.</p>
               <div class="input-row">
                 <label for="players-crosshair-fallback" data-str="PLAYERS.CROSSHAIR_FALLBACK_LABEL" data-str-title="PLAYERS.CROSSHAIR_FALLBACK_TITLE">Crosshair, players not listed:</label>
                 <select id="players-crosshair-fallback">
@@ -1154,6 +1154,7 @@
                 <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
                 <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
             <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="rename" data-str="AUDITOR.TAB_RENAME">Rename Demos</button>
+                <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="repair" data-str="REPAIR.TAB">Damaged Demos</button>
               </div>
             </div>
           </div>
@@ -1243,6 +1244,41 @@
                 <div id="split-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="split-status" class="status-indicator"></p>
                 <div id="split-list" class="split-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Damaged Demos (#15): repair_pane.js. Demos damaged partway, each
+               repaired into <name>_repaired.dem beside it. Uses the Target Folder above. -->
+          <div class="auditor-tab-panel" data-auditor-panel="repair" hidden>
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h3 data-str="REPAIR.TITLE">Damaged Demos</h3>
+              </div>
+              <div class="panel-body">
+                <p class="split-hint" data-str="REPAIR.HINT"></p>
+                <div class="row-inputs">
+                  <label class="split-recursive-label"><input type="checkbox" id="repair-recursive" checked /> <span data-str="REPAIR.RECURSIVE">Include subfolders</span></label>
+                  <button id="repair-find-btn" class="primary-btn" disabled data-str="REPAIR.FIND_BUTTON">Find Damaged Demos</button>
+                  <button id="repair-cancel-btn" disabled data-str="REPAIR.CANCEL_BUTTON">Cancel</button>
+                  <button id="repair-checked-btn" disabled data-str="REPAIR.REPAIR_CHECKED_BUTTON">Repair Checked</button>
+                </div>
+                <div id="repair-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <p id="repair-status" class="status-indicator"></p>
+                <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+                  <table id="repair-table" class="analyzer-table repair-table">
+                    <thead>
+                      <tr>
+                        <th><input type="checkbox" id="repair-select-all" checked /></th>
+                        <th data-str="REPAIR.COL_DEMO">Demo</th>
+                        <th data-str="REPAIR.COL_BREAKS" data-str-title="REPAIR.BREAKS_TITLE">Breaks at</th>
+                        <th data-str="REPAIR.COL_SIZE">Size</th>
+                        <th data-str="REPAIR.COL_RESULT">Repair</th>
+                      </tr>
+                    </thead>
+                    <tbody id="repair-body"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

@@ -1035,7 +1035,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
+        // The batch's settings ride once on the payload, not on every block.
+        const withSettings = { ...block, capture_settings: payload.capture_settings };
+        const marked = markBlockCaptured(withSettings, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });
@@ -1196,8 +1198,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // A demo may have moved since the queue was loaded (#21). main.js looks
       // for it the same way Load Project does and offers the match; a demo
       // still missing after that stops the batch, since its highlights
-      // cannot be captured. A picked demo with more than one map stops it
-      // too (#217); main.js has said why then ('handled').
+      // cannot be captured. A picked demo with more than one map goes ahead
+      // on its first map (#217).
       precheck.step('demos');
       const demosReady = pickedDemosPresent
         ? await pickedDemosPresent({ onProgress: (p) => precheck.step('demos', p?.done, p?.total) })

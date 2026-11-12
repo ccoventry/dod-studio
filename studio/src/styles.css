@@ -1856,6 +1856,14 @@ button.danger-btn {
   flex: 1 1 320px;
 }
 
+/* Already split: a quiet line, not a warning. */
+.analyzer-multimap-banner.analyzer-multimap-quiet {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-dim);
+  cursor: help;
+}
+
 /* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
 .split-progress {
   display: flex;
@@ -1955,6 +1963,73 @@ button.danger-btn {
 .multimap-split-btn:disabled {
   opacity: 0.5;
   cursor: progress;
+}
+
+/* #15: a queued demo damaged partway; the badge is the Repair button. */
+.damaged-repair-hint {
+  gap: 4px;
+}
+
+.damaged-repair-hint[hidden] {
+  display: none;
+}
+
+.damaged-repair-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--danger-light);
+  background: transparent;
+  border: 1px solid var(--danger-light);
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:disabled:not([data-splitting]),
+.analyzer-multimap-split:disabled[title] {
+  cursor: not-allowed;
+}
+
+.damaged-repair-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.analyzer-damage-repair,
+.analyzer-damage-cannot-repair,
+.analyzer-damage-already-split {
+  margin-left: 8px;
+}
+
+.repair-table td {
+  vertical-align: top;
+}
+
+.repair-result-cell .repair-progress {
+  min-width: 200px;
+}
+
+.repair-result {
+  margin-left: 6px;
+}
+
+.multimap-hint {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* A multi-map demo whose maps were already split next to it: quiet, not a warning. */
+.multimap-split-note {
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.multimap-hint [hidden] {
+  display: none;
 }
 
 /* Combine Clips (#107). */

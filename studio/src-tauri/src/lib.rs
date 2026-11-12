@@ -15,6 +15,7 @@ mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_preview;
 mod demo_rename_manager;
+mod demo_repair_manager;
 mod demo_split_manager;
 mod dir_browser;
 mod download_progress;
@@ -45,6 +46,7 @@ mod review_library;
 mod review_manager;
 mod scan_manager;
 mod settings_manager;
+mod settings_migrations;
 mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
@@ -126,6 +128,7 @@ async fn save_settings(
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.pov_own_spray_notice = guard.pov_own_spray_notice;
         settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
@@ -911,6 +914,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(demo_repair_manager::DemoRepairManager::default())
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(obs_test_manager::ObsTestManager::default())
@@ -987,6 +991,7 @@ pub fn run() {
             players_tab::crosshair_sprite_image,
             players_tab::add_crosshair_file,
             players_tab::set_player_overrides,
+            players_tab::take_pov_own_spray_notice,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
@@ -1075,6 +1080,12 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
+            demo_repair_manager::find_damaged_demos_cmd,
+            demo_repair_manager::cancel_damaged_scan,
+            demo_repair_manager::repair_demo_cmd,
+            demo_repair_manager::cancel_demo_repair,
+            demo_repair_manager::demo_repairable,
+            demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,
             cancel_audit,

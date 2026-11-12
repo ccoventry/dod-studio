@@ -33,7 +33,7 @@
 //! leaves it stale for at most that long, and the crouch ease lets go of a
 //! looked-ahead flip the file stops promising (`spectator_eye::crouch`).
 
-mod frames;
+pub(crate) mod frames;
 pub mod timeline;
 
 use std::cell::RefCell;
@@ -259,7 +259,7 @@ fn report(message: &str) {
 }
 
 /// The read must not take frames from the game.
-fn lower_priority() {
+pub(crate) fn lower_priority() {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Threading::{

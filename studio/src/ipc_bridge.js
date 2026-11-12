@@ -397,6 +397,16 @@ export async function setPlayerOverrides(on) {
     });
 }
 
+/** Whether the POV fallback spray was changed for the user and hasn't been
+ *  said yet (#1322). True once. */
+export async function takePovOwnSprayNotice() {
+  return invoke('take_pov_own_spray_notice')
+    .catch((err) => {
+      console.error("IPC Execution Error (take_pov_own_spray_notice):", err);
+      return false;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
@@ -1853,6 +1863,61 @@ export async function splitDemoAuto(path, minSeconds) {
   return invoke("split_demo_auto", { path, minSeconds })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_auto):", err);
+      throw err;
+    });
+}
+
+// #15: damaged demos (demo_repair_manager.rs).
+export async function findDamagedDemos(folder, recursive) {
+  return invoke("find_damaged_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_damaged_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDamagedScan() {
+  return invoke("cancel_damaged_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_damaged_scan):", err);
+      throw err;
+    });
+}
+
+/** Repairs the demo at `path` into `<name>_repaired.dem` beside it; resolves
+ *  its RepairResult. Progress arrives as `repair_progress` events. */
+export async function repairDemo(path) {
+  return invoke("repair_demo_cmd", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (repair_demo_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoRepair(path) {
+  return invoke("cancel_demo_repair", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_repair):", err);
+      throw err;
+    });
+}
+
+// Whether a repair of the demo at `path` has a break to cut out, and every
+// map it recorded, read past the damage (#15): `{ repairable, maps }`.
+export async function demoRepairable(path) {
+  return invoke("demo_repairable", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_repairable):", err);
+      throw err;
+    });
+}
+
+// Whether a multi-map demo's maps were already split next to it:
+// `{ split, files }` (split_status.js).
+export async function demoSplitStatus(path, maps, minSeconds) {
+  return invoke("demo_split_status", { path, maps, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_split_status):", err);
       throw err;
     });
 }
