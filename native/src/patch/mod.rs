@@ -156,7 +156,7 @@ pub mod viewdemo_refresh;
 
 pub use types::{
     CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
-    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
+    DEFAULT_AGR_FPS, DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
     ObsRecordingQuality, PatchJob, PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 

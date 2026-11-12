@@ -21,6 +21,8 @@
 // property, so every module that already passes the index around reaches it
 // without new plumbing, and JSON.stringify of the index never includes it.
 
+import { effectiveAgrFps } from './agr_rate.js';
+
 const CAPTURES = 'takeCaptures';
 
 /** The capture facts a record keeps. */
@@ -79,12 +81,14 @@ export function capturesToSave(takeIndex) {
 /**
  * The rate a batch really recorded at. `capture_fps` is the frame-sequence and
  * direct-to-video setting only: OBS mode records at its own `obs_capture_fps`
- * (60 when unset, as the backend counts it) and AGR at `agr_fps` (0 = the
- * same as `capture_fps`). `undefined` when the source doesn't carry the OBS
- * rate (a batch manifest read back after a restart).
+ * (60 when unset, as the backend counts it) and AGR at `agr_fps` (0 =
+ * `DEFAULT_AGR_FPS`, agr_rate.js). `undefined` when the source doesn't carry
+ * the OBS rate (a batch manifest read back after a restart). A manifest's
+ * `agr_fps` is the rate the batch resolved, never 0 for an AGR batch, so a
+ * batch captured when 0 still meant Capture FPS reads back as it recorded.
  */
 export function captureRateOf(mode, { capture_fps, obs_capture_fps, agr_fps } = {}) {
   if (mode === 'obs') return obs_capture_fps === undefined ? undefined : (obs_capture_fps > 0 ? obs_capture_fps : 60);
-  if (mode === 'agr') return agr_fps > 0 ? agr_fps : capture_fps;
+  if (mode === 'agr') return effectiveAgrFps(agr_fps);
   return capture_fps;
 }

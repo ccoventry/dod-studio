@@ -2,7 +2,7 @@
 """Checks `hint_panel.rs`'s signature against real DoD `client.dll`s (#286).
 
 `hint_panel.rs` writes `ret 4` over the first three bytes of
-`DoDViewport::ShowHint`. Every constant below is read out of `hint_panel.rs`
+`DoDViewport::ShowHintMessage`. Every constant below is read out of `hint_panel.rs`
 rather than restated, so this cannot drift from what the Rust code uses.
 
 Checks, per client.dll:
@@ -26,7 +26,9 @@ With two paths (PRE and POST by default), also says whether the files are
 byte-identical, which is why one pattern covers both engine builds.
 
 Usage:
-    python goldsrc-hooks/tools/verify_hint_panel_offsets.py [client.dll ...]
+    python goldsrc-hooks/tools/verify_hint_panel_offsets.py [--anniversary | client.dll ...]
+
+Defaults to both movie installs; `--anniversary` checks only the POST-Anniversary one.
 
 Requires `pefile` and `capstone` (analysis-only, not build dependencies).
 """
@@ -220,7 +222,11 @@ def check(dll: Path, rs: dict) -> bool:
 
 
 def main() -> int:
-    dlls = [Path(a) for a in sys.argv[1:]] or DEFAULT_DLLS
+    args = sys.argv[1:]
+    if args == ["--anniversary"]:
+        dlls = [DEFAULT_DLLS[1]]
+    else:
+        dlls = [Path(a) for a in args] or DEFAULT_DLLS
     src = RUST.read_text(encoding="utf-8")
     rs = {
         "PATTERN": rust_str(src, "PATTERN"),

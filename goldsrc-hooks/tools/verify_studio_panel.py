@@ -571,9 +571,9 @@ def verify(game, src):
     body = ui.body(ui.u32(sheet_vt + 4 * get_active) - ui.base, 0x10)
     check(len(body) == 2 and body[0].startswith("mov eax, dword ptr [ecx +") and body[1] == "ret",
           f"PropertySheet's slot {get_active} (GetActivePage) just returns a field: {body}")
-    key = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_TYPED")
+    key = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_PRESSED")
     got = ui.last_ret(ui.u32(page_vt + 4 * key) - ui.base)
-    check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodeTyped) returns with {got!r}")
+    check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodePressed) returns with {got!r}")
     for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8"),
                        ("IPANEL_REQUEST_FOCUS", "ret 8"), ("IPANEL_GET_ABS_POS", "ret 0xc"),
                        ("IPANEL_SET_KEYBOARD_INPUT_ENABLED", "ret 8")):

@@ -290,7 +290,7 @@ fn view_distance(studio: &EngineStudioApiPartial, origin: Vec3) -> f32 {
 }
 
 /// Called from `HUD_AddEntity`'s detour once the client has answered for
-/// `ent`, right before the engine's own PVS check in `CL_AddVisibleEntity`
+/// `ent`, right before the engine's own PVS check in `ClientDLL_AddEntity`
 /// (PRE `hw+0xbb1b`, POST `hw+0x1969f6`): in an HLTV demo the engine drops
 /// every entity outside the camera's PVS there, unless `dev_overview` is set
 /// (the check's skip, PRE `hw+0x20920`, POST `+0x1ad020`: `dev_overview`

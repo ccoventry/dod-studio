@@ -21,9 +21,8 @@
 // Each marks a take not captured, not renderable and left on disk, as a
 // watched batch does.
 
-use crate::capture_manager::{
-    CaptureManifest, CutBy, Records, VerifiedBlock, demo_ordinals, mark_cut_short,
-};
+use crate::capture_manager::{CaptureManifest, CutBy, Records, VerifiedBlock, mark_cut_short};
+use native::capture_engine::clip_verdict::demo_ordinals;
 use native::log_markdown;
 use native::obs::{Marker, MarkerKind};
 use std::io::{Read, Seek, SeekFrom};
@@ -287,6 +286,7 @@ mod tests {
                 cut_by: None,
                 short_take: None,
                 started_late_ms: None,
+                clip_verdict: None,
                 ramped_gaps: 0,
             })
             .collect()

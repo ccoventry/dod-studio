@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 /// real parallelism here.
 const PATCH_CONCURRENCY: usize = 4;
 
+use native::capture_engine::clip_verdict::{demo_ordinals, recording_order};
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
 use native::patch::{
@@ -33,6 +34,7 @@ use native::patch::{
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
+use crate::clip_verdicts::ClipEvidence;
 use crate::game_process_manager::saved_settings;
 
 /// Every patch job's stage, folded into the one status line a batch shows
@@ -201,7 +203,7 @@ pub struct CapturePayload {
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
     /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
-    /// means "the same as `capture_fps`".
+    /// means `native::patch::DEFAULT_AGR_FPS`.
     #[serde(default)]
     pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
@@ -603,6 +605,9 @@ pub struct VerifiedBlock {
     /// (#1109): the take is missing the clip's opening, so it counts as
     /// neither captured nor renderable, and is left for the user to delete.
     pub started_late_ms: Option<u64>,
+    /// What the game said about the clip when it isn't whole (#1401): failed
+    /// (not captured) or shorter than planned (captured, with a warning).
+    pub clip_verdict: Option<native::capture_engine::clip_verdict::ClipVerdict>,
     /// How many gaps between kills the take recorded sped up (#831), for its
     /// label in the batch results panel.
     pub ramped_gaps: usize,
@@ -678,33 +683,6 @@ fn mark_short_takes(
     }
 }
 
-/// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
-/// demo's blocks are contiguous and demos play in the manifest's order.
-pub(crate) fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
-    let mut ordinal = 0u32;
-    blocks
-        .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            if i == 0 || b.demo_name != blocks[i - 1].demo_name {
-                ordinal += 1;
-            }
-            ordinal
-        })
-        .collect()
-}
-
-/// Each manifest block's position in recording order: demos play in the
-/// manifest's order, and a demo's clips by `block_index`. The builder already
-/// sorts a demo's blocks that way; sorting here keeps the order from
-/// depending on it.
-fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..blocks.len()).collect();
-    let demo = demo_ordinals(blocks);
-    order.sort_by_key(|&i| (demo[i], blocks[i].block_index));
-    order
-}
-
 /// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
 /// reported, for a Cancel (#1081).
 #[derive(Debug, Default, Clone, Copy)]
@@ -758,9 +736,8 @@ struct BatchEnd<'a> {
     /// The clip recordings the markers reported, for [`mark_cut_short`].
     records: Records,
     cut_by: CutBy,
-    /// The clips OBS started recording late (#1109), for
-    /// [`mark_started_late`].
-    late_starts: Vec<native::obs::LateStart>,
+    /// What the game and OBS said about each clip (#1109, #1401).
+    clips: ClipEvidence,
 }
 
 impl<'a> BatchEnd<'a> {
@@ -771,7 +748,7 @@ impl<'a> BatchEnd<'a> {
             error: false,
             records: Records::default(),
             cut_by: CutBy::Cancel,
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
     }
 
@@ -782,15 +759,12 @@ impl<'a> BatchEnd<'a> {
             error: false,
             records,
             cut_by: CutBy::Cancel,
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
     }
 
-    fn with_late_starts(self, late_starts: Vec<native::obs::LateStart>) -> BatchEnd<'a> {
-        BatchEnd {
-            late_starts,
-            ..self
-        }
+    fn with_clips(self, clips: ClipEvidence) -> BatchEnd<'a> {
+        BatchEnd { clips, ..self }
     }
 
     /// The engine stopped the batch with `message`. `game_closed`: the game
@@ -806,25 +780,8 @@ impl<'a> BatchEnd<'a> {
             } else {
                 CutBy::Stopped
             },
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
-    }
-}
-
-/// Marks each take OBS started recording after its clip's first frame
-/// (#1109) as missing its opening: not captured, not renderable, so the
-/// highlights stay to capture again and the clean-up leaves it alone.
-fn mark_started_late(verified: &mut [VerifiedBlock], late_starts: &[native::obs::LateStart]) {
-    for late in late_starts {
-        let Some(block) = verified
-            .iter_mut()
-            .find(|b| Path::new(&b.take_folder) == late.take_folder)
-        else {
-            continue;
-        };
-        block.started_late_ms = Some(late.late.as_millis() as u64);
-        block.captured = false;
-        block.renderable = false;
     }
 }
 
@@ -970,6 +927,7 @@ pub(crate) fn verify_capture_takes_settling(
                 cut_by: None,
                 short_take: None,
                 started_late_ms: None,
+                clip_verdict: None,
                 ramped_gaps: block.ramped_gaps,
             }
         })
@@ -1059,6 +1017,8 @@ struct TakeReport {
     payload: serde_json::Value,
     captured: usize,
     total: usize,
+    /// Captured takes shorter than planned (#1401).
+    short: usize,
 }
 
 /// Runs verification for the batch that just ended, with "Checking the
@@ -1103,16 +1063,7 @@ fn check_takes(
         }
     });
     mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
-    mark_started_late(&mut blocks, &end.late_starts);
-    for block in &blocks {
-        if let Some(ms) = block.started_late_ms {
-            log_markdown(&crate::messages::capture::take_verify_started_late(
-                &block.take_key,
-                ms,
-                &block.take_folder,
-            ));
-        }
-    }
+    let short = crate::clip_verdicts::apply(&manifest, &mut blocks, &end.clips);
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
             Some(s) => {
@@ -1172,6 +1123,7 @@ fn check_takes(
             "rendered_while_capturing": rendered_while_capturing,
         }),
         captured: captured_count,
+        short,
         total,
     })
 }
@@ -1195,6 +1147,7 @@ fn finish_batch(
         "status": end.status,
         "clips_captured": report.as_ref().map(|r| r.captured),
         "clips_total": report.as_ref().map(|r| r.total),
+        "clips_short": report.as_ref().map(|r| r.short),
     });
     if end.error {
         status["error"] = serde_json::Value::Bool(true);
@@ -1280,6 +1233,9 @@ pub async fn start_capture_batch_impl(
     {
         return Err(err);
     }
+
+    // ── Guard: an AGR batch needs its own rate (the UI blocks it too) ─────────
+    crate::capture_guards::require_agr_rate(&config_from_payload(&payload))?;
 
     // ── Guard: separate HUD cannot be captured through mirv_movie_ffmpeg ──────
     // HLAE writes blank frames to the HUD stream on the FFmpeg path — measured
@@ -1900,8 +1856,8 @@ pub async fn start_capture_batch_impl(
                 let mut records = Records::default();
                 // The game went away by itself before the batch's end.
                 let mut game_closed = false;
-                // Clips OBS started recording late (#1109).
-                let mut late_starts: Vec<native::obs::LateStart> = Vec::new();
+                // What the game and OBS said about each clip (#1109, #1401).
+                let mut clip_evidence = ClipEvidence::default();
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -2057,8 +2013,9 @@ pub async fn start_capture_batch_impl(
                             if let Some(room) = &room {
                                 room.clip_started_late(&late.take_folder);
                             }
-                            late_starts.push(late);
+                            clip_evidence.late_starts.push(late);
                         }
+                        EngineEvent::ClipReported(clip) => clip_evidence.reports.push(clip),
                         // A batch that played a demo before it failed has
                         // takes to check, like a cancelled one: the finished
                         // ones are real, and the clip recording when it
@@ -2071,7 +2028,7 @@ pub async fn start_capture_batch_impl(
                                 &is_running_clone,
                                 &manifest_for_listener,
                                 BatchEnd::failed(&msg, records, game_closed)
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2095,8 +2052,7 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                BatchEnd::complete()
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                BatchEnd::complete().with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2110,7 +2066,7 @@ pub async fn start_capture_batch_impl(
                                 &is_running_clone,
                                 &manifest_for_listener,
                                 BatchEnd::cancelled(records)
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2577,11 +2533,32 @@ mod tests {
         assert_eq!(cfg.effective_agr_fps(), 60);
         assert!(!cfg.ffmpeg_capture);
 
-        // Absent from an older frontend: follows Capture FPS.
+        // Absent from an older frontend, or 0 (an empty box): AGR's own 30,
+        // never Capture FPS.
         let mut value = serde_json::to_value(sample_payload()).unwrap();
         value.as_object_mut().unwrap().remove("agr_fps");
         let payload: CapturePayload = serde_json::from_value(value).unwrap();
-        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 300);
+        assert_eq!(payload.capture_fps, 300);
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+        let mut payload = sample_payload();
+        payload.agr_fps = 0;
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_default_agr_fps() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/agr_rate.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const DEFAULT_AGR_FPS = {};",
+            native::patch::DEFAULT_AGR_FPS
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/agr_rate.js must say `{line}`"
+        );
     }
 
     #[test]
@@ -2875,35 +2852,10 @@ mod tests {
                 cut_by: None,
                 short_take: None,
                 started_late_ms: None,
+                clip_verdict: None,
                 ramped_gaps: 0,
             })
             .collect()
-    }
-
-    /// #1109: a take OBS started after its clip did is missing the opening.
-    #[test]
-    fn a_take_obs_started_late_is_not_captured_and_says_by_how_much() {
-        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0)]);
-        let mut blocks = on_disk(&manifest);
-        let late = native::obs::LateStart {
-            take_folder: std::path::PathBuf::from("a_b1"),
-            late: std::time::Duration::from_millis(240),
-        };
-        mark_started_late(&mut blocks, &[late]);
-        let got: Vec<_> = blocks
-            .iter()
-            .map(|b| (b.captured, b.renderable, b.started_late_ms))
-            .collect();
-        assert_eq!(
-            got,
-            [
-                (true, true, None),
-                (false, false, Some(240)),
-                (true, true, None)
-            ]
-        );
-        // Not a clip the batch's end cut short.
-        assert!(blocks.iter().all(|b| !b.cut_short));
     }
 
     /// Marker counts with no ticks (a marker that names none).
