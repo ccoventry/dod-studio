@@ -137,6 +137,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
+//!   through its event dictionary's lookup cache, the 25th Anniversary crash
+//!   on a second `viewdemo` of an HLTV demo (#1392). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` turns it off.
 //! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
 //!   models around them, which the engine culled from the map's origin
 //!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
@@ -294,6 +298,7 @@ mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
 mod demo_seek;
+mod demoplayer_dict_cache;
 mod detail_cache;
 mod detour;
 mod engine;
@@ -486,6 +491,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Only empties a cache the demo player rebuilds, so on unless asked not to.
+    demoplayer_dict_cache::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX", true),
         Ordering::Relaxed,
     );
     // Only restores what a chase camera can see, so on unless asked not to.

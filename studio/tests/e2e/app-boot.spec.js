@@ -3,7 +3,7 @@
 // own them, and the app-wide listeners are in place. Every other spec drives
 // one pane in its own harness, so this is the one that notices a main.js
 // wiring slip (#683).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GIB = 1024 ** 3;
 
@@ -42,8 +42,8 @@ test('boots and wires settings into the folder pools', async ({ page }) => {
     .filter((a) => a.includes('G:/more') && a.includes('D:/demos')).length);
   expect(saved).toBeGreaterThan(0);
 
-  // Panes whose boot IPC isn't mocked throw on the undefined it resolves to;
-  // a wiring slip in main.js shows up as one of these instead.
+  // Any uncaught error already fails the test (fixtures.js); this names the
+  // wiring slips main.js can make, for a clearer message.
   expect(errors.filter((m) => /before initialization|is not defined|is not a function/.test(m))).toEqual([]);
 });
 

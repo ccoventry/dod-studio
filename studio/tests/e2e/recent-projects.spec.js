@@ -1,5 +1,5 @@
 // File → Open Recent (#935), driven against tests/e2e/recent-projects.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page, list) {
   await page.goto('/tests/e2e/recent-projects.html');

@@ -1,6 +1,6 @@
 // teams_pane.js (#445) — driven against tests/e2e/teams.html.
 // See tests/e2e/README.md for what this style of test covers.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function openTeams(page) {
   await page.goto('/tests/e2e/teams.html');

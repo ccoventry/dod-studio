@@ -4,7 +4,7 @@
 // unticking and template errors keep demos out of the batch, that Rename
 // sends only the renames (after a confirm) and the list follows them, that
 // Undo puts them back, and that a settled template is saved.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 // native::demo_rename::DemoFacts, as serde sends it.
 const MODIFIED = new Date(2026, 8, 28, 12).getTime() / 1000;

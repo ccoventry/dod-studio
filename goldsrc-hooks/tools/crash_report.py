@@ -55,6 +55,12 @@ KNOWN = {
     # that build's frame is written at several places before the first push.
     "hw.dll+0x1e2612": "#384 (25th Anniversary build): the engine's hull trace read a garbage plane from a previous "
                        "map's collision data -- hull_trace_guard guards this; check its log line",
+    # Part of #1392: ObjectDictionary::AddToDictionary's shift loop in the 25th
+    # Anniversary DemoPlayer.dll, walking from a garbage insert index that a
+    # stale lookup cache gave after the event array grew. Guarded by
+    # src/demoplayer_dict_cache.rs. Often a silent exit instead of this line.
+    "demoplayer.dll+0x48e0": "#1392 (25th Anniversary build): the demo player's event list read a freed array "
+                             "on a second viewdemo -- demoplayer_dict_cache guards this; check its log line",
 }
 # Engine fatal errors already understood: a substring of the message -> what it is.
 KNOWN_ERRORS = {

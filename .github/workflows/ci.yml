@@ -53,7 +53,7 @@ jobs:
           - part: studio
             packages: -p desktop-studio
           - part: rest
-            packages: --workspace --exclude goldsrc-hooks --exclude native --exclude desktop-studio
+            packages: --workspace --exclude goldsrc-hooks --exclude native --exclude desktop-studio --exclude source-checks
     env:
       # No debug info in test builds: nothing here reads it, and on Windows
       # generating and linking it is a real share of the build. Panic messages
@@ -97,6 +97,24 @@ jobs:
       - name: cargo test --doc (dem-patch)
         if: matrix.part == 'rest'
         run: cargo test -p dem --doc --locked
+
+  # The "files in step" checks, which read source files and compile nothing:
+  # file-size ceilings, a test fn that lost its #[test], the console-name table
+  # and the crash-site table (20 of the last 30 red CI runs were one of these,
+  # and each used to fail only after `native`'s ~3 minute compile). A crate of
+  # its own with no dependencies, so the job is the checkout plus a ~10 s test
+  # build and a red run answers in about a minute. Not a required check: the
+  # rulesets get it only once this workflow is on dev (see CLAUDE.md).
+  source-checks:
+    name: Source checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo test (source-checks)
+        run: cargo test -p source-checks --locked
 
   # The check the rulesets require by this name: green only when every part
   # passed. Keeping the name means no ruleset change; a part that failed or
@@ -169,9 +187,17 @@ jobs:
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  frontend-tests:
-    name: Frontend e2e tests
+  # The e2e suite in two shards on two runners: 561 tests took ~250 s on one
+  # 4-core runner with 2 workers, ~200 s with 4 (the browsers and the Vite
+  # server share the cores), and about half that per shard. The check the
+  # rulesets require by the old name is the job below it.
+  frontend-tests-shard:
+    name: Frontend e2e shard ${{ matrix.shard }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     defaults:
       run:
         working-directory: studio
@@ -187,8 +213,10 @@ jobs:
       - run: npm ci
 
       # Vitest unit tests (#31): seconds, so they run before the browser
-      # download and fail the job early.
+      # download and fail the job early. One shard runs them; they are not
+      # sharded.
       - run: npm run test:unit
+        if: matrix.shard == 1
 
       # No `--with-deps`: on Windows it installs the Server-Media-Foundation
       # Windows feature, which took 3m20s of this job's 4m37s. The browser
@@ -196,7 +224,19 @@ jobs:
       # doesn't need that feature to run these tests.
       - run: npx playwright install chromium
 
-      - run: npm run test:e2e
+      - run: npx playwright test --shard=${{ matrix.shard }}/2
+
+  # The check the rulesets require by this name: green only when both shards
+  # passed (the same pattern as `rust-tests`).
+  frontend-tests:
+    name: Frontend e2e tests
+    needs: frontend-tests-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        shell: bash
+        run: test "${{ needs.frontend-tests-shard.result }}" = "success"
 
   # ESLint over studio/src (#1179): no-unused-vars as an error, max-params as a
   # warning. Its own parallel job on ubuntu (no Windows code involved), so it
