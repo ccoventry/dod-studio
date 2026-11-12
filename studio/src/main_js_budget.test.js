@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 531; // +5: demo_file_recheck.js's import and call, and the two project_demos.js functions it takes, so a demo renamed while Studio is open shows as missing
+const BUDGET = 548; // +17: the Damaged Demos tab and the queue's Repair and Repair & Split, two factories wired in, and the queue redraw a repair that found nothing to cut out needs (#15); +5: demo_file_recheck.js's import and call, and the two project_demos.js functions it takes, so a demo renamed while Studio is open shows as missing
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {

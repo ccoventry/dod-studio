@@ -125,6 +125,11 @@ pub(super) fn cut_blocks(
 
         // Past the first highlight the four lists are non-empty: they grow
         // together, and the first highlight always pushes.
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "past the first highlight the four lists are non-empty"
+        )]
         let prev_stop = last_kill_frame(merged_streaks.last().unwrap());
         let next_start = first_kill_frame(&current);
 
@@ -140,6 +145,11 @@ pub(super) fn cut_blocks(
             start_lead_ticks,
             stop_trail_ticks + min_separation_ticks,
         ) {
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             let last = merged_streaks.last_mut().unwrap();
             last.end_tick = last.end_tick.max(current.end_tick);
             // The record-stop mark is derived from kills[end_index], not
@@ -153,7 +163,17 @@ pub(super) fn cut_blocks(
                 last.kills.push(kill);
                 last.end_index = last.kills.len() - 1;
             }
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             merged_sources.last_mut().unwrap().push(payload_idx);
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             let kills = merged_kill_frames.last_mut().unwrap();
             kills.extend(current_kills);
             kills.sort_unstable();

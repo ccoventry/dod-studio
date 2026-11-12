@@ -39,6 +39,7 @@ pub mod overview;
 pub mod preview;
 pub mod preview_start;
 pub mod render;
+pub mod repair;
 pub mod review;
 pub mod scan;
 pub mod settings;

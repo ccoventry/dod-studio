@@ -95,6 +95,14 @@ pub struct SessionMeta {
     /// before it was recorded, or whose demo had no frame times.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<super::take_plan::TakePlan>,
+    /// Everything else the capture used, with its hash (part of #1085).
+    /// Absent for a take captured before it was recorded: "not recorded",
+    /// never a difference. Not a `FORMAT` bump: an older build ignores a
+    /// file with a newer format, and would then render a frame sequence at
+    /// Source FPS (#14); it reads this file and drops only this field when
+    /// it rewrites it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<super::take_settings::CaptureSettings>,
 }
 
 impl SessionMeta {
@@ -107,6 +115,7 @@ impl SessionMeta {
             capture_mode: None,
             agr_fps: None,
             plan: None,
+            settings: None,
         }
     }
 
@@ -629,5 +638,38 @@ mod tests {
         )));
         assert!(!is_metadata(std::ffi::OsStr::new("00000.bmp")));
         assert!(!is_metadata(std::ffi::OsStr::new("sound.wav")));
+    }
+
+    #[test]
+    fn a_takes_capture_settings_survive_a_render_writing_its_history() {
+        let (_root, block, take) =
+            block_with_take("settings", "session_x", "dodstudio_chain_01_b0");
+        let settings = super::super::take_settings::CaptureSettings {
+            width: 1920,
+            lines: vec!["mirv_fov 90".into()],
+            hash: "v1-0123456789abcdef".into(),
+            ..Default::default()
+        };
+        let meta = SessionMeta {
+            settings: Some(settings.clone()),
+            ..SessionMeta::new("session_x", 120)
+        };
+        write(&block, &meta).expect("write");
+        record_render_start(&take, &attempt_at(10, "all")).expect("start");
+        let read = read_for_take(&take).expect("meta");
+        assert_eq!(read.settings, Some(settings));
+        assert_eq!(read.format, FORMAT);
+    }
+
+    #[test]
+    fn a_take_file_without_settings_reads_as_not_recorded() {
+        let (_root, block, take) =
+            block_with_take("no_settings", "session_x", "dodstudio_chain_01_b0");
+        std::fs::write(
+            block.join(TAKE_FILE),
+            r#"{"format":2,"session_id":"s","capture_fps":120}"#,
+        )
+        .unwrap();
+        assert_eq!(read_for_take(&take).expect("meta").settings, None);
     }
 }

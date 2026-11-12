@@ -12,6 +12,7 @@ import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
 import { multiMapHint } from './queue_multimap.js';
+import { damagedRepairHint } from './queue_repair_hint.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { renderQueueTotals } from './queue_totals.js';
 import { matchesInQueue } from './queue_match_groups.js';
@@ -67,6 +68,8 @@ let currentOnLocateDemo = null;
 let currentOnUseFoundCopy = null;
 // main.js's handler for a multi-map demo's Split button (#217).
 let currentOnSplitDemo = null;
+// main.js's handlers for a damaged demo's Repair and Repair & Split (#15).
+let currentRepairHandlers = null;
 // demo_context_menu.js's handler for a row's right-click / Menu key (#1111).
 let currentOnRowMenu = null;
 let lastMenuKeyAt = -Infinity;
@@ -212,6 +215,12 @@ function matchesSearch(demo, term) {
  *  touches, not just what's on screen. */
 export function getVisibleDemos() {
   return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesPlayer(d) && matchesQuickFilters(d, quickFilters));
+}
+
+/** Sets what a damaged demo's buttons run (#15): `{ repair, repairSplit }`,
+ *  each `(demo, update)`, from queue_repair.js. */
+export function setRepairDemoHandlers(handlers) {
+  currentRepairHandlers = handlers;
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
@@ -526,6 +535,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // More than one map: only the first is used until it's split (#217).
     const multiMap = multiMapHint(demo, currentOnSplitDemo);
     if (multiMap) tdName.appendChild(multiMap);
+
+    // Damaged partway: it plays only up to its first gap (#15).
+    const repairHint = damagedRepairHint(demo, currentRepairHandlers);
+    if (repairHint) tdName.appendChild(repairHint);
 
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {
