@@ -1078,6 +1078,27 @@ button.danger-btn {
   border-bottom: 1px solid var(--border-faint);
 }
 
+/* A long demo name is cut with an ellipsis (master_pane.js) instead of
+   widening the table past its pane, which put Locate and Remove out of
+   reach. Inline-size containment makes the cell ignore its text when the
+   table sizes its columns, so width 100% gives it all the space the count
+   columns leave, and the min-width keeps some of the name readable beside
+   a badge. The Actions cell may
+   wrap, so Locate, Use found copy and Remove drop to a second line when the
+   pane is too narrow for all three side by side. */
+#master-demo-table td.queue-name-cell {
+  contain: inline-size;
+  min-width: 9em;
+  width: 100%;
+  /* Badges drop under the name instead of squeezing it to nothing. */
+  flex-wrap: wrap;
+}
+
+#master-demo-table .locate-demo-btn,
+#master-demo-table .use-found-copy-btn {
+  white-space: nowrap;
+}
+
 #master-demo-table tr:hover {
   background: var(--wash-04);
 }

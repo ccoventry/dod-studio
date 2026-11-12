@@ -491,6 +491,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // Untracked uses, so the row that survives it is visibly explained
     // rather than just a mystery afterward.
     const tdName = document.createElement('td');
+    tdName.className = 'queue-name-cell';
     tdName.style.padding = '6px 8px';
     tdName.style.fontWeight = 'bold';
     tdName.style.display = 'flex';
@@ -509,7 +510,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     nameSpan.style.overflow = 'hidden';
     nameSpan.style.textOverflow = 'ellipsis';
     nameSpan.style.whiteSpace = 'nowrap';
-    nameSpan.title = demo.name || '';
+    // The full path as the tooltip: a long name is cut to fit (queue-name-cell).
+    nameSpan.title = demo.path || demo.name || '';
     nameSpan.textContent = demo.name || STRINGS.WORKSPACE.EMPTY_DASH;
     tdName.appendChild(nameSpan);
 
@@ -575,7 +577,6 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdActions = document.createElement('td');
     tdActions.style.padding = '6px 8px';
     tdActions.style.textAlign = 'center';
-    tdActions.style.whiteSpace = 'nowrap';
 
     // Same inline SVG list_editor.js uses for Capture Output/Custom Commands
     // rows, not the 🗑 emoji — WebView2 renders that emoji as a flat
