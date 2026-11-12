@@ -39,7 +39,8 @@
       'live_session/chain_01_b1': [first, second],
     };
     recordCapture(takeIndex, 'gone_session/chain_00_b0', { session_id: 'gone_session', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/gone_session/chain_00_b0' });
-    recordCapture(takeIndex, 'live_session/chain_01_b1', { session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1' });
+    recordCapture(takeIndex, 'live_session/chain_01_b1', { session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1',
+      settings: { hash: 'v1-0123456789abcdef', mode: 'direct_to_video', fps: 120, width: 1920, height: 1080, fov: 90, install: 'Half-Life - POST-Anniversary for Movies', hook: 'bundled', lines: ['mirv_fov 90'], commands: [], before: 5, after: 1, kill_gaps: { mode: 'keep', over_seconds: 8, speed: 4 }, decal_flush: true, app_version: '0.2.5' } });
     const recorded = (started, name) => ({ started_unix_ms: started, stream: 'all', codec: 'prores', fps: 60, outcome: 'finished', output_path: `D:/out/${name}` });
     recordRender(takeIndex, 'gone_session/chain_00_b0', recorded(1_700_000_100_000, 'moved.mov'));
     recordRender(takeIndex, 'gone_session/chain_00_b0', recorded(1_700_000_200_000, 'lost.mov'));

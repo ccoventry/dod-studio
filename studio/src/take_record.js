@@ -7,7 +7,15 @@
 // breaks them (the owner moves between release, dev and test builds on one
 // project). The capture facts live in a sibling `takeCaptures` key,
 // `take_key -> { session_id, captured_at, capture_mode, capture_fps,
-// take_folder }`, which older builds ignore (and drop when they save).
+// take_folder, settings }`, which older builds ignore (and drop when they save).
+//
+// `settings` is everything else the capture used, with a hash over it (part of
+// #1085): the backend builds it from the batch's own config
+// (`native::hlcr::take_settings`) and it is stored as it arrives. A field
+// inside an entry, not a new top-level key, so every build that knows
+// `takeCaptures` keeps it (attachCaptures and carryCaptures keep whole
+// entries). A take without it was captured before
+// it existed: "not recorded", never a difference.
 //
 // In memory the map rides on the take index object as a non-enumerable
 // property, so every module that already passes the index around reaches it
@@ -16,7 +24,7 @@
 const CAPTURES = 'takeCaptures';
 
 /** The capture facts a record keeps. */
-const CAPTURE_FIELDS = ['session_id', 'captured_at', 'capture_mode', 'capture_fps', 'take_folder'];
+const CAPTURE_FIELDS = ['session_id', 'captured_at', 'capture_mode', 'capture_fps', 'take_folder', 'settings'];
 
 /** The index's capture map, made on first use. */
 export function captureMapOf(takeIndex) {

@@ -283,7 +283,7 @@ computes two rectangles from `ScreenWidth`/`ScreenHeight` and caches them in
 
 `CHud::GetOverviewMapBounds` (`+0x22a60`, four out-params, `ret 0x10`) hands one
 of the two back depending on `CHud::OverviewMapMode` (`+0x228e0`, which returns
-`_cl_minimap`'s value while a spectator predicate holds and `gHUD`'s FOV field
+`_cl_minimap`'s value while the renderer is hardware (`IsHardware`) and `gHUD`'s FOV field
 is still 90), adding the `54 * ScreenHeight/480` spectator-bar offset to the
 full map's y. Callers: `CHudDeathNotice::Draw`, `CObjectiveIcons`' map path, and
 two more in the spectator GUI.
@@ -447,15 +447,16 @@ Stated plainly, in the habit `docs/goldsrc_death_notices.md` set.
 - **`CHudBase` vftable slot 6.** A seventh virtual DoD added between `Reset` and
   `InitHUDData`. Every element inherits `CHudBase`'s stub (`+0x21970`); nothing
   overrides it, so there is no body to read and no call site was found.
-- **`+0x195e40`**, the spectator predicate `CHud::OverviewMapMode` calls. A
-  `.data` function pointer, zero in the image, that `client.dll`'s code only ever
+- **`+0x195e40`**, the function `CHud::OverviewMapMode` calls. A `.data`
+  function pointer, zero in the image, that `client.dll`'s code only ever
   *calls* — there is no store to it anywhere. It is filled by the 46-dword
-  `rep movsd` at `+0x362f3`, which copies an engine interface handed to
-  `client.dll` during initialisation into `+0x195da0`; the predicate is that
-  table's slot 40. **Which interface that is has not been established.** It is
-  not `gEngfuncs` — that is a separate 135-dword copy at `+0x176388` whose
-  `IsSpectateOnly` slot DoD calls 35 times by the ordinary route — so this is a
-  second mechanism, not the same one.
+  `rep movsd` at `+0x362f3`, which copies the engine's studio interface handed
+  to `client.dll` during initialisation into `+0x195da0`; it is that table's
+  slot 40. A 46-slot table is `engine_studio_api_t`, whose slot 40 is
+  `IsHardware` (inferred from the slot count, #897), so this is not a spectator
+  predicate, as earlier versions of this note said. It is not `gEngfuncs` — that
+  is a separate 135-dword copy at `+0x176388` whose `IsSpectateOnly` slot DoD
+  calls 35 times by the ordinary route.
 - **The objective timer's x.** Four literal digit positions (10, 24, 44, 58) plus
   a literal 0 for the background sprite, in `CObjectiveIcons::DrawDigit`'s
   callers. Five sites rather than one value; reachable but not as one setting.

@@ -397,6 +397,16 @@ export async function setPlayerOverrides(on) {
     });
 }
 
+/** Whether the POV fallback spray was changed for the user and hasn't been
+ *  said yet (#1322). True once. */
+export async function takePovOwnSprayNotice() {
+  return invoke('take_pov_own_spray_notice')
+    .catch((err) => {
+      console.error("IPC Execution Error (take_pov_own_spray_notice):", err);
+      return false;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
