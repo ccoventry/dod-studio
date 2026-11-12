@@ -31,7 +31,8 @@ import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from
 import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_setting.js';
 import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
-import { createCaptureProgress, endKind } from './capture_progress.js';
+import { createCaptureProgress, endKind, completedToast } from './capture_progress.js';
+import { clipVerdictToasts, failedClipCount, shortClipCount } from './clip_verdict_toasts.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -953,8 +954,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         } else if (kind === 'cancelled') {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
         } else {
-          showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
-          notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
+          // Success only when every clip landed whole (#1401).
+          const done = completedToast(payload);
+          showToast(done.text, done.type);
+          notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, done.text);
         }
       }
     }).then(unlistenFn => {
@@ -1069,12 +1072,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         const cut = blocks.filter((b) => b.cut_short && !b.short_take);
         // OBS started recording after the clip did (#1109).
         const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate)}${marked}`, 'error');
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate, failedClipCount(payload))}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
-      } else {
+      } else if (shortClipCount(payload) === 0) {
+        // A short clip's own warning toast follows; "all verified" would contradict it.
         showToast(`${STRINGS.CAPTURE.allTakesVerified(total)}${marked}`, 'success');
       }
+      // Which highlights the game's failed and short clips are (#1401).
+      clipVerdictToasts(payload, lastDispatch).forEach((t) => showToast(t.text, t.type, 12000));
 
       // "When a batch finishes" (#440) — a no-op unless that is set to finish
       // clips. After the status flip above, so the take index already maps

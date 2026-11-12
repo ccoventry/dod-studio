@@ -382,7 +382,9 @@ own log): the clip's number, its demo time at record start and stop, the
 frames HLAE wrote to its take and which of its markers arrived; a clip cut
 short (a skipped demo, `stop`, Studio gone from a held batch) gets one
 without its stop. Studio writes
-it to the activity log as one line per clip (#1221; `goldsrc-hooks/src/clip_log.rs`).
+it to the activity log as one line per clip (#1221; `goldsrc-hooks/src/clip_log.rs`),
+and judges each clip's take by it: no start, no stop or 0 frames is a failed
+clip, and one shorter than planned is flagged (#1401).
 `stop` ends the batch; bare says where it is. With
 `ds_capture_stay_behind` on when it starts, the game steps aside behind
 the other windows (minimised if it had the foreground, which then parks it
