@@ -1,7 +1,9 @@
 """A readable summary of every game crash on record.
 
 Reads the hook DLL's logs (%APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks_*.log,
-kept 30 days) for the crash recorder's `CRASH:` blocks and `PANIC:` lines, and the movie
+kept 30 days) for the crash recorder's `CRASH:` blocks and `PANIC:` lines, the hang
+reporter's `HANG:` blocks (a freeze: listed by the first frame outside Windows' own
+modules, with whether the game came back and the dump's path), and the movie
 install's qconsole.log for the engine's own fatal errors. Groups crashes by
 where they happened (`module+offset`, which is the same every run), newest
 first, with what was happening just before, and marks the ones already known.
@@ -83,6 +85,39 @@ CRASH = re.compile(r"CRASH: (?P<what>.+?) at (?P<where>[\w.]+\+0x[0-9a-f]+)(?: \
 # A panic in the DLL (panic_log.rs): the abort that follows skips crash.rs.
 PANIC = re.compile(r"PANIC: (?P<what>.+) at (?P<where>\S+:\d+:\d+) \(thread [^)]*\)$")
 FRAME = re.compile(r"CRASH:\s+\[esp\+0x[0-9a-f]+\] (?P<frame>[\w.]+\+0x[0-9a-f]+)")
+# A freeze (src/hang.rs): the engine thread drew no frame for the threshold.
+# The head line says where it was stopped; the block holds the `ebp` chain,
+# the stack scan and the dump's path; a later `HANG-END:` says it came back.
+HANG = re.compile(r"HANG: (?P<what>no frame for [\d.]+ s)[^)]*\)(?: at (?P<where>[\w.]+\+0x[0-9a-f]+))?")
+HANG_FRAME = re.compile(r"HANG:\s+\[(?:ebp#\d+|esp\+0x[0-9a-f]+)\] (?P<frame>[\w.]+\+0x[0-9a-f]+)")
+HANG_DUMP = re.compile(r"HANG:\s+dump (?P<path>.+) \([\d.]+ MB\)$")
+HANG_END = re.compile(r"HANG-END: frames resumed after (?P<secs>[\d.]+) s")
+# A thread stuck in a wait or a sleep stops inside Windows; the frame that
+# says whose wait it is is the first one outside Windows' own modules.
+SYSTEM_MODULES = {"ntdll.dll", "kernelbase.dll", "kernel32.dll", "win32u.dll", "user32.dll",
+                  "gdi32.dll", "gdi32full.dll", "ucrtbase.dll", "msvcrt.dll", "combase.dll"}
+
+
+def first_own_frame(where, frames):
+    """The first frame (where it stopped, then its callers) not in a Windows module."""
+    for frame in ([where] if where else []) + frames:
+        if frame.split("+")[0].lower() not in SYSTEM_MODULES:
+            return frame
+    return where or "(stack not read)"
+
+
+def hang_outcome(lines, start):
+    """How the freeze whose block ends at `start` ended: 'came back after N s' when a
+    HANG-END follows before the next session or freeze, else that it never did."""
+    for line in lines[start:]:
+        m = HEADER.match(line)
+        msg = m.group("msg") if m else ""
+        end = HANG_END.match(msg)
+        if end:
+            return f"came back after {end.group('secs')} s"
+        if msg.startswith("goldsrc-hooks worker thread started") or HANG.match(msg):
+            break
+    return "never came back: the game was closed or killed while frozen"
 
 
 def game_dir(arg):
@@ -126,13 +161,36 @@ def hook_crashes(context):
                             c.group("detail"), frames, list(before), level, session))
                 i = j
                 continue
+            h = HANG.match(msg) if m else None
+            if h:
+                frames, dump = [], None
+                j = i + 1
+                while j < len(lines) and "HANG:   " in lines[j]:
+                    f = HANG_FRAME.search(lines[j])
+                    if f:
+                        frames.append(f.group("frame"))
+                    d = HANG_DUMP.search(lines[j])
+                    if d:
+                        dump = d.group("path")
+                    j += 1
+                stopped = h.group("where")
+                detail = hang_outcome(lines, j)
+                if stopped:
+                    detail += f"; stopped at {stopped}"
+                if dump:
+                    detail += f"; dump {dump}"
+                out.append((date, m.group("time"), m.group("demo"), first_own_frame(stopped, frames),
+                            "freeze: " + h.group("what"), detail, frames, list(before), level, session))
+                i = j
+                continue
             p = PANIC.match(msg) if m else None
             if p:
                 out.append((date, m.group("time"), m.group("demo"), "panic at " + p.group("where"),
                             p.group("what"), None, [], list(before), level, session))
                 i += 1
                 continue
-            if lines[i].strip() and not NOISE.search(lines[i]) and "CRASH:" not in lines[i]:
+            if lines[i].strip() and not NOISE.search(lines[i]) and "CRASH:" not in lines[i] \
+                    and "HANG" not in lines[i]:
                 before.append(lines[i])
             i += 1
     return out
@@ -173,7 +231,7 @@ def main():
         by_where[c[3]].append(c)
     groups = sorted(by_where.items(), key=lambda kv: max((c[0], c[1]) for c in kv[1]), reverse=True)
 
-    print(f"== Crashes recorded by the hook DLL ({LOGS}) ==")
+    print(f"== Crashes and freezes recorded by the hook DLL ({LOGS}) ==")
     if not groups:
         print("none")
     for where, occ in groups:
