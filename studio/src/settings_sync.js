@@ -121,6 +121,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       analyzer_explorer_width: state.analyzerExplorerWidth,
       capture_split_left_permille: state.captureSplitLeftPermille ?? null,
       analyzer_demos_height_px: state.analyzerDemosHeightPx ?? null,
+      // Overviews panel widths and the Render / Auditor table heights (layout_splits.js).
+      ...(state.layoutPxSplits ?? {}),
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,

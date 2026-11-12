@@ -1505,6 +1505,11 @@ export const STRINGS = {
     ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
     CAPTURE_SPLIT_LABEL: 'Capture Studio split',
     ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    OVERVIEWS_MAPS_LABEL: 'Overviews Maps panel',
+    OVERVIEWS_EDIT_LABEL: 'Overviews Edit panel',
+    RENDER_TABLE_LABEL: 'Render queue table',
+    AUDITOR_TABLE_LABEL: 'Demo Auditor results table',
+    splitResetLog: (label) => `${label} size reset to the default`,
     splitNotSaved: (label, err) => `${label} not saved: ${err}`,
   },
 
