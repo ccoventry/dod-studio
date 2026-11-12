@@ -22,11 +22,16 @@ impl DriveBudget {
     /// Snapshots the free bytes of every capture directory. With none
     /// configured, one sentinel drive with unlimited room stands in, so a
     /// single-drive batch plans without an error.
-    pub fn snapshot(capture_directories: &[std::path::PathBuf]) -> Self {
-        let (mut volume_of_drive, mut free) = crate::sys::disk::group_by_volume(
-            capture_directories,
-            crate::sys::disk::get_available_bytes,
-        );
+    ///
+    /// `free_of` reads a directory's free bytes (`None`: unknown, an
+    /// unbounded budget): [`crate::sys::disk::get_available_bytes`] for a real
+    /// batch, a fixed size in tests that must not depend on the machine's.
+    pub fn snapshot(
+        capture_directories: &[std::path::PathBuf],
+        free_of: impl FnMut(&std::path::Path) -> Option<u64>,
+    ) -> Self {
+        let (mut volume_of_drive, mut free) =
+            crate::sys::disk::group_by_volume(capture_directories, free_of);
         if free.is_empty() {
             volume_of_drive.push(0);
             free.push(u64::MAX);
@@ -245,9 +250,12 @@ mod one_at_a_time_tests {
     /// was `u64::MAX`.
     #[test]
     fn unknown_free_space_snapshots_as_an_unbounded_budget() {
-        let unreadable = DriveBudget::snapshot(&[std::path::PathBuf::from("relative/takes")]);
+        let unreadable = DriveBudget::snapshot(
+            &[std::path::PathBuf::from("relative/takes")],
+            crate::sys::disk::get_available_bytes,
+        );
         assert_eq!(unreadable.free, vec![u64::MAX]);
-        let none = DriveBudget::snapshot(&[]);
+        let none = DriveBudget::snapshot(&[], crate::sys::disk::get_available_bytes);
         assert_eq!(none.volume_of_drive, vec![0]);
         assert_eq!(none.free, vec![u64::MAX]);
     }

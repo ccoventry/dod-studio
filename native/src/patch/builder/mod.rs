@@ -332,6 +332,23 @@ pub fn build_batch_queue(
     config: &PatcherConfig,
     global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
 ) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
+    build_batch_queue_with(
+        raw_streaks,
+        config,
+        global_arrays,
+        crate::sys::disk::get_available_bytes,
+    )
+}
+
+/// [`build_batch_queue`] with each capture directory's free bytes read from
+/// `free_of`, so the golden tests plan against a drive of a known size and
+/// don't depend on the free space of the machine running them.
+pub(super) fn build_batch_queue_with(
+    raw_streaks: Vec<CaptureStreak>,
+    config: &PatcherConfig,
+    global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
+    free_of: impl FnMut(&std::path::Path) -> Option<u64>,
+) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
     let passes = plan_batch(&raw_streaks, config);
     warn_short_rolls(config);
 
@@ -339,7 +356,7 @@ pub fn build_batch_queue(
     remove_previous_batch_cfgs(&dod_dir);
     // Snapshot every capture directory's free bytes so each clip is routed
     // to a drive with room for it at build time.
-    let mut drives = DriveBudget::snapshot(&config.capture_directories);
+    let mut drives = DriveBudget::snapshot(&config.capture_directories, free_of);
     let session_dir = make_session_dir(config)?;
 
     let mut helper_cfg = helper_cfg_preamble(config, &dod_dir);

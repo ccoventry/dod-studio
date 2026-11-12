@@ -198,15 +198,32 @@ fn jobs_text(jobs: &[PatchJob]) -> String {
     out
 }
 
+/// The free space of the golden batch's capture drive: room for every block,
+/// whatever the machine running the tests has free (a CI runner has far
+/// less than a block of 2560x1440 frames needs).
+const CAPTURE_DRIVE_FREE: u64 = 1_000_000_000_000;
+
+/// [`build_batch_queue`] on a capture drive with [`CAPTURE_DRIVE_FREE`].
+fn build_golden_batch(
+    streaks: &[CaptureStreak],
+    config: &PatcherConfig,
+) -> (Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>) {
+    build_batch_queue_with(
+        streaks.to_vec(),
+        config,
+        &std::collections::HashMap::new(),
+        |_| Some(CAPTURE_DRIVE_FREE),
+    )
+    .expect("the golden batch builds")
+}
+
 /// Builds the payload's batch in `mode` and checks it against
 /// `golden/<name>.txt`.
 fn check_golden(name: &str, mode: CaptureMode) {
     let root = Scratch::new(format!("batch_golden_{name}"));
     let config = config(&root, mode);
     let streaks = payload();
-    let (jobs, _headroom) =
-        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new())
-            .expect("the golden batch builds");
+    let (jobs, _headroom) = build_golden_batch(&streaks, &config);
     let batch_file = crate::patch::runtime_batch::batch_file_playing(
         &jobs,
         &streaks,
@@ -276,9 +293,7 @@ fn the_disk_estimate_bills_the_blocks_the_batch_records() {
     let root = Scratch::new("batch_golden_estimate");
     let config = config(&root, CaptureMode::FrameSequence);
     let streaks = payload();
-    let (jobs, _headroom) =
-        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new())
-            .expect("the golden batch builds");
+    let (jobs, _headroom) = build_golden_batch(&streaks, &config);
     let billed: Vec<u64> = jobs
         .iter()
         .flat_map(|job| job.blocks.iter())
