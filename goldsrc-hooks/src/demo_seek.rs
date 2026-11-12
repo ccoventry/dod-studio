@@ -74,7 +74,9 @@
 //! left it: zoom in an HLTV demo, flags and scores in a POV one. So every
 //! backward seek but a `ds_demo_seek_skip_between` one sets the clock back and
 //! steps forward to the target; `rewind.rs` says why, where it starts over
-//! and how it empties the kill feed on the way.
+//! and how it empties the kill feed on the way. A seek made while another is
+//! on its way counts from that one's target and keeps its feed clear
+//! (`chain.rs`).
 //!
 //! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
@@ -156,6 +158,7 @@ use crate::engine::{self};
 use crate::names::console_name;
 use crate::setting::Setting;
 
+mod chain;
 mod rewind;
 
 pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
@@ -182,11 +185,10 @@ struct Pending {
     /// `m_LastFrameTime` before it, until the player has sent the start
     /// frame.
     rewind_from: Option<f64>,
-    /// This seek is a rewind: it empties the kill feed at `feed_at`.
-    rewind: bool,
-    /// Where a rewind empties the kill feed: the target less a notice's
-    /// lifetime ([`rewind_step`](rewind::rewind_step)).
-    feed_at: f64,
+    /// Where a rewind, or a seek that took over from one (`chain.rs`), empties
+    /// the kill feed: the target less a notice's lifetime
+    /// ([`rewind_step`](rewind::rewind_step)). `None` for any other seek.
+    feed_at: Option<f64>,
     /// Frames the kill feed has been emptied on
     /// ([`FEED_CLEAR_FRAMES`](rewind::FEED_CLEAR_FRAMES)).
     feed_cleared: u32,
@@ -258,8 +260,7 @@ impl Pending {
             landed: false,
             last_set,
             rewind_from: None,
-            rewind: false,
-            feed_at: target,
+            feed_at: None,
             feed_cleared: 0,
             waited: 0,
             steps: 0,
@@ -802,9 +803,9 @@ fn poll_pending() {
                 engine::client_cmd(&line);
             }
             format!(
-                "{SEEK_TO_NAME}: {} {:.2} s after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
-                if seek.rewind { "rewound to" } else { "at" },
+                "{SEEK_TO_NAME}: at {:.2} s{} after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
                 seek.target,
+                chain::feed_note(seek),
                 seek.steps,
                 seek.started.elapsed().as_millis(),
                 seek.dropped,
@@ -957,6 +958,7 @@ mod player {
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
+    use super::chain::{counted_from, feed_note, in_flight, take_over, takes_over_feed_clear};
     use super::rewind::{
         FEED_CLEAR_FRAMES, feed_clear_at, recording_start, rewind_base, rewind_step, rewinds,
     };
@@ -1180,8 +1182,9 @@ mod player {
             }
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let feed_at =
-                (seek.rewind && seek.feed_cleared < FEED_CLEAR_FRAMES).then_some(seek.feed_at);
+            let feed_at = seek
+                .feed_at
+                .filter(|_| seek.feed_cleared < FEED_CLEAR_FRAMES);
             let t = match rewind_step(get_now(player), seek.target, feed_at) {
                 Step::To(t) => t,
                 Step::ClearFeed => {
@@ -1253,10 +1256,11 @@ mod player {
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let get_start: TimeFn = slot(player, SLOT_GET_START_TIME);
             let (now, start, end) = (get_now(player), get_start(player), get_end(player));
-            let to = landing(now, arg, relative, start, end);
-
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
             let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            // A seek on its way: count from where it is heading (`chain.rs`).
+            let chain = in_flight(pending.as_ref());
+            let to = landing(counted_from(now, chain), arg, relative, start, end);
             if rewinds(now, to, skip_between) {
                 // Cleared first: a player with no `HLTV` message before the
                 // landing has no zoom there.
@@ -1273,8 +1277,7 @@ mod player {
                 set_world_time(player, base, 0);
                 let mut seek = Pending::new(to, then, base);
                 seek.rewind_from = Some(from);
-                seek.rewind = true;
-                seek.feed_at = feed_clear_at(to, crate::deathmsg::notice_lifetime());
+                seek.feed_at = Some(feed_clear_at(to, crate::deathmsg::notice_lifetime()));
                 *pending = Some(seek);
                 let from_where = if recording.is_some() {
                     "the first recorded frame"
@@ -1285,11 +1288,13 @@ mod player {
                     "{now:.2} -> {to:.2} s, going back: from {from_where} ({base:.2}) in steps of {STEP_SECONDS} s, so flags, scores and zoom are right (demo runs {start:.2} to {end:.2})"
                 ));
             }
-            if stepped(now, to, skip_between) {
+            if stepped(now, to, skip_between) || takes_over_feed_clear(chain, skip_between) {
                 // Each frame from here moves the clock one step (`step`).
-                *pending = Some(Pending::new(to, then, now));
+                let seek = take_over(Pending::new(to, then, now), chain, skip_between);
+                let note = feed_note(&seek);
+                *pending = Some(seek);
                 return Ok(format!(
-                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s (demo runs {start:.2} to {end:.2})"
+                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s{note} (demo runs {start:.2} to {end:.2})"
                 ));
             }
             set_world_time(player, to, 0);
