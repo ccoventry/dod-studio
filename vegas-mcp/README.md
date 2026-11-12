@@ -23,6 +23,7 @@ Register the MCP server with Claude Code (the user does this, not an agent):
 |---|---|
 | `ping`, `project_info` | Versions; the open project's settings, tracks, events (time, speed, media, FX with parameter values) and media pool |
 | `new_project`, `open_project` | Start a project (size, fps, pixel format) or open a `.veg`. Both refuse to drop unsaved changes unless `discard_changes` |
+| `import_edl` | Open an EDL Text File (Studio's Export VEGAS EDL or Export Project to VEGAS) the way VEGAS does, as a new project; then size/fps and Select None (for the nameplate script). Reports how many events are offline |
 | `save_as` | Save to a **new** `.veg` path. Overwrites only a file this bridge session saved, with `overwrite` |
 | `add_media`, `set_event` | Put a file or subclip on the timeline; change an event's speed (`playback_rate` 0.2 = 5x slow), start, length, offset, resample |
 | `create_subclip` | A subclip of a file (it has its own Media FX chain) |
@@ -42,5 +43,7 @@ VEGAS never tells an OFX effect an event's speed, and an Event FX only sees fram
 ## Gotchas found
 
 - Project edits from an extension must sit in an `UndoBlock`; without one every change fails with `E_UNEXPECTED`.
+- An EDL opened with `OpenFile` (what File > Open of an EDL does) **replaces** the open project, asking "save changes to Untitled?" when it has any, and `OpenFile` returns before the events exist. `import_edl` clears the dirty state first and pumps messages until the timeline fills (#1303's test).
+- `project_info` gives each event its file (`media_path`, a subclip's parent), `offline` and `selected`, and each media `offline`, so an import can be checked for files VEGAS did not find.
 - VEGAS fixes its project-matching render templates ("Default Template") the first time templates are listed in a session. Listed before the timeline had video, they stay audio-only until VEGAS restarts, so `render` refuses a template without a video stream.
 - A "Hint" box (OK only) appeared during the very first bridge render and held it until OK was pressed (not seen again in three later sessions, so probably shown once). `render` presses OK on Hint boxes of its own VEGAS while it runs and reports how many; that path has not been exercised since.
