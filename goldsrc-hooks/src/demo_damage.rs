@@ -27,7 +27,9 @@
 //! - A file cut short: it has lost its directory, so `playdemo` refuses it at
 //!   the start (`Error: Corrupt demo file.`) and nothing plays.
 //! - `timedemo` goes through the same reader and is caught, but the hook does
-//!   not track its demo name, so its event carries no path.
+//!   not track its demo name: its event carries the path of the last demo
+//!   `playdemo` or `viewdemo` started this session (or on the command line),
+//!   which is another demo, or no path when there was none.
 //!
 //! ## The hook
 //!
