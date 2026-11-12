@@ -10,7 +10,6 @@ import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs, ob
 import { refreshLaunchGuard } from './capture_pane.js';
 import { runObsConnectionTest } from './obs_connection_ui.js';
 import { showToast } from './toast.js';
-import { numberField } from './number_field.js';
 // The Steam-install and program-name checks (#373) are shared with the
 // Setup window (#599).
 import { EXE_NAMES, usesPlayFolder, sameDriveFolders, wrongExeName } from './setup_checklist.js';
@@ -180,15 +179,14 @@ export function applyCaptureModeUI() {
   const captureFpsGroup = document.querySelector('#capture-fps-group');
   if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
 
-  // AGR mode records no video, so Capture FPS gives way to its own rate. An
-  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
-  // shows the number that will actually be used.
+  // AGR mode records no video, so Capture FPS gives way to its own rate, which
+  // is required there (refreshLaunchGuard blocks Start while it is empty). The
+  // placeholder is a hint ("e.g. 30"), not a value: the box stays empty and
+  // saves 0, so the settings never hold a number the user did not type.
   const agrFpsGroup = document.querySelector('#agr-fps-group');
   if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
   const agrFpsInput = document.querySelector('#config-agr-fps');
-  if (agrFpsInput) {
-    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
-  }
+  if (agrFpsInput) agrFpsInput.placeholder = STRINGS.CAPTURE_CONFIG.AGR_FPS_PLACEHOLDER;
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would

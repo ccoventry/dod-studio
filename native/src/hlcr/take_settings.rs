@@ -371,8 +371,9 @@ mod tests {
         assert_eq!(recording_fps(&config), OBS_DEFAULT_FPS);
         config.obs_capture_fps = 120;
         assert_eq!(recording_fps(&config), 120);
+        // An unset AGR FPS is AGR's own default, not Capture FPS.
         config.capture_mode = CaptureMode::Agr;
-        assert_eq!(recording_fps(&config), 300);
+        assert_eq!(recording_fps(&config), crate::patch::DEFAULT_AGR_FPS);
         config.capture_mode = CaptureMode::DirectToVideo;
         assert_eq!(recording_fps(&config), 300);
     }

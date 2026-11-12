@@ -201,7 +201,7 @@ pub struct CapturePayload {
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
     /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
-    /// means "the same as `capture_fps`".
+    /// means `native::patch::DEFAULT_AGR_FPS`.
     #[serde(default)]
     pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
@@ -1280,6 +1280,9 @@ pub async fn start_capture_batch_impl(
     {
         return Err(err);
     }
+
+    // ── Guard: an AGR batch needs its own rate (the UI blocks it too) ─────────
+    crate::capture_guards::require_agr_rate(&config_from_payload(&payload))?;
 
     // ── Guard: separate HUD cannot be captured through mirv_movie_ffmpeg ──────
     // HLAE writes blank frames to the HUD stream on the FFmpeg path — measured
@@ -2577,11 +2580,32 @@ mod tests {
         assert_eq!(cfg.effective_agr_fps(), 60);
         assert!(!cfg.ffmpeg_capture);
 
-        // Absent from an older frontend: follows Capture FPS.
+        // Absent from an older frontend, or 0 (an empty box): AGR's own 30,
+        // never Capture FPS.
         let mut value = serde_json::to_value(sample_payload()).unwrap();
         value.as_object_mut().unwrap().remove("agr_fps");
         let payload: CapturePayload = serde_json::from_value(value).unwrap();
-        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 300);
+        assert_eq!(payload.capture_fps, 300);
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+        let mut payload = sample_payload();
+        payload.agr_fps = 0;
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_default_agr_fps() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/agr_rate.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const DEFAULT_AGR_FPS = {};",
+            native::patch::DEFAULT_AGR_FPS
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/agr_rate.js must say `{line}`"
+        );
     }
 
     #[test]
