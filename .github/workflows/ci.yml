@@ -10,7 +10,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, tmp/ci-skip-test-base]
     # Deliberately no paths-ignore for **.md/docs/**: dev-protection's
     # ruleset requires these three checks by name on every PR, and GitHub
     # only skips a workflow when *every* changed file matches
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.base_ref }}
+          BASE: ${{ github.base_ref == 'tmp/ci-skip-test-base' && 'dev' || github.base_ref }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
             git diff --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
