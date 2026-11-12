@@ -1,6 +1,10 @@
 /// Studio analyses demos for the game's Highlights tab (#565).
 #[cfg(windows)]
 pub mod analysis_server;
+/// Brings a game started through WMI to the front, as a child of Studio's
+/// would come.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bring_forward;
 /// Whether reading a file would download it from a cloud drive (#992).
 pub mod cloud_file;
 /// Releases the mouse a killed game left confined (#1095).
