@@ -11,6 +11,7 @@ import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
 import { sameDriveFolders } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
+import { effectiveAgrFps } from './agr_rate.js';
 
 /** Every setting the Project tab edits, by its settings-file name. The
  *  project's block holds each one (project_settings_logic.js's fields). */
@@ -54,11 +55,11 @@ export function rateKeyFor(mode) {
   return 'capture_fps';
 }
 
-/** The rate in effect for `mode` in `values`: AGR's 0 is "the same as
- *  Capture FPS", as the batch reads it. */
+/** The rate in effect for `mode` in `values`: AGR's 0 is DEFAULT_AGR_FPS
+ *  (agr_rate.js), never Capture FPS, as the batch reads it. */
 export function rateOf(values, mode) {
   const key = rateKeyFor(mode);
-  return key === 'agr_fps' ? (values.agr_fps || values.capture_fps) : values[key];
+  return key === 'agr_fps' ? effectiveAgrFps(values.agr_fps) : values[key];
 }
 
 /** The finished-clip codec setting for `mode`, or null for AGR, whose takes
@@ -96,7 +97,6 @@ const RATE_KEYS = ['capture_fps', 'obs_capture_fps', 'agr_fps'];
  */
 export function usablePending(start, pending) {
   const used = new Set([rateKeyFor(pending.capture_mode)]);
-  if (pending.capture_mode === 'agr' && pending.agr_fps === 0) used.add('capture_fps');
   const next = { ...pending };
   for (const key of RATE_KEYS) {
     const ok = isWhole(pending[key]) || (key === 'agr_fps' && pending[key] === 0);
@@ -132,10 +132,8 @@ export function pendingProblems(pending) {
   }
   const rateKey = rateKeyFor(pending.capture_mode);
   const rate = pending[rateKey];
-  // AGR's 0 means "the same as Capture FPS"; every other rate must be set.
+  // AGR's 0 means DEFAULT_AGR_FPS; every other rate must be set.
   if (!(isWhole(rate) || (rateKey === 'agr_fps' && rate === 0))) problems[rateKey] = S.BAD_RATE;
-  // AGR's 0 reads Capture FPS, which must then be usable.
-  else if (rateKey === 'agr_fps' && rate === 0 && !isWhole(pending.capture_fps)) problems[rateKey] = S.BAD_RATE;
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};
