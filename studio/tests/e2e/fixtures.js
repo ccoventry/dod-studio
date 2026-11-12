@@ -1,7 +1,7 @@
 // Shared Playwright `test` for every spec. It fails a test when the page throws
 // an uncaught error or leaves a promise rejection unhandled (both arrive as
 // `pageerror`), so a pane that crashes on boot can no longer pass quietly
-// against the IPC mock's `undefined` answers (#1411).
+// against the IPC mock's `undefined` answers.
 //
 // Import `test` and `expect` from here, never from '@playwright/test'.
 import { test as base, expect } from '@playwright/test';
