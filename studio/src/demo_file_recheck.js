@@ -79,7 +79,7 @@ export function createDemoFileRecheck({
       label: found.length === 1 ? STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON : STRINGS.MAIN.USE_ALL_FOUND_COPIES,
       onClick: () => useFoundCopies(found),
     };
-    showToast(STRINGS.MAIN.demoFilesGoneToast(marked.map(nameOf), found.length), 'warning', 12000, { action });
+    showToast(STRINGS.MAIN.demoFilesGoneToast(marked.map(nameOf), found.length, marked.some((d) => d.searchStopped)), 'warning', 12000, { action });
   }
 
   target.addEventListener('focus', () => {
@@ -102,9 +102,19 @@ export function createDemoFileRecheck({
     const missing = demos.filter((d) => d.missing);
     if (missing.length === 0) return true;
     const found = missing.filter((d) => d.foundAt).length;
-    showToast(STRINGS.MAIN.demoFilesMissing(missing.map(nameOf), found), 'error', 12000);
+    showToast(STRINGS.MAIN.demoFilesMissing(missing.map(nameOf), found, missing.some((d) => d.searchStopped)), 'error', 12000);
     return false;
   }
 
-  return { ensurePresent };
+  /**
+   * Looks at `demos`' files again and resolves to those that are missing,
+   * with no toast: for a caller that asks the user what to do about them
+   * (Review, review_missing_demos.js). A look that failed resolves to none.
+   */
+  async function lookMissing(demos) {
+    if ((await look(demos, { toastGone: false })) === null) return [];
+    return demos.filter((d) => d.missing);
+  }
+
+  return { ensurePresent, lookMissing };
 }

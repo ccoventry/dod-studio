@@ -54,6 +54,16 @@ export function demoFilesRecheckedLine({ checked, gone, back, found, elapsedMs }
     + `${gone.length} gone${few(gone)}, ${found} of them found elsewhere; ${back.length} back${few(back)}`;
 }
 
+/** Review reached a demo whose file is missing and the user skipped it. */
+export function reviewSkippedMissingLine(name, remaining) {
+  return `[review] skipped ${name}: its file is missing; reviewing the other ${remaining} demo(s)`;
+}
+
+/** What the user chose for a missing demo when Review reached it. */
+export function reviewMissingChoiceLine(name, choice) {
+  return `[review] ${name} is missing: ${choice}`;
+}
+
 /** Demos replaced on disk since they were scanned. */
 export function changedDemosLine(count, willRescan) {
   return `[project] ${count} demo(s) changed since they were scanned${willRescan ? ', rescanning' : ', left as they are'}`;

@@ -27,6 +27,10 @@ function cacheCounts(already, failed, upgraded = 0) {
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
+// The search for a moved demo ran out of time (or entries) before it had
+// looked everywhere (#1376): said wherever the search's answer is.
+const SEARCH_STOPPED_NOTE = 'The search for it stopped early, so a copy may be in a folder it did not reach. Use Locate… to pick the file.';
+
 export const STRINGS = {
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
@@ -2120,11 +2124,13 @@ export const STRINGS = {
       `${picked} isn't the ${name} that was scanned (its size or start is different), so this row's highlights won't line up with it.\n\nReplace the row with ${picked}? It's scanned fresh with its own highlights, and this row's statuses and notes are dropped.`,
     LOCATE_MISMATCH_CONFIRM: 'Replace with this demo',
     locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
-    missingDemosToast: (names) => {
+    missingDemosToast: (names, searchStopped = false) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
-      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
+      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
     },
+    // Appended to a missing-demo toast when the search for a copy stopped early.
+    SEARCH_STOPPED_NOTE,
     leftMissingToast: (names) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
@@ -2133,21 +2139,21 @@ export const STRINGS = {
     USE_ALL_FOUND_COPIES: 'Use all found copies',
     // Queued demos whose files went while Studio was open (demo_file_recheck.js);
     // `found` of them have the same file found under another name or folder.
-    demoFilesGoneToast: (names, found) => {
+    demoFilesGoneToast: (names, found, searchStopped = false) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
       const rows = names.length === 1 ? 'Its row has' : 'Each row has';
       const copy = found === 0 ? '' : ', or Use found copy where DoD Studio found the same file under another name';
-      return `No longer where the queue says: ${shown}${more}. ${rows} Locate… to point at it again${copy}.`;
+      return `No longer where the queue says: ${shown}${more}. ${rows} Locate… to point at it again${copy}.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
     },
     // Launch Preview, Review, Open in Demo Analyzer or Open Folder on a demo
     // whose file isn't there.
-    demoFilesMissing: (names, found) => {
+    demoFilesMissing: (names, found, searchStopped = false) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
       const one = names.length === 1;
       return `Not found: ${shown}${more}. ${one ? 'It was' : 'They were'} renamed, moved or deleted. `
-        + `Use Locate… on ${one ? 'its row' : 'their rows'} in the Master Demo Queue${found > 0 ? ', or Use found copy,' : ''} first.`;
+        + `Use Locate… on ${one ? 'its row' : 'their rows'} in the Master Demo Queue${found > 0 ? ', or Use found copy,' : ''} first.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
     },
     foundCopiesGoneToast: (names) =>
       `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
@@ -3094,6 +3100,17 @@ export const STRINGS = {
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     NOT_STARTED: 'The review was not started.',
+    // Review reached a demo whose file is missing (review_missing_demos.js).
+    MISSING_TITLE: 'Demo not found',
+    missingMessage: (name, searchStopped) =>
+      `${name} was renamed, moved or deleted, so it can't be reviewed. What now?`
+      + (searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''),
+    MISSING_LOCATE: 'Locate…',
+    MISSING_USE_FOUND: 'Use found copy',
+    MISSING_REMOVE: 'Remove',
+    MISSING_SKIP: 'Skip and keep reviewing',
+    MISSING_CANCEL: 'Cancel review',
+    NOTHING_LEFT_AFTER_SKIP: 'Nothing is left to review without the skipped demo(s).',
     // #1142: the in-game Review tab asked for a review of the demo it has loaded.
     FROM_GAME_SCANNING: 'Scanning the demo in DoD Studio...',
     FROM_GAME_STARTING: 'Starting the review...',

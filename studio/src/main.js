@@ -54,6 +54,7 @@ import { renderQueueFooter } from './queue_footer.js';
 import { startAppShortcuts } from './app_shortcuts.js';
 import { createProjectDemos } from './project_demos.js';
 import { createDemoFileRecheck } from './demo_file_recheck.js';
+import { createReviewMissingDemos } from './review_missing_demos.js';
 import { createQueueState } from './queue_state.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
@@ -273,7 +274,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
   });
   // A demo renamed, moved or deleted while Studio is open: demo_file_recheck.js.
-  const { ensurePresent: ensureDemoFiles } = createDemoFileRecheck({ getDemos: queue.getDemos, markDemosGone, markDemosBack,
+  const { ensurePresent: ensureDemoFiles, lookMissing } = createDemoFileRecheck({ getDemos: queue.getDemos, markDemosGone, markDemosBack,
     refreshQueue: queue.refreshAfterRelocation, useFoundCopies });
 
   // Demos that recorded more than one map (#217): queue_split.js.
@@ -392,7 +393,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     getRecorders: getQueueRecorders,
     recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
-    hltvPick, ensureDemoFiles,
+    hltvPick,
+    // Review reaching a demo whose file is gone asks what to do: review_missing_demos.js.
+    settleMissingDemos: createReviewMissingDemos({ getDemos: queue.getDemos, lookMissing, locateDemoByHand, useFoundCopies,
+      confirmTrackedRemove: (demo) => requestTrackedDeleteConfirm(demo), replaceDemos: queue.replace }),
   });
   // Right-click menu on the queue's rows: demo_context_menu.js.
   startDemoContextMenu({ startReview: reviewMode.startReview, ensureDemoFiles });

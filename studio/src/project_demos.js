@@ -62,6 +62,8 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       if (!demo) return null;
       Object.defineProperty(demo, 'missing', { ...runtime, value: true });
       Object.defineProperty(demo, 'foundAt', { ...runtime, value: m.candidate || null });
+      // The search ended on its limit before looking everywhere (#1376).
+      Object.defineProperty(demo, 'searchStopped', { ...runtime, value: !m.candidate && m.search_stopped_early === true });
       return demo;
     }).filter(Boolean);
   }
@@ -165,7 +167,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     refreshQueue(relocated.size > 0);
     const notFound = stillMissing.filter((m) => !m.candidate);
     if (notFound.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path))), 'warning', 10000);
+      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path)), notFound.some((m) => m.search_stopped_early)), 'warning', 10000);
     }
     if (leftFound.length > 0) {
       showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => fileNameOf(d.path))), 'warning', 15000, {
