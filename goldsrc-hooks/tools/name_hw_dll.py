@@ -23,9 +23,11 @@ against their `.so`: `DemoPlayer.dll` with `demoplayer.so` (it has RTTI).
 names correctly, a miss one it names wrongly.
 
 Usage:
-    python goldsrc-hooks/tools/name_hw_dll.py --hw <hw.dll> --so <sw.so|engine_i486.so>
+    python goldsrc-hooks/tools/name_hw_dll.py --hw <hw.dll> --so <hw.so|sw.so|engine_i486.so> [more .so ...]
         [--out FILE] [--check pre|anniversary] [--find NAME ...]
 
+With several `--so` files each gets its own report, then a combined one (the
+first listed wins where two name one rva; `--out` then writes the combined map).
 `--find` prints the `hw.dll` rva the map gives each named Linux function.
 Requires `pyelftools`, `pefile` and `capstone`.
 """
@@ -273,24 +275,63 @@ def self_named_agreement(names):
     return agree, disagree
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--hw", required=True, type=Path)
-    parser.add_argument("--so", required=True, type=Path)
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--check", choices=sorted(KNOWN))
-    parser.add_argument("--find", nargs="+", default=[])
-    args = parser.parse_args(argv)
+# The Linux build's name for a `KNOWN` function that has another there: the hand name
+# `PM_PlayerTraceEx` is `_PM_PlayerTrace`, and `CL_CheckGameDirectory` is inlined into the
+# function that builds the map-cycle hints (its strings sit in that one body).
+LINUX_NAME = {"PM_PlayerTraceEx": "_PM_PlayerTrace", "CL_CheckGameDirectory": "CL_BuildMapCycleListHints"}
 
+
+def base_name(name):
+    """`name` without GCC's clone suffixes (`.part.3`, `.constprop.1`, `.isra.0`)."""
+    return re.sub(r"(\.(part|constprop|isra|cold)\.\d+)+$", "", name)
+
+
+def merge_maps(maps):
+    """Combine per-`.so` maps `{rva: name}`, the first listed winning.
+
+    Returns (merged `{rva: (name, index of the map it came from)}`, disagreements
+    `[(rva, [name per map that names it])]` where two maps name one rva differently).
+    """
+    merged, disagreements = {}, []
+    for rva in sorted({r for m in maps for r in m}):
+        given = [(i, m[rva]) for i, m in enumerate(maps) if rva in m]
+        merged[rva] = (given[0][1], given[0][0])
+        if len({base_name(n) for _i, n in given}) > 1:
+            disagreements.append((rva, [n for _i, n in given]))
+    return merged, disagreements
+
+
+def check_merged(merged, known):
+    """[(name, known rva, verdict)] for a merged map: `hit`, `wrong` or `unnamed`.
+
+    `wrong`: the known rva carries another name, or the name sits on another rva.
+    """
+    by_name = {}
+    for rva, (name, _i) in merged.items():
+        by_name.setdefault(base_name(name), []).append(rva)
+    out = []
+    for name, rva in sorted(known.items(), key=lambda kv: kv[1]):
+        name = LINUX_NAME.get(name, name)
+        if rva in merged and base_name(merged[rva][0]) == name:
+            out.append((name, rva, "hit"))
+        elif rva in merged or name in by_name:
+            out.append((name, rva, "wrong"))
+        else:
+            out.append((name, rva, "unnamed"))
+    return out
+
+
+def report_one(args, so_path):
+    """Run the matcher for one `.so`, print its report, and return (names, {rva: name})."""
     dll = EngineDll(args.hw)
-    so = LinuxLibrary(args.so)
+    so = LinuxLibrary(so_path)
     dll.scan_all()
     so.scan_all()
     names = build_engine_map(dll, so)
-    if args.out:
+    if args.out and len(args.so) == 1:
         with open(args.out, "w", encoding="utf-8") as f:
             write_map(names, f)
-    summary = name_client_dll.summary(names).replace("client.dll", "hw.dll").replace("client.so", args.so.name)
+    summary = name_client_dll.summary(names).replace("client.dll", args.hw.name).replace("client.so", so_path.name)
     by_method = Counter(m for _so, m in names.by_dll.values())
     # `summary` lists `name_client_dll`'s methods; this one's differ.
     lines = [line for line in summary.splitlines() if not line.startswith("by method")]
@@ -314,6 +355,52 @@ def main(argv=None):
         for rva, so_start, method in found or [(None, None, None)]:
             where = f"hw.dll+{rva:#x} ({method}; Linux {so_start:#x})" if rva is not None else "not named"
             print(f"{wanted}: {where}")
+    return names, {rva: names.so.name(so_start)[0] for rva, (so_start, _m) in names.by_dll.items()}
+
+
+def report_merged(args, dll, maps):
+    """The combined report for several `.so` files (first listed wins on a shared rva)."""
+    merged, disagreements = merge_maps(maps)
+    text_bytes = dll.text[1] - dll.text[0]
+    named_bytes = sum(dll.functions[r].size for r in merged)
+    print(f"combined ({len(maps)} files): {len(merged)} of {len(dll.functions)} functions named "
+          f"({100 * named_bytes / text_bytes:.1f}% of .text bytes); "
+          f"{len(disagreements)} rvas named differently by two files", file=sys.stderr)
+    for i, m in enumerate(maps):
+        only = sum(1 for r in m if merged[r][1] == i)
+        print(f"  {args.so[i].name}: {len(m)} named, {only} used", file=sys.stderr)
+    for rva, given in disagreements:
+        print(f"  disagree {rva:#x}: {' / '.join(given)}")
+    if args.check:
+        rows = check_merged(merged, KNOWN[args.check])
+        counts = Counter(v for _n, _r, v in rows)
+        for name, rva, verdict in rows:
+            print(f"combined {verdict:8} {name:26} known {rva:#x}")
+        print(f"combined: {counts['hit']} hit, {counts['wrong']} wrong, {counts['unnamed']} unnamed, "
+              f"of {len(rows)} known")
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            for rva, (name, i) in merged.items():
+                f.write(f"{rva:#x}\t{name}\t{args.so[i].name}\n")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--hw", required=True, type=Path)
+    parser.add_argument("--so", required=True, type=Path, nargs="+",
+                        help="one or more Linux files; several are also combined, the first winning")
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--check", choices=sorted(KNOWN))
+    parser.add_argument("--find", nargs="+", default=[])
+    args = parser.parse_args(argv)
+
+    maps, first = [], None
+    for so_path in args.so:
+        names, simple = report_one(args, so_path)
+        first = first or names
+        maps.append(simple)
+    if len(maps) > 1:
+        report_merged(args, first.dll, maps)
 
 
 if __name__ == "__main__":
