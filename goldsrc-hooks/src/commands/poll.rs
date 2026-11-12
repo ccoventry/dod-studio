@@ -295,6 +295,11 @@ fn describe_spectator_crosshair(on: bool) -> &'static str {
 /// `deathmsg::poll`, `spectator_target::poll` and `msglog::poll` below do
 /// not depend on cvars existing at all and must run either way (issue #324).
 pub fn poll() {
+    // The hang reporter's heartbeat: only frames the engine thread draws,
+    // not the fallback timer thread's ticks.
+    if engine::hud_frame_driving() {
+        crate::hang::beat();
+    }
     // Cvar-backed polling: each reads a `CVAR_*` pointer that stays null
     // when its cvar did not register, and then does nothing.
     // One cvar, several readers: the viewmodel's animations here, and

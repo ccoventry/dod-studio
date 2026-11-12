@@ -247,6 +247,13 @@ pub fn install() {
     if let Some(times) = register(crate::frame_times::NAME, "0") {
         crate::frame_times::CVAR.set(times);
     }
+    // On by default, like the crash recorder: it only reads, and a freeze
+    // with nothing recorded can't be fixed. The watchdog runs either way; an
+    // unregistered cvar reads as the default.
+    if let Some(hang) = register(crate::hang::NAME, &crate::hang::DEFAULT_SECONDS.to_string()) {
+        crate::hang::CVAR.set(hang);
+    }
+    crate::hang::start();
     if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
         crate::hlae_window::CLOAK_CVAR.set(cloak);
     }

@@ -317,6 +317,7 @@ mod game_folder;
 mod gl_zoom;
 mod gun_log;
 mod hand_signals;
+mod hang;
 mod headshot_sound;
 mod hide_asset;
 mod hint_panel;

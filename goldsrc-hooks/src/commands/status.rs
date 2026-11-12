@@ -190,6 +190,9 @@ fn status_text() -> String {
     if let Some(cache) = crate::demoplayer_dict_cache::status_line() {
         lines.push(cache);
     }
+    if let Some(hang) = crate::hang::status_line() {
+        lines.push(hang);
+    }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
