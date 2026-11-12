@@ -85,7 +85,7 @@ in `strafe_twitch.rs`), `spec_xray.rs` draws him once as a shell with:
   12.75 units), so the glow's edge stays about the same on screen.
 
 **Every player on the map, in an HLTV demo.** The engine drops each entity
-outside the PVS of one point before the renderer sees it (`CL_AddVisibleEntity`,
+outside the PVS of one point before the renderer sees it (`ClientDLL_AddEntity`,
 PRE `hw+0xbae0`, POST `hw+0x1969b0`; see `goldsrc_spectator_camera.md`). That
 check is skipped while `dev_overview` is set (PRE `hw+0x20920`, POST
 `+0x1ad020`: `dev_overview` and, in an HLTV demo, no `sv_cheats` needed), and

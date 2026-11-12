@@ -4,7 +4,7 @@
 `vcr_sync.rs` writes `CDemoPlayerDialog`'s slider and `m_iLastValue` while
 the VCR bar is hidden (#663). For each GameUI.dll whose TimeDateStamp and
 SizeOfImage match a row of its `BUILDS`, this proves that the dialog's
-`OnThink` really is the code the fix mirrors:
+`Update` (which `OnThink` calls) really is the code the fix mirrors:
 
   1. It loads the slider from `[this + slider]` and calls slot 0x220
      (SetRange), 0x21c (GetValue) and 0x218 (SetValue) on it.
@@ -90,10 +90,10 @@ def check(path, rows):
             for k in range(len(ops) - 1))
         store_ok = any(o.startswith("mov dword ptr [") and f"+ {last:#x}]," in o for o in ops)
         if cmp_ok and store_ok:
-            print(f"  ok   {name}: OnThink's slider check at +{x.address - base:#x} uses slider "
+            print(f"  ok   {name}: Update's slider check at +{x.address - base:#x} uses slider "
                   f"+{slider:#x}, last value +{last:#x}, player +{player:#x}")
             return True
-    print(f"  FAIL {name}: no OnThink matching slider +{slider:#x} / last +{last:#x} / player +{player:#x}")
+    print(f"  FAIL {name}: no Update matching slider +{slider:#x} / last +{last:#x} / player +{player:#x}")
     return False
 
 

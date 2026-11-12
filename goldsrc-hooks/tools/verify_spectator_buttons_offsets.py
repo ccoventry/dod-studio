@@ -145,7 +145,7 @@ def main() -> int:
     for bit in (0x4, 0x20, 0x2, 0x801):
         check(bit in tests, f"it tests button bits {bit:#x}")
     calls = [i for i in body if i.mnemonic == "call" and i.operands[0].type == capstone.x86.X86_OP_IMM]
-    check(len(calls) >= 3, f"it calls the target stepper and SetMode ({len(calls)} direct calls)")
+    check(len(calls) >= 3, f"it calls the target stepper and SetModes ({len(calls)} direct calls)")
 
     callers = []
     for m in re.finditer(rb"\xe8", code):
