@@ -487,6 +487,21 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(text_vt + 4 * get_text) - ui.base)
     check(got == "ret 8", f"TextEntry's slot {get_text} (GetText(buf, len)) returns with {got!r}")
 
+    # #1311: the review form sizes its boxes from their font. GetStartDrawIndex
+    # (slot 190) shows GetTall() / (GetFontTall(font) + 1) lines, reading the
+    # font at text_entry_font.
+    check(text_vt == build["text_entry_vftable"],
+          f"TextEntry's vftable is text_entry_vftable +{(text_vt or 0):#x}")
+    font = build["text_entry_font"]
+    font_tall = 4 * vwl.rust_usize(src, "SURFACE_GET_FONT_TALL")
+    draw = ui.body(ui.u32(text_vt + 4 * 190) - ui.base, 0x70)
+    reads = any(re.fullmatch(rf"mov e\w\w, dword ptr \[esi \+ {hex(font)}\]", x) for x in draw)
+    asks = any(re.fullmatch(rf"call dword ptr \[e\w\w \+ {hex(font_tall)}\]", x) for x in draw)
+    divides = "idiv edi" in draw and ("inc edi" in draw or "lea edi, [eax + 1]" in draw)
+    check(reads and asks and divides,
+          f"TextEntry slot 190 divides its height by the font's tall + 1: font at +{font:#x} "
+          f"(text_entry_font), ISurface slot {font_tall // 4} (SURFACE_GET_FONT_TALL)")
+
     # 17: the help line's Label::SetText.
     label_vt = ui.vftable("Label@vgui2")
     set_text = vwl.rust_usize(src, "LABEL_SLOT_SET_TEXT")

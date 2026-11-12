@@ -221,9 +221,110 @@ pub(crate) fn scaled_rect(
     (s(rect.0), s(rect.1), s(rect.2), s(rect.3))
 }
 
+/// How much taller than its font a text box is made. A vgui2 `TextEntry`
+/// shows `tall / (font tall + 1)` lines, and one that shows none reads past
+/// its line-break list on a click: on the Anniversary build, whose font is as
+/// tall as the layout file's boxes (24 px at 720 lines), that put up GameUI's
+/// "Assertion failed" dialogs (#1311). A few pixels more than the one needed
+/// keeps the text off the box's edges.
+pub(crate) const BOX_SPARE_PX: i32 = 4;
+
+/// A panel's place and size, `(x, y, wide, tall)`.
+pub(crate) type Rect = (i32, i32, i32, i32);
+
+/// The form's controls placed so each text box is [`BOX_SPARE_PX`] taller
+/// than its font (#1311). Each control is its `(x, y, wide, tall)` and, for a
+/// text box, its font's height. A row holding a box too short for its font
+/// grows by what that box lacks, every control starting on that row with it,
+/// and everything below the row moves down as much. Returns the new places
+/// and how much taller the form gets; once every box fits, nothing changes.
+pub(crate) fn fit_boxes(controls: &[(Rect, Option<i32>)]) -> (Vec<Rect>, i32) {
+    // Each row to grow: its top, its bottom before growing, and by how much.
+    let mut rows: Vec<(i32, i32, i32)> = Vec::new();
+    for &((_, y, _, tall), font) in controls {
+        let Some(font) = font.filter(|f| *f > 0) else {
+            continue;
+        };
+        let grow = font + BOX_SPARE_PX - tall;
+        if grow <= 0 {
+            continue;
+        }
+        match rows.iter_mut().find(|r| r.0 == y) {
+            Some(row) => {
+                row.1 = row.1.max(y + tall);
+                row.2 = row.2.max(grow);
+            }
+            None => rows.push((y, y + tall, grow)),
+        }
+    }
+    let placed = controls
+        .iter()
+        .map(|&((x, y, wide, tall), _)| {
+            let grow: i32 = rows.iter().filter(|r| r.0 == y).map(|r| r.2).sum();
+            let down: i32 = rows.iter().filter(|r| y >= r.1).map(|r| r.2).sum();
+            (x, y + down, wide, tall + grow)
+        })
+        .collect();
+    (placed, rows.iter().map(|r| r.2).sum())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ReviewForm.res`'s rows: title, Kills / from / to / count, Note / box,
+    /// hint and buttons. The boxes are 24 px tall.
+    fn form(font: Option<i32>) -> Vec<(Rect, Option<i32>)> {
+        vec![
+            ((10, 8, 500, 20), None),
+            ((10, 34, 44, 24), None),
+            ((58, 34, 36, 24), font),
+            ((122, 34, 36, 24), font),
+            ((164, 34, 120, 24), None),
+            ((10, 64, 44, 24), None),
+            ((58, 64, 452, 24), font),
+            ((10, 96, 340, 24), None),
+            ((440, 96, 70, 24), None),
+        ]
+    }
+
+    #[test]
+    fn boxes_as_tall_as_their_font_grow_and_the_rows_below_move_down() {
+        // The Anniversary build at 720 lines: a 24 px font in 24 px boxes.
+        let (placed, grow) = fit_boxes(&form(Some(24)));
+        assert_eq!(grow, 8);
+        assert_eq!(placed[0], (10, 8, 500, 20));
+        assert_eq!(placed[1], (10, 34, 44, 28));
+        assert_eq!(placed[2], (58, 34, 36, 28));
+        assert_eq!(placed[4], (164, 34, 120, 28));
+        assert_eq!(placed[5], (10, 68, 44, 28));
+        assert_eq!(placed[6], (58, 68, 452, 28));
+        assert_eq!(placed[7], (10, 104, 340, 24));
+        assert_eq!(placed[8], (440, 104, 70, 24));
+        // Every box now shows a line: tall / (font + 1) >= 1.
+        assert!(placed[2].3 / 25 >= 1 && placed[6].3 / 25 >= 1);
+    }
+
+    #[test]
+    fn boxes_that_fit_their_font_stay_as_laid_out() {
+        // The pre-Anniversary build's 16 px font.
+        let laid_out: Vec<_> = form(None).iter().map(|c| c.0).collect();
+        assert_eq!(fit_boxes(&form(Some(16))), (laid_out.clone(), 0));
+        // A font not known yet (0 before the box's first layout).
+        assert_eq!(fit_boxes(&form(Some(0))), (laid_out.clone(), 0));
+        assert_eq!(fit_boxes(&form(None)), (laid_out, 0));
+    }
+
+    #[test]
+    fn fitting_twice_changes_nothing_more() {
+        let (once, _) = fit_boxes(&form(Some(48)));
+        let again: Vec<_> = once
+            .iter()
+            .zip(form(Some(48)))
+            .map(|(&rect, (_, font))| (rect, font))
+            .collect();
+        assert_eq!(fit_boxes(&again), (once, 0));
+    }
 
     #[test]
     fn empty_boxes_keep_the_range() {

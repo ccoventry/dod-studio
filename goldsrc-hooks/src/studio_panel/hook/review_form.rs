@@ -16,10 +16,19 @@
 //! keeps the keys a box has focus for; `HUD_Key_Event` never sees them).
 //! Hidden, the keys are the game's again. A click on its buttons worked on
 //! the pre-Anniversary build only (the Anniversary build's mouse is raw
-//! input, and a click on a box there trips GameUI's asserts, so the form
-//! takes no mouse there: `Build::clicks_over_demo`), so everything works
-//! from the keyboard: Tab moves between the boxes (`tabPosition` in the
-//! layout), Enter saves, Esc cancels.
+//! input), so everything works from the keyboard: Tab moves between the
+//! boxes (`tabPosition` in the layout), Enter saves, Esc cancels.
+//!
+//! ## Boxes taller than their font
+//!
+//! A text box shows `tall / (font tall + 1)` lines, and a click on one that
+//! shows none reads past its line-break list: on the Anniversary build, whose
+//! font grows with the screen (24 px at 720 lines, as tall as the layout
+//! file's boxes), that put up GameUI's "Assertion failed" dialogs (#1311).
+//! The font is only known once the shown form's first layout has given the
+//! boxes theirs, so from then on each frame [`fit_boxes`] grows any box
+//! shorter than its font + `BOX_SPARE_PX`, with its row, moves the rows below
+//! down and lengthens the form, and only then lets the form take clicks.
 //!
 //! ## Keys and buttons
 //!
@@ -40,7 +49,7 @@
 //! while it shows, is put away again: Esc on the form means the form.
 
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::*;
 use crate::review_form::FormView;
@@ -52,6 +61,8 @@ const FROM: &str = "FormFrom";
 const TO: &str = "FormTo";
 const KILL_COUNT: &str = "FormKillCount";
 const NOTE: &str = "FormNote";
+/// The text boxes, sized to their font ([`fit_boxes`]).
+const BOXES: [&str; 3] = [FROM, TO, NOTE];
 const HINT: &str = "FormHint";
 const SAVE: &str = "save";
 const CANCEL: &str = "cancel";
@@ -65,6 +76,9 @@ const TOP_PERCENT: i32 = 55;
 
 /// The form we built, or 0.
 static FORM: AtomicUsize = AtomicUsize::new(0);
+/// Whether the shown form's boxes fit their fonts since it opened, so it
+/// takes clicks ([`fit_boxes`]).
+static FITTED: AtomicBool = AtomicBool::new(false);
 /// The class's own `OnKeyCodeTyped` and `OnCommand`, for what isn't ours.
 static OWN_ON_KEY: AtomicUsize = AtomicUsize::new(0);
 static OWN_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
@@ -106,6 +120,8 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     if let Some(why) = reason_to_close(vgui, vp) {
                         vgui.set_visible(vp, false);
                         close(why);
+                    } else if !FITTED.load(Ordering::Acquire) {
+                        fit_boxes(vgui, vp);
                     }
                 }
                 None => close("its window has gone"),
@@ -305,12 +321,12 @@ unsafe fn open(vgui: &Vgui) -> Result<String, String> {
         front(vgui.panel, vp);
         let keyboard: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
         keyboard(vgui.panel, vp, 1);
-        // No clicks where they trip GameUI's asserts (`Build::clicks_over_demo`):
-        // vgui2 routes no click to a panel, or its children, that takes no
-        // mouse input, so the form is keyboard-only there, as its hint says.
-        let clicks = gameui().is_ok_and(|(_, build)| build.clicks_over_demo);
-        let mouse: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_MOUSE_INPUT_ENABLED);
-        mouse(vgui.panel, vp, clicks as u32);
+        // No clicks until the boxes fit their fonts ([`fit_boxes`]): vgui2
+        // routes no click to a panel, or its children, that takes no mouse
+        // input, and a click on a box too short for its font trips GameUI's
+        // asserts.
+        FITTED.store(false, Ordering::Release);
+        take_clicks(vgui, vp, false);
         if let Some(from) = vgui.child_named(vp, FROM) {
             let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
             focus(vgui.panel, from, 0);
@@ -330,6 +346,83 @@ unsafe fn open(vgui: &Vgui) -> Result<String, String> {
         );
         set_showing(Some(view));
         Ok(note)
+    }
+}
+
+/// `ISurface::GetFontTall(HFont)`.
+type FontTallFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
+
+/// Whether the form, and so its boxes and buttons, takes clicks.
+unsafe fn take_clicks(vgui: &Vgui, vp: Vpanel, on: bool) {
+    unsafe {
+        let mouse: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_MOUSE_INPUT_ENABLED);
+        mouse(vgui.panel, vp, on as u32);
+    }
+}
+
+/// A text box's font height, once its first layout has given it a font;
+/// `None` before that, or for a control that isn't a `TextEntry`.
+unsafe fn box_font_tall(vgui: &Vgui, vp: Vpanel) -> Option<i32> {
+    let (base, build) = gameui().ok()?;
+    unsafe {
+        let object = vgui.object(vp);
+        if object.is_null() || *(object as *const usize) != base + build.text_entry_vftable {
+            return None;
+        }
+        let font = *((object as usize + build.text_entry_font) as *const u32);
+        if font == 0 {
+            return None;
+        }
+        let font_tall: FontTallFn = slot(vgui.surface, SURFACE_GET_FONT_TALL);
+        Some(font_tall(vgui.surface, font)).filter(|&tall| tall > 0)
+    }
+}
+
+/// Makes every box taller than its font, moving the rows below down and
+/// lengthening the form (`review_form::fit_boxes`), then lets the form take
+/// clicks. Waits, keyboard-only, while a box's font isn't known yet; a
+/// layout without the three boxes stays keyboard-only.
+unsafe fn fit_boxes(vgui: &Vgui, vp: Vpanel) {
+    unsafe {
+        let controls: Vec<(Vpanel, crate::review_form::Rect, Option<i32>)> = laid_out_controls()
+            .filter_map(|name| {
+                let child = vgui.child_named(vp, name)?;
+                let font = if BOXES.contains(&name) {
+                    box_font_tall(vgui, child)
+                } else {
+                    None
+                };
+                Some((child, vgui.rect(child), font))
+            })
+            .collect();
+        if controls.iter().filter(|c| c.2.is_some()).count() < BOXES.len() {
+            return;
+        }
+        let laid_out: Vec<_> = controls.iter().map(|c| (c.1, c.2)).collect();
+        let (placed, grow) = crate::review_form::fit_boxes(&laid_out);
+        let boxes: Vec<String> = controls
+            .iter()
+            .zip(&placed)
+            .filter_map(|(c, rect)| {
+                c.2.map(|font| format!("{} px for a {font} px font", rect.3))
+            })
+            .collect();
+        if grow > 0 {
+            for (control, rect) in controls.iter().zip(placed) {
+                vgui.place(control.0, rect);
+            }
+            let (x, y, wide, tall) = vgui.rect(vp);
+            vgui.place(vp, (x, y, wide, tall + grow));
+            trace(&format!(
+                "made the boxes taller than their font, the form {grow} px taller ({} px): {}",
+                tall + grow,
+                boxes.join(", ")
+            ));
+        } else {
+            trace(&format!("the boxes fit their font: {}", boxes.join(", ")));
+        }
+        take_clicks(vgui, vp, true);
+        FITTED.store(true, Ordering::Release);
     }
 }
 
