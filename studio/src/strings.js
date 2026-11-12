@@ -14,6 +14,8 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+import { DEFAULT_AGR_FPS } from './agr_rate.js';
+
 /**
  * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
  * (#569). `already` counts the upgraded ones too: they are in the cache by
@@ -459,7 +461,7 @@ export const STRINGS = {
         'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The sound of each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
     AGR_FPS_LABEL: 'AGR FPS:',
     AGR_FPS_TITLE:
-        'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
+        `How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300, and a high rate makes Blender renders far slower. Leave empty for ${DEFAULT_AGR_FPS}, whatever Capture FPS says.`,
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',

@@ -18,6 +18,7 @@ import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
 import { captureRateOf } from './take_record.js';
+import { effectiveAgrFps } from './agr_rate.js';
 import { STRINGS } from './strings.js';
 import { MAX_PROBLEM_PATHS_SHOWN } from './capture_pane_logic.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
@@ -229,7 +230,7 @@ export async function refreshLaunchGuard(state) {
   // batches that fit with room to spare.
   const captureMode = document.querySelector('#config-capture-mode')?.value;
   const agrMode = captureMode === 'agr';
-  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
+  const agrFpsVal = effectiveAgrFps(numberField('#config-agr-fps', 0, { integer: true, positive: true }));
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -450,8 +451,8 @@ function currentCaptureSetup() {
     mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
-    // An empty AGR FPS records at Capture FPS, as the batch does.
-    agrFps: numberField('#config-agr-fps', numberField('#config-capture-fps', 300, { integer: true, positive: true }), { integer: true, positive: true }),
+    // An empty AGR FPS records at DEFAULT_AGR_FPS, as the batch does.
+    agrFps: effectiveAgrFps(numberField('#config-agr-fps', 0, { integer: true, positive: true })),
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
@@ -600,7 +601,7 @@ function initImportCfgButton() {
 export function batchSettingsPayload(state) {
   const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
   const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-  // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+  // Empty is 0, DEFAULT_AGR_FPS — resolved by the backend.
   const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
   const preRollVal = numberField('#config-pre-roll', 5.0);
   const postRollVal = numberField('#config-post-roll', 1.0);

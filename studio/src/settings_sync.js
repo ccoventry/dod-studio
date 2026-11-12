@@ -44,7 +44,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 120, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    // 0 = empty = DEFAULT_AGR_FPS (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 5.0);
     const postRoll = numberField('#config-post-roll', 1.0);
@@ -272,7 +272,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const selectEl = document.querySelector('#config-obs-recording-quality');
     if (selectEl) selectEl.value = settings.obs_recording_quality;
   }
-  // 0 is "the same as Capture FPS" and stays an empty box.
+  // 0 is DEFAULT_AGR_FPS and stays an empty box, whose placeholder shows
+  // that number (config_wiring.js).
   if (settings.agr_fps > 0) {
     const inputEl = document.querySelector('#config-agr-fps');
     if (inputEl) inputEl.value = settings.agr_fps;
