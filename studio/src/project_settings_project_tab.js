@@ -87,10 +87,10 @@ function chips(name, choices, picked, onPick) {
 }
 
 /** A number box: `onValue(number|NaN)` on every keystroke. */
-function numberBox(name, value, onValue, { step = '1', width = '84px', title } = {}) {
+function numberBox(name, value, onValue, { step = '1', width = '84px', title, placeholder = '' } = {}) {
   const input = el('input', {
     type: 'number', class: 'ps-number', step, value: value === undefined || value === null ? '' : String(value),
-    title: title || '', dataset: { field: name },
+    title: title || '', placeholder, dataset: { field: name },
   });
   input.style.width = width;
   input.addEventListener('input', () => onValue(input.value.trim() === '' ? NaN : Number(input.value)));
@@ -154,7 +154,7 @@ export function createProjectTab({ getState, onEdit }) {
     })];
     if (picked === 'custom') {
       controls.push(el('div', { class: 'ps-inline' }, [
-        numberBox(key, rate, (v) => onEdit({ [key]: v })), unit(S.FPS_UNIT),
+        numberBox(key, rate, (v) => onEdit({ [key]: v }), mode === 'agr' ? { placeholder: S.AGR_RATE_PLACEHOLDER } : {}), unit(S.FPS_UNIT),
       ]));
     }
     // AGR records positions, not frames; its own rate is the one that counts (R14).

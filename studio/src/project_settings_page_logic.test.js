@@ -96,10 +96,15 @@ describe('a rate typed badly under a mode that is then left', () => {
   });
 });
 
-describe('pendingProblems and the AGR default', () => {
-  it("lets AGR's 0 through whatever Capture FPS holds: 0 is 30, not Capture FPS", () => {
+describe('pendingProblems and the blank AGR rate', () => {
+  it("refuses AGR's 0 under AGR mode, whatever Capture FPS holds", () => {
     const start = startingValues(form(), null, 'pc-a');
-    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: 0, capture_fps: NaN })).toEqual({});
+    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: 0, capture_fps: 300 })).toEqual({ agr_fps: S.AGR_RATE_REQUIRED });
+    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: NaN })).toEqual({ agr_fps: S.AGR_RATE_REQUIRED });
+  });
+  it('ignores a blank AGR rate under the other modes', () => {
+    const start = startingValues(form(), null, 'pc-a');
+    expect(pendingProblems({ ...start, capture_mode: 'frame_sequence', agr_fps: 0 })).toEqual({});
   });
 });
 
@@ -121,9 +126,10 @@ describe('pendingProblems', () => {
     expect(pendingProblems({ ...ok(), capture_mode: 'obs', obs_capture_fps: 1.5 })).toEqual({ obs_capture_fps: S.BAD_RATE });
   });
 
-  it("lets AGR's 0 stand for AGR's own default", () => {
-    expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: 0 })).toEqual({});
-    expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: NaN })).toEqual({ agr_fps: S.BAD_RATE });
+  it('wants AGR to have a rate of its own', () => {
+    expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: 0 })).toEqual({ agr_fps: S.AGR_RATE_REQUIRED });
+    expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: 1.5 })).toEqual({ agr_fps: S.BAD_RATE });
+    expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: 30 })).toEqual({});
   });
 
   it('refuses negative or blank seconds', () => {
@@ -193,9 +199,9 @@ describe('the chips', () => {
     expect(rateKeyFor('direct_to_video')).toBe('capture_fps');
   });
 
-  it("shows AGR's 0 as the 30 the batch records at, never Capture FPS", () => {
-    expect(rateOf({ agr_fps: 0, capture_fps: 300 }, 'agr')).toBe(30);
-    expect(rateOf({ capture_fps: 300 }, 'agr')).toBe(30);
+  it("shows AGR's 0 as blank, never Capture FPS or an invented 30", () => {
+    expect(rateOf({ agr_fps: 0, capture_fps: 300 }, 'agr')).toBeUndefined();
+    expect(rateOf({ capture_fps: 300 }, 'agr')).toBeUndefined();
     expect(rateOf({ agr_fps: 60, capture_fps: 300 }, 'agr')).toBe(60);
   });
 

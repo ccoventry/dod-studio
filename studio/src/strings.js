@@ -2026,6 +2026,8 @@ export const STRINGS = {
 
     BAD_SIZE: 'Width and height must be whole numbers above 0.',
     BAD_RATE: 'Enter a whole number of frames a second above 0.',
+    AGR_RATE_REQUIRED: 'Set AGR positions a second: an AGR capture will not start without it.',
+    AGR_RATE_PLACEHOLDER: 'e.g. 30',
     BAD_SECONDS: 'Enter 0 or more seconds.',
     badKillGaps: (max) => `Gaps must be over 0 s, sped up more than 1x and at most ${max}x.`,
   },

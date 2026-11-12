@@ -24,7 +24,7 @@ const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 const KINDS = {
   mode: (v) => (CAPTURE_MODES.includes(v) ? v : undefined),
   size: (v) => (Number.isInteger(v) && v > 0 ? v : undefined),
-  // AGR's 0 is DEFAULT_AGR_FPS (agr_rate.js).
+  // AGR's 0 is "not set": the page refuses it under AGR mode.
   rateOrZero: (v) => (Number.isInteger(v) && v >= 0 ? v : undefined),
   seconds: (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined),
   flag: (v) => (typeof v === 'boolean' ? v : undefined),

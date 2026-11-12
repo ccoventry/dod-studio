@@ -145,8 +145,16 @@ test('AGR shows its own positions a second, and has nothing to finish', async ({
   await openPage(page);
   await chip(page, 'capture_mode', 'agr').click();
   await expect(pageRoot(page).locator('[data-row="agr_fps"]')).toContainText('AGR positions a second');
-  // No AGR rate set (Capture FPS is 120): the row shows the 30 the batch uses.
-  await expect(pageRoot(page).locator('[data-field="agr_fps"]')).toHaveValue('30');
+  // No AGR rate set (Capture FPS is 120): the box stays blank with a hint, and
+  // the page says the rate is needed.
+  const agrBox = pageRoot(page).locator('[data-field="agr_fps"]');
+  await expect(agrBox).toHaveValue('');
+  await expect(agrBox).toHaveAttribute('placeholder', 'e.g. 30');
+  await expect(footer(page, 'apply')).toBeDisabled();
+  await expect(footer(page, 'ok')).toBeDisabled();
+  await expect(pageRoot(page).locator('[data-row="agr_fps"] .ps-problem')).toContainText('AGR positions a second');
+  await agrBox.fill('30');
+  await expect(footer(page, 'apply')).toBeEnabled();
   await expect(pageRoot(page).locator('[data-chips="finish"]')).toHaveCount(0);
 });
 

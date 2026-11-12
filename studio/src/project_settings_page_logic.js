@@ -11,7 +11,6 @@ import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
 import { sameDriveFolders } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
-import { effectiveAgrFps } from './agr_rate.js';
 
 /** Every setting the Project tab edits, by its settings-file name. The
  *  project's block holds each one (project_settings_logic.js's fields). */
@@ -55,11 +54,13 @@ export function rateKeyFor(mode) {
   return 'capture_fps';
 }
 
-/** The rate in effect for `mode` in `values`: AGR's 0 is DEFAULT_AGR_FPS
- *  (agr_rate.js), never Capture FPS, as the batch reads it. */
+/** The rate in effect for `mode` in `values`. AGR has no default to show: a
+ *  blank (0) AGR rate is `undefined`, which the page draws as an empty box
+ *  and pendingProblems refuses, since the batch will not start without one. */
 export function rateOf(values, mode) {
   const key = rateKeyFor(mode);
-  return key === 'agr_fps' ? effectiveAgrFps(values.agr_fps) : values[key];
+  if (key !== 'agr_fps') return values[key];
+  return Number.isInteger(values.agr_fps) && values.agr_fps > 0 ? values.agr_fps : undefined;
 }
 
 /** The finished-clip codec setting for `mode`, or null for AGR, whose takes
@@ -132,8 +133,9 @@ export function pendingProblems(pending) {
   }
   const rateKey = rateKeyFor(pending.capture_mode);
   const rate = pending[rateKey];
-  // AGR's 0 means DEFAULT_AGR_FPS; every other rate must be set.
-  if (!(isWhole(rate) || (rateKey === 'agr_fps' && rate === 0))) problems[rateKey] = S.BAD_RATE;
+  // Every rate the mode uses must be set, AGR's too: its blank (0) is a
+  // problem of its own, since an AGR batch will not start without a rate.
+  if (!isWhole(rate)) problems[rateKey] = rateKey === 'agr_fps' && !(rate > 0) ? S.AGR_RATE_REQUIRED : S.BAD_RATE;
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};
