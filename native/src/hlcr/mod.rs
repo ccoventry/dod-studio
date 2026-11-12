@@ -15,5 +15,6 @@ pub mod take_frames;
 pub mod take_length;
 pub mod take_meta;
 pub mod take_plan;
+pub mod take_settings;
 
 pub use autosave::{RenderJob, RenderJobStatus, RenderSessionData};

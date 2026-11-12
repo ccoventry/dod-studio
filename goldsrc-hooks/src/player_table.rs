@@ -11,9 +11,10 @@
 //!
 //! The rule, the same for both demo types: a player in the table gets their
 //! PNG and their crosshair; anyone else gets the fallbacks. Sprays fall back
-//! per demo type -- POV: the game's own (the spray the demo saved), one PNG,
-//! or none; HLTV: one PNG or none (`game` there is the engine's bullet hole,
-//! which is what an HLTV demo draws with no image). The crosshair falls back
+//! per demo type to one PNG or none, and `game`, a fallback with no PNG
+//! picked, is the spray the demo saved or else none (the engine's bullet hole
+//! with the table not in use). A lambda, which names no player, is decided
+//! here too ([`Table::lambda_choice`]). The crosshair falls back
 //! to the game's own (the viewer's `cl_xhair_style` tile of
 //! `customXHair.spr`) or one sprite and tile.
 
@@ -318,6 +319,19 @@ impl Table {
         }
     }
 
+    /// What a lambda becomes: a picture or nothing, never the game's own.
+    /// `recorder` names the recorder of a POV demo when the lambda is theirs;
+    /// any other lambda names no player, so it gets what a player not listed
+    /// gets. A lambda is never a spray the demo saved, so "From the demo"
+    /// finds none for it.
+    pub fn lambda_choice(&self, recorder: Option<(&str, u64)>, hltv: bool) -> Choice {
+        let choice = match recorder {
+            Some((name, steam_id)) => self.choose(false, name, steam_id),
+            None => self.fallback(hltv),
+        };
+        self.resolve(choice, false, hltv)
+    }
+
     /// The crosshair row for a player.
     pub fn crosshair_row_for(&self, name: &str, steam_id: u64) -> Option<&CrosshairRow> {
         row_for(&self.crosshairs, |r| &r.who, name, steam_id)
@@ -494,6 +508,48 @@ mod tests {
         );
     }
 
+    /// `spray_pov_fallback none`, HLTV's `team_allies.png`, and m00cat with
+    /// a picture.
+    fn recorder(name: &str) -> Option<(&str, u64)> {
+        Some((name, if name == "m00cat" { M00CAT } else { 0 }))
+    }
+
+    #[test]
+    fn a_recorders_lambda_is_their_row_and_anyone_elses_the_fallback() {
+        let t = fixture();
+        assert_eq!(
+            t.lambda_choice(recorder("m00cat"), false),
+            Choice::Png("chris_teamwork.png".into())
+        );
+        assert_eq!(t.lambda_choice(None, false), Choice::Blank);
+        assert_eq!(
+            t.lambda_choice(None, true),
+            Choice::Png("team_allies.png".into())
+        );
+    }
+
+    #[test]
+    fn a_recorder_not_listed_gets_the_fallback_for_their_lambda() {
+        assert_eq!(
+            fixture().lambda_choice(recorder("nobody"), false),
+            Choice::Blank
+        );
+    }
+
+    #[test]
+    fn from_the_demo_finds_no_saved_spray_for_a_lambda() {
+        assert_eq!(
+            fixture().lambda_choice(recorder("Own Spray"), false),
+            Choice::Blank
+        );
+    }
+
+    #[test]
+    fn a_lambda_is_never_left_as_the_games_own_while_the_table_is_in_use() {
+        let t = parse("spray_pov_fallback\tgame\nspray\tname\tx\ta.png\n");
+        assert_eq!(t.lambda_choice(None, false), Choice::Blank);
+    }
+
     #[test]
     fn from_the_demo_keeps_a_saved_spray_and_else_falls_back() {
         let t = fixture();
@@ -506,8 +562,8 @@ mod tests {
             t.resolve(Choice::Own, false, true),
             Choice::Png("team_allies.png".into())
         );
-        // A POV fallback of "Their own spray" with none saved is no spray,
-        // never the bullet hole -- listed or not.
+        // A fallback with no PNG picked and none saved is no spray, never
+        // the bullet hole -- listed or not.
         let own = parse("spray_pov_fallback\tgame\nspray\tname\tx\town\n");
         assert_eq!(
             own.resolve(own.choose(false, "x", 0), false, false),
