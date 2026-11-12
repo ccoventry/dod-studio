@@ -32,10 +32,18 @@ import struct
 import sys
 from pathlib import Path
 
+# Checked when a file is opened, not at import, so `demangle` works without
+# pyelftools (`elf_symbols.py` and its test import only that).
 try:
-    from elftools.elf.elffile import ELFFile
+    from elftools.elf.elffile import ELFFile as _ELFFile
 except ImportError:  # pragma: no cover - developer tooling
-    sys.exit("needs `pip install pyelftools`")
+    _ELFFile = None
+
+
+def ELFFile(stream):  # noqa: N802 - stands in for pyelftools' class
+    if _ELFFile is None:
+        sys.exit("needs `pip install pyelftools`")
+    return _ELFFile(stream)
 
 DEFAULT_INSTALL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
