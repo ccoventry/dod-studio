@@ -331,23 +331,4 @@ mod tests {
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         assert_eq!(explain_and_record(&dir, &dir, later, 6), None);
     }
-
-    /// The sites here are crash_report.py's; a site known to one and not the
-    /// other is how the two drift apart.
-    #[test]
-    fn the_known_sites_match_crash_report_py() {
-        let script = include_str!("../../goldsrc-hooks/tools/crash_report.py");
-        let known = &script[script.find("KNOWN = {").unwrap()..];
-        let known = &known[..known.find("\n}").unwrap()];
-        let mut theirs: Vec<&str> = known
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix('"'))
-            .filter_map(|l| l.split('"').next())
-            .filter(|s| s.contains(".dll+0x"))
-            .collect();
-        theirs.sort();
-        let mut ours: Vec<&str> = KNOWN_CRASHES.iter().map(|(s, _)| *s).collect();
-        ours.sort();
-        assert_eq!(ours, theirs);
-    }
 }

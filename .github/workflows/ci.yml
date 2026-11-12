@@ -53,7 +53,7 @@ jobs:
           - part: studio
             packages: -p desktop-studio
           - part: rest
-            packages: --workspace --exclude goldsrc-hooks --exclude native --exclude desktop-studio
+            packages: --workspace --exclude goldsrc-hooks --exclude native --exclude desktop-studio --exclude source-checks
     env:
       # No debug info in test builds: nothing here reads it, and on Windows
       # generating and linking it is a real share of the build. Panic messages
@@ -97,6 +97,24 @@ jobs:
       - name: cargo test --doc (dem-patch)
         if: matrix.part == 'rest'
         run: cargo test -p dem --doc --locked
+
+  # The "files in step" checks, which read source files and compile nothing:
+  # file-size ceilings, a test fn that lost its #[test], the console-name table
+  # and the crash-site table (20 of the last 30 red CI runs were one of these,
+  # and each used to fail only after `native`'s ~3 minute compile). A crate of
+  # its own with no dependencies, so the job is the checkout plus a ~10 s test
+  # build and a red run answers in about a minute. Not a required check: the
+  # rulesets get it only once this workflow is on dev (see CLAUDE.md).
+  source-checks:
+    name: Source checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo test (source-checks)
+        run: cargo test -p source-checks --locked
 
   # The check the rulesets require by this name: green only when every part
   # passed. Keeping the name means no ruleset change; a part that failed or
