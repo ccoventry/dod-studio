@@ -106,6 +106,15 @@ opt-level = 1
 [profile.dev.package.native]
 opt-level = 3
 
+# `dem` (the dem-patch crate) and `analysis` parse and walk whole demos in tight
+# loops, so their tests were mostly unoptimised-code time: the workspace test
+# CPU time went from 124.8 s to 29.4 s with these two at opt-level 3.
+[profile.dev.package.dem]
+opt-level = 3
+
+[profile.dev.package.analysis]
+opt-level = 3
+
 # Reduce the amount of debug info generated to speed up compilation
 [profile.dev]
 debug = 0
