@@ -25,6 +25,18 @@ export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mi
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
   'mirv_agr'];
 export const NOOP_IN_INIT = ['mirv_movie_filename', 'ds_capture_run_in_background', 'ds_capture_stay_behind'];
+// Settings the project owns (#1085): `<name> <number>` is refused while it
+// sets them (cfg_scan's PROJECT_OWNED_COMMANDS). Field of view only.
+export const PROJECT_OWNED = ['mirv_fov'];
+
+/** Whether `line` is a project-owned assignment: `mirv_fov 100` or
+ *  `mirv_fov "100"`, not `mirv_fov handleZoom enabled 1`. */
+export function isProjectOwnedLine(line) {
+  const [name, value, extra] = String(line ?? '').trim().split(/\s+/);
+  if (!name || !PROJECT_OWNED.includes(name.toLowerCase()) || value === undefined || extra !== undefined) return false;
+  const bare = value.replace(/^"(.*)"$/, '$1');
+  return bare !== '' && Number.isFinite(Number(bare));
+}
 // Set by the fast-forward between clips and put back at every clip's pre-roll (#724):
 // honoured in Initial Commands, short-lived as a Scheduled Command.
 export const FAST_FORWARD_CVARS = ['fps_override', 'fps_max', 'gl_vsync'];
@@ -65,9 +77,16 @@ const ALL = (() => {
 /** What Studio does with `name` typed in this list, or null when nothing:
  *  `{ level: 'refused' | 'warned' | 'noop', text }`. `seeks` is Seek Between
  *  Clips: on, the hook runs both lists past the demo filter, so the filter's
- *  tier applies only when it is off (a patched batch). */
-export function tierNote(name, { scheduled, seeks = true }) {
+ *  tier applies only when it is off (a patched batch). `projectFov`: the
+ *  open project sets the field of view (New UI on), so `mirv_fov <number>`
+ *  is its; `line`, the whole line when known, tells a number from HLAE's
+ *  sub-commands, and without it the name alone gets a warning. */
+export function tierNote(name, { scheduled, seeks = true, projectFov = false, line = null }) {
   const S = STRINGS.COMMAND_SUGGEST;
+  if (projectFov && PROJECT_OWNED.includes(name)) {
+    if (line === null) return { level: 'warned', text: S.PROJECT_FOV_NAME };
+    if (isProjectOwnedLine(line)) return { level: 'refused', text: S.PROJECT_FOV };
+  }
   if (OWNED_BY_STUDIO.includes(name)) return { level: 'refused', text: S.OWNED_BY_STUDIO };
   if (GAME_QUITS_OVER.includes(name)) return { level: 'refused', text: S.GAME_QUITS_OVER };
   if (scheduled && SCHEDULED_BANNED.includes(name)) return { level: 'refused', text: S.SCHEDULED_BANNED };
@@ -102,7 +121,7 @@ function renamedFrom(typed) {
  * (`dodstudio_…`) lists the names that replaced it. Each carries its `note`
  * for Initial (`scheduled: false`) or Scheduled Commands.
  */
-export function suggestions(prefix, { scheduled = false, seeks = true, limit = MAX_SUGGESTIONS } = {}) {
+export function suggestions(prefix, { scheduled = false, seeks = true, projectFov = false, limit = MAX_SUGGESTIONS } = {}) {
   const p = String(prefix || '').toLowerCase();
   if (!p) return [];
   let hits;
@@ -112,7 +131,7 @@ export function suggestions(prefix, { scheduled = false, seeks = true, limit = M
     hits = ALL.filter((e) => e.name.startsWith(p));
     hits.sort((a, b) => (b.name === p) - (a.name === p));
   }
-  return hits.slice(0, limit).map((e) => ({ ...e, note: tierNote(e.name, { scheduled, seeks }) }));
+  return hits.slice(0, limit).map((e) => ({ ...e, note: tierNote(e.name, { scheduled, seeks, projectFov }) }));
 }
 
 /** `value` with its first word replaced by `name`, and a space after it so
@@ -124,11 +143,12 @@ export function acceptSuggestion(value, name) {
 
 /**
  * Adds type-ahead to a text input. `scheduled` says which list it is in;
- * `seeks()` reads Seek Between Clips each time the list is drawn.
+ * `seeks()` reads Seek Between Clips each time the list is drawn, and
+ * `projectFov()` whether the open project sets the field of view.
  * Up and Down move through the list, Enter or Tab takes the highlighted
  * name, Escape closes it; a click takes one too.
  */
-export function attachCommandSuggest(input, { scheduled = false, seeks = () => true } = {}) {
+export function attachCommandSuggest(input, { scheduled = false, seeks = () => true, projectFov = () => false } = {}) {
   let list = null;
   let items = [];
   let active = 0;
@@ -149,7 +169,7 @@ export function attachCommandSuggest(input, { scheduled = false, seeks = () => t
 
   function render() {
     const name = typedName(input.value, input.selectionStart ?? input.value.length);
-    items = name ? suggestions(name, { scheduled, seeks: seeks() }) : [];
+    items = name ? suggestions(name, { scheduled, seeks: seeks(), projectFov: projectFov() }) : [];
     // Nothing more to say when the name is already typed in full.
     if (!items.length || (items.length === 1 && items[0].name === name && !items[0].note)) {
       close();

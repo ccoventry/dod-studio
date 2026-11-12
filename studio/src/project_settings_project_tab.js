@@ -17,7 +17,6 @@ import { pickPath } from './pick_path.js';
 import { calculateExportPoolSpace } from './ipc_bridge.js';
 import { BYTES_PER_GB } from './byte_size.js';
 import { madeWithOf } from './project_settings_logic.js';
-import { fovFromLines } from './clip_settings_logic.js';
 import { el, row, card, chips, numberBox, unit } from './project_settings_dom.js';
 import { STRINGS } from './strings.js';
 
@@ -82,9 +81,9 @@ export function createProjectTab({ getState, onEdit }) {
     return row(S.SIZE, S.SIZE_HINT, controls, { id: 'resolution_width' });
   }
 
-  /** Field of view, the project's own (build plan step 8): unset on a
-   *  project that never picked one, which then keeps its Clip settings
-   *  line, so the note says what that line gives. */
+  /** Field of view, the project's own (build plan step 8): never unset
+   *  and no way to clear it (#1085, decision 3); a batch sends it after
+   *  every Clip settings line. */
   function fovRow(pending, ui) {
     const picked = ui.customFov ? 'custom' : fovChoiceOf(pending.capture_fov);
     const choices = [...FOV_CHOICES.map((fov) => ({ value: fov, label: String(fov) })), { value: 'custom', label: S.CUSTOM }];
@@ -96,8 +95,6 @@ export function createProjectTab({ getState, onEdit }) {
       controls.push(el('div', { class: 'ps-inline' }, [
         numberBox('capture_fov', pending.capture_fov, (v) => onEdit({ capture_fov: v })), unit(S.FOV_UNIT),
       ]));
-    } else if (picked === null) {
-      controls.push(el('div', { class: 'ps-note', text: S.fovUnset(fovFromLines(pending.init_commands)) }));
     }
     return row(S.FOV, S.FOV_HINT, controls, { id: 'capture_fov' });
   }

@@ -6,6 +6,32 @@
 
 use std::fmt::Display;
 
+// ── capture_manager.rs: the project's field of view (#1085) ─────────────
+
+/// A Scheduled `mirv_fov <n>` while the project sets the field of view.
+pub fn project_fov_scheduled_refused(command: &str) -> String {
+    format!(
+        "\"{command}\" is not allowed in Scheduled Commands: this project's field of view is set in Project Settings › Picture."
+    )
+}
+
+/// A batch starts with the project's field of view: sent after Initial
+/// Commands, and the `mirv_fov <n>` lines it leaves out of them.
+pub fn project_fov_sent(fov: f32, left_out: &[String]) -> String {
+    let left = if left_out.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; left out {} mirv_fov line(s) of Initial Commands ({})",
+            left_out.len(),
+            left_out.join(", ")
+        )
+    };
+    format!(
+        "[capture] Field of view {fov} from Project Settings › Picture, sent after Initial Commands and any cfg they exec{left}"
+    )
+}
+
 // ── capture_manager.rs: take verification ────────────────────────────────
 
 /// The capture settings file next to a take could not be written.
@@ -207,6 +233,19 @@ pub fn room_stopping_batch(clip: usize, why: impl Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_fov_lines_keep_their_wording() {
+        assert_eq!(
+            project_fov_sent(110.0, &[]),
+            "[capture] Field of view 110 from Project Settings › Picture, sent after Initial Commands and any cfg they exec"
+        );
+        assert!(
+            project_fov_sent(90.0, &["mirv_fov 105".to_string()])
+                .ends_with("; left out 1 mirv_fov line(s) of Initial Commands (mirv_fov 105)")
+        );
+        assert!(project_fov_scheduled_refused("mirv_fov 100").contains("Project Settings › Picture"));
+    }
 
     #[test]
     fn take_lines_keep_their_wording() {

@@ -106,7 +106,9 @@ export const CLIP_SETTINGS_SECTIONS = Object.freeze([
 export const CLIP_SETTINGS_ROWS = Object.freeze(CLIP_SETTINGS_SECTIONS.flatMap((s) => s.rows));
 
 /** The cvars the rows show, lower case: a line setting one of them belongs
- *  to its row, never to Your own commands. */
+ *  to its row, never to Your own commands. Not field of view's: its row
+ *  shows the project's value, and a `mirv_fov` line stays in Your own
+ *  commands, where its note says a batch leaves it out (#1085). */
 export const ROW_CVARS = Object.freeze(
-  CLIP_SETTINGS_ROWS.filter((r) => r.cvar).map((r) => r.cvar.toLowerCase()),
+  CLIP_SETTINGS_ROWS.filter((r) => r.cvar && r.kind !== 'picture').map((r) => r.cvar.toLowerCase()),
 );

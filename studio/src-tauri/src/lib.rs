@@ -1119,6 +1119,7 @@ pub fn run() {
             map_manager::check_demo_maps,
             map_manager::download_map,
             config_checks_cmd::scan_game_configs,
+            config_checks_cmd::project_fov_sources,
             config_checks_cmd::roll_floors,
             hd_manager::hd_status,
             hd_manager::hd_setup_tools,

@@ -151,6 +151,17 @@ export function clipSettingsAppliedLine(path, { preset, initCount, scheduledCoun
   return `[project settings] Clip settings for ${pageProject(path)}: ${from}, ${initCount} line(s), ${scheduledCount} at each clip, ${view}`;
 }
 
+/** A project with no field of view of its own took one (#1085, decision
+ *  3): `file` the cfg its Initial Commands exec that set it, null for a
+ *  line of its own; `isDefault` when nothing did and it took the game's. */
+export function projectFovFilledLine(path, { fov, file, line, isDefault }) {
+  let took;
+  if (isDefault) took = `${fov}, the game's default: nothing in its Initial Commands, or a cfg they exec, sets mirv_fov`;
+  else if (file) took = `${fov} from ${file}, line ${line}, which its Initial Commands exec, so its look doesn't change`;
+  else took = `${fov} from its Initial Commands (mirv_fov ${fov}), so its look doesn't change`;
+  return `[project] ${path} had no field of view of its own: took ${took}; saved with the next save`;
+}
+
 /** A Clip settings preset saved on this PC from the Project settings page. */
 export function clipPresetSavedLine(name, lists) {
   return `[project settings] Saved the Clip settings preset ${name} (${(lists.init_commands || []).length} line(s), ${(lists.custom_commands || []).length} at each clip)`;

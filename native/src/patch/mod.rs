@@ -141,6 +141,7 @@ pub mod launch_settings;
 pub mod map_check;
 pub mod map_fetch;
 pub mod map_text;
+pub mod picture_fov;
 pub mod reachability;
 pub mod runtime_batch;
 pub mod scanner;
@@ -193,7 +194,7 @@ pub use engine::{PatchStage, StreamPatcher};
 pub use builder::{
     WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
     build_preview_patch_jobs, estimate_batch_capture_blocks, estimate_batch_capture_bytes,
-    final_init_commands, playdemo_safe_stem, spawn_patch_batch,
+    final_init_commands, playdemo_safe_stem, spawn_patch_batch, user_init_commands,
 };
 
 pub use scanner::{

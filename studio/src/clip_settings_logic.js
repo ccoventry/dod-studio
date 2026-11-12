@@ -8,9 +8,10 @@
 // (decision 9): picking one replaces the lists, with no link back.
 //
 // Field of view is the project's own, on the Project tab's Picture
-// (`settings.picture.fov`). When a project sets it, the batch drops every
-// `mirv_fov` line (Clean clips carries one) and sends the Picture value
-// instead (withPictureFov); `r_decals` stays a line.
+// (`settings.picture.fov`, project_fov.js). The batch sends it after these
+// lines and leaves their `mirv_fov <n>` out (native picture_fov.rs), so
+// such a line is no row: it shows in Your own commands with its refused
+// note. `r_decals` stays a line.
 
 import { ROW_CVARS, CLIP_SETTINGS_ROWS } from './clip_settings_rows.js';
 import { profileLists } from './command_profiles.js';
@@ -22,6 +23,9 @@ export const CLIP_TAB_KEYS = Object.freeze(['command_profile_active', 'init_comm
 
 /** Field of view's cvar, which the project owns on the Project tab. */
 export const FOV_CVAR = 'mirv_fov';
+
+/** The game's own field of view: a project's when nothing says another. */
+export const DEFAULT_FOV = 90;
 
 const FOV_MIN = 1;
 const FOV_MAX = 179;
@@ -128,23 +132,17 @@ export function withRowLinesMerged(lines) {
   return keep.size === list.length ? list : list.filter((_, i) => keep.has(i));
 }
 
-/** The field of view the lines give, the last `mirv_fov` line's, or null. */
+/** The field of view the lines give, the last `mirv_fov <n>` line's, or
+ *  null. A sub-command (`mirv_fov handleZoom enabled 1`) sets none. */
 export function fovFromLines(lines) {
-  const value = rowValue(lines, FOV_CVAR);
-  const fov = value === null ? NaN : Number(value);
-  return isUsableFov(fov) ? fov : null;
-}
-
-/**
- * The Initial Commands a batch sends for a project whose Picture sets field
- * of view to `fov`: every `mirv_fov` line dropped and `mirv_fov <fov>` first.
- * `fov` not usable (the project sets none) returns `lines` as they are, so a
- * project made before step 8 sends exactly what it did.
- */
-export function withPictureFov(lines, fov) {
-  if (!isUsableFov(fov) || !Array.isArray(lines)) return lines;
-  const rest = lines.filter((line) => parseSetting(line)?.name !== FOV_CVAR);
-  return [`${FOV_CVAR} ${fov}`, ...rest];
+  const list = lines || [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const setting = parseSetting(list[i]);
+    if (setting?.name !== FOV_CVAR || /\s/.test(setting.value)) continue;
+    const fov = Number(setting.value);
+    if (isUsableFov(fov)) return fov;
+  }
+  return null;
 }
 
 /**

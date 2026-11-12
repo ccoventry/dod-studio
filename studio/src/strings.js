@@ -1952,10 +1952,7 @@ export const STRINGS = {
     SMOOTHNESS_HINT: 'Frames a second. Higher is smoother in slow motion and uses more disk.',
     SMOOTHNESS_OBS_HINT: 'Frames a second OBS records, in real time. Set it above what this PC keeps up with and OBS drops frames: test a short capture first.',
     FOV: 'Field of view',
-    FOV_HINT: "mirv_fov, for every demo, first-person and HLTV. Wins over any Clip settings line, Clean clips' 90 included. A config.cfg that sets mirv_fov is warned about before a capture.",
-    fovUnset: (fromLines) => (fromLines === null
-      ? 'Not set here: your game configs decide.'
-      : `Not set here: the Clip settings lines give ${fromLines}.`),
+    FOV_HINT: "mirv_fov, for every demo, first-person and HLTV. Sent after the Clip settings lines and any cfg they exec, so it wins over every other mirv_fov: a batch leaves those lines out, and a cfg that sets a different one is warned about in Configuration › Commands. The game's default is 90.",
     FOV_UNIT: '°',
     BAD_FOV: 'Enter a field of view from 1 to 179.',
     AGR_RATE: 'AGR positions a second',
@@ -2061,7 +2058,7 @@ export const STRINGS = {
     typedValue: (value) => `${value} (typed)`,
     AT_LOAD: 'At map load',
     AT_LOAD_TITLE: 'The game reads this as a map loads, and these lines run once it has loaded: a change reaches the second demo of a batch, not the first.',
-    pictureValue: (fov) => (fov === null ? 'Not set' : `${fov}°`),
+    pictureValue: (fov) => `${fov}°`,
     PICTURE_LINK: 'Set on the Project tab',
     PICTURE_LINK_TITLE: 'Field of view belongs to the whole project: Project › Picture.',
     SPRAYS_STATE: 'Follows Configuration › Players',
@@ -2223,8 +2220,15 @@ export const STRINGS = {
     SETTING_FOR_CVAR: {
       mirv_movie_fps: 'Output Format → Capture FPS',
       r_decals: 'Pipeline → Flush Decals Between Clips',
+      // Only the open project's field of view is sent for mirv_fov (#1085).
+      mirv_fov: 'Project Settings › Picture › Field of view',
     },
     UNKNOWN_SETTING: 'its own setting',
+    // #1085: the project's field of view replaces Initial Commands' own.
+    PROJECT_FOV_LEFT_OUT_TITLE: "These lines are left out, as this project sets the field of view:",
+    PROJECT_FOV_LEFT_OUT_ADVICE:
+      "A batch sends the field of view from Project Settings › Picture after your Initial Commands, so these do nothing. Change it there; the lines can go. Captures aren't blocked.",
+    PROJECT_FOV_SCHEDULED_REASON: 'set the field of view in Project Settings › Picture instead',
     BANNED_TITLE: 'These commands are not allowed:',
     BANNED_ADVICE:
       'Too dangerous to run at all — remove them. Start Capture Batch stays disabled while any are present.',
@@ -3066,6 +3070,8 @@ export const STRINGS = {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
     GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
     SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
+    PROJECT_FOV: 'Refused: set the field of view in Project Settings › Picture. A batch leaves this line out.',
+    PROJECT_FOV_NAME: 'A number here is refused: set the field of view in Project Settings › Picture. handleZoom and the other sub-commands are fine.',
     droppedFromDemo: (pattern) => `Does nothing while Seek Between Clips is off: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',

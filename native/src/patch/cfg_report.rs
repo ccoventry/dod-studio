@@ -295,6 +295,17 @@ pub struct CfgReport {
     /// so anything Initial or Scheduled Commands set ends up saved in it.
     /// Advisory: the app never changes the file or its attributes.
     pub config_cfg_writable: bool,
+    /// The project's field of view (Project Settings › Picture, #1085) when
+    /// the request carries one: it is sent after every Initial Command, so a
+    /// config that sets `mirv_fov` differently shows in `conflicts` with this
+    /// as the value used, and a Scheduled `mirv_fov` in `banned_scheduled`
+    /// points there.
+    pub project_fov: Option<f32>,
+    /// Initial Commands a batch leaves out because the project sets the
+    /// field of view (`cfg_scan::PROJECT_OWNED_COMMANDS`,
+    /// `picture_fov::lines_left_out`). Not blocking: the project's value
+    /// replaces them.
+    pub project_fov_left_out: Vec<String>,
 }
 
 /// Whether `<game_dir>/config.cfg` exists and is not read-only. The engine's
@@ -343,6 +354,9 @@ pub struct CfgReportRequest {
     pub decal_flush: Option<bool>,
     /// Seek Between Clips; `None` keeps the pipeline default.
     pub hook_runs_batch: Option<bool>,
+    /// The project's field of view (`PatcherConfig::picture_fov`); `None`
+    /// when there is none (New UI off, or no project).
+    pub picture_fov: Option<f32>,
 }
 
 /// What the game's own config files set, and what the app's init commands will
@@ -361,6 +375,9 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
     let cfg = pipeline_config(&request);
     let effective_commands = crate::patch::final_init_commands(&cfg);
     let init_commands = &request.init_commands;
+    // What the value rules see as typed: the lines a batch sends, so the
+    // project's field of view after them counts as the app's.
+    let sent_init = crate::patch::picture_fov::lines_sent(&cfg);
     let command_texts: Vec<String> = request
         .scheduled_commands
         .iter()
@@ -373,7 +390,7 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
         game_dir: &dir,
         scan: &scan,
         effective_commands: &effective_commands,
-        init_commands,
+        init_commands: &sent_init,
         scheduled_commands: &request.scheduled_commands,
         flagged: &flagged_cvars(&custom, &banned_scheduled),
         filter,
@@ -398,6 +415,8 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
         fatal_cvars: fatal_rows(&scan),
         renamed: renamed_everywhere(&scan, init_commands, &command_texts),
         config_cfg_writable,
+        project_fov: cfg.picture_fov,
+        project_fov_left_out: crate::patch::picture_fov::lines_left_out(&cfg),
     }
 }
 
@@ -460,6 +479,9 @@ fn pipeline_config(request: &CfgReportRequest) -> crate::patch::PatcherConfig {
     if let Some(v) = request.decal_flush {
         cfg.decal_flush = v;
     }
+    cfg.picture_fov = request
+        .picture_fov
+        .filter(|v| crate::patch::picture_fov::is_usable(*v));
     cfg
 }
 
@@ -886,7 +908,45 @@ mod tests {
             capture_fps,
             decal_flush,
             hook_runs_batch,
+            picture_fov: None,
         })
+    }
+
+    /// The project's field of view wins over a config's `mirv_fov` (#1085):
+    /// the report says so once, as a conflict whose value used is the
+    /// project's, and leaves the lines' own `mirv_fov <n>` out of what is
+    /// sent, `handleZoom` kept.
+    #[test]
+    fn the_projects_field_of_view_overrides_a_configs_and_leaves_the_lines_out() {
+        let (_dir, game) = fake_game("picture_fov");
+        let r = cfg_report(CfgReportRequest {
+            game_path: game,
+            init_commands: vec![
+                "mirv_fov 100".to_string(),
+                "mirv_fov handleZoom enabled 1".to_string(),
+            ],
+            picture_fov: Some(90.0),
+            ..Default::default()
+        });
+        assert_eq!(r.project_fov, Some(90.0));
+        assert_eq!(r.project_fov_left_out, ["mirv_fov 100"]);
+        assert!(r.banned_init.is_empty(), "left out, not blocking");
+        let row = conflict(&r, "mirv_fov").expect("movie.cfg's 105 is overridden");
+        assert_eq!(values_of(row), [("105", "config"), ("90", "app")]);
+        assert_eq!(row.effective.value, "90");
+        assert!(r.unseen.iter().all(|u| u.cvar != "mirv_fov"));
+    }
+
+    /// Without the project's field of view nothing changes: the typed line
+    /// is sent and is the one used.
+    #[test]
+    fn without_the_projects_field_of_view_a_typed_mirv_fov_is_used() {
+        let (_dir, game) = fake_game("no_picture_fov");
+        let r = report_for(game, vec!["mirv_fov 100".to_string()], Vec::new(), None, None, None);
+        assert_eq!(r.project_fov, None);
+        assert!(r.project_fov_left_out.is_empty());
+        let row = conflict(&r, "mirv_fov").expect("movie.cfg's 105 differs");
+        assert_eq!(values_of(row), [("105", "config"), ("100", "initial")]);
     }
 
     fn report_scheduled(tag: &str, custom: Vec<CustomCommand>) -> CfgReport {

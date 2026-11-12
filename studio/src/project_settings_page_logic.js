@@ -31,8 +31,8 @@ export const PAGE_KEYS = Object.freeze([...PROJECT_TAB_KEYS, ...CLIP_TAB_KEYS]);
 /** Field of view's chips other than Custom. */
 export const FOV_CHOICES = Object.freeze([90, 100]);
 
-/** The Field of view chip `fov` matches, 'custom', or null when the project
- *  sets none. */
+/** The Field of view chip `fov` matches, 'custom', or null for no value
+ *  (the page always has one: blockForPage fills it in). */
 export function fovChoiceOf(fov) {
   if (fov === undefined || fov === null) return null;
   return FOV_CHOICES.includes(fov) ? fov : 'custom';
@@ -151,10 +151,8 @@ export function pendingProblems(pending) {
   if (!(isWhole(rate) || (rateKey === 'agr_fps' && rate === 0))) problems[rateKey] = S.BAD_RATE;
   // AGR's 0 reads Capture FPS, which must then be usable.
   else if (rateKey === 'agr_fps' && rate === 0 && !isWhole(pending.capture_fps)) problems[rateKey] = S.BAD_RATE;
-  // Unset is fine: the Clip settings lines or the game's configs decide.
-  if (pending.capture_fov !== undefined && pending.capture_fov !== null && !isUsableFov(pending.capture_fov)) {
-    problems.capture_fov = S.BAD_FOV;
-  }
+  // A project always has a field of view (#1085, decision 3): blank is one.
+  if (!isUsableFov(pending.capture_fov)) problems.capture_fov = S.BAD_FOV;
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};

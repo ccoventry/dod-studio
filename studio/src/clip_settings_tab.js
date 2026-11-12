@@ -9,7 +9,7 @@
 import { CLIP_SETTINGS_SECTIONS, ROW_CVARS } from './clip_settings_rows.js';
 import {
   rowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
-  fovFromLines, presetPick, numberRowValue, parseSetting, clipRowKey,
+  DEFAULT_FOV, presetPick, numberRowValue, parseSetting, clipRowKey,
 } from './clip_settings_logic.js';
 import { profileState } from './command_profiles.js';
 import { isBuiltinName } from './builtin_profiles.js';
@@ -33,10 +33,13 @@ const seeks = () => document.querySelector('#config-hook-runs-batch')?.checked ?
 /** The value a "Not set" choice carries: no line for the row. */
 const UNSET = 'unset';
 
-/** The note under a command, from command_suggest.js's tiers, or null. */
+/** The note under a command, from command_suggest.js's tiers, or null.
+ *  The page is the New UI's, so the project always sets the field of view
+ *  (#1085): a `mirv_fov <n>` line here is refused. */
 function noteFor(command, scheduled) {
   const name = typedName(command) ?? String(command).trim().split(/\s+/)[0];
-  const note = name ? tierNote(name.toLowerCase(), { scheduled, seeks: seeks() }) : null;
+  const line = typedName(command) === null ? String(command) : null;
+  const note = name ? tierNote(name.toLowerCase(), { scheduled, seeks: seeks(), projectFov: true, line }) : null;
   return note ? note.text : '';
 }
 
@@ -130,10 +133,10 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     if (r.kind === 'number') return [numberInput(r, value)];
     if (r.kind === 'picture') {
       const { pending } = getState();
-      const fov = pending.capture_fov ?? fovFromLines(lines());
+      const fov = pending.capture_fov ?? DEFAULT_FOV;
       const link = el('button', { type: 'button', class: 'ps-link-btn', text: S.PICTURE_LINK, title: S.PICTURE_LINK_TITLE });
       link.addEventListener('click', () => goTo('project', 'picture'));
-      return [el('span', { class: 'ps-install-name', text: S.pictureValue(fov ?? null) }), link];
+      return [el('span', { class: 'ps-install-name', text: S.pictureValue(fov) }), link];
     }
     return [el('span', { class: 'ps-muted', text: S.SPRAYS_STATE, title: S.SPRAYS_TITLE })];
   }
@@ -200,7 +203,7 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     });
     const note = el('div', { class: 'ps-warn', text: noteFor(text, scheduled) });
     note.hidden = !note.textContent;
-    attachCommandSuggest(input, { scheduled, seeks });
+    attachCommandSuggest(input, { scheduled, seeks, projectFov: () => true });
     input.addEventListener('input', () => {
       onText(input.value);
       note.textContent = noteFor(input.value, scheduled);
