@@ -15,7 +15,7 @@
 //!   visible from `cl.simorg` while an HLTV demo plays (POST `hw+0x19d764`:
 //!   `Mod_PointInLeaf`, `Mod_LeafPVS`, then the marking at `hw+0x1e73f0`), and
 //!   re-marks the camera's leaves once they are linked (`hw+0x19d82f`).
-//! - `CL_AddVisibleEntity` (PRE `hw+0xbae0`, POST `hw+0x1969b0`) asks the
+//! - `ClientDLL_AddEntity` (PRE `hw+0xbae0`, POST `hw+0x1969b0`) asks the
 //!   client's `HUD_AddEntity` first, then drops any entity whose box is in no
 //!   marked leaf. So the watched player reaches `HUD_AddEntity` and is never
 //!   drawn: measured, his `StudioDrawPlayer` count is 0 while `HUD_AddEntity`

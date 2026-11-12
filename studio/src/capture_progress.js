@@ -92,7 +92,22 @@ export function heldView(view, shown) {
 export function endLine(p, ms) {
   if (p?.error) return STRINGS.CAPTURE.captureErrorStatusText(p.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
   if (p?.status === 'Cancelled') return STRINGS.CAPTURE.CANCELLED;
-  return STRINGS.CAPTURE_PROGRESS.done(durationTextMs(ms), p?.clips_captured ?? null, p?.clips_total ?? null);
+  return STRINGS.CAPTURE_PROGRESS.done(durationTextMs(ms), p?.clips_captured ?? null, p?.clips_total ?? null, p?.clips_short ?? 0);
+}
+
+/// The toast a batch that ran to its end gets: success only when every clip
+/// was captured whole. A clip it didn't capture failed, and one shorter than
+/// planned is a warning (#1401). `{ text, type }`.
+export function completedToast(p) {
+  const total = p?.clips_total ?? null;
+  const captured = p?.clips_captured ?? total;
+  if (total != null && captured < total) {
+    return { text: STRINGS.CAPTURE.batchFinishedWithFailures(total - captured, total), type: 'error' };
+  }
+  if (total != null && (p?.clips_short ?? 0) > 0) {
+    return { text: STRINGS.CAPTURE.batchFinishedShort(p.clips_short, total), type: 'warning' };
+  }
+  return { text: STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, type: 'success' };
 }
 
 /// How a batch ended, for the activity log and Last Batch.
@@ -168,7 +183,7 @@ export function createCaptureProgress({ statusEl, container, now = () => Date.no
       if (fill && kind === 'cancelled') fill.style.width = '0%';
       setStatusLine(statusEl, endLine(p, ms));
       if (wasRunning) {
-        log(STRINGS.CAPTURE_PROGRESS.endLog(kind, durationTextMs(ms), p?.clips_captured, p?.clips_total ?? null));
+        log(STRINGS.CAPTURE_PROGRESS.endLog(kind, durationTextMs(ms), p?.clips_captured, p?.clips_total ?? null, p?.clips_short ?? 0));
       }
       return ms;
     },
