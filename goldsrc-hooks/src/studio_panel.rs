@@ -24,7 +24,7 @@
 //!   tabs and switches pages itself.
 //!
 //! Being GameUI's `Frame`, the window gets the ESC fix (#396, the shared
-//! `Frame::OnKeyCodeTyped`), resizing and remembered placement (#410) and build
+//! `Frame::OnKeyCodePressed`), resizing and remembered placement (#410) and build
 //! mode (Ctrl+Shift+Alt+B on a tab, then Save, which writes that tab's `.res`).
 //!
 //! ## Buttons
@@ -381,12 +381,13 @@ const PAGE_ALLOC: usize = 0x400;
 
 /// `Panel::OnCommand(const char *)`; the VCR bar overrides the same slot.
 const FRAME_SLOT_ON_COMMAND: usize = 87;
-/// `Panel::OnKeyCodeTyped(KeyCode)`, the slot #396's `Frame` patch is in.
-const PANEL_SLOT_ON_KEY_CODE_TYPED: usize = 100;
-/// `Panel::OnKeyCodePressed(KeyCode)`. The console dialog overrides it:
+/// `Panel::OnKeyCodePressed(KeyCode)`, the slot #396's `Frame` patch is in
+/// (`Frame::OnKeyCodePressed` is the ESC handler).
+const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 100;
+/// `Panel::OnKeyCodeTyped(KeyCode)`. The console dialog overrides it:
 /// Tab and the arrow keys (type-ahead and command history) are handled
 /// there, for keys its input line passes up to its parent.
-const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
+const PANEL_SLOT_ON_KEY_CODE_TYPED: usize = 101;
 /// vgui2's `KEY_ENTER` and `KEY_PAD_ENTER` (the console's input line maps the
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
@@ -1152,8 +1153,8 @@ mod hook {
     /// Each class's own `OnCommand`, for whatever our handler passes on.
     static FRAME_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
-    static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
+    static PAGE_ON_KEY_TYPED: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_WHEEL: AtomicUsize = AtomicUsize::new(0);
     /// Frames left to put the focus back on the Console tab's input line
     /// after Up or Down (#786).
@@ -1611,12 +1612,12 @@ mod hook {
                     &[
                         (FRAME_SLOT_ON_COMMAND, page_on_command as *const () as usize),
                         (
-                            PANEL_SLOT_ON_KEY_CODE_TYPED,
-                            page_on_key as *const () as usize,
-                        ),
-                        (
                             PANEL_SLOT_ON_KEY_CODE_PRESSED,
                             page_on_key_pressed as *const () as usize,
+                        ),
+                        (
+                            PANEL_SLOT_ON_KEY_CODE_TYPED,
+                            page_on_key_typed as *const () as usize,
                         ),
                         (
                             PANEL_SLOT_ON_MOUSE_WHEELED,
@@ -1625,8 +1626,8 @@ mod hook {
                     ],
                 );
                 PAGE_ON_COMMAND.store(own[0], Ordering::Release);
-                PAGE_ON_KEY.store(own[1], Ordering::Release);
-                PAGE_ON_KEY_PRESSED.store(own[2], Ordering::Release);
+                PAGE_ON_KEY_PRESSED.store(own[1], Ordering::Release);
+                PAGE_ON_KEY_TYPED.store(own[2], Ordering::Release);
                 PAGE_ON_WHEEL.store(own[3], Ordering::Release);
                 load(object, page.res.0.as_ptr(), std::ptr::null());
                 // Where the .res put each control, before anything resizes it.
@@ -3016,14 +3017,14 @@ mod hook {
         }
     }
 
-    /// Each page's `OnKeyCodePressed`. On the Console tab, a key the borrowed
+    /// Each page's `OnKeyCodeTyped`. On the Console tab, a key the borrowed
     /// input line passes up (Tab, the arrows) goes to the console dialog, its
     /// usual parent, which does the type-ahead and the command history.
-    /// Enter stays here: the dialog's base `OnKeyCodePressed` posts `Hotkey`
+    /// Enter stays here: the dialog's base `OnKeyCodeTyped` posts `Hotkey`
     /// to its default button, the borrowed Submit, which ran the line a
-    /// second time after [`page_on_key`]'s Submit had cleared it, echoing an
-    /// empty `] ` (#989).
-    unsafe extern "thiscall" fn page_on_key_pressed(this: *mut c_void, code: i32) {
+    /// second time after [`page_on_key_pressed`]'s Submit had cleared it,
+    /// echoing an empty `] ` (#989).
+    unsafe extern "thiscall" fn page_on_key_typed(this: *mut c_void, code: i32) {
         let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
         if this == console_page && (code == KEY_ENTER || code == KEY_PAD_ENTER) {
             return;
@@ -3037,8 +3038,8 @@ mod hook {
                     .map(|console| vgui.object(console))
                     .filter(|o| !o.is_null());
                 if let Some(object) = object {
-                    let pressed: KeyFn = slot(object, PANEL_SLOT_ON_KEY_CODE_PRESSED);
-                    pressed(object, code);
+                    let typed: KeyFn = slot(object, PANEL_SLOT_ON_KEY_CODE_TYPED);
+                    typed(object, code);
                     if code == KEY_UP || code == KEY_DOWN {
                         CONSOLE_REFOCUS.store(3, Ordering::Release);
                     }
@@ -3046,9 +3047,9 @@ mod hook {
                 }
             }
         }
-        let original = PAGE_ON_KEY_PRESSED.load(Ordering::Acquire);
+        let original = PAGE_ON_KEY_TYPED.load(Ordering::Acquire);
         if original != 0 {
-            // Safety: the class's own OnKeyCodePressed, from its vftable.
+            // Safety: the class's own OnKeyCodeTyped, from its vftable.
             let original: KeyFn = unsafe { std::mem::transmute(original) };
             unsafe { original(this, code) };
         }
@@ -3094,11 +3095,12 @@ mod hook {
         }
     }
 
-    /// Each page's `OnKeyCodeTyped`: a key a control on the tab didn't use
-    /// comes here. On the Console tab, Enter submits the borrowed input line,
-    /// as it does in the console window -- where the dialog's own Submit
+    /// Each page's `OnKeyCodePressed`: every key pressed on the tab comes here
+    /// (`TextEntry` doesn't override it, so a box forwards each press). On the
+    /// Console tab, Enter submits the borrowed input line, as it does in the
+    /// console window -- where the dialog's own Submit
     /// button is the window's default, which our window knows nothing of.
-    unsafe extern "thiscall" fn page_on_key(this: *mut c_void, code: i32) {
+    unsafe extern "thiscall" fn page_on_key_pressed(this: *mut c_void, code: i32) {
         // Enter in the Playback tab's time box jumps, as Go does.
         let playback_page = PAGE_OBJECTS[PLAYBACK_PAGE].load(Ordering::Acquire) as *mut c_void;
         if this == playback_page && (code == KEY_ENTER || code == KEY_PAD_ENTER) {
@@ -3124,9 +3126,9 @@ mod hook {
                 }
             }
         }
-        let original = PAGE_ON_KEY.load(Ordering::Acquire);
+        let original = PAGE_ON_KEY_PRESSED.load(Ordering::Acquire);
         if original != 0 {
-            // Safety: the class's own OnKeyCodeTyped, from its vftable.
+            // Safety: the class's own OnKeyCodePressed, from its vftable.
             let original: KeyFn = unsafe { std::mem::transmute(original) };
             unsafe { original(this, code) };
         }

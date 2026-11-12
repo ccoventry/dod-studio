@@ -37,8 +37,8 @@ Usage:
     python goldsrc-hooks/tools/verify_hltv_spray_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_hltv_spray_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one. Needs `pip install pefile capstone`.
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install. Needs `pip install pefile capstone`.
 """
 
 import re
@@ -57,7 +57,7 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll")
 RUST = Path(__file__).resolve().parent.parent / "src" / "spray_hltv.rs"
 TE_PLAYERDECAL = 112
 SCRATCH = {"eax", "ecx", "edx"}

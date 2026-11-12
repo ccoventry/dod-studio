@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - developer tooling
 STEAM = Path(r"C:\Program Files (x86)\Steam\steamapps\common")
 DEFAULT_DLLS = [
     STEAM / "Half-Life - PRE-Anniversary for Movies" / "hw.dll",
-    STEAM / "Half-Life" / "hw.dll",
+    STEAM / "Half-Life - POST-Anniversary for Movies" / "hw.dll",
 ]
 SRC = Path(__file__).resolve().parent.parent / "src"
 RUST = [SRC / "demo_reload.rs", SRC / "connect_guard.rs", SRC / "engine.rs"]

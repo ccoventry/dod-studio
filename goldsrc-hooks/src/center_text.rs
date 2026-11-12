@@ -21,7 +21,7 @@
 //!
 //! ## What it doesn't reach
 //!
-//! - The spectator camera mode's name: `CHudSpectator::SetMode` calls
+//! - The spectator camera mode's name: `CHudSpectator::SetModes` calls
 //!   `MsgFunc_TextMsg` directly, not through the message dispatcher, so this
 //!   never sees the client's own copy. (The server's copy, a `#Spec_Mode`
 //!   `TextMsg` a demo carries, is centre text like any other and goes.)

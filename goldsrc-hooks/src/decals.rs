@@ -27,7 +27,7 @@
 //!   hw+0x49da0  R_DecalInit()              memset the whole pool, gDecalCount
 //!                                          = 0, and reset the 256-entry decal
 //!                                          texture table
-//!   hw+0x4a000  R_DecalRemoveAll<by flag>  the pattern this copies: for each
+//!   hw+0x4a000  R_DecalRemoveWithFlag      the pattern this copies: for each
 //!                                          slot, unlink then zero 28 bytes
 //! ```
 //!
