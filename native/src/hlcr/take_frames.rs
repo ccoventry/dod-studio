@@ -20,8 +20,6 @@
 //! is near-instant for the intra-only codecs HLAE writes (utvideo, ProRes)
 //! and costs one GOP for OBS's H.264.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;

@@ -33,6 +33,7 @@ mod pause_replay;
 mod player;
 mod position;
 mod pov_stats;
+pub mod repair;
 mod round;
 mod scoreboard;
 mod segment;

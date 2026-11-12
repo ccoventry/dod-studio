@@ -117,6 +117,7 @@ mod tests {
         "map_reload_lighting",
         "map_run_cfgs",
         "map_weather",
+        "map_wind",
         "player_change_name",
         "player_fix_model_flicker",
         "sound_headshot_farther",

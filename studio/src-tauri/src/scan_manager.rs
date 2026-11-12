@@ -96,6 +96,12 @@ pub struct SerializedDemo {
     /// existed; the frontend scans those again.
     #[serde(default)]
     pub signon_maps: Vec<String>,
+    /// Where the demo stops reading, when it is damaged partway (#811): the
+    /// Master Queue offers to repair it (#15). `None` for a whole demo, and
+    /// missing from demos in a project saved before it existed, which the
+    /// frontend scans again.
+    #[serde(default)]
+    pub damage: Option<::analysis::DemoDamage>,
     /// The `analysis::highlights::HIGHLIGHTS_VERSION` that listed this demo's
     /// highlights; 0 for a demo from a project saved before it was recorded.
     /// Opening a project offers to rescan demos below the current one.
@@ -234,6 +240,7 @@ fn serialized_demo(
         recorder_name: recorder.map(|p| p.name),
         teams: ::analysis::team_tags(&analysis.state),
         signon_maps: analysis.state.signon_maps.clone(),
+        damage: analysis.demo_info.damage.clone(),
         highlights_version: ::analysis::highlights::HIGHLIGHTS_VERSION,
     }
 }

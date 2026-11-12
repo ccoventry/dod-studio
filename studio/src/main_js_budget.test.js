@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 526; // +1: project_session's onStatusChange, so renders found on open redraw the tables (#1345)
+const BUDGET = 543; // +17: the Damaged Demos tab and the queue's Repair and Repair & Split, two factories wired in, and the queue redraw a repair that found nothing to cut out needs (#15)
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {

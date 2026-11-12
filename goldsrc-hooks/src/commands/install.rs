@@ -286,6 +286,9 @@ pub fn install() {
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);
     }
+    if let Some(wind) = register(crate::map_wind::NAME, crate::map_wind::DEFAULT) {
+        crate::map_wind::CVAR.set(wind);
+    }
     // Standalone: read by demo_reload's playdemo/viewdemo wrappers.
     if let Some(cvar) = register(crate::map_cfgs::NAME, "1") {
         crate::map_cfgs::SETTING.set_cvar(cvar);
