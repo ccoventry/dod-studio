@@ -1,6 +1,6 @@
 // Every main tab fits the window width: no horizontal page scrollbar at the
 // two common sizes (#46). Drives the real app shell against mocked IPC.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const SIZES = [
   { width: 1280, height: 720 },
@@ -16,7 +16,7 @@ for (const size of SIZES) {
       test(`${tab} has no horizontal page scrollbar`, async ({ page }) => {
         await page.addInitScript(() => {
           window.__mockInvokeHandlers = {
-            get_settings: () => ({ pinned_folders: [] }),
+            get_settings: () => ({ setup_dismissed: true, pinned_folders: [] }),
             scan_demo_folders: () => [],
           };
         });

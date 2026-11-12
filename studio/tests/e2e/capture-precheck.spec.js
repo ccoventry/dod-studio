@@ -1,7 +1,7 @@
 // Start Capture Batch's checks before the batch (#953): Start greys out and
 // the footer line names each check from the click, and a check that stops
 // the batch brings Start back with the reason on the line.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.addInitScript(() => {

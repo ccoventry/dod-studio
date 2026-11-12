@@ -1,6 +1,6 @@
 // crash_map_warnings.js — the ask before a batch on a map a session crashed
 // on (#207).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const HARRINGTON = (demo) => ({
   demo_name: demo, map: 'dod_harrington', count: 2, last_unix_secs: 1790000000, build: 'pre-Anniversary',

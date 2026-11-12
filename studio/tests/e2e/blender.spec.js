@@ -4,7 +4,7 @@
 // the maps and HD styles to pick), that nothing can run until a take and the
 // Crowbar folder are chosen, the requests each step sends, render progress,
 // and cancel.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** blender_manager::BlenderPageStatus, as serde sends it (snake_case). */
 const STATUS = {

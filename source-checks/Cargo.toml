@@ -1,0 +1,12 @@
+# Checks that read the workspace's source files and compile none of them: the
+# file-size ceilings, the "test fn without #[test]" scan, the console-name table
+# and the crash-site table. No dependencies, so CI's `Source checks` job fails a
+# slipped one in about a minute instead of after `native`'s compile.
+[package]
+name = "source-checks"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true

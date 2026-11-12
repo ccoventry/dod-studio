@@ -1,5 +1,5 @@
 // demo_cache.js (#569), driven against tests/e2e/demo-cache.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/demo-cache.html');

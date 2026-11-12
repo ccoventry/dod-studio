@@ -1,6 +1,6 @@
 // Each Capture Output row shows whether its folder is usable (#25), on the
 // real app shell with the diagnose command mocked.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('each Capture Output row shows its own status and rechecks on a change', async ({ page }) => {
   await page.addInitScript(() => {

@@ -1,5 +1,5 @@
 // game_folder_ui.js — Configuration > Paths' Game Folder row (#402).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page, folders) {
   await page.addInitScript((f) => {

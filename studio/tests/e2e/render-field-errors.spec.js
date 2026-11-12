@@ -1,7 +1,7 @@
 // Render's refused actions mark the field that is wrong, with the reason on a
 // line under it (#25). The fields live on Configuration in the real app; the
 // harness carries them next to the render controls.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/render-studio.html');

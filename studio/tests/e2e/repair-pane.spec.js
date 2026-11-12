@@ -1,7 +1,7 @@
 // repair_pane.js — the Demo Auditor's Damaged Demos tab (#15): find the demos
 // with a gap in the Target Folder, repair one or the ticked ones into
 // <name>_repaired.dem, and show what each repair came to.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const ONE = 'C:\\demos\\monday-wsod25_r07_m1_h1.dem';
 const TWO = 'C:\\demos\\sub\\monday-wsod25_r07_m3_h2.dem';

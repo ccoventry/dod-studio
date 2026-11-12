@@ -1,6 +1,6 @@
 // install_picker.js — Configuration > Paths' Half-Life Executable as a list
 // of the installs found on this PC (#931).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const COMMON = 'C:\\Steam\\steamapps\\common';
 const install = (name, build) => ({ name, path: `${COMMON}\\${name}`, hl_exe: `${COMMON}\\${name}\\hl.exe`, build });
