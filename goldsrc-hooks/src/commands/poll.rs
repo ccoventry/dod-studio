@@ -434,6 +434,8 @@ pub fn poll() {
     // Patches Core.dll's packet loop once viewdemo loads it, and logs each
     // load's time (#798).
     crate::fast_load::poll();
+    // Patches DemoPlayer.dll's dictionary grow once viewdemo loads it (#1392).
+    crate::demoplayer_dict_cache::keep_installed();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.

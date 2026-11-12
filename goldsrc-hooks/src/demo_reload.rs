@@ -135,6 +135,9 @@ unsafe extern "C" fn wrapped_viewdemo() {
         crate::map_cfgs::before_demo(&name);
     }
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // The command has just loaded DemoPlayer.dll: patch it before the
+    // demo's first events are read (#1392).
+    crate::demoplayer_dict_cache::keep_installed();
     // A seek later on this command line waits for this demo to load (#928).
     crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Viewdemo);
     // ds_ui_viewdemo_in_panel: the DoD Studio window stands in for the bar.
