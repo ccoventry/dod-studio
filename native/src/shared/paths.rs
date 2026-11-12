@@ -389,7 +389,6 @@ pub fn downloads_dir(game_root: &Path) -> PathBuf {
 /// `_addon`/`_downloads` siblings have no `liblist.gam`; the movie installs'
 /// `valve` has one but no `client.dll`, and starting it ends in the engine's
 /// "could not load library" error (#768).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn list_game_folders(game_root: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(game_root) else {
         return Vec::new();
@@ -428,7 +427,6 @@ pub struct MissingLanguageFile {
 /// copy only has `dod_<language>.txt` (#925). `None` for `dod` itself and for
 /// a folder that already has the file. Only looks; Studio never writes the
 /// user's folder.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn missing_language_file(
     game_root: &Path,
     folder: &str,
@@ -474,7 +472,6 @@ pub fn missing_language_file(
 /// directory: `build_hlae_process` runs HLAE with its CWD set to HLAE's own
 /// folder, and the log still appears next to `hl.exe` with nothing in HLAE's
 /// folder. So deriving the path from the game path is always right.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn console_log_path(game_root: &Path) -> PathBuf {
     game_root.join("qconsole.log")
 }
@@ -484,7 +481,6 @@ pub fn console_log_path(game_root: &Path) -> PathBuf {
 /// retry-and-report treatment every other scratch file there gets -- but both
 /// resolve the path through [`console_log_path`], so neither can drift from
 /// the other on *where* the log lives.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn remove_console_log(game_root: &Path) {
     let _ = std::fs::remove_file(console_log_path(game_root));
 }
@@ -505,10 +501,6 @@ pub fn remove_console_log(game_root: &Path) {
 /// files; adding a scratch file to one and forgetting the other left it in the
 /// user's game folder with no error and no log line. Add new scratch filenames
 /// here and both paths get them.
-///
-/// Gated like the helpers it calls: this is all `std::fs`, and per CLAUDE.md's
-/// WASM guardrail direct file I/O stays off the wasm32 build.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn clear_capture_scratch(
     game_root: &Path,
     auto_clear_logs: bool,
@@ -614,7 +606,6 @@ pub fn clear_capture_scratch(
 ///
 /// `setting` names the auto-clear checkbox that asked for this, so the log line
 /// points at the control the user would go looking for.
-#[cfg(not(target_arch = "wasm32"))]
 fn remove_scratch_file(path: &Path, setting: &str) -> bool {
     match remove_file_retrying(path) {
         None => true,
