@@ -31,3 +31,40 @@ export function steamIdForms(id) {
 export function deathmsgShowOnlyLine(forms) {
   return `ds_hud_deathmsg block !${forms.id64}`;
 }
+
+const NOT_A_STEAM_ID = Object.freeze({ ok: false, reason: 'not_a_steam_id' });
+
+/** The 32-bit account number a pasted SteamID names, or null. Accepts the
+ *  classic form (`STEAM_0:1:6155141`, universe 0 or 1: older games print 0
+ *  for the public universe, newer ones 1), SteamID3 (`[U:1:12310283]`, the
+ *  brackets optional) and SteamID64, with whitespace around it. Any other
+ *  universe or account type is not a player to add. */
+function accountFromText(input) {
+  if (typeof input !== 'string') return null;
+  const t = input.trim();
+  const classic = /^STEAM_[01]:([01]):(\d{1,10})$/i.exec(t);
+  if (classic) return BigInt(classic[2]) * 2n + BigInt(classic[1]);
+  const id3 = /^(?:\[U:1:(\d{1,10})\]|U:1:(\d{1,10}))$/i.exec(t);
+  if (id3) return BigInt(id3[1] ?? id3[2]);
+  if (/^\d{15,20}$/.test(t)) return BigInt(t) - INDIVIDUAL_BASE;
+  return null;
+}
+
+/** What a person pasted as a SteamID, in any of the three forms: `{ ok: true,
+ *  id64, classic, id3 }`, or `{ ok: false, reason: 'not_a_steam_id' }`.
+ *  Never throws. `id64` is the canonical form the Players table is keyed
+ *  by. Account 0 and anything past 32 bits are refused, as in
+ *  `steamIdForms`. */
+export function parseSteamIdInput(input) {
+  const account = accountFromText(input);
+  if (account === null || account <= 0n || account >= ACCOUNT_LIMIT) return NOT_A_STEAM_ID;
+  const forms = steamIdForms(String(INDIVIDUAL_BASE + account));
+  return forms ? { ok: true, ...forms } : NOT_A_STEAM_ID;
+}
+
+/** Converts a pasted SteamID to one form (`'id64'`, `'classic'` or `'id3'`),
+ *  or null when it isn't a SteamID. */
+export function convertSteamId(input, form) {
+  const parsed = parseSteamIdInput(input);
+  return parsed.ok && form !== 'ok' && Object.hasOwn(parsed, form) ? parsed[form] : null;
+}

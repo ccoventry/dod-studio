@@ -1,5 +1,5 @@
 //! Does the full-file re-encode change *content*, not just cosmetic bit
-//! choices, in the untouched real tail? `snapshot_inject` reserializes every
+//! choices, in the untouched real tail? `snapshot_inject` (now `analysis::repair`) reserializes every
 //! message in the file via `write_to_bytes`, not just the ones it constructs.
 //! Diff a pure `multi_bridge` splice (raw bytes, zero re-encoding) against the
 //! same logical frames after `snapshot_inject`'s round-trip, restricted to a

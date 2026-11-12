@@ -320,6 +320,11 @@ pub fn value_warnings_with_execs(
 
     let mut out = ValueWarnings::default();
     for (cvar, values) in &pool {
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "a pool entry is created with its first value"
+        )]
         let effective = values.last().expect("a pool entry has a value").clone();
         let disagree = values
             .iter()
@@ -362,6 +367,11 @@ pub fn value_warnings_with_execs(
         let paired = values
             .iter()
             .any(|v| matches!(v.source, ValueSource::ScheduledBefore { .. }));
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "a pool entry is created with its first value"
+        )]
         let baseline = values.last().expect("a pool entry has a value");
         if !paired && !same_value(&after.value, &baseline.value) {
             out.asymmetric.push(AsymmetricAfter {

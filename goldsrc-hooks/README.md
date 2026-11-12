@@ -370,8 +370,8 @@ to tell two builds at one path apart before reusing the game (#1143).
 > [!WARNING]
 > **Never join a server from a game you loaded this DLL into, and never load
 > it into a game you are about to play online with.** This DLL patches the
-> game in memory, which is what VAC detects. Only use a separate movie copy of
-> Half-Life. The DLL refuses `connect` once it has hooked the engine, but
+> game in memory, which is what VAC detects. Only use a movie copy of
+> the `dod` folder (or of Half-Life). The DLL refuses `connect` once it has hooked the engine, but
 > don't rely on that alone. See [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 The DLL has to be in the game **before `client.dll` starts**: it reaches the
@@ -464,7 +464,10 @@ tab's spray size, in place of the engine's -- whether or not the demo saved
 one, POV or HLTV (#368) -- through the engine's own custom-spray path, on
 both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`); with HD
 textures on, its upload gets the PNG itself. A spray the demo saved is drawn
-untouched ("From the demo", "Their own spray").
+untouched ("From the demo"). `src/spray_lambda.rs` does the same for the
+stock lambda a server places when it has no custom spray for a player: the
+recorder's in a POV demo gets their table spray, any other the fallback
+(#1322; `tools/verify_lambda_spray_offsets.py`, `--anniversary`).
 `ds_player_spray <name>` makes a `logos\<name>.png` the user's own spray for
 live play by writing the game's `tempdecal.wad` (with a backup).
 `src/player_crosshair.rs` gives the crosshair on screen (the recorder's in

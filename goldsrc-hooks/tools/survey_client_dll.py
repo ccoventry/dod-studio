@@ -107,8 +107,8 @@ KNOWN_FUNCTIONS = {
     0x22330: "CHud::AddHudElem",
     # bool(int section) -- the shared per-section visibility predicate.
     0x2CA80: "CHud::ShouldDraw",
-    # Returns _cl_minimap's value, but only while a spectator predicate holds
-    # and gHUD's FOV field is still 90.
+    # Returns _cl_minimap's value, but only while the renderer is hardware
+    # (engine_studio_api_t.IsHardware) and gHUD's FOV field is still 90.
     0x228E0: "CHud::OverviewMapMode",
     # void(int* x, int* y, int* w, int* h) -- the overview map's rect for the
     # mode above; zeroes all four when the map is down.
