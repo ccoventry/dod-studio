@@ -28,6 +28,7 @@ public class Commands {
             case "project_info": return ProjectInfo();
             case "new_project": return NewProject(a);
             case "open_project": return OpenProject(a);
+            case "import_edl": return ImportEdl(a);
             case "save_as": return SaveAs(a);
             case "list_effects": return ListEffects(a);
             case "list_render_templates": return ListRenderTemplates(a);
@@ -101,6 +102,51 @@ public class Commands {
         return ProjectInfo();
     }
 
+    // An EDL (DoD Studio's Export VEGAS EDL / Export Project to VEGAS, or
+    // any EDL Text File) onto the timeline, the way File > Open of an EDL
+    // does it (VEGAS's OpenFile, as #110 measured). Measured here (#1303's
+    // test): VEGAS opens an EDL as a NEW project, replacing the open one
+    // (asking to save it when it has changes, so that is refused first like
+    // open_project), and OpenFile returns before the events exist, so this
+    // pumps messages until they appear. Then the size and rate like
+    // new_project, and Select None, because the nameplate script works on
+    // the selection when there is one (docs/vegas_nameplates.md).
+    object ImportEdl(Args a) {
+        string path = Path.GetFullPath(a.Str("path"));
+        if (!File.Exists(path)) throw new BridgeError("no EDL at " + path);
+        RefuseUnsaved(a);
+        // Clear the dirty state first so OpenFile never asks to save.
+        vegas.NewProject(false, false);
+        vegas.OpenFile(path);
+        DateTime until = DateTime.Now.AddSeconds(a.Num("wait_seconds", 60));
+        while (DateTime.Now < until && (vegas.Project == null || vegas.Project.Tracks.Count == 0)) {
+            System.Windows.Forms.Application.DoEvents();
+            System.Threading.Thread.Sleep(50);
+        }
+        Project p = P;
+        if (p.Tracks.Count == 0) throw new BridgeError("VEGAS put nothing on the timeline from " + path + " within wait_seconds");
+        int events = 0, offline = 0;
+        using (new UndoBlock(p, "DoD Studio bridge: EDL settings, select none")) {
+            if (a.Has("width")) p.Video.Width = a.Int("width");
+            if (a.Has("height")) p.Video.Height = a.Int("height");
+            if (a.Has("fps")) p.Video.FrameRate = a.Num("fps");
+            foreach (Track t in p.Tracks) {
+                foreach (TrackEvent ev in t.Events) {
+                    events++;
+                    if (a.Bool("select_none", true)) ev.Selected = false;
+                    if (ev.ActiveTake == null || ev.ActiveTake.Media == null || ev.ActiveTake.Media.IsOffline()) offline++;
+                }
+            }
+        }
+        Dictionary<string, object> r = new Dictionary<string, object>();
+        r["edl"] = path;
+        r["tracks"] = p.Tracks.Count;
+        r["events"] = events;
+        r["offline_events"] = offline;
+        r["project"] = ProjectInfo();
+        return r;
+    }
+
     object SaveAs(Args a) {
         string path = Path.GetFullPath(a.Str("path"));
         if (!path.EndsWith(".veg", StringComparison.OrdinalIgnoreCase)) throw new BridgeError("save_as needs a .veg path");
@@ -140,6 +186,7 @@ public class Commands {
             mi["key"] = m.KeyString;
             mi["path"] = m.FilePath;
             mi["subclip"] = m.IsSubclip();
+            mi["offline"] = m.IsOffline();
             mi["length"] = Sec(m.Length);
             VideoStream vs = m.GetVideoStreamByIndex(0);
             if (vs != null) mi["fps"] = vs.FrameRate;
@@ -157,8 +204,15 @@ public class Commands {
         e["start"] = Sec(ev.Start);
         e["length"] = Sec(ev.Length);
         e["playback_rate"] = ev.PlaybackRate;
+        e["selected"] = ev.Selected;
         if (ev.ActiveTake != null) {
-            e["media"] = ev.ActiveTake.Media != null ? ev.ActiveTake.Media.KeyString : ev.ActiveTake.MediaPath;
+            Media m = ev.ActiveTake.Media;
+            e["media"] = m != null ? m.KeyString : ev.ActiveTake.MediaPath;
+            // The file it plays (a subclip's parent), and whether VEGAS
+            // found it: an offline event renders as a placeholder.
+            e["media_path"] = m == null ? ev.ActiveTake.MediaPath
+                            : m.IsSubclip() ? ((Subclip)m).ParentMedia.FilePath : m.FilePath;
+            e["offline"] = m == null || m.IsOffline();
             e["offset"] = Sec(ev.ActiveTake.Offset);
         }
         VideoEvent ve = ev as VideoEvent;

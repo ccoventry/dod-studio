@@ -56,6 +56,22 @@ TOOLS = [
         ["path"],
     ),
     tool(
+        "import_edl",
+        "Open an EDL Text File (DoD Studio's Export VEGAS EDL / Export Project to VEGAS) as VEGAS does: as a NEW project "
+        "that replaces the open one (refused when it has unsaved changes unless discard_changes). Then optional size/fps "
+        "and Select None. Returns track/event counts, how many events are offline, and project_info.",
+        {
+            "path": {"type": "string"},
+            "wait_seconds": {"type": "number", "description": "how long to wait for the events to appear; default 60"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "fps": {"type": "number"},
+            "select_none": {"type": "boolean", "description": "default true"},
+            "discard_changes": {"type": "boolean"},
+        },
+        ["path"],
+    ),
+    tool(
         "save_as",
         "Save the project to a NEW .veg path. Never overwrites a file this bridge session did not save itself (overwrite=true for those).",
         {"path": {"type": "string"}, "overwrite": {"type": "boolean"}},
