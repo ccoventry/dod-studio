@@ -88,6 +88,7 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Renaming a feature, tab, setting or command:** grep comments, `docs/`, READMEs, `goldsrc-hooks/ui/Commands.txt` and `goldsrc-hooks/tools/` for the old name in the same PR. Most wrong comments found by the 2026-10 audits were left behind by a rename (#653: "Killstreaks" → Highlights).
 - **A new file in `docs/` gets a line in `docs/README.md`.** A plan that's done moves to `docs/archive/` (#638, #642).
 - **SteamIDs and player names are fine in tests, fixtures and docs:** they are public, shown on every server a player joins, and every real demo carries them. Keep local filesystem paths out (`C:\Users\<name>\…`); use a made-up path.
+- **The repo is public: private details never go into a commit, PR or issue text, or a comment:** real local paths (use a made-up one like `C:\Users\<name>\…`), personal email addresses (commits use the GitHub noreply address), and other machines' names or private drive layouts. Each person keeps their own private list of what to avoid in their `CLAUDE.local.md`. `source-checks/tests/private_paths.rs` fails CI on a real Windows user folder in any tracked text file.
 
 ### Terminal & Shell Rules
 - **Diagnostics:** Never output raw compiler logs. Provide concise, single-sentence failure summaries and direct mechanical fixes.
