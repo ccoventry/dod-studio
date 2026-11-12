@@ -916,7 +916,7 @@ on the type:
 | type | what it does |
 | --- | --- |
 | 2 `DemoStart` | resets the playback clock, reads the next frame |
-| 3 `ConsoleCommand` | reads **exactly 64 bytes**, filters, `Cbuf_AddText`s it plus `"\n"` |
+| 3 `ConsoleCommand` | reads **exactly 64 bytes**, filters, `Cbuf_AddFilteredText`s it plus `"\n"` |
 | 4 `ClientData` | reads 32 bytes |
 | 5 `NextSection` | advances to the next directory entry |
 | 6, 7, 8 | event, weapon animation, sound — each its own reader |
@@ -958,8 +958,12 @@ What that means for anything that writes demos:
 hw+0x111c3  push 0x40                ; FS_Read(buf, 64, 1, demofile)
 hw+0x111c6  call FS_Read             ; buf is a 64-byte local
 hw+0x111cf  call hw+0x1dce0          ; the command filter (below)
-hw+0x111e3  call Cbuf_AddText        ; buf, then "\n"
+hw+0x111e3  call Cbuf_AddFilteredText  ; buf, then "\n"
 ```
+
+The call goes to `hw+0x27350`, which appends to `filteredcmd_text`, not
+`cmd_text`: Valve's Linux `sw.so` names it `Cbuf_AddFilteredText`
+(`goldsrc_linux_symbols.md`, #1133). `Cbuf_AddText` proper is `hw+0x272e0`.
 
 **Proven: the engine reads exactly 64 bytes and writes no terminator.** The
 buffer is 64 bytes on the stack and the next local is the `ClientData`
