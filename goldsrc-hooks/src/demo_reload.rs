@@ -27,6 +27,17 @@
 //! the wrap is in: live, the demo was a quarter of a second in when the wrap
 //! landed. So with no name noted, `ds_demo_reload` takes the last
 //! `+playdemo`/`+viewdemo` from the game's own command line instead.
+//!
+//! ## `timedemo` forgets the name
+//!
+//! `timedemo` (the engine's old benchmark, which DoD Studio never runs)
+//! starts its demo through `playdemo`'s code without running the `playdemo`
+//! command, so the wrap never sees its name. It is wrapped too, only to
+//! forget the remembered name: after it, nothing here names a demo, rather
+//! than naming the one played before it (a damaged `timedemo` was reported
+//! against that other demo, #1394). The `startdemos` cycle needs nothing:
+//! `Host_NextDemo` queues `playdemo %s` as console text (pre-Anniversary
+//! `hw.dll+0x5d035`, Anniversary `+0x1ce6a9`), which runs the wrapped command.
 
 // Only the 32-bit build installs anything; a host check still compiles it.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -44,15 +55,30 @@ pub const NAME: &str = console_name!("demo_reload");
 /// The engine's own handlers, called by the wrappers.
 static REAL_PLAYDEMO: AtomicUsize = AtomicUsize::new(0);
 static REAL_VIEWDEMO: AtomicUsize = AtomicUsize::new(0);
+static REAL_TIMEDEMO: AtomicUsize = AtomicUsize::new(0);
 static WRAPPED: AtomicBool = AtomicBool::new(false);
 
 /// How many more frames `poll` retries a wrap that found nothing.
 static RETRIES_LEFT: AtomicU32 = AtomicU32::new(300);
 
+/// What `ds_demo_reload` says after a `timedemo`.
+const AFTER_TIMEDEMO: &str = "the last demo was started with timedemo, which does not keep its name -- start it with playdemo or viewdemo";
+
+/// The last demo command this session.
+#[derive(Debug, Clone, PartialEq)]
+enum Last {
+    /// None yet: the game's command line may name one.
+    Unset,
+    /// `playdemo`/`viewdemo` and the name it was given.
+    Played(&'static str, String),
+    /// A `timedemo`, whose name is not known (see the module doc).
+    Forgotten,
+}
+
 thread_local! {
-    /// The last `playdemo`/`viewdemo` and the name it was given. Console
-    /// commands run on the engine's main thread, like everything else here.
-    static LAST: RefCell<Option<(&'static str, String)>> = const { RefCell::new(None) };
+    /// Console commands run on the engine's main thread, like everything
+    /// else here.
+    static LAST: RefCell<Last> = const { RefCell::new(Last::Unset) };
 }
 
 /// Wraps `playdemo` and `viewdemo`. Called once engfuncs are captured.
@@ -89,6 +115,8 @@ fn try_wrap() -> bool {
             found_playdemo |= wrap(entry, &REAL_PLAYDEMO, wrapped_playdemo);
         } else if name.eq_ignore_ascii_case(b"viewdemo") {
             wrap(entry, &REAL_VIEWDEMO, wrapped_viewdemo);
+        } else if name.eq_ignore_ascii_case(b"timedemo") {
+            wrap(entry, &REAL_TIMEDEMO, wrapped_timedemo);
         }
     });
     if !listed {
@@ -141,6 +169,15 @@ unsafe extern "C" fn wrapped_viewdemo() {
     crate::studio_panel::after_viewdemo();
 }
 
+/// Forgets the remembered name before a named `timedemo` starts; a bare one
+/// only prints its usage and changes nothing.
+unsafe extern "C" fn wrapped_timedemo() {
+    if !crate::cmd_list::args().is_empty() {
+        LAST.with(|last| *last.borrow_mut() = Last::Forgotten);
+    }
+    unsafe { call_real(&REAL_TIMEDEMO) };
+}
+
 /// Notes the name the command was given and returns it. A bare `playdemo`
 /// (it prints its usage), or a name that can't be replayed, changes nothing
 /// and returns `None`.
@@ -157,7 +194,7 @@ fn remember(command: &'static str) -> Option<String> {
         CStr::from_ptr(arg).to_string_lossy().trim().to_string()
     };
     replay_line(command, &name)?;
-    LAST.with(|last| *last.borrow_mut() = Some((command, name.clone())));
+    LAST.with(|last| *last.borrow_mut() = Last::Played(command, name.clone()));
     Some(name)
 }
 
@@ -174,7 +211,8 @@ fn replay_line(command: &str, name: &str) -> Option<String> {
 /// The last `+playdemo <name>` or `+viewdemo <name>` among the game's
 /// command-line arguments, for a demo started at launch (see the module doc).
 /// A `+` or `-` argument right after the command is the next option, not a
-/// name.
+/// name. A named `+timedemo` after the last of them forgets it, as the
+/// command does once the wrap is in.
 fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static str, String)> {
     let mut found = None;
     let mut args = args.into_iter().peekable();
@@ -183,12 +221,16 @@ fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static
             "playdemo"
         } else if arg.eq_ignore_ascii_case("+viewdemo") {
             "viewdemo"
+        } else if arg.eq_ignore_ascii_case("+timedemo") {
+            "timedemo"
         } else {
             continue;
         };
         if let Some(name) = args.next_if(|next| !next.starts_with(['+', '-'])) {
             let name = name.trim().to_string();
-            if replay_line(command, &name).is_some() {
+            if command == "timedemo" {
+                found = None;
+            } else if replay_line(command, &name).is_some() {
                 found = Some((command, name));
             }
         }
@@ -196,21 +238,33 @@ fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static
     found
 }
 
-/// The last `playdemo`/`viewdemo` and its demo name, from this session or
-/// the game's command line. Main thread only (where commands run).
+/// The last `playdemo`/`viewdemo` and its demo name: this session's, or
+/// with none yet, `command_line`'s. `None` after a `timedemo`.
+fn resolve(
+    last: Last,
+    command_line: impl FnOnce() -> Option<(&'static str, String)>,
+) -> Option<(&'static str, String)> {
+    match last {
+        Last::Played(command, name) => Some((command, name)),
+        Last::Forgotten => None,
+        Last::Unset => command_line(),
+    }
+}
+
+/// [`resolve`] on this session. Main thread only (where commands run).
 fn last_played() -> Option<(&'static str, String)> {
-    LAST.with(|last| last.borrow().clone())
+    resolve(LAST.with(|last| last.borrow().clone()), || {
         // `args_os`, not `args`: `std::env::args()` panics on any argument
         // that isn't valid Unicode, and a panic in a console command handler
         // is a game crash under `panic = "abort"`. A lossy name just fails to
         // match and falls through to the "no demo" message.
-        .or_else(|| {
-            from_command_line(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
-        })
+        from_command_line(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
+    })
 }
 
 /// The name the demo last played was given (relative to the game folder,
-/// maybe without `.dem`), for the DoD Studio window's Highlights tab.
+/// maybe without `.dem`), for the DoD Studio window's Highlights tab and the
+/// damaged-demo notice. `None` after a `timedemo`.
 pub fn current_demo() -> Option<String> {
     last_played().map(|(_, name)| name)
 }
@@ -219,7 +273,9 @@ pub fn current_demo() -> Option<String> {
 pub unsafe extern "C" fn command() {
     let last = last_played();
     let Some((command, name)) = last else {
-        let why = if WRAPPED.load(Ordering::Relaxed) {
+        let why = if LAST.with(|last| *last.borrow() == Last::Forgotten) {
+            AFTER_TIMEDEMO
+        } else if WRAPPED.load(Ordering::Relaxed) {
             "no demo has been played this session yet -- start one with playdemo or viewdemo first"
         } else {
             "the engine's playdemo command was not found, so the demo name cannot be tracked"
@@ -305,6 +361,37 @@ mod tests {
         );
         assert_eq!(from_command_line(args("hl.exe +viewdemo")), None);
         assert_eq!(from_command_line(args("hl.exe -game dod")), None);
+    }
+
+    #[test]
+    fn a_timedemo_on_the_command_line_forgets_the_demo_before_it() {
+        assert_eq!(
+            from_command_line(args("hl.exe +viewdemo healthy +timedemo damaged")),
+            None
+        );
+        assert_eq!(
+            from_command_line(args("hl.exe +timedemo bench +playdemo match1")),
+            Some(("playdemo", "match1".to_string()))
+        );
+        // A bare +timedemo only prints its usage.
+        assert_eq!(
+            from_command_line(args("hl.exe +viewdemo healthy +timedemo -condebug")),
+            Some(("viewdemo", "healthy".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_timedemo_in_the_session_names_no_demo_even_with_one_on_the_command_line() {
+        let command_line = || Some(("playdemo", "from_launch".to_string()));
+        assert_eq!(resolve(Last::Forgotten, command_line), None);
+        assert_eq!(
+            resolve(Last::Unset, command_line),
+            Some(("playdemo", "from_launch".to_string()))
+        );
+        assert_eq!(
+            resolve(Last::Played("viewdemo", "typed".to_string()), command_line),
+            Some(("viewdemo", "typed".to_string()))
+        );
     }
 
     #[test]

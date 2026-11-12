@@ -19,6 +19,14 @@
 //! reader's last `NextSection`, which is not on the list (11 healthy demos,
 //! POV and HLTV, measured on PRE).
 //!
+//! ## Too many entities is not damage
+//!
+//! `Host_EndGame("CL_ParsePacketEntities: newindex == MAX_PACKET_ENTITIES")`
+//! stops a demo that sends more entities than the engine holds: 256 on the
+//! pre-Anniversary build, 1024 on the Anniversary one (#207). The file is
+//! fine, so it gets its own line and its own event, `DEMO_ENTITY_LIMIT`, with
+//! no offer to repair it.
+//!
 //! ## What it does not catch yet
 //!
 //! - `viewdemo`: `DemoPlayer`'s loader (`Core.dll`) reads the whole file at
@@ -26,10 +34,10 @@
 //!   the part before the damage; neither function is called.
 //! - A file cut short: it has lost its directory, so `playdemo` refuses it at
 //!   the start (`Error: Corrupt demo file.`) and nothing plays.
-//! - `timedemo` goes through the same reader and is caught, but the hook does
-//!   not track its demo name: its event carries the path of the last demo
-//!   `playdemo` or `viewdemo` started this session (or on the command line),
-//!   which is another demo, or no path when there was none.
+//! - `timedemo`'s demo name: it goes through the same reader and is caught,
+//!   but `demo_reload` forgets the remembered name when it runs, so its
+//!   notice says the demo is unknown and its event carries no path, rather
+//!   than naming the demo played before it.
 //!
 //! ## The hook
 //!
@@ -43,8 +51,9 @@
 //! [`on_host_end`] runs on the engine's thread, inside the error. It only
 //! reads: is a demo playing, which one, where its clock is. It stores that
 //! for [`poll`], which on the next frame prints the console line (after the
-//! engine's own), logs it and sends one `DEMO_DAMAGED` event to Studio over
-//! the events pipe. Nothing runs per frame but one atomic load.
+//! engine's own), logs it and sends one `DEMO_DAMAGED` (or
+//! `DEMO_ENTITY_LIMIT`) event to Studio over the events pipe. Nothing runs
+//! per frame but one atomic load.
 //!
 //! `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off for a session.
 //!
@@ -155,10 +164,38 @@ const REASONS: [(Which, &str, &str); 6] = [
     ),
 ];
 
+/// The ends that mean the demo has more entities than the engine holds: not
+/// damage (see the module doc). The same shape as [`REASONS`].
+const LIMITS: [(Which, &str, &str); 1] = [(
+    Which::EndGame,
+    "CL_ParsePacketEntities: newindex == MAX_PACKET_ENTITIES",
+    "entity_limit",
+)];
+
+/// Why a demo stopped, of the ends the hook reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cause {
+    /// One of [`REASONS`].
+    Damaged,
+    /// One of [`LIMITS`].
+    EntityLimit,
+}
+
 /// The console line's text, until #1373 settles the wording. `{at}` is the
 /// demo time.
 const NOTICE: &str = "This demo is damaged at {at} and stopped playing. \
                       DoD Studio can repair it (Demo Auditor, Repair).";
+
+/// The console line for [`Cause::EntityLimit`]. `{at}` is the demo time.
+const ENTITY_NOTICE: &str = "This demo stopped playing at {at}: it shows more \
+                             entities than this engine can hold. The file is not damaged.";
+
+/// Added to [`ENTITY_NOTICE`] on the pre-Anniversary build, whose limit is
+/// the lower one (#207).
+const ENTITY_HINT_PRE: &str = " It plays on the 25th Anniversary engine, which holds more.";
+
+/// `{at}` when the demo's clock could not be read.
+const UNKNOWN_TIME: &str = "an unknown time";
 
 /// Whether to install at all -- `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 pub static ENABLED: AtomicBool = AtomicBool::new(true);
@@ -170,6 +207,9 @@ static RESUME_ERROR: AtomicUsize = AtomicUsize::new(0);
 /// Set once both jumps are in. `hw.dll` never reloads, so once is enough.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static BUILD_NAME: Mutex<&str> = Mutex::new("");
+/// Set when the installed build is the pre-Anniversary one, for
+/// [`ENTITY_HINT_PRE`].
+static PRE_ANNIVERSARY: AtomicBool = AtomicBool::new(false);
 /// See [`detour::Detour`] on why these are never undone.
 static DETOURS: Mutex<Vec<detour::Detour>> = Mutex::new(Vec::new());
 
@@ -179,9 +219,11 @@ static NOTICED: AtomicU32 = AtomicU32::new(0);
 static WAITING: AtomicBool = AtomicBool::new(false);
 static PENDING: Mutex<Option<Damage>> = Mutex::new(None);
 
-/// What [`on_host_end`] saw when a demo stopped on a damaged frame.
+/// What [`on_host_end`] saw when a demo stopped on a damaged frame (or at the
+/// entity limit).
 #[derive(Debug, Clone, PartialEq)]
 struct Damage {
+    cause: Cause,
     reason: &'static str,
     /// The engine's message, as it prints it after `Host_EndGame: `.
     message: String,
@@ -255,6 +297,7 @@ pub fn install() {
             if let Ok(mut name) = BUILD_NAME.lock() {
                 *name = build;
             }
+            PRE_ANNIVERSARY.store(build == BUILDS[0].name, Ordering::Relaxed);
             INSTALLED.store(true, Ordering::Release);
             unsafe {
                 crate::debug::report(&format!(
@@ -315,17 +358,23 @@ fn install_at(base: usize) -> Result<(Vec<detour::Detour>, &'static str, usize, 
     Err(misses.join("; "))
 }
 
-/// The reason's key when `fmt`, passed to `which`, is one of [`REASONS`].
-fn classify(which: Which, fmt: &str) -> Option<&'static str> {
-    REASONS
-        .iter()
-        .find(|(w, start, _)| *w == which && fmt.starts_with(start))
-        .map(|(_, _, key)| *key)
+/// The cause and the reason's key when `fmt`, passed to `which`, is one of
+/// [`REASONS`] or [`LIMITS`].
+fn classify(which: Which, fmt: &str) -> Option<(Cause, &'static str)> {
+    let find = |table: &[(Which, &str, &'static str)]| {
+        table
+            .iter()
+            .find(|(w, start, _)| *w == which && fmt.starts_with(start))
+            .map(|(_, _, key)| *key)
+    };
+    find(&REASONS)
+        .map(|key| (Cause::Damaged, key))
+        .or_else(|| find(&LIMITS).map(|key| (Cause::EntityLimit, key)))
 }
 
 /// `fmt` with its first `%s` replaced by `arg`, without the trailing
-/// newline: what the engine prints. Only the damage reasons' formats are
-/// expanded, and they take at most one string.
+/// newline: what the engine prints. Only the reasons' formats are expanded,
+/// and they take at most one string.
 fn expand(fmt: &str, arg: Option<&str>) -> String {
     let text = match (fmt.find("%s"), arg) {
         (Some(at), Some(arg)) => format!("{}{arg}{}", &fmt[..at], &fmt[at + 2..]),
@@ -386,31 +435,35 @@ unsafe extern "C" fn on_host_end(which: u32, fmt: *const c_char, args: *const us
         return;
     };
     let playing = playing_demo();
-    let reason = classify(which, &fmt);
-    if !playing && reason.is_none() {
+    let classified = classify(which, &fmt);
+    if !playing && classified.is_none() {
         return;
     }
+    let Some((cause, reason)) = classified.filter(|_| playing) else {
+        // The raw format: its arguments are only read for the reasons'
+        // formats, whose types are known.
+        unsafe {
+            crate::debug::report(&format!(
+                "demo_damage: {}: {} (demo playing: {playing}; not a damaged-demo end)",
+                which.name(),
+                fmt.trim_end()
+            ))
+        };
+        return;
+    };
     // The only reason taking an argument is the illegible message's svc
     // name; the others have no `%`.
     let arg = if fmt.contains("%s") && !args.is_null() {
-        // Safety: the format takes a string, so the first variadic argument
-        // is one: `svc_strings[n]`, a literal.
+        // Safety: a reason's format with `%s` takes one string as its first
+        // variadic argument: `svc_strings[n]`, a literal.
         unsafe { c_text(*args as *const u8, 64) }
     } else {
         None
     };
     let message = expand(&fmt, arg.as_deref());
-    let Some(reason) = reason.filter(|_| playing) else {
-        unsafe {
-            crate::debug::report(&format!(
-                "demo_damage: {}: {message} (demo playing: {playing}; not a damaged-demo end)",
-                which.name()
-            ))
-        };
-        return;
-    };
     let (at, clock) = demo_time();
     let damage = Damage {
+        cause,
         reason,
         message,
         demo: crate::demo_reload::current_demo(),
@@ -436,9 +489,10 @@ pub fn poll() {
     let at_text = damage
         .at
         .map(crate::demo_seek::clock_text)
-        .unwrap_or_else(|| "an unknown time".to_string());
+        .unwrap_or_else(|| UNKNOWN_TIME.to_string());
     let path = damage.demo.as_deref().map(demo_file_path);
-    crate::commands::console_print(&format!("{}\n", NOTICE.replace("{at}", &at_text)));
+    let pre = PRE_ANNIVERSARY.load(Ordering::Relaxed);
+    crate::commands::console_print(&format!("{}\n", notice(damage.cause, pre, &at_text)));
     unsafe {
         crate::debug::report(&format!(
             "demo_damage: {} stopped at {at_text} ({}): \"{}\" ({}) (#1373)",
@@ -451,40 +505,64 @@ pub fn poll() {
     crate::events::send(&event_label(&damage, path.as_deref()));
 }
 
-/// `DEMO_DAMAGED<tab>seconds<tab>reason<tab>path`, for Studio. Tabs, as
-/// `BATCH_PROBLEM` uses, since the path can hold spaces; the path is last
-/// and empty when the demo's name is not known.
+/// The console line for `cause`, at `at_text`; `pre` is the pre-Anniversary
+/// build.
+fn notice(cause: Cause, pre: bool, at_text: &str) -> String {
+    match cause {
+        Cause::Damaged => NOTICE.replace("{at}", at_text),
+        Cause::EntityLimit => {
+            let hint = if pre { ENTITY_HINT_PRE } else { "" };
+            format!("{}{hint}", ENTITY_NOTICE.replace("{at}", at_text))
+        }
+    }
+}
+
+/// `DEMO_DAMAGED<tab>seconds<tab>reason<tab>path` (`DEMO_ENTITY_LIMIT` for
+/// the entity limit), for Studio. Tabs, as `BATCH_PROBLEM` uses, since the
+/// path can hold spaces. The path is last and left out, with its tab, when
+/// the demo's name is not known: the pipe trims a line's end, so a trailing
+/// empty field would not arrive anyway. Seconds are empty when unknown.
 fn event_label(damage: &Damage, path: Option<&str>) -> String {
+    let name = match damage.cause {
+        Cause::Damaged => "DEMO_DAMAGED",
+        Cause::EntityLimit => "DEMO_ENTITY_LIMIT",
+    };
     let at = damage.at.map(|t| format!("{t:.2}")).unwrap_or_default();
-    format!(
-        "DEMO_DAMAGED\t{at}\t{}\t{}",
-        damage.reason,
-        path.unwrap_or("")
-    )
+    let mut label = format!("{name}\t{at}\t{}", damage.reason);
+    if let Some(path) = path.filter(|p| !p.is_empty()) {
+        label.push('\t');
+        label.push_str(path);
+    }
+    label
 }
 
 /// The demo's file on disk: its name joined to the game folder (or its
 /// `_addon` folder, where the engine also finds demos), `.dem` added,
-/// `..` resolved.
+/// `..` worked out by [`demo_path_in`]. Only the folder choice looks at the
+/// disk.
 fn demo_file_path(name: &str) -> String {
     let game = crate::game_folder::mod_dir();
     let addon = crate::game_folder::game_root().join(crate::game_folder::addon_name());
-    let in_game = crate::streaks::demo_path(&game, name);
-    let path = if in_game.is_file() {
-        in_game
-    } else {
-        let in_addon = crate::streaks::demo_path(&addon, name);
-        if in_addon.is_file() {
-            in_addon
-        } else {
-            in_game
-        }
-    };
-    let resolved = std::fs::canonicalize(&path).unwrap_or(path);
-    let text = resolved.display().to_string();
-    text.strip_prefix(r"\\?\")
-        .map(str::to_string)
-        .unwrap_or(text)
+    demo_path_in(&game, &addon, name, |path| path.is_file())
+        .display()
+        .to_string()
+}
+
+/// `name`'s file under `game`, or under `addon` when only that one `exists`;
+/// `..` resolved without the disk, so a network share stays `\\server\...`
+/// (`std::fs::canonicalize` gives `\\?\UNC\server\...`).
+fn demo_path_in(
+    game: &std::path::Path,
+    addon: &std::path::Path,
+    name: &str,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> std::path::PathBuf {
+    let in_game = crate::review_ask::demo_path(game, name);
+    if exists(&in_game) {
+        return in_game;
+    }
+    let in_addon = crate::review_ask::demo_path(addon, name);
+    if exists(&in_addon) { in_addon } else { in_game }
 }
 
 /// The `ds_debug_status` line, or `None` when it was never installed.
@@ -583,8 +661,66 @@ mod tests {
             (Which::EndGame, "Server disconnected", None),
         ];
         for (which, fmt, want) in cases {
-            assert_eq!(classify(which, fmt), want, "{which:?} {fmt:?}");
+            assert_eq!(
+                classify(which, fmt),
+                want.map(|key| (Cause::Damaged, key)),
+                "{which:?} {fmt:?}"
+            );
         }
+    }
+
+    #[test]
+    fn the_entity_limit_is_its_own_cause_not_damage() {
+        assert_eq!(
+            classify(
+                Which::EndGame,
+                "CL_ParsePacketEntities: newindex == MAX_PACKET_ENTITIES"
+            ),
+            Some((Cause::EntityLimit, "entity_limit"))
+        );
+        for (_, start, _) in LIMITS {
+            assert!(
+                !REASONS
+                    .iter()
+                    .any(|(_, r, _)| r.starts_with(start) || start.starts_with(r)),
+                "{start:?} is also a damage reason"
+            );
+        }
+    }
+
+    #[test]
+    fn the_entity_notice_says_it_is_not_damaged_and_names_anniversary_only_on_pre() {
+        let pre = notice(Cause::EntityLimit, true, "1:02.00");
+        let post = notice(Cause::EntityLimit, false, "1:02.00");
+        assert!(pre.contains("1:02.00") && pre.contains("not damaged"));
+        assert!(pre.ends_with(ENTITY_HINT_PRE));
+        assert!(!post.contains("Anniversary"));
+        assert!(!post.contains("repair"));
+        assert_eq!(
+            notice(Cause::Damaged, true, UNKNOWN_TIME),
+            NOTICE.replace("{at}", UNKNOWN_TIME)
+        );
+    }
+
+    #[test]
+    fn the_demo_path_resolves_dots_without_the_disk_and_keeps_a_share() {
+        let game = std::path::Path::new(r"\\server\share\Half-Life\dod");
+        let addon = std::path::Path::new(r"\\server\share\Half-Life\dod_addon");
+        assert_eq!(
+            demo_path_in(game, addon, "../demos/match1", |_| false),
+            std::path::PathBuf::from(r"\\server\share\Half-Life\demos\match1.dem")
+        );
+        let game = std::path::Path::new(r"C:\Games\Half-Life\dod");
+        let addon = std::path::Path::new(r"C:\Games\Half-Life\dod_addon");
+        let only_addon = |p: &std::path::Path| p.starts_with(addon);
+        assert_eq!(
+            demo_path_in(game, addon, "match1.dem", only_addon),
+            std::path::PathBuf::from(r"C:\Games\Half-Life\dod_addon\match1.dem")
+        );
+        assert_eq!(
+            demo_path_in(game, addon, "match1", |_| true),
+            std::path::PathBuf::from(r"C:\Games\Half-Life\dod\match1.dem")
+        );
     }
 
     #[test]
@@ -606,23 +742,40 @@ mod tests {
     #[test]
     fn the_event_carries_time_reason_and_path() {
         let damage = Damage {
+            cause: Cause::Damaged,
             reason: "message_too_big",
             message: "Demo message > MAX_POSSIBLE_MSG".to_string(),
             demo: Some("monday-wsod25_r07_m1_h1".to_string()),
             at: Some(369.123),
             clock: "demo player",
         };
+        // What goes on the pipe, not just the label: `events::send` trims.
+        let wire = |damage: &Damage, path| {
+            crate::events::wire_line(&event_label(damage, path)).expect("a marker line")
+        };
         assert_eq!(
-            event_label(
+            wire(
                 &damage,
                 Some(r"C:\Games\Half-Life\dod\monday-wsod25_r07_m1_h1.dem")
             ),
-            "DEMO_DAMAGED\t369.12\tmessage_too_big\tC:\\Games\\Half-Life\\dod\\monday-wsod25_r07_m1_h1.dem"
+            "[dod-studio] DEMO_DAMAGED\t369.12\tmessage_too_big\tC:\\Games\\Half-Life\\dod\\monday-wsod25_r07_m1_h1.dem"
         );
-        let unknown = Damage { at: None, ..damage };
+        let unknown = Damage {
+            at: None,
+            ..damage.clone()
+        };
         assert_eq!(
-            event_label(&unknown, None),
-            "DEMO_DAMAGED\t\tmessage_too_big\t"
+            wire(&unknown, None),
+            "[dod-studio] DEMO_DAMAGED\t\tmessage_too_big"
+        );
+        let limit = Damage {
+            cause: Cause::EntityLimit,
+            reason: "entity_limit",
+            ..damage
+        };
+        assert_eq!(
+            wire(&limit, Some(r"C:\x y\a.dem")),
+            "[dod-studio] DEMO_ENTITY_LIMIT\t369.12\tentity_limit\tC:\\x y\\a.dem"
         );
     }
 

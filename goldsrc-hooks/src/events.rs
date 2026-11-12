@@ -99,9 +99,15 @@ fn emit(line: String) {
 /// Studio: the review mode's answers (#623). A label holding a line break is
 /// dropped, as an `echo` of one would be.
 pub(crate) fn send(label: &str) {
-    if let Some(line) = marker_line(&[TAG.to_string(), label.to_string()]) {
+    if let Some(line) = wire_line(label) {
         emit(line);
     }
+}
+
+/// The line [`send`] puts on the pipe for `label`, trimmed at both ends as
+/// an `echo`'s is.
+pub(crate) fn wire_line(label: &str) -> Option<String> {
+    marker_line(&[TAG.to_string(), label.to_string()])
 }
 
 unsafe extern "C" fn wrapped_echo() {

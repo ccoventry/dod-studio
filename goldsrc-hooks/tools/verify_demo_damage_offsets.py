@@ -18,9 +18,10 @@ documented; only the binary can prove the facts it relies on:
      `[ebp+8]` and `va_start` is `lea r, [ebp+0xc]` -- what the stub passes.
   4. Nothing branches into the interior of either span, and no relocated
      dword points into it.
-  5. Every damage reason in `REASONS` is a format string in this `hw.dll`,
-     passed to the function `REASONS` names, and "End of demo." -- a healthy
-     `playdemo` end -- goes to `Host_EndGame` and is not in `REASONS`.
+  5. Every damage reason in `REASONS`, and every entity-limit end in
+     `LIMITS`, is a format string in this `hw.dll`, passed to the function
+     the table names, and "End of demo." -- a healthy `playdemo` end -- goes
+     to `Host_EndGame` and is in neither.
 
 Every constant comes out of `demo_damage.rs` rather than being restated here,
 for the reason in `verify_deathmsg_offsets.py`.
@@ -77,14 +78,14 @@ def rust_builds(src: str):
     return builds
 
 
-def rust_reasons(src: str):
-    """[(function key, format start, reason key)] from `REASONS`."""
-    table = re.search(r"const REASONS: \[\(Which, &str, &str\); \d+\] = \[(.*?)\n\];", src, re.S)
+def rust_reasons(src: str, name: str = "REASONS"):
+    """[(function key, format start, reason key)] from `REASONS` (or `LIMITS`)."""
+    table = re.search(rf"const {name}: \[\(Which, &str, &str\); \d+\] = \[(.*?)\];\n", src, re.S)
     if not table:
-        raise SystemExit("could not find `const REASONS` in demo_damage.rs")
+        raise SystemExit(f"could not find `const {name}` in demo_damage.rs")
     found = re.findall(r'\(\s*Which::(\w+),\s*"([^"]+)",\s*"([^"]+)",?\s*\)', table.group(1))
     if not found:
-        raise SystemExit("`REASONS` in demo_damage.rs has no entries this script can read")
+        raise SystemExit(f"`{name}` in demo_damage.rs has no entries this script can read")
     return found
 
 
@@ -172,6 +173,7 @@ def main() -> int:
     src = RUST.read_text(encoding="utf-8")
     builds = rust_builds(src)
     reasons = rust_reasons(src)
+    limits = rust_reasons(src, "LIMITS")
     stolen_len = int(rust_const(src, "STOLEN_LEN"), 0)
 
     pe = pefile.PE(str(dll), fast_load=True)
@@ -248,7 +250,7 @@ def main() -> int:
         print(f"     {fn}: {entry_calls} direct call(s) to its entry")
 
     # -- 5. the reasons --------------------------------------------------------
-    for key, start, reason in reasons:
+    for key, start, reason in reasons + limits:
         rvas = [r for r in string_rva(image, start.encode())]
         calls = callers_with_push(pe, image, base, md, rvas)
         to = {t for _, t in calls}
@@ -263,8 +265,8 @@ def main() -> int:
         end_calls and {t for _, t in end_calls} == {found.get("EndGame")},
         f"'End of demo.' goes to Host_EndGame (sites {[hex(p) for p, _ in end_calls]})",
     )
-    check(not any("End of demo".startswith(s) or s.startswith("End of demo") for _, s, _ in reasons),
-          "'End of demo.' is not a damage reason")
+    check(not any("End of demo".startswith(s) or s.startswith("End of demo") for _, s, _ in reasons + limits),
+          "'End of demo.' is not a damage reason or an entity-limit end")
 
     print("all checks passed" if ok else "SOME CHECKS FAILED")
     return 0 if ok else 1
