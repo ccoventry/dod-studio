@@ -315,7 +315,7 @@ same as reaching it by fast-forward.
 and nothing else. Where that comes from, read out of both installs' DLLs
 (#776): every demo open ends in the file system's `Open(name, "rb", pathID
 = 0)` -- `hw.dll`'s `FS_Open` for `playdemo`, `Core.dll`'s
-`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadDemo`,
+`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadGame(char*)`,
 slot 41) for `viewdemo` -- and `FileSystem_Stdio.dll`'s `Open` only tries
 `<search path> + name` for each search path in turn. Nothing on the way
 checks the name (the "Relative pathnames are not allowed" test belongs to

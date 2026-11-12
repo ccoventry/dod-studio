@@ -15,10 +15,10 @@
 //!
 //! ```text
 //! CHudMessage::MsgFunc_HudText        +0x25470
-//!     flag > 0 and gViewPortInterface: gViewPortInterface->ShowHint(text)
-//! DoDViewport::ShowHint(text)         +0x1f8c0   __thiscall, one argument
-//!     CHintPanel::SetHint(team, text) +0x207b0   text, team image, a timer
-//!                                                 of 0.05 s per character
+//!     flag > 0 and gViewPortInterface: gViewPortInterface->ShowHintMessage(text)
+//! DoDViewport::ShowHintMessage(text)          +0x1f8c0   __thiscall, one argument
+//!     CHintPanel::ShowHintMessage(team, text) +0x207b0   text, team image, a timer
+//!                                                        of 0.05 s per character
 //!     tail-jumps to SetVisible(true)  [vtbl+0x74], which ends `ret 4`
 //! ```
 //!
@@ -28,7 +28,7 @@
 //!
 //! ## The patch
 //!
-//! `ret 4` (`C2 04 00`) over `ShowHint`'s first three bytes: the hint is
+//! `ret 4` (`C2 04 00`) over `ShowHintMessage`'s first three bytes: the hint is
 //! dropped and its one argument comes off the stack as the tail-jump's
 //! `ret 4` would have taken it. The first instruction is
 //! `mov eax, [team global]`, whose operand is an absolute address that
@@ -39,7 +39,7 @@
 //! re-loaded `client.dll` is patched again. Turning the cvar on after it was
 //! off also closes a hint already up (not at launch, when none can be, and
 //! only from the engine's own thread) (`SetVisible(false)` on the viewport's hint panel, the
-//! slot `ShowHint` itself shows it through): its own timer can leave it up
+//! slot `ShowHintMessage` itself shows it through): its own timer can leave it up
 //! for many seconds after a seek.
 //!
 //! `client.dll` is one file, identical in every install, so one pattern
@@ -64,8 +64,8 @@ use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_hints");
 
-/// `DoDViewport::ShowHint`, whole: from its first instruction
-/// (`mov eax, [abs]`) through the team check, the `SetHint` call on
+/// `DoDViewport::ShowHintMessage`, whole: from its first instruction
+/// (`mov eax, [abs]`) through the team check, the `CHintPanel::ShowHintMessage` call on
 /// `[this+0x14]` (the hint panel) and the tail-jump to its `SetVisible`
 /// (`[vtbl+0x74]`), so the two offsets [`close_open_hint`] uses are pinned.
 const PATTERN: &str = "A1 ?? ?? ?? ?? 56 83 F8 01 8B F1 75 0C 8A 0D ?? ?? ?? ?? 84 C9 74 02 33 C0 \
@@ -76,22 +76,22 @@ const PATTERN: &str = "A1 ?? ?? ?? ?? 56 83 F8 01 8B F1 75 0C 8A 0D ?? ?? ?? ?? 
 const HIDDEN: [u8; 3] = [0xc2, 0x04, 0x00];
 
 /// `MsgFunc_HudText`'s flagged branch: `mov ecx, [gViewPortInterface]; test
-/// ecx, ecx; je; mov edx, [ecx]; push edi; call [edx+0x14]` (`ShowHint`).
+/// ecx, ecx; je; mov edx, [ecx]; push edi; call [edx+0x14]` (`ShowHintMessage`).
 // The four below are only read by the 32-bit build's `close_open_hint`.
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 const VIEWPORT_CALL: &str = "8B 0D ?? ?? ?? ?? 85 C9 74 08 8B 11 57 FF 52 14";
 /// Where `gViewPortInterface`'s address sits in [`VIEWPORT_CALL`].
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 const VIEWPORT_AT: usize = 2;
-/// The hint panel's pointer in the object `ShowHint` runs on.
+/// The hint panel's pointer in the object `ShowHintMessage` runs on.
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 const HINT_PANEL_OFFSET: usize = 0x14;
-/// `Panel::SetVisible(bool)`, the slot `ShowHint` tail-jumps through.
+/// `Panel::SetVisible(bool)`, the slot `ShowHintMessage` tail-jumps through.
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 const SET_VISIBLE_SLOT: usize = 0x74 / 4;
 
 pub static CVAR: Cvar = Cvar::new();
-/// `ShowHint`'s address, 0 before a successful scan.
+/// `ShowHintMessage`'s address, 0 before a successful scan.
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// The module base [`ADDRESS`] belongs to.
 static BASE: AtomicUsize = AtomicUsize::new(0);
@@ -124,7 +124,7 @@ fn stubbed_pattern() -> String {
     format!("C2 04 00{}", &PATTERN["A1 ?? ??".len()..])
 }
 
-/// `ShowHint`'s address in the module at `base`, scanning once per module.
+/// `ShowHintMessage`'s address in the module at `base`, scanning once per module.
 fn resolve(base: usize) -> Result<usize, String> {
     if BASE.load(Ordering::Acquire) == base {
         let cached = ADDRESS.load(Ordering::Acquire);
@@ -133,7 +133,7 @@ fn resolve(base: usize) -> Result<usize, String> {
         }
     }
     if FAILED_BASE.load(Ordering::Acquire) == base {
-        return Err("DoDViewport::ShowHint was not found in this client.dll".into());
+        return Err("DoDViewport::ShowHintMessage was not found in this client.dll".into());
     }
     // Safety: `client_module_base` only returns a base for a mapped module,
     // and it stays mapped for the session. The pattern starts with the stock
@@ -147,12 +147,14 @@ fn resolve(base: usize) -> Result<usize, String> {
             let stubbed = stubbed_pattern();
             if unsafe { scan::find_unique(base, &stubbed) }.is_ok() {
                 return Err(
-                    "DoDViewport::ShowHint is already stubbed (C2 04 00) by an earlier load; \
+                    "DoDViewport::ShowHintMessage is already stubbed (C2 04 00) by an earlier load; \
                      restart the game to get hints back"
                         .into(),
                 );
             }
-            return Err(format!("could not find DoDViewport::ShowHint -- {why}"));
+            return Err(format!(
+                "could not find DoDViewport::ShowHintMessage -- {why}"
+            ));
         }
     };
     // Safety: the pattern matched, so these bytes are mapped code.
@@ -163,7 +165,7 @@ fn resolve(base: usize) -> Result<usize, String> {
     Ok(address)
 }
 
-/// Puts `ShowHint` in the wanted state, returning whether anything was
+/// Puts `ShowHintMessage` in the wanted state, returning whether anything was
 /// written.
 fn apply(base: usize, hidden: bool) -> Result<bool, String> {
     let address = resolve(base)?;
@@ -176,11 +178,11 @@ fn apply(base: usize, hidden: bool) -> Result<bool, String> {
     }
     if present != stock && present != HIDDEN {
         return Err(format!(
-            "DoDViewport::ShowHint starts {present:02x?}, neither the stock {stock:02x?} nor {HIDDEN:02x?} -- something else has patched it"
+            "DoDViewport::ShowHintMessage starts {present:02x?}, neither the stock {stock:02x?} nor {HIDDEN:02x?} -- something else has patched it"
         ));
     }
     if !unsafe { crate::patch::write_code_bytes(address, &want) } {
-        return Err("could not make DoDViewport::ShowHint writable".into());
+        return Err("could not make DoDViewport::ShowHintMessage writable".into());
     }
     Ok(true)
 }
@@ -283,7 +285,7 @@ pub fn status_line() -> Option<String> {
     }
     Some(if HIDDEN_NOW.load(Ordering::Relaxed) {
         format!(
-            "{NAME} = 1 -- DoDViewport::ShowHint is stubbed, so auto-help hints do not open; {}",
+            "{NAME} = 1 -- DoDViewport::ShowHintMessage is stubbed, so auto-help hints do not open; {}",
             crate::mg_reload_hint::status()
         )
     } else {
@@ -314,7 +316,7 @@ mod tests {
         }
     }
 
-    /// `ShowHint` takes one argument and its tail-jump returns with `ret 4`,
+    /// `ShowHintMessage` takes one argument and its tail-jump returns with `ret 4`,
     /// so the stub must pop exactly four bytes.
     #[test]
     fn the_stub_is_ret_4() {
@@ -322,7 +324,7 @@ mod tests {
     }
 
     /// The panel offset and `SetVisible` slot are the ones the pattern pins
-    /// in `ShowHint`'s own code (`mov ecx, [esi+0x14]`, `jmp [edx+0x74]`).
+    /// in `ShowHintMessage`'s own code (`mov ecx, [esi+0x14]`, `jmp [edx+0x74]`).
     #[test]
     fn close_uses_the_offsets_show_hint_uses() {
         assert!(PATTERN.contains(&format!("8B 4E {HINT_PANEL_OFFSET:02X} 5E")));
@@ -336,7 +338,7 @@ mod tests {
         );
         assert!(
             VIEWPORT_CALL.ends_with(&format!("FF 52 {:02X}", 5 * 4)),
-            "slot 5, ShowHint"
+            "slot 5, ShowHintMessage"
         );
     }
 

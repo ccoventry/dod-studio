@@ -87,9 +87,10 @@ pub struct AppSettings {
     /// `capture_fps` with frame-sequence/direct-to-video.
     #[serde(default = "default_obs_capture_fps")]
     pub obs_capture_fps: i32,
-    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 means "the same
-    /// as `capture_fps`", which is also what a file written before it existed
-    /// gets.
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 means
+    /// `native::patch::DEFAULT_AGR_FPS`, which is also what a file written
+    /// before it existed gets. A setting, so 0 takes the current meaning: no
+    /// capture has been recorded with it yet.
     #[serde(default)]
     pub agr_fps: i32,
     pub pre_roll_seconds: f32,

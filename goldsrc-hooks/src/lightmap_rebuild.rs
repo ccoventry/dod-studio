@@ -4,20 +4,21 @@
 //!
 //! ## The gap
 //!
-//! `V_CheckGamma` (pre-Anniversary `hw.dll+0xc19b0`) runs at the start of
-//! every screen update. When one of the gamma cvars changed it rebuilds the
-//! gamma tables, then calls a "flush" (+0x4703e) that is a lone `ret`. So the
-//! table `R_BuildLightMap` reads per luxel follows the cvars, but nothing
-//! rebuilds the lightmaps that were made from the old one: the world keeps
-//! the lighting it loaded with until the next map, while player models,
-//! which are lit every frame, follow the change at once. That mismatch is
-//! #662's "models brighter than the world". `lightmap_gamma` (#365) only
-//! makes the map load use the current table.
+//! `V_CheckGamma` (pre-Anniversary `hw.dll+0xc19b0`) runs at the start of every
+//! screen update. When one of the gamma cvars changed it rebuilds the gamma
+//! tables, then calls a "flush" (`D_FlushCaches`, +0x4703e) that is a lone
+//! `ret`. So the table `R_BuildLightMap` reads per luxel follows the cvars, but
+//! nothing rebuilds the lightmaps that were made from the old one: the world
+//! keeps the lighting it loaded with until the next map, while player models,
+//! which are lit every frame, follow the change at once. That mismatch is #662's
+//! "models brighter than the world". `lightmap_gamma` (#365) only makes the map
+//! load use the current table.
 //!
 //! The 25th Anniversary `hw.dll` points that flush at `GL_BuildLightmaps`
-//! (`jmp` thunk +0x245a70 → +0x246f80), and its `GL_BuildLightmaps` builds a
-//! surface's display list only while the surface has none (`fa->polys`,
-//! +0x24, is null), so a rebuild redoes the lightmaps alone.
+//! (`D_FlushCaches`, a `jmp` thunk +0x245a70 → +0x246f80), and its
+//! `GL_BuildLightmaps` builds a surface's display list only while the surface
+//! has none (`fa->polys`, +0x24, is null), so a rebuild redoes the lightmaps
+//! alone.
 //!
 //! ## The fix: the same two changes, on pre-Anniversary
 //!

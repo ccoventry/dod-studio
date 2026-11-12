@@ -5,10 +5,11 @@
 //!
 //! ## What GameUI does
 //!
-//! `CDemoPlayerDialog::OnThink` (pre-Anniversary `GameUI.dll+0x1f9f0`, 25th
-//! Anniversary `+0x26b50`) runs only while the bar shows. Each time it sets
-//! the slider's range to the demo's first and last frame, then compares the
-//! slider's value with the one it set itself last time (`m_iLastValue`):
+//! `CDemoPlayerDialog::Update` (pre-Anniversary `GameUI.dll+0x1f9f0`, 25th
+//! Anniversary `+0x26b50`; `OnThink` and `OnCommand` call it) runs only while
+//! the bar shows. Each time it sets the slider's range to the demo's first and
+//! last frame, then compares the slider's value with the one it set itself last
+//! time (`m_iLastValue`):
 //!
 //! - different: it takes that as the user dragging the slider and calls
 //!   `SetWorldTime(value)`, then pauses when the old value was above 0;

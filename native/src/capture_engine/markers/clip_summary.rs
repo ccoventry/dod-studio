@@ -10,9 +10,11 @@
 /// What the summary's label starts with.
 const LABEL: &str = "CLIP_SUMMARY";
 
-/// One clip, as the hook summed it up.
-#[derive(Debug, Default, PartialEq)]
-pub(super) struct ClipSummary {
+/// One clip, as the hook summed it up. The listener gets it too
+/// (`EngineEvent::ClipReported`), to judge the clip's take (#1401,
+/// `clip_verdict`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClipSummary {
     pub number: Option<u32>,
     pub demo: Option<(u32, u32)>,
     pub demo_clip: Option<(u32, u32)>,
@@ -59,7 +61,8 @@ pub(super) fn parse(label: &str) -> Option<ClipSummary> {
 }
 
 impl ClipSummary {
-    fn saw(&self, marker: &str) -> bool {
+    /// Whether the clip's `marker` (`START_RECORD`, `STOP_RECORD`) arrived.
+    pub fn saw(&self, marker: &str) -> bool {
         self.markers.iter().any(|m| m == marker)
     }
 
