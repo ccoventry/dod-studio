@@ -74,8 +74,8 @@
 //! left it: zoom in an HLTV demo, flags and scores in a POV one. So every
 //! backward seek but a `ds_demo_seek_skip_between` one sets the clock back and
 //! steps forward to the target; `rewind.rs` says why, where it starts over
-//! and how it empties the kill feed on the way. A seek made while another is
-//! on its way counts from that one's target and keeps its feed clear
+//! and how it empties the kill feed on the way, as every stepped seek does. A
+//! seek made while another is on its way counts from that one's target
 //! (`chain.rs`).
 //!
 //! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
@@ -185,9 +185,9 @@ struct Pending {
     /// `m_LastFrameTime` before it, until the player has sent the start
     /// frame.
     rewind_from: Option<f64>,
-    /// Where a rewind, or a seek that took over from one (`chain.rs`), empties
-    /// the kill feed: the target less a notice's lifetime
-    /// ([`rewind_step`](rewind::rewind_step)). `None` for any other seek.
+    /// Where a stepped seek, rewinds included (`chain.rs`), empties the kill
+    /// feed: the target less a notice's lifetime
+    /// ([`rewind_step`](rewind::rewind_step)). `None` for one that lands at once.
     feed_at: Option<f64>,
     /// Frames the kill feed has been emptied on
     /// ([`FEED_CLEAR_FRAMES`](rewind::FEED_CLEAR_FRAMES)).
@@ -234,7 +234,7 @@ fn cancel_pending() -> Option<f64> {
 enum Step {
     To(f64),
     Land(f64),
-    /// Empty the kill feed before stepping on (a rewind).
+    /// Empty the kill feed before stepping on (`chain.rs`).
     ClearFeed,
 }
 
@@ -958,7 +958,7 @@ mod player {
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
-    use super::chain::{counted_from, feed_note, in_flight, take_over, takes_over_feed_clear};
+    use super::chain::{counted_from, in_flight, stepped_seek, steps};
     use super::rewind::{
         FEED_CLEAR_FRAMES, feed_clear_at, recording_start, rewind_base, rewind_step, rewinds,
     };
@@ -1193,7 +1193,7 @@ mod player {
                     seek.feed_cleared += 1;
                     if let Err(why) = crate::deathmsg::clear_for_rewind() {
                         crate::debug::report(&format!(
-                            "demo_seek: could not empty the kill feed before the rewind lands: {why}"
+                            "demo_seek: could not empty the kill feed before the seek lands: {why}"
                         ));
                     }
                     return Ok(false);
@@ -1288,13 +1288,12 @@ mod player {
                     "{now:.2} -> {to:.2} s, going back: from {from_where} ({base:.2}) in steps of {STEP_SECONDS} s, so flags, scores and zoom are right (demo runs {start:.2} to {end:.2})"
                 ));
             }
-            if stepped(now, to, skip_between) || takes_over_feed_clear(chain, skip_between) {
+            if steps(now, to, skip_between, chain) {
                 // Each frame from here moves the clock one step (`step`).
-                let seek = take_over(Pending::new(to, then, now), chain, skip_between);
-                let note = feed_note(&seek);
-                *pending = Some(seek);
+                let lifetime = crate::deathmsg::notice_lifetime();
+                *pending = Some(stepped_seek(to, then, now, chain, lifetime));
                 return Ok(format!(
-                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s{note} (demo runs {start:.2} to {end:.2})"
+                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s, emptying the kill feed on the way (demo runs {start:.2} to {end:.2})"
                 ));
             }
             set_world_time(player, to, 0);

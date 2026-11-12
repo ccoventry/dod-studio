@@ -1,5 +1,5 @@
-//! A seek made while another is still on its way (#1392's review): what the
-//! new one takes over from the one it replaces.
+//! A seek made while another is still on its way, and the kill feed after any
+//! stepped seek (#1392's review).
 //!
 //! A rewind (`rewind.rs`) or a forward stepped seek moves the clock 5 s a
 //! frame, so for a second or two the clock is nowhere near where the seek is
@@ -9,28 +9,28 @@
 //! target of the seek in progress ([`counted_from`]): the second -10 goes to
 //! 22:40, as two presses with the demo playing would.
 //!
-//! The seek that replaces a rewind is usually a forward one from the rewind's
-//! step clock (22:40 is ahead of 10:00), which would put the last kills its
-//! steps replayed in the feed, however old. So it empties the kill feed the
-//! way the rewind would have ([`take_over`]), one notice lifetime before its
-//! own target, and a short one steps too so the feed is emptied on the way:
-//! old kills never show after a jump. A rewind whose start frame the player
-//! has not sent yet passes that wait on too, or the new seek's first step
+//! The steps replay every `DeathMsg` on the way within a second or two of real
+//! time, forward ones as much as a rewind's: a forward stepped seek on
+//! `solifotw-pb2` (PRE, 878.7 -> 978.6 s) landed with three kills from before
+//! the last notice lifetime still in the feed. So every stepped seek empties
+//! the feed one notice lifetime before its target, as a rewind does
+//! ([`stepped_seek`]), and old kills never show after a jump. A seek that
+//! replaces one on its way steps even when it is short ([`steps`]), so the
+//! kills the old one's steps replayed go too. A rewind whose start frame the
+//! player has not sent yet passes that wait on, or the new seek's first step
 //! would be a backward jump that replays nothing.
 //!
 //! A `ds_demo_seek_skip_between` seek still lands at once: it skips what lies
 //! between on purpose.
 
 use super::Pending;
+use super::rewind::feed_clear_at;
 
 /// A seek still on its way, as the seek replacing it sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct InFlight {
     /// Where it is heading.
     pub(super) target: f64,
-    /// How long before `target` it empties the kill feed, when it does (a
-    /// rewind, or a seek that took over from one).
-    pub(super) feed_lead: Option<f64>,
     /// The rewind's `m_LastFrameTime` before it, until its start frame is sent.
     pub(super) rewind_from: Option<f64>,
 }
@@ -41,7 +41,6 @@ pub(super) fn in_flight(pending: Option<&Pending>) -> Option<InFlight> {
     let seek = pending.filter(|seek| !seek.landed)?;
     Some(InFlight {
         target: seek.target,
-        feed_lead: seek.feed_at.map(|at| seek.target - at),
         rewind_from: seek.rewind_from,
     })
 }
@@ -52,27 +51,30 @@ pub(super) fn counted_from(now: f64, chain: Option<InFlight>) -> f64 {
     chain.map_or(now, |seek| seek.target)
 }
 
-/// Whether a seek that does not go back steps all the same, to empty the
-/// kill feed on the way as the seek it replaces would have.
-pub(super) fn takes_over_feed_clear(chain: Option<InFlight>, skip_between: bool) -> bool {
-    !skip_between && chain.is_some_and(|seek| seek.feed_lead.is_some())
+/// Whether a seek from `now` to `to` that does not go back steps: one longer
+/// than a step, or any that replaces a seek on its way, so the kill feed is
+/// emptied of what that one's steps replayed.
+pub(super) fn steps(now: f64, to: f64, skip_between: bool, chain: Option<InFlight>) -> bool {
+    super::stepped(now, to, skip_between) || (!skip_between && chain.is_some())
 }
 
-/// `seek`, a stepped seek starting now, with what it takes over from the
-/// seek it replaces: its kill-feed clear, moved to the new target, and its
-/// wait for a rewind's start frame.
-pub(super) fn take_over(mut seek: Pending, chain: Option<InFlight>, skip_between: bool) -> Pending {
-    if let Some(old) = chain
-        && takes_over_feed_clear(chain, skip_between)
-    {
-        seek.feed_at = old.feed_lead.map(|lead| seek.target - lead);
-        seek.rewind_from = old.rewind_from;
-    }
+/// A forward stepped seek to `to` from `now`: it empties the kill feed one
+/// notice lifetime (`lifetime`) before `to`, and waits for the start frame of
+/// a rewind it replaces.
+pub(super) fn stepped_seek(
+    to: f64,
+    then: Option<String>,
+    now: f64,
+    chain: Option<InFlight>,
+    lifetime: Option<f64>,
+) -> Pending {
+    let mut seek = Pending::new(to, then, now);
+    seek.feed_at = Some(feed_clear_at(to, lifetime));
+    seek.rewind_from = chain.and_then(|old| old.rewind_from);
     seek
 }
 
-/// The words a seek's console lines add, as it starts and as it lands, when
-/// it empties the kill feed (a rewind, or a seek that took over from one).
+/// The words a seek's landing line adds when it emptied the kill feed.
 pub(super) fn feed_note(seek: &Pending) -> &'static str {
     if seek.feed_at.is_some() {
         ", the kill feed emptied on the way"
@@ -83,8 +85,8 @@ pub(super) fn feed_note(seek: &Pending) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::super::rewind::{feed_clear_at, rewind_step, rewinds};
-    use super::super::{Step, landing, stepped};
+    use super::super::rewind::{rewind_step, rewinds};
+    use super::super::{Step, landing};
     use super::*;
 
     /// A rewind to `target` from `base`, the way `player::seek` starts one.
@@ -110,13 +112,10 @@ mod tests {
         let to = relative_target(600.0, Some(&first), -10.0);
         assert!((to - 1360.0).abs() < 1e-9, "{to}");
         assert!(!rewinds(600.0, to, false), "ahead of the step clock");
-        assert!(stepped(600.0, to, false));
+        let chain = in_flight(Some(&first));
+        assert!(steps(600.0, to, false, chain));
         // A third press: from 22:40, the second seek's own target.
-        let second = take_over(
-            Pending::new(to, None, 600.0),
-            in_flight(Some(&first)),
-            false,
-        );
+        let second = stepped_seek(to, None, 600.0, chain, Some(10.0));
         let third = relative_target(700.0, Some(&second), -10.0);
         assert!((third - 1350.0).abs() < 1e-9, "{third}");
     }
@@ -129,7 +128,7 @@ mod tests {
         let hltv_rewind = rewind(900.0, 30.0, Some(1000.0));
         let back = relative_target(35.0, Some(&hltv_rewind), -10.0);
         assert!((back - 890.0).abs() < 1e-9, "{back}");
-        let forward = Pending::new(900.0, None, 300.0);
+        let forward = stepped_seek(900.0, None, 300.0, None, Some(10.0));
         let on = relative_target(400.0, Some(&forward), 60.0);
         assert!((on - 960.0).abs() < 1e-9, "{on}");
         let back = relative_target(400.0, Some(&forward), -10.0);
@@ -148,33 +147,31 @@ mod tests {
         assert_eq!(relative_target(1370.02, Some(&landed), -10.0), 1360.02);
     }
 
-    /// Review's Next twice: the second seek lands ahead of the rewind's step
-    /// clock and empties the feed one notice lifetime before its own target.
+    /// Review's Next twice, or any forward stepped seek: it empties the feed
+    /// one notice lifetime before its own target, then steps on.
     #[test]
-    fn a_seek_that_replaces_a_rewind_empties_the_kill_feed_as_it_would() {
+    fn a_stepped_seek_empties_the_kill_feed_one_notice_lifetime_before_landing() {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
-        assert!(takes_over_feed_clear(chain, false));
-        let next = take_over(Pending::new(1500.0, None, 700.0), chain, false);
+        let next = stepped_seek(1500.0, None, 700.0, chain, Some(10.0));
         assert_eq!(next.feed_at, Some(1490.0));
         assert_eq!(rewind_step(700.0, 1500.0, next.feed_at), Step::To(705.0));
         assert_eq!(rewind_step(1490.0, 1500.0, next.feed_at), Step::ClearFeed);
         assert!(!feed_note(&next).is_empty());
-        // And the one after that, since this one empties the feed too.
-        let again = take_over(
-            Pending::new(1600.0, None, 800.0),
-            in_flight(Some(&next)),
-            false,
-        );
-        assert_eq!(again.feed_at, Some(1590.0));
+        // The PRE pb2 forward seek that kept three old kills.
+        let alone = stepped_seek(978.61, None, 878.7, None, Some(10.0));
+        assert!((alone.feed_at.unwrap() - 968.61).abs() < 1e-9);
+        assert_eq!(alone.rewind_from, None);
     }
 
-    /// A short hop past the step clock steps all the same: past the clear
-    /// point already, it empties the feed at once, then lands.
+    /// A short hop past the step clock steps when it replaces a seek on its
+    /// way: past the clear point already, it empties the feed at once, then
+    /// lands. With nothing on its way it lands at once, as it always has.
     #[test]
-    fn a_short_seek_after_a_rewind_still_empties_the_feed() {
+    fn a_short_seek_that_replaces_another_still_empties_the_feed() {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
-        assert!(!stepped(1368.0, 1371.0, false));
-        let hop = take_over(Pending::new(1371.0, None, 1368.0), chain, false);
+        assert!(steps(1368.0, 1371.0, false, chain));
+        assert!(!steps(1368.0, 1371.0, false, None));
+        let hop = stepped_seek(1371.0, None, 1368.0, chain, Some(10.0));
         assert_eq!(rewind_step(1368.0, 1371.0, hop.feed_at), Step::ClearFeed);
         assert_eq!(rewind_step(1368.0, 1371.0, None), Step::Land(1371.0));
     }
@@ -183,21 +180,16 @@ mod tests {
     #[test]
     fn a_seek_that_replaces_a_rewind_waits_for_its_start_frame() {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, Some(1380.0))));
-        let next = take_over(Pending::new(1360.0, None, 566.49), chain, false);
+        let next = stepped_seek(1360.0, None, 566.49, chain, Some(10.0));
         assert_eq!(next.rewind_from, Some(1380.0));
     }
 
-    /// A forward stepped seek never emptied the feed, and a skip lands at
-    /// once on purpose: neither passes a clear on.
+    /// A skip lands at once on purpose, chained or not.
     #[test]
-    fn only_a_seek_that_empties_the_feed_passes_it_on() {
-        let forward = in_flight(Some(&Pending::new(900.0, None, 300.0)));
-        assert!(!takes_over_feed_clear(forward, false));
-        let next = take_over(Pending::new(960.0, None, 400.0), forward, false);
-        assert_eq!(next.feed_at, None);
-        assert!(feed_note(&next).is_empty());
-        let rewinding = in_flight(Some(&rewind(1370.0, 566.49, None)));
-        assert!(!takes_over_feed_clear(rewinding, true));
-        assert!(!takes_over_feed_clear(None, false));
+    fn a_skip_never_steps() {
+        let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
+        assert!(!steps(600.0, 1500.0, true, chain));
+        assert!(!steps(600.0, 1500.0, true, None));
+        assert!(steps(600.0, 1500.0, false, None));
     }
 }

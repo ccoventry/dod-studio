@@ -36,8 +36,9 @@
 
 use super::{GAP_LANDING_BEFORE, GAP_SECONDS, STEP_SECONDS, Step, next_step};
 
-/// One frame of a rewind still to empty the kill feed at `feed_at`: step to
-/// exactly there, then clear; `None` once cleared, stepping as any seek.
+/// One frame of a stepped seek, a rewind or a forward one (`chain.rs`), still
+/// to empty the kill feed at `feed_at`: step to exactly there, then clear;
+/// `None` once cleared, stepping as any seek.
 pub(super) fn rewind_step(now: f64, target: f64, feed_at: Option<f64>) -> Step {
     match feed_at {
         Some(at) if now < at - 0.001 => Step::To((now + STEP_SECONDS).min(at)),

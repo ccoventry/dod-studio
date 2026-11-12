@@ -285,11 +285,13 @@ message (the LOADING frames' sign-on was read at load) and took 1.0-2.6 s on
 5 POV demos from 5 players. Each rewind steps to exactly `hud_deathnotice_time`
 before the landing, empties the kill feed there and steps on, so the feed
 shows only the kills of that last notice lifetime, not the last few the steps
-replayed from earlier (`demo_seek/rewind.rs`). A seek made while another is
-still stepping (two quick presses of the Playback tab's -10, Review's Next twice)
-counts a relative time from that seek's target, not from the clock mid-steps,
-and when it replaces a rewind it empties the feed the same way before its own
-target, a short hop included (`demo_seek/chain.rs`). A capture batch goes back with its
+replayed from earlier (`demo_seek/rewind.rs`). A forward stepped seek does the
+same: without it, a jump from 878.7 to 978.6 s in `solifotw-pb2` landed with three
+kills from before the last 10 s still up, on PRE and POST. A seek made while
+another is still stepping (two quick presses of the Playback tab's -10, Review's
+Next twice) counts a relative time from that seek's target, not from the clock
+mid-steps, and steps even when short, so the feed is emptied of what the first
+one's steps replayed (`demo_seek/chain.rs`). A capture batch goes back with its
 `back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)

@@ -326,7 +326,10 @@ replays (a POV demo's key presses) are dropped and the keys let go on landing,
 since the engine would run them one a frame long after it (#702). A jump
 back starts over and steps forward the same way (#830, #1085), from the
 demo's first recorded frame, so flags, scores and zoom are right where it
-lands; it takes a second or two. Anything after the time is
+lands; it takes a second or two. Either way the kill feed is emptied one
+`hud_deathnotice_time` before the landing, so it shows only the kills playing
+in would. A `ds_demo_seek_by` typed while a jump is still stepping counts from
+where that jump is heading: -10 pressed twice goes back 20 s. Anything after the time is
 a command to run once the jump has landed:
 `ds_demo_seek_to 1335.3 ds_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
