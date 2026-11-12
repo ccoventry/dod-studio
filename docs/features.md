@@ -455,4 +455,3 @@ Each of these is true on `dev` today. Items with an issue number are tracked; th
 
 - `DOD_BATCH_DONE` is removed before each batch but nothing creates or reads it.
 - `dod_quit.cfg` is written but never executed.
-- The WASM gates in `native/` guard nothing, since no WASM build uses `native`.
