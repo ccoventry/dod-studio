@@ -1078,7 +1078,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
+        // The batch's settings ride once on the payload, not on every block.
+        const withSettings = { ...block, capture_settings: payload.capture_settings };
+        const marked = markBlockCaptured(withSettings, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });

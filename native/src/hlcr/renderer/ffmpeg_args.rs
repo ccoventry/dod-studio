@@ -187,6 +187,11 @@ pub(super) fn input_args(clip: &ClipData, fps: &str) -> Vec<String> {
 
     if let Some(video) = clip.video_file.as_deref() {
         if is_hud {
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "the clip was checked for a wav file earlier in this build"
+            )]
             let wav = clip
                 .wav_file
                 .as_deref()
@@ -221,6 +226,11 @@ pub(super) fn input_args(clip: &ClipData, fps: &str) -> Vec<String> {
             push(&["-i", &video_input]);
         }
     } else if is_hud {
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "the clip was checked for a wav file earlier in this build"
+        )]
         let wav = clip
             .wav_file
             .as_deref()
@@ -261,6 +271,11 @@ pub(super) fn input_args(clip: &ClipData, fps: &str) -> Vec<String> {
             "2:a",
         ]);
     } else {
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "the clip was checked for a wav file earlier in this build"
+        )]
         let wav = clip
             .wav_file
             .as_deref()

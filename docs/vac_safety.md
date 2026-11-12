@@ -34,10 +34,12 @@ Steam Support: <https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74>
    An injector of your own, into a running game, skips every safeguard DoD
    Studio has (below).
 
-**Recommended, not required: a separate copy of Half-Life for movies.** Copy
-the whole `Half-Life` folder from `steamapps\common` to a new folder (for
-example `Half-Life - Movies`) and point DoD Studio at that copy's `hl.exe`.
-It keeps movie-only edits (configs, models, sprites, sounds, `.res` files) out
+**Recommended, not required: a separate copy of the `dod` folder for movies.**
+Setup's **Make a movie copy...** button copies the `dod` folder in
+`steamapps\common\Half-Life` to a new one (for example `dod_movies`) and picks
+it as the Game Folder. By hand, copy the `dod` folder the same way, or copy the
+whole `Half-Life` folder to a new folder (for example `Half-Life - Movies`) and
+point DoD Studio at that copy's `hl.exe`. Either keeps movie-only edits (configs, models, sprites, sounds, `.res` files) out
 of the game you play online. It is not a VAC safeguard: what matters is what is
 loaded into the game when it joins a server, whichever folder it runs from.
 
