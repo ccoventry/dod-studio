@@ -109,4 +109,4 @@ opt-level = 3
 # Reduce the amount of debug info generated to speed up compilation
 [profile.dev]
 debug = 0
-split-debuginfo = "unpacked"
+split-debuginfo = "unpacked"# ci skip test
