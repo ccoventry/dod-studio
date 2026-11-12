@@ -174,6 +174,8 @@ fn ramp(span: RampSpan) -> Vec<Frame> {
                 frame_data: FrameData::NetworkMessage(Box::new((
                     template.0.clone(),
                     NetworkMessage {
+                        // The view held through the hole. When the damage
+                        // reached the template's, `view_range` restates it.
                         info: template.1.info.clone(),
                         sequence_info,
                         message_length: 0,

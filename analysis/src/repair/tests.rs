@@ -153,6 +153,93 @@ fn a_damaged_time_right_before_a_hole_does_not_hide_the_resume() {
     assert!(hole.lost_secs < 10.0, "{hole:?}");
 }
 
+/// Every playback frame whose view (origin, angles, health) is out of range:
+/// (time, what).
+fn views_out_of_range(bytes: &[u8]) -> Vec<(f32, &'static str)> {
+    let demo = dem::open_demo_from_bytes(bytes).expect("parses");
+    demo.directory
+        .entries
+        .iter()
+        .skip(1)
+        .flat_map(|e| e.frames.iter())
+        .filter_map(|f| match &f.frame_data {
+            FrameData::NetworkMessage(n) if !view_range::info_in_range(&n.1.info) => {
+                Some((f.time, "network"))
+            }
+            FrameData::ClientData(c) if !view_range::client_data_in_range(c) => {
+                Some((f.time, "client data"))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Damage that reaches the bodies of the first frames after a hole, headers
+/// intact, as in `m3_h2`: the first network frame after it holds a view
+/// origin of 6.3e10, a yaw of 1.1e12 and a health of -2147483548, and a
+/// client-data frame a yaw of 4.9e21. Every ramp frame copied that view, and
+/// the screen was black for the whole cut (#15).
+#[test]
+fn a_damaged_view_at_the_edge_of_a_hole_reaches_no_written_frame() {
+    // Offsets into a frame's body: a network frame's `demo_info` opens with
+    // its timestamp, then `ref_params` (view origin at 0, client view angles
+    // at 128, health at 140); a client-data frame's origin, then its angles.
+    const VIEW_ORIGIN_Y: usize = 4 + 4;
+    const CLIENT_YAW: usize = 4 + 128 + 4;
+    const HEALTH: usize = 4 + 140;
+    const CLIENT_DATA_YAW: usize = 12 + 4;
+    const BODY: usize = 9;
+    let original = crate::tests_fixture::fixture();
+    let mut bytes = damaged_fixture(original.len() / 2, 300_000);
+    let bridged = bridge::bridge(
+        &bytes,
+        bridge::BridgeHooks {
+            progress: &mut |_| {},
+            is_cancelled: &|| false,
+        },
+    )
+    .expect("bridges");
+    let resume = bridged.cuts[0].resume;
+    let end = frame_walk::frames_end(&bytes);
+    let (starts, _) = frame_walk::frame_starts(&bytes, resume, end);
+    let mut network_damaged = 0;
+    let mut client_data_damaged = 0;
+    for &at in starts.iter().take(16) {
+        let body = at + BODY;
+        match bytes[at] {
+            0 | 1 if network_damaged < 2 => {
+                bytes[body + VIEW_ORIGIN_Y..][..4].copy_from_slice(&6.3e10f32.to_le_bytes());
+                bytes[body + CLIENT_YAW..][..4].copy_from_slice(&1.1e12f32.to_le_bytes());
+                bytes[body + HEALTH..][..4].copy_from_slice(&(-2_147_483_548i32).to_le_bytes());
+                network_damaged += 1;
+            }
+            4 if client_data_damaged < 1 => {
+                bytes[body + CLIENT_DATA_YAW..][..4].copy_from_slice(&4.9e21f32.to_le_bytes());
+                client_data_damaged += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!((network_damaged, client_data_damaged), (2, 1));
+    let outcome = repair(&bytes).expect("repairs");
+    let RepairOutcome::Repaired { bytes, report } = outcome else {
+        panic!("not repaired: {outcome:?}");
+    };
+    assert_eq!(report.holes.len(), 1, "{report:?}");
+    assert!(report.joins[0].ramp_frames > 0, "{report:?}");
+    assert!(
+        report.views_restated > report.joins[0].ramp_frames,
+        "{report:?}"
+    );
+    let bad = views_out_of_range(&bytes);
+    assert!(
+        bad.is_empty(),
+        "{} frames carry a view out of range, first {:?}",
+        bad.len(),
+        bad.first()
+    );
+}
+
 /// Damage that runs to the end of the file: nothing resumes after it, so the
 /// repair is the recording up to the break, with no gap to list.
 #[test]
