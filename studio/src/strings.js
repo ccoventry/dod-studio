@@ -805,11 +805,17 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
+    // A batch that ran to its end but left clips uncaptured, or short (#1401).
+    batchFinishedWithFailures: (failed, total) => `Batch capture finished, but ${failed} of ${total} clip${total === 1 ? '' : 's'} failed: not marked Captured. See Last Batch and the activity log.`,
+    batchFinishedShort: (short, total) => `Batch capture finished: ${short} of ${total} clip${total === 1 ? ' is' : 's are'} shorter than planned. Check ${short === 1 ? 'it' : 'them'} before using ${short === 1 ? 'it' : 'them'}.`,
+    // The highlights of the clips the game reported as failed or short (#1401).
+    clipsFailed: (labels, more) => `Failed in the game (nothing usable recorded), not marked Captured: ${labels.join('; ')}${more > 0 ? ` and ${more} more` : ''}.`,
+    clipsShort: (labels, more) => `Shorter than planned or missing a kill, marked Captured, check before using: ${labels.join('; ')}${more > 0 ? ` and ${more} more` : ''}.`,
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
-      const missing = total - captured - cutShort - stoppedEarly - startedLate;
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0, failed = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly - startedLate - failed;
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
@@ -817,6 +823,8 @@ export const STRINGS = {
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       // OBS started recording after the clip's first frame (#1109).
       if (startedLate > 0) parts.push(`${startedLate} OBS started recording late (missing the clip's opening, not captured)`);
+      // The game recorded no start, no stop or no frames (#1401).
+      if (failed > 0) parts.push(`${failed} failed in the game (not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -2685,6 +2693,8 @@ export const STRINGS = {
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
+      // What the game reported about the clip (#1401).
+      failed: 'Failed in the game: nothing usable recorded (not captured)',
       late: 'OBS started late (missing the opening, not captured)',
     },
     // A clip the batch's end cut short, by what ended it (#1081).
@@ -2696,6 +2706,16 @@ export const STRINGS = {
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
+    // Why the game's clip failed (#1401).
+    clipFailed: (why) => ({
+      no_start: 'Failed: the game never started recording it (not captured)',
+      no_stop: 'Failed: the game never stopped recording it (not captured)',
+      no_frames: 'Failed: the game recorded no frames (not captured)',
+    })[why] || 'Failed in the game: nothing usable recorded (not captured)',
+    // A take shorter than its plan, or missing a kill: still captured (#1401).
+    clipShort: (recorded, planned, killsOutside) => killsOutside > 0
+      ? `Captured, but missing ${killsOutside} kill${killsOutside === 1 ? '' : 's'}: ${recorded.toFixed(2)} s of ${planned.toFixed(2)} s planned`
+      : `Captured, but short: ${recorded.toFixed(2)} s of ${planned.toFixed(2)} s planned`,
     // A take OBS started recording after its clip's first frame (#1109).
     startedLate: (ms) => `OBS started ${ms} ms late: missing the clip's opening (not captured)`,
     OPEN_FOLDER: 'Open folder',
@@ -3330,15 +3350,18 @@ export const STRINGS = {
 
   // ── capture_progress.js: the capture batch's footer line and bar (#952)
   CAPTURE_PROGRESS: {
-    done: (duration, captured, total) => {
+    // A clip not captured in a batch that ran to its end failed; a short one
+    // is captured but shorter than planned (#1401).
+    done: (duration, captured, total, short = 0) => {
       if (total == null) return `Done in ${duration}`;
       const clips = total === 1 ? 'clip' : 'clips';
-      return captured === total
+      const head = captured === total
         ? `Done in ${duration}: ${total} ${clips} captured`
-        : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
+        : `Done in ${duration}: ${captured} of ${total} ${clips} captured, ${total - captured} failed`;
+      return short > 0 ? `${head}, ${short} shorter than planned` : head;
     },
     startLog: () => '[capture] started',
-    endLog: (outcome, elapsed, captured, total) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
+    endLog: (outcome, elapsed, captured, total, short = 0) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}${short > 0 ? `, ${short} shorter than planned` : ''}`,
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
