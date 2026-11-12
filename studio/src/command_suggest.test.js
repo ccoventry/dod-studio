@@ -6,9 +6,10 @@ import {
   suggestions, typedName, acceptSuggestion, tierNote, droppedFromDemo,
   OWNED_BY_STUDIO, GAME_QUITS_OVER, SCHEDULED_BANNED, MID_DEMO_HAZARDS, NOOP_IN_INIT, FAST_FORWARD_CVARS,
   DEMO_FILTER_NAME_CONTAINS, DEMO_FILTER_NAME_STARTS_WITH, DEMO_FILTER_LINE_STARTS_WITH,
-  DEMO_FILTER_LINE_CONTAINS, DEMO_FILTER_WORD_STARTS_WITH,
+  DEMO_FILTER_LINE_CONTAINS, DEMO_FILTER_WORD_STARTS_WITH, PROJECT_OWNED, isProjectOwnedLine,
 } from './command_suggest.js';
 import { DODSTUDIO_NAMES } from './console_commands_data.js';
+import { STRINGS } from './strings.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -126,6 +127,35 @@ describe('droppedFromDemo (#679)', () => {
   });
 });
 
+describe("the project's field of view (#1085)", () => {
+  const S = STRINGS.COMMAND_SUGGEST;
+  it('refuses mirv_fov <number> while the project sets one, Initial and Scheduled alike', () => {
+    for (const scheduled of [false, true]) {
+      expect(tierNote('mirv_fov', { scheduled, projectFov: true, line: 'mirv_fov 100' }))
+        .toEqual({ level: 'refused', text: S.PROJECT_FOV });
+      expect(tierNote('mirv_fov', { scheduled, projectFov: true, line: 'mirv_fov "105"' }).level).toBe('refused');
+    }
+  });
+
+  it('keeps handleZoom allowed in Initial Commands, and refused as before when scheduled', () => {
+    expect(tierNote('mirv_fov', { scheduled: false, projectFov: true, line: 'mirv_fov handleZoom enabled 1' })).toBeNull();
+    expect(tierNote('mirv_fov', { scheduled: true, projectFov: true, line: 'mirv_fov handleZoom enabled 1' }).text)
+      .toBe(S.SCHEDULED_BANNED);
+  });
+
+  it('warns on the name alone, and changes nothing without the project setting', () => {
+    expect(tierNote('mirv_fov', { scheduled: false, projectFov: true })).toEqual({ level: 'warned', text: S.PROJECT_FOV_NAME });
+    expect(tierNote('mirv_fov', { scheduled: false, line: 'mirv_fov 100' })?.level).not.toBe('refused');
+    expect(suggestions('mirv_fov', { projectFov: true })[0].note.text).toBe(S.PROJECT_FOV_NAME);
+  });
+
+  it('reads only a bare number as the project-owned assignment', () => {
+    expect(['mirv_fov 90', ' MIRV_FOV "100" ', 'mirv_fov 100.5'].every(isProjectOwnedLine)).toBe(true);
+    expect(['mirv_fov', 'mirv_fov handleZoom enabled 1', 'mirv_fov wide', 'default_fov 90', 'mirv_fov_x 9']
+      .some(isProjectOwnedLine)).toBe(false);
+  });
+});
+
 describe('typing', () => {
   it('suggests only while the cursor is in the first word', () => {
     expect(typedName('mirv_fo')).toBe('mirv_fo');
@@ -158,6 +188,7 @@ describe('kept in step with the code', () => {
     expect([...DEMO_FILTER_WORD_STARTS_WITH].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_WORD_STARTS_WITH'));
     expect([...NOOP_IN_INIT].sort()).toEqual(rustList(cfgScan, 'NOOP_IN_INIT_COMMANDS'));
     expect([...FAST_FORWARD_CVARS].sort()).toEqual(rustList(cfgScan, 'FAST_FORWARD_CVARS'));
+    expect([...PROJECT_OWNED].sort()).toEqual(rustList(cfgScan, 'PROJECT_OWNED_COMMANDS'));
   });
 
   it("has every console_name! in goldsrc-hooks (re-run goldsrc-hooks/tools/console_names.py when this fails)", () => {

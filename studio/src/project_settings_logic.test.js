@@ -119,7 +119,13 @@ describe('blockFromForm', () => {
   it('has a path for every owned field', () => {
     const block = blockFromForm(appForm(), { pcId: PC });
     expect(keysDifferingFromForm(appForm(), block, PC)).toEqual([]);
-    expect(PROJECT_FIELDS.length).toBe(17);
+    // 17 with Configuration's own, plus field of view, which only the
+    // Project settings page sets (step 8).
+    expect(PROJECT_FIELDS.length).toBe(18);
+  });
+
+  it('leaves field of view out: Configuration has none, so an old project gets none', () => {
+    expect(blockFromForm(appForm(), { pcId: PC }).picture.fov).toBeUndefined();
   });
 });
 

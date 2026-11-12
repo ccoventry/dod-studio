@@ -72,9 +72,9 @@ pub struct CaptureSettings {
     pub codec: String,
     pub width: i32,
     pub height: i32,
-    /// The horizontal field of view the capture ran at: `mirv_fov` from
-    /// Initial Commands, else the game's configs, else the default
-    /// (`capture_fov_resolved`).
+    /// The horizontal field of view the capture ran at: the project's
+    /// (Picture), else `mirv_fov` from Initial Commands, else the game's
+    /// configs, else the default (`capture_fov_resolved`).
     pub fov: f32,
     /// The install's folder name (`hl.exe`'s folder), not its path, so the
     /// record means the same on another PC.
@@ -114,8 +114,8 @@ impl CaptureSettings {
             fov: crate::patch::capture_fov_resolved(config),
             install: install_name(&config.game_path),
             hook: hook_label(config),
-            lines: config
-                .init_commands
+            // As sent: with the project's field of view after the user's own.
+            lines: crate::patch::user_init_commands(config)
                 .iter()
                 .map(|line| line.trim().to_string())
                 .filter(|line| !line.is_empty())

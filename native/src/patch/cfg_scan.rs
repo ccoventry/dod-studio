@@ -716,6 +716,34 @@ pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
     "dem_speed",
 ];
 
+/// Cvars a project owns as one of its settings (#1085): refused in Initial
+/// and Scheduled Commands when the batch carries that setting, with the
+/// place to set it instead. Only `mirv_fov` today, the project's field of
+/// view (Project Settings › Picture): the batch sends it after every Initial
+/// Command (`builder::user_init_commands`), so a typed one would either do
+/// nothing or, scheduled, change the view mid-demo.
+///
+/// Only an assignment counts, `mirv_fov <number>`: HLAE's sub-commands
+/// (`mirv_fov handleZoom enabled 1`, the scope zoom) set no field of view
+/// and stay allowed. Without the project's setting (New UI off, no project)
+/// this tier does not apply and Initial Commands set the field of view, as
+/// before; scheduled, `SCHEDULED_BANNED_COMMANDS` still refuses it.
+pub const PROJECT_OWNED_COMMANDS: &[&str] = &["mirv_fov"];
+
+/// `PROJECT_OWNED_COMMANDS` assignments in `commands`, as (cvar, whole
+/// trimmed command): the head is one of them and its one argument, quotes
+/// stripped, is a number.
+pub fn project_owned_commands(commands: &[String]) -> Vec<(String, String)> {
+    commands_matching(PROJECT_OWNED_COMMANDS, commands)
+        .into_iter()
+        .filter(|(_, command)| {
+            let mut parts = command.split_whitespace().skip(1);
+            matches!((parts.next(), parts.next()), (Some(value), None)
+                if unquote(value).parse::<f32>().is_ok())
+        })
+        .collect()
+}
+
 // ── The demo command filter (#679) ──────────────────────────────────────────
 //
 // Every type-3 `ConsoleCommand` frame a demo carries goes through the same
@@ -1262,6 +1290,29 @@ mod tests {
 
     fn scratch(tag: &str) -> Scratch {
         Scratch::new(format_args!("cfg_scan_{tag}"))
+    }
+
+    /// The project owns `mirv_fov <number>` (#1085), quoted or not; HLAE's
+    /// sub-commands such as `handleZoom` (the scope zoom) are not its.
+    #[test]
+    fn only_a_mirv_fov_number_is_the_projects() {
+        let commands: Vec<String> = [
+            "mirv_fov 105",
+            "  MIRV_FOV \"100\" ",
+            "mirv_fov handleZoom enabled 1",
+            "mirv_fov handleZoom minUnzoomedFov current",
+            "mirv_fov",
+            "mirv_fov_other 5",
+            "default_fov 100",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let owned: Vec<String> = project_owned_commands(&commands)
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
+        assert_eq!(owned, ["mirv_fov 105", "MIRV_FOV \"100\""]);
     }
 
     /// `ds_player_change_name` (#1021) is an ordinary user command: renaming a

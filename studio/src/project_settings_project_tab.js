@@ -6,7 +6,7 @@
 // project_settings_page_logic.js.
 
 import {
-  CAPTURE_MODES, SIZE_CHOICES, RATE_CHOICES, sizeChoiceOf, rateChoiceOf, rateKeyFor, rateOf, codecKeyFor,
+  CAPTURE_MODES, SIZE_CHOICES, RATE_CHOICES, FOV_CHOICES, sizeChoiceOf, rateChoiceOf, fovChoiceOf, rateKeyFor, rateOf, codecKeyFor,
   templateOrDefault, killGapsWith, withFolder, withoutFolder, sameDriveLines, installState,
 } from './project_settings_page_logic.js';
 import { DEFAULT_TEMPLATE, PLACEHOLDERS } from './clip_name.js';
@@ -17,6 +17,7 @@ import { pickPath } from './pick_path.js';
 import { calculateExportPoolSpace } from './ipc_bridge.js';
 import { BYTES_PER_GB } from './byte_size.js';
 import { madeWithOf } from './project_settings_logic.js';
+import { el, row, card, chips, numberBox, unit } from './project_settings_dom.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.PROJECT_SETTINGS_PAGE;
@@ -34,70 +35,6 @@ export const PROJECT_SECTIONS = Object.freeze([
   { id: 'folders', label: S.FOLDERS },
   { id: 'install', label: S.INSTALL },
 ]);
-
-/** An element with `props` (class, text, title, and any other property)
- *  and `children`. */
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null) continue;
-    if (key === 'class') node.className = value;
-    else if (key === 'text') node.textContent = value;
-    else if (key === 'dataset') Object.assign(node.dataset, value);
-    else node[key] = value;
-  }
-  node.append(...children.filter(Boolean));
-  return node;
-}
-
-/** A row: its label and hint on the left, `controls` on the right. */
-function row(label, hint, controls, { id } = {}) {
-  return el('div', { class: 'ps-row', dataset: id ? { row: id } : {} }, [
-    el('div', { class: 'ps-row-label' }, [
-      el('div', { class: 'ps-row-title', text: label }),
-      hint ? el('div', { class: 'ps-row-hint', text: hint }) : null,
-    ]),
-    el('div', { class: 'ps-row-controls' }, controls),
-  ]);
-}
-
-/** A card for one section. */
-function card(id, title, sub, rows) {
-  return el('section', { class: 'ps-card', id: `ps-section-${id}` }, [
-    el('h3', { class: 'ps-card-title' }, [
-      document.createTextNode(title),
-      sub ? el('span', { class: 'ps-card-sub', text: sub }) : null,
-    ]),
-    ...rows,
-  ]);
-}
-
-/** A row of chips, one picked. `choices` are `{ value, label, title }`. */
-function chips(name, choices, picked, onPick) {
-  return el('div', { class: 'ps-chips', role: 'group', dataset: { chips: name } }, choices.map((c) => {
-    const on = c.value === picked;
-    const chip = el('button', {
-      type: 'button', class: `ps-chip${on ? ' ps-chip-on' : ''}`, text: c.label, title: c.title || '',
-      dataset: { value: String(c.value) },
-    });
-    chip.setAttribute('aria-pressed', on ? 'true' : 'false');
-    chip.addEventListener('click', () => { if (!on) onPick(c.value); });
-    return chip;
-  }));
-}
-
-/** A number box: `onValue(number|NaN)` on every keystroke. */
-function numberBox(name, value, onValue, { step = '1', width = '84px', title } = {}) {
-  const input = el('input', {
-    type: 'number', class: 'ps-number', step, value: value === undefined || value === null ? '' : String(value),
-    title: title || '', dataset: { field: name },
-  });
-  input.style.width = width;
-  input.addEventListener('input', () => onValue(input.value.trim() === '' ? NaN : Number(input.value)));
-  return input;
-}
-
-const unit = (text) => el('span', { class: 'ps-unit', text });
 
 /**
  * @param {object} page  `getState()` the page's `{ pending, block, form, ui }`
@@ -118,6 +55,7 @@ export function createProjectTab({ getState, onEdit }) {
           (m) => { ui.customRate = false; onEdit({ capture_mode: m }, { redraw: true }); }),
       ]),
       sizeRow(pending, ui),
+      fovRow(pending, ui),
       rateRow(pending, ui, mode),
       finishRow(pending, mode),
     ];
@@ -141,6 +79,24 @@ export function createProjectTab({ getState, onEdit }) {
       ]));
     }
     return row(S.SIZE, S.SIZE_HINT, controls, { id: 'resolution_width' });
+  }
+
+  /** Field of view, the project's own (build plan step 8): never unset
+   *  and no way to clear it (#1085, decision 3); a batch sends it after
+   *  every Clip settings line. */
+  function fovRow(pending, ui) {
+    const picked = ui.customFov ? 'custom' : fovChoiceOf(pending.capture_fov);
+    const choices = [...FOV_CHOICES.map((fov) => ({ value: fov, label: String(fov) })), { value: 'custom', label: S.CUSTOM }];
+    const controls = [chips('fov', choices, picked, (fov) => {
+      ui.customFov = fov === 'custom';
+      onEdit(fov === 'custom' ? {} : { capture_fov: fov }, { redraw: true });
+    })];
+    if (picked === 'custom') {
+      controls.push(el('div', { class: 'ps-inline' }, [
+        numberBox('capture_fov', pending.capture_fov, (v) => onEdit({ capture_fov: v })), unit(S.FOV_UNIT),
+      ]));
+    }
+    return row(S.FOV, S.FOV_HINT, controls, { id: 'capture_fov' });
   }
 
   function rateRow(pending, ui, mode) {
@@ -326,24 +282,7 @@ export function createProjectTab({ getState, onEdit }) {
     container.replaceChildren(pictureCard(), clipLengthCard(), clipNamesCard(), foldersCard(), installCard());
   }
 
-  return { render, showProblems };
-}
-
-/**
- * Marks each row in `container` that `problems` (pendingProblems' `{ key:
- * message }`) names: its boxes red and the message under it. Clears the
- * marks of rows that are fine now. Run on every edit, without a redraw, so
- * a box being typed in keeps its focus.
- */
-export function showProblems(container, problems) {
-  container.querySelectorAll('.ps-problem').forEach((line) => line.remove());
-  container.querySelectorAll('.ps-invalid').forEach((input) => input.classList.remove('ps-invalid'));
-  for (const [key, message] of Object.entries(problems)) {
-    const target = container.querySelector(`[data-row="${key}"] .ps-row-controls`);
-    if (!target) continue;
-    target.querySelectorAll('input').forEach((input) => input.classList.add('ps-invalid'));
-    target.append(el('div', { class: 'ps-problem', role: 'alert', text: message }));
-  }
+  return { render };
 }
 
 /** A seconds value for the clip-length line: as typed, or ? while blank. */

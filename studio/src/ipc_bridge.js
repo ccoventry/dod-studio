@@ -269,10 +269,26 @@ export async function scanGameConfigs(
     captureFps: context.captureFps ?? null,
     decalFlush: context.decalFlush ?? null,
     hookRunsBatch: context.hookRunsBatch ?? null,
+    // The open project's field of view (#1085), null without one.
+    pictureFov: context.pictureFov ?? null,
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], filteredInit: [], filteredScheduled: [], filterApplies: false, missingExec: [], configCfgWritable: false };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], filteredInit: [], filteredScheduled: [], filterApplies: false, missingExec: [], configCfgWritable: false, projectFov: null, projectFovLeftOut: [] };
+    });
+}
+
+/**
+ * What a project's Initial Commands and the game's configs set the field of
+ * view to (#1085): `{ fromLines, configs }`, each `{ value, file, line }`
+ * (`file` null for a line of Initial Commands itself). Null when the scan
+ * fails: the caller then takes the lines alone.
+ */
+export async function projectFovSources(gamePath, initCommands = []) {
+  return invoke("project_fov_sources", { gamePath, initCommands })
+    .catch((err) => {
+      console.error("IPC Execution Error (project_fov_sources):", err);
+      return null;
     });
 }
 

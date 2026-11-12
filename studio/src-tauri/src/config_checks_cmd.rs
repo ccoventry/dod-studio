@@ -21,6 +21,7 @@ pub async fn scan_game_configs(
     capture_fps: Option<i32>,
     decal_flush: Option<bool>,
     hook_runs_batch: Option<bool>,
+    picture_fov: Option<f32>,
 ) -> Result<CfgReport, String> {
     let request = CfgReportRequest {
         game_path,
@@ -29,10 +30,65 @@ pub async fn scan_game_configs(
         capture_fps,
         decal_flush,
         hook_runs_batch,
+        picture_fov,
     };
     tokio::task::spawn_blocking(move || cfg_report(request))
         .await
         .map_err(crate::messages::config_scan_failed)
+}
+
+/// One value stated for `mirv_fov` (`native::patch::picture_fov::StatedFov`):
+/// `file` the config's name, `None` for a line of Initial Commands itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatedFovRow {
+    pub value: f32,
+    pub file: Option<String>,
+    pub line: usize,
+}
+
+impl From<&native::patch::picture_fov::StatedFov> for StatedFovRow {
+    fn from(s: &native::patch::picture_fov::StatedFov) -> Self {
+        StatedFovRow {
+            value: s.value,
+            file: s.file.as_ref().map(|f| {
+                f.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| f.display().to_string())
+            }),
+            line: s.line,
+        }
+    }
+}
+
+/// What sets the field of view around a project's Initial Commands
+/// (`native::patch::picture_fov::FovSources`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FovSourcesReport {
+    pub from_lines: Option<StatedFovRow>,
+    pub configs: Vec<StatedFovRow>,
+}
+
+/// What `init_commands` and the game's configs set the field of view to,
+/// for the project's Picture field of view (#1085): what an older project
+/// takes when it first opens, and which configs it overrides. Reads only.
+#[tauri::command]
+pub async fn project_fov_sources(
+    game_path: String,
+    init_commands: Vec<String>,
+) -> Result<FovSourcesReport, String> {
+    tokio::task::spawn_blocking(move || {
+        let game_dir = native::shared::paths::mod_dir_for_exe(std::path::Path::new(&game_path))
+            .filter(|d| d.is_dir());
+        let sources = native::patch::picture_fov::fov_sources(game_dir.as_deref(), &init_commands);
+        FovSourcesReport {
+            from_lines: sources.from_lines.as_ref().map(StatedFovRow::from),
+            configs: sources.configs.iter().map(StatedFovRow::from).collect(),
+        }
+    })
+    .await
+    .map_err(crate::messages::config_scan_failed)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

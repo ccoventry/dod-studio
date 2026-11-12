@@ -8,8 +8,9 @@
 // pending edits asks Apply, Discard or Stay. The page never touches the
 // Configuration form, which is the app's store (settings_sync.js).
 //
-// Only the Project tab is built (project_settings_project_tab.js); the other
-// two arrive with build plan steps 8 and 7 and show greyed until then.
+// The Project tab (project_settings_project_tab.js) and the Clip settings
+// tab (clip_settings_tab.js) are built; Players and sprays arrives with build
+// plan step 7 and shows greyed until then.
 //
 // Hidden behind the New UI switch (new_ui.js) until the whole rework ships:
 // with it off there is no menu item and open() does nothing.
@@ -20,29 +21,21 @@ import { blockForPage, applyBlockFromPage, onProjectBlockReplaced, setProjectSet
 import {
   startingValues, changedKeys, pendingProblems, blockWithPending,
 } from './project_settings_page_logic.js';
-import { createProjectTab, showProblems, PROJECT_SECTIONS } from './project_settings_project_tab.js';
+import { createProjectTab, PROJECT_SECTIONS } from './project_settings_project_tab.js';
+import { createClipSettingsTab, CLIP_SECTIONS } from './clip_settings_tab.js';
+import { el, showProblems } from './project_settings_dom.js';
+import { getAllCommandProfiles, saveCommandProfileToLibrary } from './command_profiles_ui.js';
+import { CLIP_TAB_KEYS } from './clip_settings_logic.js';
+import { showToast } from './toast.js';
 import { setAppShortcutsEnabled } from './app_shortcuts.js';
 import {
-  projectSettingsPageOpenedLine, projectSettingsPageAppliedLine, projectSettingsPageClosedLine,
+  projectSettingsPageOpenedLine, projectSettingsPageAppliedLine, projectSettingsPageClosedLine, clipPresetSavedLine, clipSettingsAppliedLine,
 } from './project_log.js';
 import { fileNameOf } from './path_display.js';
 import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.PROJECT_SETTINGS_PAGE;
-
-/** An element with `props` (class, text, title, any other property). */
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null) continue;
-    if (key === 'class') node.className = value;
-    else if (key === 'text') node.textContent = value;
-    else node[key] = value;
-  }
-  node.append(...children.filter(Boolean));
-  return node;
-}
 
 /** Keys the app's own shortcuts swallow (app_shortcuts.js): let through to
  *  it, so a reload key never reloads the window from inside the page. */
@@ -72,13 +65,55 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
   let state = null;
   let leavePrompt = null;
 
+  let sectionsNav = null;
+  let tabsBar = null;
   const projectTab = createProjectTab({ getState: () => state, onEdit });
+  const clipTab = createClipSettingsTab({
+    getState: () => state,
+    onEdit,
+    getPresets: getAllCommandProfiles,
+    savePreset: saveCommandProfileToLibrary,
+    goTo,
+    onPresetSaved: (name, lists) => {
+      logFrontendEvent(clipPresetSavedLine(name, lists));
+      showToast(STRINGS.CLIP_SETTINGS.presetSavedToast(name), 'success');
+    },
+  });
+  // The tabs that are built, by id, with the sections their side list shows.
+  const TABS = {
+    project: { tab: projectTab, sections: PROJECT_SECTIONS },
+    clip: { tab: clipTab, sections: CLIP_SECTIONS },
+  };
 
   function onEdit(changes, { redraw = false } = {}) {
     if (!state) return;
     state.pending = { ...state.pending, ...changes };
-    if (redraw) projectTab.render(tabBody);
+    if (redraw) TABS[state.tab].tab.render(tabBody);
     refresh();
+  }
+
+  /** Shows tab `id` (its cards and its side list), scrolled to `sectionId`
+   *  when given, else to the top. Pending edits stay whichever tab shows. */
+  function goTo(id, sectionId = null) {
+    if (!state || !TABS[id]) return;
+    state.tab = id;
+    tabsBar.querySelectorAll('[data-tab]').forEach((tab) => {
+      const on = tab.dataset.tab === id;
+      tab.classList.toggle('ps-tab-on', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    tabBody.dataset.tab = id;
+    sectionsNav.replaceChildren(...TABS[id].sections.map((s) => {
+      const link = el('button', { type: 'button', class: 'ps-section-link', text: s.label });
+      link.addEventListener('click', () => tabBody.querySelector(`#ps-section-${s.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+      return link;
+    }));
+    TABS[id].tab.render(tabBody);
+    refresh();
+    const scroll = root.querySelector('.ps-scroll');
+    const target = sectionId && tabBody.querySelector(`#ps-section-${sectionId}`);
+    if (target) target.scrollIntoView({ block: 'start' });
+    else scroll.scrollTop = 0;
   }
 
   /** Apply's and OK's state, and the problem marks, after any edit. */
@@ -101,16 +136,12 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     kicker = el('div', { class: 'ps-kicker' });
     banner = el('div', { class: 'ps-banner', text: S.BATCH_RUNNING, hidden: true });
     tabBody = el('div', { class: 'ps-tab-body', id: 'project-settings-project-tab' });
-    const tabs = el('div', { class: 'ps-tabs', role: 'tablist' }, [
-      tabButton(S.TAB_PROJECT, null, true),
-      tabButton(S.TAB_CLIP_SETTINGS, S.TAB_CLIP_SETTINGS_SOON, false),
-      tabButton(S.TAB_PLAYERS, S.TAB_PLAYERS_SOON, false),
+    tabsBar = el('div', { class: 'ps-tabs', role: 'tablist' }, [
+      tabButton('project', S.TAB_PROJECT, null),
+      tabButton('clip', S.TAB_CLIP_SETTINGS, null),
+      tabButton('players', S.TAB_PLAYERS, S.TAB_PLAYERS_SOON),
     ]);
-    const sections = el('nav', { class: 'ps-sections' }, PROJECT_SECTIONS.map((s) => {
-      const link = el('button', { type: 'button', class: 'ps-section-link', text: s.label });
-      link.addEventListener('click', () => tabBody.querySelector(`#ps-section-${s.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-      return link;
-    }));
+    sectionsNav = el('nav', { class: 'ps-sections' });
     footer = el('div', { class: 'ps-footer' }, [
       footerButton('ok', S.OK, 'primary-btn', () => finish('OK')),
       footerButton('cancel', S.CANCEL, '', () => close('Cancel'), S.CANCEL_TITLE),
@@ -121,10 +152,10 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
         el('aside', { class: 'ps-side' }, [
           kicker,
           el('h2', { class: 'ps-title', text: S.TITLE }),
-          sections,
+          sectionsNav,
           el('p', { class: 'ps-side-note', text: S.SIDE_NOTE }),
         ]),
-        el('div', { class: 'ps-main' }, [tabs, banner, el('div', { class: 'ps-scroll' }, [tabBody])]),
+        el('div', { class: 'ps-main' }, [tabsBar, banner, el('div', { class: 'ps-scroll' }, [tabBody])]),
       ]),
       footer,
     ]);
@@ -134,12 +165,14 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     document.body.append(root);
   }
 
-  function tabButton(label, soonTitle, active) {
+  /** A tab, greyed with `soonTitle` saying why while it isn't built. */
+  function tabButton(id, label, soonTitle) {
     const tab = el('button', {
-      type: 'button', class: `ps-tab${active ? ' ps-tab-on' : ''}`, text: label, title: soonTitle || '', disabled: !active,
+      type: 'button', class: 'ps-tab', text: label, title: soonTitle || '', disabled: !!soonTitle, dataset: { tab: id },
     });
     tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    tab.setAttribute('aria-selected', 'false');
+    tab.addEventListener('click', () => goTo(id));
     return tab;
   }
 
@@ -166,15 +199,13 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     if (!form) return; // settings not loaded yet: nothing to start from
     if (!root) build();
     const start = startingValues(form, block, pcId);
-    state = { start, pending: structuredClone(start), block, form, pcId, ui: {} };
+    state = { start, pending: structuredClone(start), block, form, pcId, ui: {}, tab: 'project' };
     const path = getProjectPath();
     kicker.textContent = path ? fileNameOf(path) : S.UNTITLED;
     kicker.title = path || '';
-    projectTab.render(tabBody);
-    refresh();
     placeUnderNavbar();
     root.hidden = false;
-    root.querySelector('.ps-scroll').scrollTop = 0;
+    goTo('project');
     // Focus inside, so keys reach the page's own listener first.
     root.focus();
     setAppShortcutsEnabled(false);
@@ -198,6 +229,14 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     state.block = next;
     state.start = structuredClone(state.pending);
     logFrontendEvent(projectSettingsPageAppliedLine(getProjectPath(), how, changed));
+    if (changed.some((key) => CLIP_TAB_KEYS.includes(key) || key === 'capture_fov')) {
+      logFrontendEvent(clipSettingsAppliedLine(getProjectPath(), {
+        preset: state.pending.command_profile_active,
+        initCount: (state.pending.init_commands || []).filter((c) => String(c).trim()).length,
+        scheduledCount: (state.pending.custom_commands || []).filter((c) => String(c?.command ?? '').trim()).length,
+        fov: state.pending.capture_fov,
+      }));
+    }
     onSettingsInEffectChange();
     refresh();
     return true;

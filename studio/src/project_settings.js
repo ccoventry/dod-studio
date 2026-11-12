@@ -17,8 +17,12 @@
 
 import { logFrontendEvent } from './ipc_bridge.js';
 import {
-  resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
+  resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
+  blockFov, blockWithFov,
 } from './project_settings_logic.js';
+import { DEFAULT_FOV, fovFromLines } from './clip_settings_logic.js';
+import { withFilledFov } from './project_fov.js';
+import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import {
   projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine, projectSettingsFromSnapshotLine,
 } from './project_log.js';
@@ -65,6 +69,20 @@ export function setFormReader(reader) {
  *  a capture, a launch or a render uses. See resolveSettings. */
 export function effectiveSettings(form) {
   return resolveSettings(form, block, pcId);
+}
+
+/** effectiveSettings for the batch payload: with the project's field of view
+ *  as `picture_fov` while the New UI is on (the page that sets it exists).
+ *  See resolveCaptureSettings. */
+export function effectiveCaptureSettings(form) {
+  return resolveCaptureSettings(form, block, pcId, { pictureFov: isNewUiOn() });
+}
+
+/** The field of view a batch sends for the open project (#1085), or null:
+ *  New UI off, no project, or one with none yet. For the cfg warnings and
+ *  the Commands type-ahead, which refuse a `mirv_fov <n>` while it is set. */
+export function projectPictureFov() {
+  return isNewUiOn() ? blockFov(block) : null;
 }
 
 /** The value in effect for one setting whose form value is `formValue`. */
@@ -155,7 +173,39 @@ export function leaveProjectSettingsPage(how) {
 export function blockForPage() {
   const form = formNow();
   const base = block || (form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null);
-  return { form, block: base, pcId };
+  return { form, block: withFovForPage(base, form), pcId };
+}
+
+/** `base` with a field of view, for the page, which never shows one unset
+ *  (#1085): a session not saved yet, or a project whose fill hasn't run,
+ *  takes what its lines give, else the game's 90. The lines only: the
+ *  backend's read of an exec'd cfg is withFilledFov's, on open. */
+function withFovForPage(base, form) {
+  if (!base || blockFov(base) !== null) return base;
+  const lines = resolveSettings({ init_commands: form?.init_commands || [] }, base, pcId).init_commands;
+  return blockWithFov(base, fovFromLines(lines) ?? DEFAULT_FOV);
+}
+
+// The open project's path, for the log line of a field of view filled in
+// when the New UI is switched on with it open.
+let openPath = '';
+
+/**
+ * Gives the open block a field of view when it has none and the New UI is
+ * on (project_fov.js): on open, and when the switch turns on. Written with
+ * the next save, like the settings snapshot. A block replaced meanwhile (a
+ * project opened, New Session) is left alone.
+ */
+async function fillOpenProjectFov() {
+  if (!isNewUiOn() || !block || blockFov(block) !== null) return;
+  const before = block;
+  const form = formNow();
+  const filled = await withFilledFov(before, {
+    gamePath: form?.hl_path || '',
+    lines: resolveSettings({ init_commands: form?.init_commands || [] }, before, pcId).init_commands,
+    path: openPath,
+  });
+  if (block === before) block = filled;
 }
 
 /**
@@ -194,9 +244,17 @@ export function startProjectSettingsSnapshot() {
  */
 export function createProjectSettings({ markDirty: mark }) {
   markDirty = mark;
+  // A project opened with the New UI off gets its field of view once it is
+  // turned on (the page can't be open then, so nothing redraws).
+  onNewUiChange((on) => {
+    if (on) fillOpenProjectFov();
+  });
 
   async function open(raw, path) {
     const opened = await openBlock(raw, path);
+    openPath = path;
+    // Before the page hears of the new block, so it shows the value.
+    await fillOpenProjectFov();
     onReplaced();
     return opened;
   }
@@ -244,6 +302,7 @@ export function createProjectSettings({ markDirty: mark }) {
 
   function clear() {
     block = null;
+    openPath = '';
     formAtLastLook = null;
     onReplaced();
   }

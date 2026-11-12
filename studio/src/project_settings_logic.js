@@ -15,6 +15,7 @@
 
 import { killGapsFrom } from './kill_gaps_setting.js';
 import { samePath, fileNameOf, folderOf } from './path_display.js';
+import { isUsableFov } from './clip_settings_logic.js';
 
 const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 
@@ -32,6 +33,7 @@ const KINDS = {
   textOrNone: (v) => (typeof v === 'string' || v === null ? v : undefined),
   texts: (v) => (Array.isArray(v) && v.every((s) => typeof s === 'string') ? [...v] : undefined),
   killGaps: (v) => (v && typeof v === 'object' ? killGapsFrom(v) : undefined),
+  fov: (v) => (isUsableFov(v) ? v : undefined),
   scheduled: (v) => (Array.isArray(v) && v.every((c) => c && typeof c.command === 'string')
     ? v.map((c) => ({ command: c.command, relation: c.relation === 'After' ? 'After' : 'Before', offset_seconds: c.offset_seconds }))
     : undefined),
@@ -50,6 +52,9 @@ export const PROJECT_FIELDS = Object.freeze([
   { key: 'capture_fps', path: ['picture', 'captureFps'], kind: 'size' },
   { key: 'obs_capture_fps', path: ['picture', 'obsCaptureFps'], kind: 'size' },
   { key: 'agr_fps', path: ['picture', 'agrFps'], kind: 'rateOrZero' },
+  // Not a settings-file key: Configuration has no field of view of its own,
+  // so only the Project settings page sets it (build plan step 8).
+  { key: 'capture_fov', path: ['picture', 'fov'], kind: 'fov' },
   { key: 'finish_clips_after_batch', path: ['picture', 'finished', 'enabled'], kind: 'flag' },
   { key: 'finish_codec_obs', path: ['picture', 'finished', 'codecObs'], kind: 'text' },
   { key: 'finish_codec_video', path: ['picture', 'finished', 'codecVideo'], kind: 'text' },
@@ -71,6 +76,9 @@ export const PC_FIELDS = Object.freeze([
 ]);
 
 const pcPath = (field, pcId) => ['folders', pcId, field.name];
+
+/** Where a block keeps its field of view (`capture_fov`'s path). */
+const PICTURE_FOV_PATH = PROJECT_FIELDS.find((f) => f.key === 'capture_fov').path;
 
 function readPath(block, path) {
   return path.reduce((at, part) => (at && typeof at === 'object' ? at[part] : undefined), block);
@@ -110,6 +118,32 @@ export function resolveSettings(form, block, pcId = '') {
     if (key in resolved) resolved[key] = value;
   }
   return resolved;
+}
+
+/** The field of view `block` sets (Picture), or null when it sets none. */
+export function blockFov(block) {
+  const fov = readPath(block, PICTURE_FOV_PATH);
+  return isUsableFov(fov) ? fov : null;
+}
+
+/** `block` with its field of view set to `fov` (project_fov.js's fill). */
+export function blockWithFov(block, fov) {
+  return writePath(block, PICTURE_FOV_PATH, fov);
+}
+
+/**
+ * resolveSettings for what a batch sends: the same values, and with
+ * `pictureFov` (the New UI switch: the page that sets it exists) the
+ * block's field of view as `picture_fov`. The backend sends it after the
+ * Initial Commands and leaves their own `mirv_fov <n>` out (native
+ * picture_fov.rs), so it wins over every line and every cfg they exec.
+ * Without it, or with a block that sets none, the batch sends what it did
+ * before step 8.
+ */
+export function resolveCaptureSettings(form, block, pcId = '', { pictureFov = false } = {}) {
+  const resolved = resolveSettings(form, block, pcId);
+  const fov = pictureFov ? blockFov(block) : null;
+  return fov === null ? resolved : { ...resolved, picture_fov: fov };
 }
 
 /**

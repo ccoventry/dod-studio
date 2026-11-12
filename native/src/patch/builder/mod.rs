@@ -112,8 +112,34 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
     )
 }
 
+/// The user's own Initial Commands, then the project's field of view
+/// (`PatcherConfig::picture_fov`, #1085) when it sets one, with the lines'
+/// own `mirv_fov <n>` left out (`picture_fov::lines_sent`): what every job
+/// starts its init lines with, the primer included.
+///
+/// The field of view goes straight after the user's lines so it wins over
+/// all of them, a cfg they `exec` included. Every way the game runs these
+/// keeps that order: a patched demo writes them as `ConsoleCommand` frames
+/// in this order right after `DemoStart` (`engine.rs`; the demo filter drops
+/// an `exec` there anyway), and the hook's batch runs each demo's `init`
+/// lines in file order through `ClientCmd` (`runtime_batch.rs`, goldsrc-hooks
+/// `batch.rs`), every demo of the batch again. An `exec` runs its file
+/// before the next line: the game's `Cmd_Exec_f` inserts the file's text at
+/// the front of the command buffer (`Cbuf_InsertText`), ahead of the lines
+/// still queued after it. One line of `mirv_fov <n>` is far under the
+/// 64-byte frame limit.
+pub fn user_init_commands(config: &PatcherConfig) -> Vec<String> {
+    // Its own `mirv_fov <n>` lines left out: the project's comes after them.
+    let mut out = crate::patch::picture_fov::lines_sent(config);
+    if let Some(fov) = config.picture_fov {
+        out.push(crate::patch::picture_fov::fov_line(fov));
+    }
+    out
+}
+
 /// Every command the engine will run at demo load: the user's own init
-/// commands, then the ones the pipeline adds for itself.
+/// commands and the project's field of view ([`user_init_commands`]), then
+/// the ones the pipeline adds for itself.
 ///
 /// Extracted so it can be asked ahead of a capture as well as during one. The
 /// app's own additions override whatever the game's configs set — `capture_fps`
@@ -121,7 +147,7 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
 /// `r_decals` there — and a user is entitled to know that before it happens
 /// rather than by noticing the result.
 pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
-    let mut out = config.init_commands.clone();
+    let mut out = user_init_commands(config);
     out.push("sys_autodir".to_string());
     // AGR mode's sound-only movie (#450) runs at the AGR rate: the movie
     // recorder pins the timestep to `1 / mirv_movie_fps`, and that has to be
@@ -460,7 +486,8 @@ fn make_session_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBu
 }
 
 /// Says in the activity log how a direct-to-video or AGR batch records,
-/// since neither writes the frame sequence the other modes do.
+/// since neither writes the frame sequence the other modes do, and the
+/// project's field of view when the batch carries one.
 fn announce_capture_mode(config: &PatcherConfig) {
     if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
         crate::log_markdown(&crate::messages::direct_to_video_capture(
@@ -471,6 +498,14 @@ fn announce_capture_mode(config: &PatcherConfig) {
 
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::log_markdown(&crate::messages::agr_capture(config.effective_agr_fps()));
+    }
+
+    // The project's field of view (#1085), and the lines it leaves out.
+    if let Some(fov) = config.picture_fov {
+        crate::log_markdown(&crate::messages::project_fov_sent(
+            fov,
+            &crate::patch::picture_fov::lines_left_out(config),
+        ));
     }
 }
 
@@ -490,7 +525,7 @@ fn primer_job(
     first_source: &str,
     dod_dir: &std::path::Path,
 ) -> (PatchJob, String) {
-    let mut primer_init = config.init_commands.clone();
+    let mut primer_init = user_init_commands(config);
     primer_init.push("sys_autodir".to_string());
 
     // Every patched demo lands directly in the game's own dod/ folder --

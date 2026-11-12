@@ -384,3 +384,22 @@
   gap: 8px;
   margin-top: 6px;
 }
+
+/* Clip settings tab (#1085 step 8): Your own commands and At each clip. */
+.ps-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+}
+
+.ps-command {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ps-command .ps-text {
+  flex: 1;
+  min-width: 200px;
+}
