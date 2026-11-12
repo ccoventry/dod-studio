@@ -189,3 +189,48 @@ test('a one-map damaged demo the repair check finds no more maps in keeps Repair
   await expect(banner.locator('.analyzer-damage-repair')).toBeVisible();
   await expect(banner.locator('button')).toHaveCount(1);
 });
+
+test('a demo damaged before its level change whose repair was already split offers no repair', async ({ page }) => {
+  // The live repro: m1_h2 repaired and split from the queue, then the
+  // original opened in the Demo Analyzer. Its analysis knows one map; the
+  // "Already split" check must ask with the repair check's three.
+  const early = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  const maps = ['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a'];
+  await page.evaluate(({ early, maps }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = () => early;
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_repairable = () => ({ repairable: true, maps });
+    window.__mockInvokeHandlers.demo_split_status = ({ maps: asked }) => {
+      window.__splitAskedWith = asked;
+      return {
+        split: true,
+        files: ['monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem', 'monday-wsod25_r07_m1_h2_repaired_split3_thunder2_b5a.dem'],
+      };
+    };
+  }, { early, maps });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+  const banner = page.locator('#analyzer-damage-banner');
+  await expect(banner).toContainText('Damaged demo: read up to 8:27.');
+  await expect(banner).toContainText('Already repaired and split into its 3 maps (dod_anzio, dod_pandemic_aim, dod_thunder2_b5a) next to it.');
+  await expect(banner.locator('button')).toHaveCount(0);
+  await expect(banner.locator('.analyzer-damage-already-split')).toHaveAttribute('title', /monday-wsod25_r07_m1_h2_repaired_split1_anzio\.dem/);
+  expect(await page.evaluate(() => window.__splitAskedWith)).toEqual(maps);
+  await expect(page.locator('#analyzer-multimap-banner')).toBeHidden();
+});
+
+test('a damaged two-map demo whose repair was already split offers no repair, and the multi-map notice says split', async ({ page }) => {
+  const both = report('monday-wsod25_r07_m1_h2.dem', DAMAGE);
+  both.state.signon_maps = ['dod_anzio', 'dod_pandemic_aim'];
+  await page.evaluate(({ both }) => {
+    window.__mockInvokeHandlers.analyze_demo_full = () => both;
+    window.__mockInvokeHandlers.browse_directory = () => ({ path: 'C:/demos', dirs: [], demos: [] });
+    window.__mockInvokeHandlers.demo_repairable = () => ({ repairable: true, maps: both.state.signon_maps });
+    window.__mockInvokeHandlers.demo_split_status = () => ({ split: true, files: ['a_repaired_split1_anzio.dem', 'a_repaired_split2_pandemic_aim.dem'] });
+  }, { both });
+  await page.evaluate(() => window.__openDemo('C:/demos/monday-wsod25_r07_m1_h2.dem'));
+  const banner = page.locator('#analyzer-damage-banner');
+  await expect(banner.locator('button')).toHaveCount(0);
+  // Said once, by the multi-map notice, not again in the damage notice.
+  await expect(banner.locator('.analyzer-damage-already-split')).toHaveCount(0);
+  await expect(page.locator('#analyzer-multimap-banner')).toContainText('already split');
+});

@@ -1340,6 +1340,9 @@ export const STRINGS = {
     // Its Split stays greyed out too: the split parses the whole demo and
     // stops at the same damage.
     SPLIT_DAMAGE_CANNOT_REPAIR: "The damage stops a split, and Repair can't cut it out.",
+    // The Demo Analyzer's damage notice once the repair's maps were split
+    // next to the demo (analyzer_damage.js): nothing is left to repair.
+    analyzerAlreadySplit: (maps) => `Already repaired and split into its ${maps.length} maps (${maps.join(', ')}) next to it.`,
     cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it, and Split stays greyed out (the damage stops a split too)`,
     // The analyzer's map list stops at the damage; the repair check's byte
     // scan found the maps after it (repair_status.js).

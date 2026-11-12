@@ -4,7 +4,11 @@
 // It says so above every tab, with where it stopped on the viewdemo clock,
 // and offers Repair now (#15): the repair is the caller's, through `onRepair`.
 // Damage the repair has no break to cut out (repair_status.js) keeps the
-// notice, which says Repair can't fix it instead of offering it.
+// notice, which says Repair can't fix it instead of offering it. Once the
+// repair's maps were split next to the demo (split_status.js, asked with the
+// maps repair_status.js found past the damage, as the queue row asks), the
+// notice offers neither button: the work is done, and another Repair would
+// only write a second copy.
 //
 // Pure, apart from the banner it fills in.
 
@@ -13,6 +17,7 @@ import { clockFloor } from './time_format.js';
 import { escapeHtml as esc } from './html.js';
 import { repairProgressBar } from './repair_view.js';
 import { isUnrepairableDamage, repairMaps, repairableStatus } from './repair_status.js';
+import { isAlreadySplit, splitStatus } from './split_status.js';
 
 /** A byte count as "14.2 MB" or "312 KB". */
 export function sizeText(bytes) {
@@ -43,9 +48,11 @@ export function damageNotice(report) {
  * buttons are disabled and the bar shows; if it throws, the banner says why.
  * Each resolves the line the banner shows after. Once `repairable`
  * (repair_status.js) finds no break for the repair to cut out, the notice
- * says Repair can't fix it in place of the buttons.
+ * says Repair can't fix it in place of the buttons, and once `status`
+ * (split_status.js) finds the repair's maps already split, the notice shows
+ * no buttons either ([alreadySplitNote] says so when nothing else does).
  */
-export function renderDamageBanner(el, report, onRepair, onRepairSplit, repairable = repairableStatus) {
+export function renderDamageBanner(el, report, onRepair, onRepairSplit, { repairable = repairableStatus, status = splitStatus } = {}) {
   if (!el) return;
   const notice = damageNotice(report);
   const path = report?.file_path || '';
@@ -61,16 +68,52 @@ export function renderDamageBanner(el, report, onRepair, onRepairSplit, repairab
     return;
   }
   const own = report?.state?.signon_maps || [];
-  const bothFor = (scanned) => Boolean(onRepairSplit) && repairMaps(own, scanned).length > 1;
-  const both = bothFor(path ? repairable.lastMaps(path) : null);
-  renderRepairButtons(el, { notice, both, onRepair, onRepairSplit });
+  const mapsFor = (scanned) => repairMaps(own, scanned);
+  const bothFor = (scanned) => Boolean(onRepairSplit) && mapsFor(scanned).length > 1;
+  const known = path ? repairable.lastMaps(path) : null;
+  const both = bothFor(known);
+  // A split answer already in (this demo was open a moment ago) draws the
+  // done state at once, without the buttons flashing up first.
+  const lastSplit = both ? status.last(path) : null;
+  if (isAlreadySplit(lastSplit)) renderAlreadySplit(el, notice, alreadySplitNote(own, mapsFor(known), lastSplit));
+  else renderRepairButtons(el, { notice, both, onRepair, onRepairSplit });
   if (!path) return;
+  const stillOurs = () => el.dataset.path === path && !el.querySelector('button:disabled');
   repairable.checkMaps(path, own).then((scanned) => {
-    if (el.dataset.path !== path || el.querySelector('button:disabled')) return;
-    if (isUnrepairableDamage(demo, repairable.last(path))) renderUnrepairable(el, notice);
+    if (!stillOurs()) return;
+    if (isUnrepairableDamage(demo, repairable.last(path))) {
+      renderUnrepairable(el, notice);
+      return;
+    }
+    const maps = mapsFor(scanned);
     // The scan found maps past the damage: Repair & Split joins Repair now.
-    else if (!both && bothFor(scanned)) renderRepairButtons(el, { notice, both: true, onRepair, onRepairSplit });
+    if (!both && bothFor(scanned)) renderRepairButtons(el, { notice, both: true, onRepair, onRepairSplit });
+    if (!bothFor(scanned)) return;
+    // Asked with the list the repair is split by, as the queue row asks
+    // (queue_repair_hint.js), so a repaired-and-split demo reads as split.
+    status.check(path, maps).then((answer) => {
+      if (stillOurs() && isAlreadySplit(answer)) renderAlreadySplit(el, notice, alreadySplitNote(own, maps, answer));
+    });
   });
+}
+
+/**
+ * The line the damage notice adds once the repair's `maps` were split next
+ * to the demo (`answer` split_status.js's), or null when the multi-map notice
+ * above it already says so: it shows for a demo whose own analysis (`own`)
+ * lists more than one map. Pure.
+ */
+export function alreadySplitNote(own, maps, answer) {
+  if (!isAlreadySplit(answer) || (Array.isArray(own) && own.length > 1)) return null;
+  return { text: STRINGS.REPAIR.analyzerAlreadySplit(maps), title: STRINGS.ANALYZER.multiMapAlreadySplitTitle(answer.files || []) };
+}
+
+/** The notice for a demo whose repair was already split: no buttons, and
+ *  `note` (alreadySplitNote's) when there is one. */
+function renderAlreadySplit(el, notice, note) {
+  el.innerHTML = `<span class="analyzer-damage-text">${esc(notice)}</span>${note
+    ? `<span class="analyzer-damage-already-split" title="${esc(note.title)}">${esc(note.text)}</span>`
+    : ''}`;
 }
 
 /** The notice for damage the repair has no break to cut out: no buttons. */
