@@ -45,7 +45,7 @@
 //! passes over the same stretch, with the same times, never mix. The `back`
 //! itself comes last in its pass, so no line of a pass may be later than its
 //! `back`, and a pass after the demo's `next` would never play: both are
-//! refused. The seek back is `demo_seek`'s rewind, which replays the demo
+//! refused, as is a `back` whose `to` is not before its own time. The seek back is `demo_seek`'s rewind, which replays the demo
 //! from its first recorded frame so the flags, scores and kill feed are what
 //! playing up to there would leave.
 //!
@@ -218,6 +218,14 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
                 in_demo(&mut plan)?;
                 let at = time(fields[1], number)?;
                 let to = time(fields[2], number)?;
+                // A `back` that lands at or past its own time would step
+                // forward, and the next pass's earlier lines would all run at
+                // once on its landing.
+                if to >= at {
+                    return Err(format!(
+                        "line {number}: a \"back\" at {at} must go back, not to {to}"
+                    ));
+                }
                 let demo = plan.demos.last_mut().unwrap();
                 end_pass(&demo.entries, at).map_err(|why| format!("line {number}: {why}"))?;
                 demo.entries.push(Entry {
@@ -1170,6 +1178,11 @@ mod tests {
         assert!(e.contains("line 4") && e.contains("never run"), "{e}");
         let e = parse(&file(&["demo\tx.dem", "back\t17"])).unwrap_err();
         assert!(e.contains("needs 2"), "{e}");
+        // A `back` must land before its own time.
+        let e = parse(&file(&["demo\tx.dem", "back\t17\t20"])).unwrap_err();
+        assert!(e.contains("line 3") && e.contains("must go back"), "{e}");
+        let e = parse(&file(&["demo\tx.dem", "back\t17\t17"])).unwrap_err();
+        assert!(e.contains("must go back"), "{e}");
         // A `back` in another demo's section starts its own count.
         assert!(
             parse(&file(&[

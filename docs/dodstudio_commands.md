@@ -357,7 +357,9 @@ demos instead of patched copies. `start "<file>"` reads the batch file Studio
 wrote (`native::patch::runtime_batch`): `dodstudio-batch 1`, then per demo a
 `demo <path>` line, its `init` commands, and `at <seconds> <command>`,
 `seek <seconds> <to>` and `next <seconds>` lines on the demo player's clock,
-and `end` commands after the last demo, all tab-separated. Each demo is loaded
+and `end` commands after the last demo, all tab-separated. A
+`back <seconds> <to>` line ends a pass through the demo and goes back to `to`
+(the rewind above) for the next pass, such as a clip's variant (#1085). Each demo is loaded
 with `viewdemo`; once it has loaded, the init commands run, then each timed
 line runs once on the first frame at or past its time, and where the patched
 demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs

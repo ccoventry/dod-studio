@@ -282,9 +282,10 @@ its clock starts at the LOADING frames, often minutes before the recording
 step with nothing to send (7-15 s a rewind). Jumping to 0.01 s before the
 first frame after the gap, as the player's own gap jump would, skips no
 message (the LOADING frames' sign-on was read at load) and took 1.0-2.6 s on
-5 POV demos from 5 players. Each rewind empties the kill feed before its last
-step, so the feed shows only the kills of the 5 s before the landing, not the
-last few the steps replayed from earlier. A capture batch goes back with its
+5 POV demos from 5 players. Each rewind steps to exactly `hud_deathnotice_time`
+before the landing, empties the kill feed there and steps on, so the feed
+shows only the kills of that last notice lifetime, not the last few the steps
+replayed from earlier (`demo_seek/rewind.rs`). A capture batch goes back with its
 `back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)
