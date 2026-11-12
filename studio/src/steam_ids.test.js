@@ -68,6 +68,8 @@ describe('parseSteamIdInput (#1085)', () => {
     }
     expect(convertSteamId('nope', 'id3')).toBeNull();
     expect(convertSteamId(ID64, 'ok')).toBeNull();
+    // an inherited name is not a form
+    expect(convertSteamId(ID64, 'toString')).toBeNull();
   });
 
   it('refuses another universe or account type', () => {

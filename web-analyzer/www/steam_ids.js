@@ -67,5 +67,5 @@ export function parseSteamIdInput(input) {
  *  or null when it isn't a SteamID. */
 export function convertSteamId(input, form) {
   const parsed = parseSteamIdInput(input);
-  return parsed.ok && form in parsed && form !== 'ok' ? parsed[form] : null;
+  return parsed.ok && form !== 'ok' && Object.hasOwn(parsed, form) ? parsed[form] : null;
 }
