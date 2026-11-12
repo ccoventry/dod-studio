@@ -121,10 +121,31 @@ export function projectSettingsDifferLine(path, keys) {
   return `[project] ${path} sets ${keys.length} setting(s) other than Configuration's, used for its captures: ${keys.join(', ')}`;
 }
 
-/** Configuration edits copied into the open project (until the Project
- *  settings page exists). */
+/** Configuration edits copied into the open project (until Configuration
+ *  shows a read-only "This project sets" line instead). */
 export function projectSettingsFollowedLine(keys) {
   return `[project] Configuration change copied into the open project: ${keys.join(', ')}`;
+}
+
+/** The project a Project settings page line is about: its file, or a
+ *  session not saved yet. */
+const pageProject = (path) => path || 'an untitled session';
+
+/** The Project settings page opened (#1085). */
+export function projectSettingsPageOpenedLine(path) {
+  return `[project settings] Opened for ${pageProject(path)}`;
+}
+
+/** Pending edits written into the open project by `how` (Apply, OK, or
+ *  Apply in the leave prompt). Names the settings, not their values. */
+export function projectSettingsPageAppliedLine(path, how, keys) {
+  return `[project settings] ${how}: ${keys.length} setting(s) changed in ${pageProject(path)}: ${keys.join(', ')}`;
+}
+
+/** The page closed by `how` (OK, Cancel, Discard, a project opening), with
+ *  how many unapplied edits it dropped. */
+export function projectSettingsPageClosedLine(path, how, dropped) {
+  return `[project settings] Closed (${how}) for ${pageProject(path)}, ${dropped} unapplied change(s) dropped`;
 }
 
 /** The answer to "This project was made with ... Switch?". */

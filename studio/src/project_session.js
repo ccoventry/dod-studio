@@ -32,7 +32,7 @@ import { STRINGS } from './strings.js';
 import { projectSaveDialogOptions, projectCopyDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 import { createProjectOpenProgress } from './project_open_progress.js';
 import { fileNameOf } from './path_display.js';
-import { createProjectSettings } from './project_settings.js';
+import { createProjectSettings, leaveProjectSettingsPage } from './project_settings.js';
 import { snapshotDay } from './project_settings_snapshot.js';
 import { offerProjectInstall } from './project_install_offer.js';
 
@@ -309,6 +309,8 @@ export function createProjectSession({
   // 'discard' loads over it either way.
   async function confirmReplaceProject() {
     if (refuseDuringBatch()) return false;
+    // Unapplied Project settings edits first, so an Apply is in the save.
+    if (!(await leaveProjectSettingsPage('another project opening'))) return false;
     if (!needsSavePrompt()) return true;
     return !!(await requestUnsavedChangesConfirmation());
   }
@@ -525,6 +527,7 @@ export function createProjectSession({
   // now is a session it chose not to save.
   async function newSession({ quiet = false } = {}) {
     if (!quiet && refuseDuringBatch()) return;
+    if (!quiet && !(await leaveProjectSettingsPage('New Session'))) return;
     if (!quiet && needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();
       if (!outcome) return; // Cancel — abort, keep current state

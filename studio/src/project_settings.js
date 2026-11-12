@@ -4,10 +4,12 @@
 // the value a capture, launch or render uses (effectiveSettings). The rules
 // are project_settings_logic.js's; this holds the state.
 //
-// Until the Project settings page exists (plan step 6), Configuration still
-// changes a project's settings: an edit there is saved as the app's value, as
-// always, and copied into the open project too (noteFormSaved). The project's
-// values themselves never go into the form, which would make them the app's.
+// The Project settings page (project_settings_page.js) changes them, through
+// blockForPage and applyBlockFromPage. Configuration still does too, until
+// it shows a read-only "This project sets" line (build plan): an edit there
+// is saved as the app's value, as always, and copied into the open project
+// too (noteFormSaved). The project's values themselves never go into the
+// form, which would make them the app's.
 //
 // One project is open per window, so the block lives at module level, like
 // clip_name_ui.js's template; project_session.js opens, saves and clears it
@@ -113,6 +115,59 @@ function formNow() {
   return readForm ? readForm() : null;
 }
 
+// Told when the open project's block is replaced from outside the Project
+// settings page (a project opened, New Session), so the page drops edits
+// made against the block that was there and what reads the settings in
+// effect is redrawn.
+let onReplaced = () => {};
+
+/** Registers `listener()`, called once a project has opened or closed, its
+ *  block in place. One listener: the Project settings page. */
+export function onProjectBlockReplaced(listener) {
+  onReplaced = listener;
+}
+
+// The Project settings page's leave(), registered when the page is made.
+let leavePage = async () => true;
+
+/** Registers the Project settings page's `leave(how)`. */
+export function setProjectSettingsPageLeave(leave) {
+  leavePage = leave;
+}
+
+/**
+ * Asks the Project settings page to close before something leaves it
+ * (closing the window, opening a project, New Session). With pending edits
+ * it asks Apply, Discard or Stay. Resolves true when the page is closed (or
+ * was never open), false when the user chose Stay. Lives here rather than in
+ * the page's module so the session and the close check need not load the
+ * page.
+ */
+export function leaveProjectSettingsPage(how) {
+  return leavePage(how);
+}
+
+/**
+ * What the Project settings page edits: `form` the settings file's values
+ * now (null before settings load), `block` the open project's block, or one
+ * made from `form` for a session not saved yet, and `pcId`.
+ */
+export function blockForPage() {
+  const form = formNow();
+  const base = block || (form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null);
+  return { form, block: base, pcId };
+}
+
+/**
+ * Makes `next` the open project's block (the Project settings page's Apply)
+ * and marks the project unsaved. A session not saved yet keeps it and
+ * writes it with its first save.
+ */
+export function applyBlockFromPage(next) {
+  block = next;
+  markDirty();
+}
+
 /** Keeps the form as it is now as the snapshot older projects start from,
  *  unless one was taken before (project_settings_snapshot.js). main.js calls
  *  it once, as soon as the settings are in the form. */
@@ -141,6 +196,15 @@ export function createProjectSettings({ markDirty: mark }) {
   markDirty = mark;
 
   async function open(raw, path) {
+    const opened = await openBlock(raw, path);
+    onReplaced();
+    return opened;
+  }
+
+  /** Makes `raw` the open block, or for a file without one the snapshot
+   *  older projects start from (Configuration's copy when there is none).
+   *  Returns `{ copied, snapshotTakenAt }`. */
+  async function openBlock(raw, path) {
     // Waited for before anything else, so the form read below and the block
     // set here belong to the same moment.
     const snapshot = raw && typeof raw === 'object' ? null : await snapshotInEffect();
@@ -181,6 +245,7 @@ export function createProjectSettings({ markDirty: mark }) {
   function clear() {
     block = null;
     formAtLastLook = null;
+    onReplaced();
   }
 
   return {

@@ -24,7 +24,7 @@ const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 const KINDS = {
   mode: (v) => (CAPTURE_MODES.includes(v) ? v : undefined),
   size: (v) => (Number.isInteger(v) && v > 0 ? v : undefined),
-  // AGR's 0 is "the same as Capture FPS".
+  // AGR's 0 is "not set": the page refuses it under AGR mode.
   rateOrZero: (v) => (Number.isInteger(v) && v >= 0 ? v : undefined),
   seconds: (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined),
   flag: (v) => (typeof v === 'boolean' ? v : undefined),
@@ -132,8 +132,9 @@ export function blockFromForm(form, { pcId, madeWith = null }) {
 }
 
 /**
- * Until the Project settings page exists (plan step 6), Configuration is
- * where a project's settings are changed: each owned value that differs
+ * An edit's values into a block, for the Project settings page's Apply and
+ * for Configuration, which changes the open project too until it shows a
+ * read-only "This project sets" line (build plan): each owned value that differs
  * between `before` and `after` (two settings payloads) goes into `block`,
  * and a new `hl_path` becomes its `install.madeWith`. Returns `{ block, changed }`, `changed` the keys copied, `block` the same
  * object when none were.

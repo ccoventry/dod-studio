@@ -6,6 +6,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { isCaptureRunning } from './capture_pane.js';
+import { leaveProjectSettingsPage } from './project_settings.js';
 
 /**
  * @param {object} app  needsSavePrompt() and requestUnsavedChangesConfirmation()
@@ -22,6 +23,9 @@ export function startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirma
     event.preventDefault();
     // A running batch first: closing leaves it unwatched (#545).
     if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning }))) return;
+    // Project settings edits not applied yet: Apply, Discard or Stay (#1085).
+    // Before the save prompt, so an Apply there is saved with the rest.
+    if (!(await leaveProjectSettingsPage('window closing'))) return;
     // Project state changed since the last save: offer save, discard or cancel.
     if (needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();

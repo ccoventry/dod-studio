@@ -7,7 +7,7 @@ import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer, isCaptureStarting } from './capture_pane.js';
+import { initCaptureUI, isCaptureRunning, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer, isCaptureStarting } from './capture_pane.js';
 import { createBatchGuard } from './batch_guard.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
@@ -62,6 +62,8 @@ import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
 import { inEffect, startProjectSettingsSnapshot } from './project_settings.js';
+import { createProjectSettingsPage } from './project_settings_page.js';
+import { createNewUi } from './new_ui.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
@@ -299,6 +301,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  createNewUi({ persist: () => persistAppSettings() }); // The New UI switch (#1085): new pages show only while it is on.
   // Configuration > Players (#428): players_ui.js.
   createPlayersUi({
     getDemos: queue.getDemos,
@@ -493,6 +496,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       queue.redrawSelected();
     },
   });
+
+  // File > Project Settings (#1085); an Apply or a project opening redraws what reads its settings.
+  createProjectSettingsPage({ getProjectPath: projectSession.currentPath, isBatchRunning: isCaptureRunning,
+    onSettingsInEffectChange: () => { renderCaptureSummary(); queue.redrawSelected(); } });
 
   initDetailPane(queue.getDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
