@@ -36,11 +36,15 @@ The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Namepla
 
 With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.
 
-It adds a track called **Nameplates** above every video track (so above a HUD pass laid over a clip too, which never covers it), and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now. A box then says how many it added and why any clip got none.
+It adds a track called **Nameplates** above every video track (so above a HUD pass laid over a clip too, which never covers it), and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now.
+
+**A clip you cut into pieces gets one nameplate, not one per piece.** Events that are on the same track, play the same media file (the same entry in the clip list) and touch end to start are one clip: the nameplate runs from the first piece's start to the last piece's end. "Touch" allows a gap of up to 4 frames (`JOIN_FRAMES`, in the script's defaults) and any overlap, so a crossfade between pieces still joins them. Speed changes (ctrl-drag slow motion or fast forward) don't matter: the script compares the media, never the length or the offset. A different clip between two pieces, or a real gap, starts a new nameplate. The box at the end says how many it added and how many pieces it joined, for example "5 nameplates for 9 events: 4 split pieces joined into the clip before them." The joining rule is `GroupPieces` in the script; `powershell -ExecutionPolicy Bypass -File vegas\tests\run.ps1` runs its tests (no VEGAS needed to run them).
+
+A box then says how many nameplates it added and why any clip got none.
 
 It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
 
-Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips that have none over their exact start and length, so a rerun doesn't stack duplicates. A clip you stretched or trimmed since gets a new one and its old one stays for you to delete. The box says how many clips already had one.
+Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A clip you stretched or trimmed since gets a new one and its old one stays for you to delete. The box says how many clips already had one.
 
 ### Changing the defaults
 
