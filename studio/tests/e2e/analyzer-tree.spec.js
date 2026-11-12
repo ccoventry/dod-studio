@@ -1,6 +1,6 @@
 // The Demo Analyzer's Explorer tree (#572), driven against
 // tests/e2e/analyzer-tree.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 // A Windows path inside a CSS attribute selector: each backslash doubled.
 const css = (path) => path.replace(/\\/g, '\\\\');

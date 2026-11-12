@@ -3,7 +3,7 @@
 // one bar for the whole batch that never goes backwards across its steps,
 // a sliding block over a step it can't measure, plain step lines, and
 // "Done in" at the end.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.addInitScript(() => {

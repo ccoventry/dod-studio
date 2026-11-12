@@ -1,6 +1,6 @@
 // queue_scan.js's folder listing (#843) and its progress line and bar (#951),
 // driven against tests/e2e/queue-scan.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/queue-scan.html');

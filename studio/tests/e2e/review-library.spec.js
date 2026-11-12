@@ -1,6 +1,6 @@
 // review_library.js (#848) — driven against tests/e2e/review-library.html.
 // See tests/e2e/README.md for what this style of test covers.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const KEY = '4096:00ff';
 const KILLS = [[100, 1, 'K98'], [200, 3, 'K98'], [300, 5, 'BAR']];
