@@ -1226,6 +1226,14 @@ fn finish_batch(
 ///
 /// Pure so it can be tested without a `tauri::AppHandle`; `start_capture_batch_impl`
 /// is the only caller.
+/// True for an AGR batch whose payload carries no rate (0 or negative).
+/// Resolved through `config_from_payload` so the legacy `ffmpeg_capture`
+/// flag and an empty `capture_mode` map to a mode exactly as the batch does.
+fn agr_fps_missing(payload: &CapturePayload) -> bool {
+    let cfg = config_from_payload(payload);
+    cfg.capture_mode == native::patch::CaptureMode::Agr && cfg.agr_fps <= 0
+}
+
 fn first_banned_command_error(
     init_commands: &[String],
     custom_commands: &[CustomCommandPayload],
@@ -1279,6 +1287,20 @@ pub async fn start_capture_batch_impl(
     if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands)
     {
         return Err(err);
+    }
+
+    // ── Guard: an AGR batch needs its own rate ────────────────────────────────
+    // The frontend blocks Start while AGR FPS is empty (capture_pane.js's
+    // refreshLaunchGuard); this is the only start path, so a payload that
+    // bypasses the UI (an older build, a direct IPC call) is refused here.
+    // `DEFAULT_AGR_FPS` stays as the fallback for readers that never start a
+    // batch (catch-up of old manifests).
+    if agr_fps_missing(&payload) {
+        log_markdown(&format!(
+            "**Capture batch refused:** {}",
+            crate::messages::AGR_FPS_REQUIRED
+        ));
+        return Err(crate::messages::AGR_FPS_REQUIRED.to_string());
     }
 
     // ── Guard: separate HUD cannot be captured through mirv_movie_ffmpeg ──────
@@ -2587,6 +2609,24 @@ mod tests {
         let mut payload = sample_payload();
         payload.agr_fps = 0;
         assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+    }
+
+    #[test]
+    fn an_agr_batch_without_its_own_rate_is_refused() {
+        let mut payload = sample_payload();
+        payload.capture_mode = "agr".to_string();
+        payload.agr_fps = 0;
+        assert!(agr_fps_missing(&payload));
+        payload.agr_fps = -5;
+        assert!(agr_fps_missing(&payload));
+        payload.agr_fps = 30;
+        assert!(!agr_fps_missing(&payload));
+        // Other modes ignore the field.
+        for mode in ["frame_sequence", "direct_to_video", "obs"] {
+            payload.agr_fps = 0;
+            payload.capture_mode = mode.to_string();
+            assert!(!agr_fps_missing(&payload), "{mode}");
+        }
     }
 
     #[test]

@@ -230,7 +230,9 @@ export async function refreshLaunchGuard(state) {
   // batches that fit with room to spare.
   const captureMode = document.querySelector('#config-capture-mode')?.value;
   const agrMode = captureMode === 'agr';
-  const agrFpsVal = effectiveAgrFps(numberField('#config-agr-fps', 0, { integer: true, positive: true }));
+  const agrFpsRaw = numberField('#config-agr-fps', 0, { integer: true, positive: true });
+  // Sizing a blocked (blank) AGR batch still needs some rate.
+  const agrFpsVal = effectiveAgrFps(agrFpsRaw);
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -350,8 +352,13 @@ export async function refreshLaunchGuard(state) {
     hlPath: document.querySelector('#hl-path-input')?.value,
     hlaePath: document.querySelector('#hlae-path-input')?.value,
     driveCount: effectiveDrivePool.length,
+    captureMode,
+    agrFps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
   }, !noHighlightsSelected);
-  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
+  // AGR has no default to fall back on: an AGR batch needs its own rate. The
+  // backend refuses a 0 rate too (start_capture_batch_impl).
+  const agrFpsMissing = agrMode && agrFpsRaw <= 0;
+  const blocked = bannedCommandsPresent || pathsMissing || agrFpsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
     startBtn.disabled = blocked;
@@ -370,6 +377,10 @@ export async function refreshLaunchGuard(state) {
     } else if (pathsMissing) {
       warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
+      warningEl.style.display = 'block';
+    } else if (agrFpsMissing) {
+      warningEl.style.color = 'var(--danger)';
+      warningEl.textContent = STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = 'var(--danger)';
@@ -425,7 +436,7 @@ export async function refreshLaunchGuard(state) {
     footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
-  return { requiredBytes, availableBytes, blocked, noHighlightsSelected };
+  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing };
 }
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
@@ -451,8 +462,8 @@ function currentCaptureSetup() {
     mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
-    // An empty AGR FPS records at DEFAULT_AGR_FPS, as the batch does.
-    agrFps: effectiveAgrFps(numberField('#config-agr-fps', 0, { integer: true, positive: true })),
+    // 0 when empty: the strip says so rather than naming a rate.
+    agrFps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
@@ -601,7 +612,7 @@ function initImportCfgButton() {
 export function batchSettingsPayload(state) {
   const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
   const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-  // Empty is 0, DEFAULT_AGR_FPS — resolved by the backend.
+  // Empty is 0, which Start refuses in AGR mode (refreshLaunchGuard) and so does the backend.
   const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
   const preRollVal = numberField('#config-pre-roll', 5.0);
   const postRollVal = numberField('#config-post-roll', 1.0);
@@ -1188,6 +1199,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // and it should not arrive behind a modal about closing their game.
         if (guard.noHighlightsSelected) {
           stopWith(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING);
+        } else if (guard.agrFpsMissing) {
+          stopWith(STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING);
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {

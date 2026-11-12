@@ -3,7 +3,7 @@
 // The rate AGR mode records at. AGR's rate is its own, not Capture FPS: an
 // AGR take is rebuilt in Blender, and a high recorded rate makes those
 // renders far slower, so following a 300 fps Capture FPS was the wrong
-// default for it. An empty AGR FPS (saved as 0) records at DEFAULT_AGR_FPS.
+// default for it. AGR FPS is required in AGR mode (an empty box blocks Start); DEFAULT_AGR_FPS is only the fallback for paths that never pass through the UI.
 
 /** Mirrors `native::patch::DEFAULT_AGR_FPS`; a test in
  *  `studio/src-tauri/src/capture_manager.rs` checks the two agree. */
