@@ -187,6 +187,9 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(damage) = crate::demo_damage::status_line() {
+        lines.push(damage);
+    }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }

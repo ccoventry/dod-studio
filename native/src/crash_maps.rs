@@ -58,6 +58,10 @@ pub const KNOWN_CRASHES: &[(&str, &str)] = &[
         "hw.dll+0x1e2612",
         "The engine's movement trace ran on the previous map's collision data (#384, 25th Anniversary build). The hook guards this; its hull_trace_guard log line says why it didn't.",
     ),
+    (
+        "client.dll+0x2c59b",
+        "DoD's client read through a bad pointer in a message handler after `End of demo.` of some demos under playdemo (#1394). Not caused by the hook DLL; the demo is fine.",
+    ),
 ];
 
 /// What the cause of a crash at `site` is, when it is known.

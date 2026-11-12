@@ -481,6 +481,14 @@ there but not in an HLTV demo (#894): one byte, both builds
 (`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
 On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
+`src/demo_damage.rs` notices a `playdemo` (or `timedemo`) that stops on a
+damaged frame, or at the engine's entity limit (256 on the pre-Anniversary
+build), and says so in the console, the hook log and a `DEMO_DAMAGED` /
+`DEMO_ENTITY_LIMIT` event to Studio (#1373): one entry detour on each of
+`Host_EndGame` and `Host_Error`, both builds
+(`tools/verify_demo_damage_offsets.py`). It only reads. On by default;
+`GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise
