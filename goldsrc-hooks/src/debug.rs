@@ -76,6 +76,12 @@ fn log_path() -> Option<std::path::PathBuf> {
     std::env::var_os("TEMP").map(|t| std::path::PathBuf::from(t).join(log_file_name()))
 }
 
+/// The folder the log goes in ([`log_path`]'s), for files that belong beside
+/// it (`hang.rs`'s dumps).
+pub(crate) fn log_dir() -> Option<std::path::PathBuf> {
+    log_path().and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+}
+
 /// The prefix every dated log file shares, so [`prune_old_hook_logs`] can
 /// recognise its own files without also sweeping up an unrelated one that
 /// happens to share the log directory.
