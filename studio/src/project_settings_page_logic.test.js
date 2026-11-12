@@ -97,10 +97,10 @@ describe('a rate typed badly under a mode that is then left', () => {
   });
 });
 
-describe('pendingProblems and the AGR fallback', () => {
-  it("refuses AGR's 0 while the Capture FPS it stands for is unusable", () => {
+describe('pendingProblems and the AGR default', () => {
+  it("lets AGR's 0 through whatever Capture FPS holds: 0 is 30, not Capture FPS", () => {
     const start = startingValues(form(), null, 'pc-a');
-    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: 0, capture_fps: NaN })).toEqual({ agr_fps: S.BAD_RATE });
+    expect(pendingProblems({ ...start, capture_mode: 'agr', agr_fps: 0, capture_fps: NaN })).toEqual({});
   });
 });
 
@@ -122,7 +122,7 @@ describe('pendingProblems', () => {
     expect(pendingProblems({ ...ok(), capture_mode: 'obs', obs_capture_fps: 1.5 })).toEqual({ obs_capture_fps: S.BAD_RATE });
   });
 
-  it("lets AGR's 0 stand for the same as Capture FPS", () => {
+  it("lets AGR's 0 stand for AGR's own default", () => {
     expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: 0 })).toEqual({});
     expect(pendingProblems({ ...ok(), capture_mode: 'agr', agr_fps: NaN })).toEqual({ agr_fps: S.BAD_RATE });
   });
@@ -194,8 +194,9 @@ describe('the chips', () => {
     expect(rateKeyFor('direct_to_video')).toBe('capture_fps');
   });
 
-  it("shows AGR's 0 as the Capture FPS it stands for", () => {
-    expect(rateOf({ agr_fps: 0, capture_fps: 300 }, 'agr')).toBe(300);
+  it("shows AGR's 0 as the 30 the batch records at, never Capture FPS", () => {
+    expect(rateOf({ agr_fps: 0, capture_fps: 300 }, 'agr')).toBe(30);
+    expect(rateOf({ capture_fps: 300 }, 'agr')).toBe(30);
     expect(rateOf({ agr_fps: 60, capture_fps: 300 }, 'agr')).toBe(60);
   });
 
