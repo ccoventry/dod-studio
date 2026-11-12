@@ -15,6 +15,7 @@ mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_preview;
 mod demo_rename_manager;
+mod demo_repair_manager;
 mod demo_split_manager;
 mod dir_browser;
 mod download_progress;
@@ -913,6 +914,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(demo_repair_manager::DemoRepairManager::default())
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(obs_test_manager::ObsTestManager::default())
@@ -1078,6 +1080,11 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
+            demo_repair_manager::find_damaged_demos_cmd,
+            demo_repair_manager::cancel_damaged_scan,
+            demo_repair_manager::repair_demo_cmd,
+            demo_repair_manager::cancel_demo_repair,
+            demo_repair_manager::demo_repairable,
             demo_split_manager::demo_split_status,
             delete_audit_files,
             list_fixed_drives,
