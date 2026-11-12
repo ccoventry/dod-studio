@@ -33,6 +33,47 @@ permissions:
   contents: read
 
 jobs:
+  # Which expensive jobs this run needs, from the files a PR changes
+  # (.github/scripts/ci_changes.py has the areas and their reasons). A job whose
+  # area is untouched is skipped by its `if:`, and GitHub reports a skipped job
+  # as passing a required check, so a docs-only PR doesn't wait ~3 min on Rust
+  # builds. Not workflow-level `paths`: a workflow that never starts leaves its
+  # required checks "expected" for ever. Fails open: if this job fails, every
+  # job runs (`needs.changes.result != 'success'` in each `if:`). Everything
+  # runs on the push to dev, on PRs into main, and when a build input or CI
+  # itself changes. Source checks and Frontend lint always run.
+  #
+  # The PR's merge commit has the base as its first parent, so a two-commit
+  # checkout and `HEAD^1..HEAD` list exactly what the PR changes against its
+  # base; `--no-renames` lists both sides of a rename.
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.areas.outputs.rust }}
+      hooks: ${{ steps.areas.outputs.hooks }}
+      frontend: ${{ steps.areas.outputs.frontend }}
+      web_python: ${{ steps.areas.outputs.web_python }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Areas this run needs
+        id: areas
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            git diff --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          else
+            : > "$RUNNER_TEMP/changed.txt"
+          fi
+          python3 .github/scripts/ci_changes.py --event "$EVENT" --base "$BASE" \
+            --files "$RUNNER_TEMP/changed.txt" | tee -a "$GITHUB_OUTPUT"
+
   # The workspace's tests in three jobs side by side. As one job they took
   # ~5.5 minutes, the longest in CI, and ~3m40s of that was compiling: the
   # crates on the path analysis -> native -> native's tests, and the Tauri
@@ -42,6 +83,8 @@ jobs:
   # Each part keeps its own Rust cache (`key` below).
   rust-tests-part:
     name: Rust tests (${{ matrix.part }})
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: windows-latest
     strategy:
       # Let every part finish, so one red run shows every failing part.
@@ -117,20 +160,29 @@ jobs:
         run: cargo test -p source-checks --locked
 
   # The check the rulesets require by this name: green only when every part
-  # passed. Keeping the name means no ruleset change; a part that failed or
-  # was cancelled turns it red.
+  # passed, or when the parts were skipped because `changes` succeeded and found
+  # no Rust change. Keeping the name means no ruleset change; a part that failed
+  # or was cancelled turns it red.
   rust-tests:
     name: Rust workspace tests
-    needs: rust-tests-part
+    needs: [changes, rust-tests-part]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every part passed
+      - name: Every part passed, or none was needed
         shell: bash
-        run: test "${{ needs.rust-tests-part.result }}" = "success"
+        env:
+          PARTS: ${{ needs.rust-tests-part.result }}
+          CHANGES: ${{ needs.changes.result }}
+          NEEDED: ${{ needs.changes.outputs.rust }}
+        run: |
+          echo "parts: $PARTS, changes: $CHANGES, rust changed: $NEEDED"
+          [ "$PARTS" = "success" ] || { [ "$PARTS" = "skipped" ] && [ "$CHANGES" = "success" ] && [ "$NEEDED" = "false" ]; }
 
   clippy:
     name: Clippy
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -193,6 +245,8 @@ jobs:
   # rulesets require by the old name is the job below it.
   frontend-tests-shard:
     name: Frontend e2e shard ${{ matrix.shard }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.frontend == 'true') }}
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -212,12 +266,6 @@ jobs:
 
       - run: npm ci
 
-      # Vitest unit tests (#31): seconds, so they run before the browser
-      # download and fail the job early. One shard runs them; they are not
-      # sharded.
-      - run: npm run test:unit
-        if: matrix.shard == 1
-
       # No `--with-deps`: on Windows it installs the Server-Media-Foundation
       # Windows feature, which took 3m20s of this job's 4m37s. The browser
       # download itself is ~17s, too little to be worth caching. Chromium
@@ -227,20 +275,30 @@ jobs:
       - run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # The check the rulesets require by this name: green only when both shards
-  # passed (the same pattern as `rust-tests`).
+  # passed, or were skipped with no frontend change (the same pattern as
+  # `rust-tests`).
   frontend-tests:
     name: Frontend e2e tests
-    needs: frontend-tests-shard
+    needs: [changes, frontend-tests-shard]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every shard passed
+      - name: Every shard passed, or none was needed
         shell: bash
-        run: test "${{ needs.frontend-tests-shard.result }}" = "success"
+        env:
+          SHARDS: ${{ needs.frontend-tests-shard.result }}
+          CHANGES: ${{ needs.changes.result }}
+          NEEDED: ${{ needs.changes.outputs.frontend }}
+        run: |
+          echo "shards: $SHARDS, changes: $CHANGES, frontend changed: $NEEDED"
+          [ "$SHARDS" = "success" ] || { [ "$SHARDS" = "skipped" ] && [ "$CHANGES" = "success" ] && [ "$NEEDED" = "false" ]; }
 
   # ESLint over studio/src (#1179): no-unused-vars as an error, max-params as a
-  # warning. Its own parallel job on ubuntu (no Windows code involved), so it
-  # adds no wall-clock time; npm is cached the way the e2e job does.
+  # warning, then the Vitest unit tests (#31). Its own parallel job on ubuntu
+  # (no Windows code involved), so it adds no wall-clock time; npm is cached
+  # the way the e2e job does. Runs on every PR, never skipped: the unit tests
+  # are seconds, and several read Rust and web-analyzer files to check a
+  # mirrored constant or copy, so no file area could safely skip them.
   frontend-lint:
     name: Frontend lint
     runs-on: ubuntu-latest
@@ -260,6 +318,8 @@ jobs:
 
       - run: npm run lint
 
+      - run: npm run test:unit
+
   # The hook DLL ships as 32-bit, so its tests run here, as 32-bit, and only
   # here; Clippy above lints it as 64-bit too (it is a workspace member).
   # Three of its tests are `#[cfg(target_arch = "x86")]`, and its 32-bit-only
@@ -268,6 +328,8 @@ jobs:
   # (saved from dev, like the others) holds just those.
   hooks-32bit:
     name: Hooks 32-bit
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.hooks == 'true') }}
     runs-on: windows-latest
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -297,6 +359,8 @@ jobs:
   # since neither depends on Windows, and it is the quicker runner.
   web-and-python:
     name: Web analyzer and Python
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web_python == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
