@@ -35,8 +35,6 @@
 //! way back through the UI and a folder that usually needs administrator rights
 //! to edit by hand. See `docs/direct_to_video_capture.md`.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 
 const FFMPEG_DIR: &str = "ffmpeg";

@@ -106,6 +106,35 @@ pub unsafe fn find_unique(module: usize, pattern: &str) -> Result<usize, String>
     found.ok_or_else(|| "the pattern does not match this build".to_string())
 }
 
+/// Every address in `module`'s executable sections matching `pattern`, which
+/// must match exactly `count` times: for code the compiler inlined into
+/// several callers byte for byte, where no window is unique. A different
+/// count is an error for the same reason [`find_unique`]'s second match is.
+///
+/// Safety: as [`find_unique`].
+pub unsafe fn find_exactly(
+    module: usize,
+    pattern: &str,
+    count: usize,
+) -> Result<Vec<usize>, String> {
+    let pattern = Pattern::parse(pattern)?;
+    let (start, len) = unsafe { pe::code_range(module as *mut u8) }
+        .ok_or_else(|| "could not find an executable section in the module".to_string())?;
+    // Safety: as in `find_unique`.
+    let code = unsafe { std::slice::from_raw_parts((module + start) as *const u8, len) };
+    let found: Vec<usize> = (0..=code.len().saturating_sub(pattern.0.len()))
+        .filter(|&at| pattern.matches_at(code, at))
+        .map(|at| module + start + at)
+        .collect();
+    if found.len() != count {
+        return Err(format!(
+            "the pattern matches {} times, expected {count}",
+            found.len()
+        ));
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Pattern;
