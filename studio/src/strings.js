@@ -882,7 +882,10 @@ export const STRINGS = {
     exportProjectNone: (total) => total > 0
       ? `None of the ${total} video${total === 1 ? '' : 's'} rendered for this project could be found. Add the folder they are in to the render export folders in Configuration.`
       : 'No videos have been rendered for the loaded project yet, so there is nothing to export.',
-    exportProjectLooking: (count) => `Looking for ${count} rendered video${count === 1 ? '' : 's'}…`,
+    exportProjectLooking: (count) => `Finding ${count} rendered video${count === 1 ? '' : 's'} on disk…`,
+    exportProjectReading: (n, total) => `Reading the length of video ${n} of ${total} for the EDL…`,
+    EXPORT_PROJECT_PICKING: 'Choose where to save the EDL…',
+    EXPORT_PROJECT_WRITING: 'Writing the EDL and the clip list…',
     exportProjectLookFailed: "Couldn't look for the project's videos on disk.",
     exportProjectDone: (count, scope, missing, skipped, nameplates = 0) => `EDL saved (${count} video${count === 1 ? '' : 's'}${scope === 'ticked' ? ' from the ticked highlights' : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${missing > 0 ? `, ${missing} missing` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     // #429: the nameplate script into VEGAS's script menu.

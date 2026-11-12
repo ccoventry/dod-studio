@@ -61,7 +61,8 @@ export function takePlayer(takeKey, takeIndex, byUid) {
  *   `demos` the project's; `useAsName(steamId)` and `nameplatePath(steamId)`
  *   the Players tab's lookups (player_alias.js)
  * @returns {object}  `{ format, version, edl, clips: [{ name, path, seconds,
- *   player: { steam_id, name, in_game_name } | null, nameplate: path | null }] }`
+ *   hud?: true, player: { steam_id, name, in_game_name } | null,
+ *   nameplate: path | null }] }`; `hud` only on a HUD-only render
  */
 export function clipManifest(clips, { edlName = '', takeIndex = {}, demos = [], useAsName, nameplatePath }) {
   const byUid = streaksByUid(demos);
@@ -69,8 +70,11 @@ export function clipManifest(clips, { edlName = '', takeIndex = {}, demos = [], 
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
     edl: edlName,
-    // A HUD-only render lies over its clip; the clip carries the nameplate.
-    clips: (clips || []).filter((clip) => !clip.hud).map((clip) => {
+    // A HUD-only render lies over its clip and the clip carries the nameplate:
+    // it is listed with `hud: true` and no player, so the nameplate script
+    // knows the file is ours and leaves it out of "not in any clip list".
+    clips: (clips || []).map((clip) => {
+      if (clip.hud) return { name: clip.name, path: clip.path, seconds: clip.seconds, hud: true, player: null, nameplate: null };
       const who = takePlayer(clip.take_key, takeIndex, byUid);
       const player = who ? {
         steam_id: who.steam_id,

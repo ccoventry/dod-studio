@@ -69,6 +69,8 @@ public class EntryPoint
         public string Path;
         public string Player;
         public string Nameplate;
+        // A HUD-only render laid over its clip: ours, but it takes no nameplate.
+        public bool Hud;
     }
 
     /// The clip lists read so far: each clip by its full path, and by its
@@ -103,10 +105,12 @@ public class EntryPoint
 
         Dictionary<VideoEvent, ClipEntry> matched = new Dictionary<VideoEvent, ClipEntry>();
         int notListed = 0;
+        int hudPasses = 0;
         foreach (VideoEvent clip in clips)
         {
             ClipEntry entry = Find(manifests, MediaPath(clip));
             if (entry == null) notListed++;
+            else if (entry.Hud) hudPasses++;
             else matched[clip] = entry;
         }
 
@@ -139,7 +143,7 @@ public class EntryPoint
                 VideoTrack track = existing;
                 if (track == null)
                 {
-                    track = new VideoTrack(project, TopTrackIndex(todo), TRACK_NAME);
+                    track = new VideoTrack(project, TopTrackIndex(project), TRACK_NAME);
                     project.Tracks.Add(track);
                 }
                 foreach (VideoEvent clip in todo)
@@ -151,7 +155,7 @@ public class EntryPoint
             }
         }
 
-        Say(Summary(added, todo.Count - added, alreadyThere, notListed, noNameplate, missingFiles, manifests, selectedOnly, clips.Count));
+        Say(Summary(added, todo.Count - added, alreadyThere, notListed, hudPasses, noNameplate, missingFiles, manifests, selectedOnly, clips.Count));
     }
 
     /// The first video track named TRACK_NAME, or null.
@@ -273,6 +277,7 @@ public class EntryPoint
                 entry.Path = Str(clip, "path");
                 entry.Player = player != null ? Str(player, "name") : null;
                 entry.Nameplate = Str(clip, "nameplate");
+                entry.Hud = Get(clip, "hud") is bool && (bool)Get(clip, "hud");
                 // A later list wins: it is the newer export of the same clip.
                 into.ByPath[PathKey(entry.Path)] = entry;
                 string name = NameKey(entry.Path);
@@ -323,12 +328,16 @@ public class EntryPoint
         try { return Path.GetFileName(p).ToLowerInvariant(); } catch (Exception) { return p.ToLowerInvariant(); }
     }
 
-    /// The index of the topmost track holding one of `clips`: the new track
-    /// goes there, which puts it above them all.
-    static int TopTrackIndex(List<VideoEvent> clips)
+    /// The index of the topmost video track other than the nameplate track:
+    /// the new track goes there, which puts it above every clip and above any
+    /// HUD pass laid over one, so a HUD pass never covers a nameplate.
+    static int TopTrackIndex(Project project)
     {
         int top = int.MaxValue;
-        foreach (VideoEvent clip in clips) top = Math.Min(top, clip.Track.Index);
+        foreach (Track track in project.Tracks)
+        {
+            if (track.IsVideo() && track.Name != TRACK_NAME) top = Math.Min(top, track.Index);
+        }
         return top == int.MaxValue ? 0 : top;
     }
 
@@ -387,7 +396,7 @@ public class EntryPoint
         }
     }
 
-    static string Summary(int added, int unopened, int alreadyThere, int notListed, int noNameplate, List<string> missingFiles, Manifests manifests, bool selectedOnly, int clipCount)
+    static string Summary(int added, int unopened, int alreadyThere, int notListed, int hudPasses, int noNameplate, List<string> missingFiles, Manifests manifests, bool selectedOnly, int clipCount)
     {
         StringBuilder text = new StringBuilder();
         if (added > 0) text.AppendLine("Added " + Count(added, "nameplate") + " on the \"" + TRACK_NAME + "\" track. Ctrl+Z takes them all away again.");
@@ -399,6 +408,7 @@ public class EntryPoint
         if (manifests.Read.Count == 0) text.AppendLine("No DoD Studio clip list was found. Save one with Render > Export VEGAS EDL... in DoD Studio.");
         else text.AppendLine("Read " + Count(manifests.Read.Count, "clip list") + ": " + Names(manifests.Read) + ".");
         if (notListed > 0) text.AppendLine(Count(notListed, "clip") + " on the timeline " + (notListed == 1 ? "isn't" : "aren't") + " in any clip list.");
+        if (hudPasses > 0) text.AppendLine(Count(hudPasses, "HUD pass") + " on the timeline " + (hudPasses == 1 ? "was" : "were") + " left alone: the clip under " + (hudPasses == 1 ? "it carries" : "them carries") + " the nameplate.");
         if (noNameplate > 0) text.AppendLine(Count(noNameplate, "clip") + " had no nameplate: the player has none on DoD Studio's Players tab, or the clip isn't one player's.");
         if (missingFiles.Count > 0) text.AppendLine("These nameplate files aren't there any more: " + string.Join(", ", missingFiles.ToArray()));
         if (unopened > 0) text.AppendLine(Count(unopened, "nameplate") + " couldn't be opened as a picture by VEGAS.");

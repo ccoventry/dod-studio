@@ -40,6 +40,32 @@ export function captureOf(takeIndex, takeKey) {
 }
 
 /**
+ * When the session folder's name says its take was captured: HLAE names it
+ * `session_YYYYMMDD_HHMMSS` in local time. Epoch milliseconds, or undefined
+ * when the text holds no such name or the date is not a real one.
+ */
+export function sessionFolderTime(text) {
+  const m = /session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(String(text || ''));
+  if (!m) return undefined;
+  const [year, month, day, hour, minute, second] = m.slice(1).map(Number);
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  const real = date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    && date.getHours() === hour && date.getMinutes() === minute && date.getSeconds() === second;
+  return real ? date.getTime() : undefined;
+}
+
+/**
+ * When `takeKey` was captured: its recorded time, else the time in its take
+ * folder's name, else in the take key's own session folder; undefined when
+ * none says (movie order puts those last).
+ */
+export function capturedAtOf(takeIndex, takeKey) {
+  const record = captureOf(takeIndex, takeKey);
+  if (record?.captured_at != null) return record.captured_at;
+  return sessionFolderTime(record?.take_folder) ?? sessionFolderTime(takeKey);
+}
+
+/**
  * Records the capture facts in `meta` for `takeKey`. A fact that is known
  * overwrites the old one (a re-capture into the same key is the newer
  * capture); an unknown one leaves it.

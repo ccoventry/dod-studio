@@ -36,7 +36,7 @@ The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Namepla
 
 With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.
 
-It adds a track called **Nameplates** above the topmost of those clips, and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now. A box then says how many it added and why any clip got none.
+It adds a track called **Nameplates** above every video track (so above a HUD pass laid over a clip too, which never covers it), and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now. A box then says how many it added and why any clip got none.
 
 It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
 

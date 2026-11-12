@@ -15,6 +15,7 @@ import { videosToExport, clipsOfVideos } from './project_vegas_logic.js';
 import { vegasEdl, edlDefaultPath, EDL_SAVE_FILTER } from './vegas_edl.js';
 import { probeLengths, saveManifest } from './vegas_edl_export.js';
 import { nameplateCount } from './clip_manifest.js';
+import { lengthsView, lookupView, pickingView, writingView, createVegasProgress } from './project_vegas_progress.js';
 import { projectEdlStartLine, projectEdlExportedLine, projectEdlNotWrittenLine } from './project_log.js';
 
 const defaultIo = {
@@ -31,6 +32,7 @@ const defaultIo = {
   saveManifest,
   log: logFrontendEvent,
   toast: showToast,
+  progress: createVegasProgress(),
   now: () => Date.now(),
 };
 
@@ -44,7 +46,16 @@ const defaultIo = {
 export function createProjectVegasExport({
   getTakeIndex, getAllDemos, ffmpegPath = () => null, io = defaultIo,
 }) {
+  // The bar and its line stay up from the click until the run ends, however it ends.
   async function run() {
+    try {
+      return await exportProject();
+    } finally {
+      io.progress?.hide();
+    }
+  }
+
+  async function exportProject() {
     const takeIndex = getTakeIndex() || {};
     const demos = getAllDemos() || [];
     const recorded = projectRenderedVideos(takeIndex);
@@ -55,7 +66,7 @@ export function createProjectVegasExport({
     const started = io.now();
     const { videos: chosen, scope } = videosToExport(recorded, demos);
     io.log(projectEdlStartLine(recorded.length, chosen.length, scope));
-    io.toast(STRINGS.RENDER.exportProjectLooking(chosen.length), 'info');
+    io.progress?.show(lookupView(chosen.length));
     const located = await io.locate(chosen.map((video) => video.output_path));
     if (!located) {
       io.toast(STRINGS.RENDER.exportProjectLookFailed, 'error');
@@ -69,19 +80,25 @@ export function createProjectVegasExport({
       io.log(projectEdlNotWrittenLine('missing', chosen.length, scope, io.now() - started));
       return false;
     }
-    io.toast(STRINGS.RENDER.exportEdlProbing(found.length), 'info');
-    const lengths = await io.probe(found.map((video) => video.output_path), ffmpegPath());
+    io.progress?.show(lengthsView(0, found.length));
+    const lengths = await io.probe(
+      found.map((video) => video.output_path),
+      ffmpegPath(),
+      (done) => io.progress?.show(lengthsView(done, found.length)),
+    );
     const { clips, skipped } = clipsOfVideos(found, takeIndex, lengths);
     if (clips.length === 0) {
       io.toast(STRINGS.RENDER.exportEdlNone(skipped), 'info');
       io.log(projectEdlNotWrittenLine('unreadable', chosen.length, scope, io.now() - started));
       return false;
     }
+    io.progress?.show(pickingView());
     const path = await io.pickPath(clips);
     if (!path) {
       io.log(projectEdlNotWrittenLine('cancelled', chosen.length, scope, io.now() - started));
       return false;
     }
+    io.progress?.show(writingView());
     try {
       await io.write(path, vegasEdl(clips));
     } catch (err) {

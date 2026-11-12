@@ -16,12 +16,16 @@ function setUp({ located, lengths, path = 'D:/out/movie.txt' }) {
   recordRender(index, 't2', render(30, 'hud:hudcolor', 'D:/v/b_hud.mov'));
   const io = {
     locate: vi.fn(async () => located),
-    probe: vi.fn(async () => new Map(Object.entries(lengths))),
+    probe: vi.fn(async (paths, _ffmpeg, onProgress) => {
+      paths.forEach((_p, i) => onProgress?.(i + 1, paths.length));
+      return new Map(Object.entries(lengths));
+    }),
     pickPath: vi.fn(async () => path),
     write: vi.fn(async () => {}),
     saveManifest: vi.fn(async () => ({ clips: [] })),
     log: vi.fn(),
     toast: vi.fn(),
+    progress: { show: vi.fn(), hide: vi.fn() },
     now: () => 0,
   };
   const exporter = createProjectVegasExport({ getTakeIndex: () => index, getAllDemos: () => [], io });
@@ -63,5 +67,41 @@ describe('createProjectVegasExport', () => {
     expect(await exporter.run()).toBe(false);
     expect(io.write).not.toHaveBeenCalled();
     expect(io.log).toHaveBeenLastCalledWith(expect.stringContaining('wrote no EDL: the save dialog was cancelled'));
+  });
+  describe('progress', () => {
+    const shown = (io) => io.progress.show.mock.calls.map(([view]) => view.text);
+    it('shows the lookup, each length read and the save step, then hides on success', async () => {
+      const { io, exporter } = setUp({
+        located: ['D:/v/a.mov', 'D:/v/b.mov', 'D:/v/b_hud.mov'],
+        lengths: { 'D:/v/a.mov': 3, 'D:/v/b.mov': 4, 'D:/v/b_hud.mov': 4 },
+      });
+      await exporter.run();
+      const lines = shown(io);
+      expect(lines[0]).toContain('3 rendered videos');
+      expect(io.progress.show.mock.calls[0][0].indeterminate).toBe(true);
+      const reads = io.progress.show.mock.calls.map(([v]) => v).filter((v) => !v.indeterminate);
+      expect(reads.map((v) => v.pct)).toEqual([0, 33, 67, 100]);
+      expect(lines.at(-1)).toContain('Writing');
+      expect(io.progress.hide).toHaveBeenCalledTimes(1);
+      expect(io.toast).not.toHaveBeenCalledWith(expect.stringContaining('Looking for'), 'info');
+    });
+    it('hides when the run ends without an EDL: nothing found, cancelled, a lookup that failed', async () => {
+      const none = setUp({ located: [null, null, null], lengths: {} });
+      await none.exporter.run();
+      expect(none.io.progress.hide).toHaveBeenCalledTimes(1);
+      const cancelled = setUp({ located: ['D:/v/a.mov', null, null], lengths: { 'D:/v/a.mov': 3 }, path: null });
+      await cancelled.exporter.run();
+      expect(shown(cancelled.io).some((t) => t.includes('Choose where'))).toBe(true);
+      expect(cancelled.io.progress.hide).toHaveBeenCalledTimes(1);
+      const failed = setUp({ located: null, lengths: {} });
+      await failed.exporter.run();
+      expect(failed.io.progress.hide).toHaveBeenCalledTimes(1);
+    });
+    it('hides when a step throws', async () => {
+      const { io, exporter } = setUp({ located: ['D:/v/a.mov', null, null], lengths: { 'D:/v/a.mov': 3 } });
+      io.probe = vi.fn(async () => { throw new Error('boom'); });
+      await expect(exporter.run()).rejects.toThrow('boom');
+      expect(io.progress.hide).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -12,7 +12,7 @@
 // when they save). In memory the map rides on the take index as a
 // non-enumerable property, so JSON.stringify of the index never includes it.
 
-import { captureOf } from './take_record.js';
+import { capturedAtOf } from './take_record.js';
 
 const RENDERS = 'takeRenders';
 
@@ -94,7 +94,8 @@ export function rendersToSave(takeIndex) {
 
 /**
  * Every video recorded for the project, in movie order: takes by when they
- * were captured (a take with no date last, then by key), each take's renders
+ * were captured (a take with no recorded time ordered by the time in its folder's
+ * name, one with neither last, then by key), each take's renders
  * oldest first. Each is `{ takeKey, uids, ...render }`. Pure: whether a file
  * is still there is the caller's question (`locateRenderedVideos`). The list
  * a whole-project VEGAS export starts from (#1264 part 2).
@@ -102,7 +103,7 @@ export function rendersToSave(takeIndex) {
 export function projectRenderedVideos(takeIndex) {
   const keys = Object.keys(takeIndex?.[RENDERS] || {})
     .filter((key) => Object.prototype.hasOwnProperty.call(takeIndex, key));
-  const capturedAt = (key) => captureOf(takeIndex, key)?.captured_at;
+  const capturedAt = (key) => capturedAtOf(takeIndex, key);
   keys.sort((a, b) => {
     const at = capturedAt(a);
     const bt = capturedAt(b);

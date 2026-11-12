@@ -18,10 +18,12 @@ import { fileNameOf } from './path_display.js';
 /**
  * The length of each file in `paths` as FFmpeg reads it (the Combine Clips
  * probe), one file at a time so one unreadable file leaves only itself out.
+ * @param {(done: number, total: number) => void} [onProgress]  after each file
  * @returns {Promise<Map<string, number>>} path to seconds, readable files only
  */
-export async function probeLengths(paths, ffmpegPath) {
+export async function probeLengths(paths, ffmpegPath, onProgress = () => {}) {
   const lengths = new Map();
+  let done = 0;
   for (const path of paths) {
     try {
       const plan = await combinePlan([path], ffmpegPath);
@@ -30,6 +32,8 @@ export async function probeLengths(paths, ffmpegPath) {
     } catch {
       // Left out of the EDL and counted in the toast's "left out".
     }
+    done += 1;
+    onProgress(done, paths.length);
   }
   return lengths;
 }

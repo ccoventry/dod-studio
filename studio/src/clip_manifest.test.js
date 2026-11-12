@@ -71,10 +71,15 @@ describe('clipManifest', () => {
     { name: 'clip3', path: 'D:\\r\\clip3.mov', seconds: 1.5, take_key: '' },
   ];
 
-  it('leaves a HUD-only render out: its clip carries the nameplate', () => {
+  it('lists a HUD-only render as a HUD pass with no player or nameplate: its clip carries the nameplate', () => {
     const hud = { name: 'clip1 hud', path: 'D:/r/clip1_hud.mov', seconds: 2, take_key: 'session_1/chain_01_b0', hud: true };
     const m = clipManifest([clips[0], hud], { ...project(), ...lookups });
-    expect(m.clips.map((c) => c.name)).toEqual(['clip1']);
+    expect(m.clips.map((c) => c.name)).toEqual(['clip1', 'clip1 hud']);
+    expect(m.clips[1]).toEqual({
+      name: 'clip1 hud', path: 'D:/r/clip1_hud.mov', seconds: 2, hud: true, player: null, nameplate: null,
+    });
+    expect(m.clips[0].hud).toBeUndefined();
+    expect(nameplateCount(m)).toBe(1);
   });
 
   it('names each clip\'s player by their Use as name, with their nameplate', () => {
