@@ -28,11 +28,31 @@
 //! - `init <command>`: run once the demo has loaded, before anything else;
 //! - `at <seconds> <command>`: run on the first frame at or past that time;
 //! - `seek <seconds> <to>`: at that time, jump forward to `to`;
+//! - `back <seconds> <to>`: at that time, go back to `to` and play the demo
+//!   again from there (#1085);
 //! - `next <seconds>`: at that time, the demo is done;
 //! - `end <command>`: after the last demo (outside any section).
 //!
 //! Times are the demo player's clock, the one `ds_demo_seek_to` takes. Lines
 //! starting with `//` and blank lines are skipped.
+//!
+//! ## Going back in one demo (#1085)
+//!
+//! A clip's variant is captured in the same playthrough: after the clip, a
+//! `back` line takes the demo back to before it and the variant's lines
+//! follow. Each `back` ends a pass through the demo: the lines before it, back
+//! to the last `back`, are one pass, sorted by time on their own, so two
+//! passes over the same stretch, with the same times, never mix. The `back`
+//! itself comes last in its pass, so no line of a pass may be later than its
+//! `back`, and a pass after the demo's `next` would never play: both are
+//! refused, as is a `back` whose `to` is not before its own time. The seek back is `demo_seek`'s rewind, which replays the demo
+//! from its first recorded frame so the flags, scores and kill feed are what
+//! playing up to there would leave.
+//!
+//! `seek` stays forward only: a `seek` whose target is behind it plays on,
+//! as it always has, so no batch file that has no `back` line does anything
+//! new. A hook DLL older than `back` refuses the whole file ("unknown line")
+//! rather than playing both passes as one.
 //!
 //! Commands and [`poll`] run on the game's main thread.
 
@@ -71,6 +91,8 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 pub(crate) enum Action {
     Run(String),
     Seek(f64),
+    /// Go back to this time: the end of a pass.
+    Back(f64),
     Next,
 }
 
@@ -85,7 +107,8 @@ pub(crate) struct Entry {
 pub(crate) struct DemoPlan {
     pub demo: String,
     pub init: Vec<String>,
-    /// Sorted by time; lines at one time keep the file's order.
+    /// Sorted by time within each pass (each ending at a `back`); lines at
+    /// one time keep the file's order.
     pub entries: Vec<Entry>,
 }
 
@@ -190,6 +213,26 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
                     action: Action::Seek(to),
                 });
             }
+            "back" => {
+                need(3)?;
+                in_demo(&mut plan)?;
+                let at = time(fields[1], number)?;
+                let to = time(fields[2], number)?;
+                // A `back` that lands at or past its own time would step
+                // forward, and the next pass's earlier lines would all run at
+                // once on its landing.
+                if to >= at {
+                    return Err(format!(
+                        "line {number}: a \"back\" at {at} must go back, not to {to}"
+                    ));
+                }
+                let demo = plan.demos.last_mut().unwrap();
+                end_pass(&demo.entries, at).map_err(|why| format!("line {number}: {why}"))?;
+                demo.entries.push(Entry {
+                    at,
+                    action: Action::Back(to),
+                });
+            }
             "next" => {
                 need(2)?;
                 in_demo(&mut plan)?;
@@ -211,9 +254,46 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
         return Err("the batch has no demos".to_string());
     }
     for demo in &mut plan.demos {
-        demo.entries.sort_by(|a, b| a.at.total_cmp(&b.at));
+        sort_passes(&mut demo.entries);
     }
     Ok(plan)
+}
+
+/// Where the pass that `entries` is in now began: after its last `back`.
+fn pass_start(entries: &[Entry]) -> usize {
+    entries
+        .iter()
+        .rposition(|e| matches!(e.action, Action::Back(_)))
+        .map_or(0, |i| i + 1)
+}
+
+/// Whether a `back` at `at` can end the pass `entries` is in now: it comes
+/// last in its pass, and a pass after the demo's `next` never plays.
+fn end_pass(entries: &[Entry], at: f64) -> Result<(), String> {
+    let pass = &entries[pass_start(entries)..];
+    if pass.iter().any(|e| e.action == Action::Next) {
+        return Err("a \"back\" after the demo's \"next\" would never run".to_string());
+    }
+    match pass.iter().map(|e| e.at).reduce(f64::max) {
+        Some(latest) if latest > at => Err(format!(
+            "the \"back\" at {at} comes before a line of its pass at {latest}"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Sorts each pass by time on its own: a pass ends at a `back`, which
+/// [`end_pass`] made sure is the latest line of it, so a stable sort leaves
+/// it last.
+fn sort_passes(entries: &mut [Entry]) {
+    let mut from = 0;
+    for i in 0..entries.len() {
+        if matches!(entries[i].action, Action::Back(_)) {
+            entries[from..=i].sort_by(|a, b| a.at.total_cmp(&b.at));
+            from = i + 1;
+        }
+    }
+    entries[from..].sort_by(|a, b| a.at.total_cmp(&b.at));
 }
 
 /// What one frame of a demo's schedule asks for, after its due commands ran.
@@ -221,6 +301,8 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
 pub(crate) enum Then {
     Play,
     Seek(f64),
+    /// A `back` line: rewind to this time for the next pass.
+    Back(f64),
     Next,
 }
 
@@ -232,9 +314,11 @@ pub(crate) struct Cursor {
 
 impl Cursor {
     /// Moves past every entry due at clock `now`. Returns the commands to run,
-    /// in order, and what comes after them: the demo's end, or the furthest
-    /// seek that is still ahead. Only ever forward: a batch never seeks back,
-    /// so a clock that goes back (a seek by hand) re-runs nothing.
+    /// in order, and what comes after them: the demo's end, a `back` (which
+    /// ends the pass, so nothing after it is looked at: every line of the next
+    /// pass is due by the clock it leaves behind), or the furthest seek that
+    /// is still ahead. The cursor only moves on, so a clock that goes back
+    /// any other way (a seek by hand) re-runs nothing.
     pub fn due(&mut self, entries: &[Entry], now: f64) -> (Vec<String>, Then) {
         let mut run = Vec::new();
         let mut then = Then::Play;
@@ -248,6 +332,10 @@ impl Cursor {
                             _ => Then::Seek(*to),
                         };
                     }
+                }
+                Action::Back(to) => {
+                    self.next += 1;
+                    return (run, Then::Back(*to));
                 }
                 Action::Next => {
                     self.next += 1;
@@ -367,7 +455,7 @@ const FAST_FORWARD_LINE: &str = "sys_fast_forward";
 /// at a clip boundary. Two clips close together have no seek between them,
 /// only the fast-forward through the gap, which is a boundary as well.
 pub(crate) fn holds_at(then: &Then, lines: &[String], hold: bool) -> bool {
-    hold && (matches!(then, Then::Seek(_) | Then::Next)
+    hold && (matches!(then, Then::Seek(_) | Then::Back(_) | Then::Next)
         || lines.iter().any(|l| l == FAST_FORWARD_LINE))
 }
 
@@ -780,6 +868,22 @@ fn act(
             }
             batch.phase = Phase::Playing { cursor, beat };
         }
+        Then::Back(to) => {
+            match crate::demo_seek::rewind_to_seconds(to) {
+                Ok(how) => trace(&format!(
+                    "demo {}: going back from {:.1} to {to:.1} for the next pass ({how})",
+                    batch.at + 1,
+                    c.now
+                )),
+                // Playing on would run the next pass's lines at once, on
+                // the wrong stretch of the demo.
+                Err(why) => {
+                    skip(guard, format!("the seek back to {to:.1} failed ({why})"));
+                    return;
+                }
+            }
+            batch.phase = Phase::Playing { cursor, beat };
+        }
         Then::Play => {
             if c.now >= c.end - 0.05 && left > 0 {
                 skip(
@@ -1021,6 +1125,80 @@ mod tests {
         assert_eq!(cursor.due(&e, 2.0).0, ["a", "b"]);
         assert_eq!(cursor.due(&e, 0.5), (vec![], Then::Play));
         assert_eq!(cursor.due(&e, 2.0), (vec![], Then::Play));
+    }
+
+    /// An Original, then its Variant over the same stretch (#1085).
+    fn two_passes() -> Vec<Entry> {
+        entries(&[
+            "at\t10\toriginal start",
+            "at\t17\toriginal stop",
+            "back\t17.5\t5",
+            "at\t17\tvariant stop",
+            "at\t10\tvariant start",
+            "next\t18",
+        ])
+    }
+
+    #[test]
+    fn each_pass_sorts_on_its_own_and_back_ends_it() {
+        let got: Vec<_> = two_passes().into_iter().map(|e| (e.at, e.action)).collect();
+        assert_eq!(
+            got,
+            [
+                (10.0, Action::Run("original start".into())),
+                (17.0, Action::Run("original stop".into())),
+                (17.5, Action::Back(5.0)),
+                (10.0, Action::Run("variant start".into())),
+                (17.0, Action::Run("variant stop".into())),
+                (18.0, Action::Next),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_back_goes_back_and_the_next_pass_runs_on_the_new_clock() {
+        let e = two_passes();
+        let mut cursor = Cursor { next: 0 };
+        assert_eq!(cursor.due(&e, 10.0).0, ["original start"]);
+        assert_eq!(cursor.due(&e, 17.0).0, ["original stop"]);
+        // Every line of the next pass is due by this clock: none of them run.
+        assert_eq!(cursor.due(&e, 17.6), (vec![], Then::Back(5.0)));
+        // Landed at 5: the variant runs at its own times.
+        assert_eq!(cursor.due(&e, 5.0), (vec![], Then::Play));
+        assert_eq!(cursor.due(&e, 10.0).0, ["variant start"]);
+        assert_eq!(cursor.due(&e, 17.0).0, ["variant stop"]);
+        assert_eq!(cursor.due(&e, 18.0), (vec![], Then::Next));
+    }
+
+    #[test]
+    fn a_back_that_cannot_end_its_pass_is_refused() {
+        let e = parse(&file(&["demo\tx.dem", "at\t20\tlate", "back\t17\t5"])).unwrap_err();
+        assert!(e.contains("line 4") && e.contains("comes before"), "{e}");
+        let e = parse(&file(&["demo\tx.dem", "next\t9", "back\t17\t5"])).unwrap_err();
+        assert!(e.contains("line 4") && e.contains("never run"), "{e}");
+        let e = parse(&file(&["demo\tx.dem", "back\t17"])).unwrap_err();
+        assert!(e.contains("needs 2"), "{e}");
+        // A `back` must land before its own time.
+        let e = parse(&file(&["demo\tx.dem", "back\t17\t20"])).unwrap_err();
+        assert!(e.contains("line 3") && e.contains("must go back"), "{e}");
+        let e = parse(&file(&["demo\tx.dem", "back\t17\t17"])).unwrap_err();
+        assert!(e.contains("must go back"), "{e}");
+        // A `back` in another demo's section starts its own count.
+        assert!(
+            parse(&file(&[
+                "demo\tx.dem",
+                "next\t9",
+                "demo\ty.dem",
+                "back\t17\t5"
+            ]))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_back_is_a_clip_boundary() {
+        assert!(holds_at(&Then::Back(5.0), &[], true));
+        assert!(!holds_at(&Then::Back(5.0), &[], false));
     }
 
     #[test]

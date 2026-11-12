@@ -715,6 +715,30 @@ pub(crate) fn lift_name_cap() -> Result<(), String> {
     unsafe { name_cap::lift(base, array) }
 }
 
+/// How long a kill notice stays up, in seconds: `hud_deathnotice_time`,
+/// truncated as the game does. `None` before the engine is up.
+// Only the 32-bit demo player rewinds; a host build has none.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn notice_lifetime() -> Option<f64> {
+    let engfuncs = engine::engfuncs()?;
+    // Safety: the engine's own cvar lookup, with a NUL-terminated name.
+    let lifetime = unsafe { (engfuncs.pfn_get_cvar_float)(c"hud_deathnotice_time".as_ptr()) };
+    Some(f64::from(lifetime.trunc()))
+}
+
+/// Empties the kill feed during a rewind (`demo_seek`, #1085): its steps
+/// replay every kill before the landing within a second or two.
+/// Returns how many lines went.
+// Only the 32-bit demo player rewinds; a host build has none.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn clear_for_rewind() -> Result<usize, String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    Ok(clear::expire_all())
+}
+
 /// Whether the kill feed holds 63-character names now.
 pub(crate) fn name_cap_lifted() -> bool {
     engine::client_module_base().is_some_and(name_cap::lifted)

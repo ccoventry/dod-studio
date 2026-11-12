@@ -324,8 +324,13 @@ A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
 game; a 20-minute jump takes a few hundred frames. The console commands it
 replays (a POV demo's key presses) are dropped and the keys let go on landing,
-since the engine would run them one a frame long after it (#702). Anything
-after the time is
+since the engine would run them one a frame long after it (#702). A jump
+back starts over and steps forward the same way (#830, #1085), from the
+demo's first recorded frame, so flags, scores and zoom are right where it
+lands; it takes a second or two. Either way the kill feed is emptied one
+`hud_deathnotice_time` before the landing, so it shows only the kills playing
+in would. A `ds_demo_seek_by` typed while a jump is still stepping counts from
+where that jump is heading: -10 pressed twice goes back 20 s. Anything after the time is
 a command to run once the jump has landed:
 `ds_demo_seek_to 1335.3 ds_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
@@ -357,7 +362,9 @@ demos instead of patched copies. `start "<file>"` reads the batch file Studio
 wrote (`native::patch::runtime_batch`): `dodstudio-batch 1`, then per demo a
 `demo <path>` line, its `init` commands, and `at <seconds> <command>`,
 `seek <seconds> <to>` and `next <seconds>` lines on the demo player's clock,
-and `end` commands after the last demo, all tab-separated. Each demo is loaded
+and `end` commands after the last demo, all tab-separated. A
+`back <seconds> <to>` line ends a pass through the demo and goes back to `to`
+(the rewind above) for the next pass, such as a clip's variant (#1085). Each demo is loaded
 with `viewdemo`; once it has loaded, the init commands run, then each timed
 line runs once on the first frame at or past its time, and where the patched
 demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
