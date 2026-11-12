@@ -789,4 +789,7 @@ mod tests;
 mod grouping_tests;
 
 #[cfg(test)]
+mod blocks_tests;
+
+#[cfg(test)]
 mod golden_tests;
