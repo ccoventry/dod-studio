@@ -72,6 +72,62 @@ fn a_demo_with_a_hole_is_repaired_and_keeps_the_frames_around_it() {
     }
 }
 
+/// Each network frame's `svc_time` (the server clock), in order.
+fn server_clock(bytes: &[u8]) -> Vec<(f32, f32)> {
+    use dem::types::{EngineMessage, MessageData, NetMessage};
+    let demo = dem::open_demo_from_bytes(bytes).expect("parses");
+    demo.directory
+        .entries
+        .iter()
+        .skip(1)
+        .flat_map(|e| e.frames.iter())
+        .filter_map(|f| match &f.frame_data {
+            FrameData::NetworkMessage(n) => match &n.1.messages {
+                MessageData::Parsed(msgs) => msgs.iter().find_map(|m| match m {
+                    NetMessage::EngineMessage(em) => match &**em {
+                        EngineMessage::SvcTime(t) => Some((f.time, t.time)),
+                        _ => None,
+                    },
+                    _ => None,
+                }),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// `viewdemo` plays the world by the server clock (`svc_time`), which runs
+/// ahead of the frame time by however long the server had been up when the
+/// recording started (about 300 s in the fixture, 10.6 s in `m1_h2`). The
+/// join's ramp frames were stamped with frame times, taking the clock back
+/// that far at every hole, and `viewdemo` left the map (#15).
+#[test]
+fn a_repair_keeps_the_server_clock_rising_through_each_join() {
+    let original = crate::tests_fixture::fixture();
+    let (at, len) = (original.len() / 2, 300_000);
+    let outcome = repair(&damaged_fixture(at, len)).expect("repairs");
+    let original = server_clock(&original);
+    let RepairOutcome::Repaired { bytes, report } = outcome else {
+        panic!("not repaired: {outcome:?}");
+    };
+    assert_eq!(report.joins.len(), 1, "{report:?}");
+    // How far the original's clock ever steps back between two frames.
+    let worst_step = |clock: &[(f32, f32)]| {
+        clock
+            .windows(2)
+            .map(|w| w[1].1 - w[0].1)
+            .fold(0.0f32, f32::min)
+    };
+    let repaired = server_clock(&bytes);
+    assert!(
+        worst_step(&repaired) >= worst_step(&original) - 0.1,
+        "the server clock steps back {} s in the repair, {} s in the original",
+        -worst_step(&repaired),
+        -worst_step(&original)
+    );
+}
+
 /// The frame right before a hole carries a time far ahead of the recording
 /// around it (a bit flip in its header, as at `m1_h2`'s third hole): the
 /// search for where the recording resumes must not wait for that time, or it

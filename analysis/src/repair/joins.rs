@@ -27,6 +27,10 @@ pub(crate) struct Join {
     pub sequence_before: i32,
     /// The `delta_sequence` of the last entity delta before the hole.
     pub delta_sequence_before: u32,
+    /// The server clock (`svc_time`) of the last network frame before the
+    /// hole that carried one. It runs ahead of the frame time by however long
+    /// the server had been up when the recording started (10.6 s in `m1_h2`).
+    pub server_time_before: Option<f32>,
 }
 
 /// Every join in `demo`, in order.
@@ -34,6 +38,7 @@ pub(crate) fn find_joins(demo: &Demo) -> Vec<Join> {
     let mut joins = Vec::new();
     let mut prev: Option<(i32, f32)> = None;
     let mut last_delta_sequence = 0u32;
+    let mut last_server_time = None;
     let frames = demo
         .directory
         .entries
@@ -53,15 +58,20 @@ pub(crate) fn find_joins(demo: &Demo) -> Vec<Join> {
                 time_before: prev_time,
                 sequence_before: prev_sequence,
                 delta_sequence_before: last_delta_sequence,
+                server_time_before: last_server_time,
             });
         }
         prev = Some((sequence, frame.time));
         if let MessageData::Parsed(msgs) = &bt.1.messages {
             for m in msgs {
-                if let NetMessage::EngineMessage(em) = m
-                    && let EngineMessage::SvcDeltaPacketEntities(pe) = &**em
-                {
-                    last_delta_sequence = pe.delta_sequence.to_u32();
+                if let NetMessage::EngineMessage(em) = m {
+                    match &**em {
+                        EngineMessage::SvcDeltaPacketEntities(pe) => {
+                            last_delta_sequence = pe.delta_sequence.to_u32();
+                        }
+                        EngineMessage::SvcTime(t) => last_server_time = Some(t.time),
+                        _ => {}
+                    }
                 }
             }
         }
