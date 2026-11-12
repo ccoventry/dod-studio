@@ -621,7 +621,7 @@ def report_decals(hw, afx):
     cleared = u32(init[0] + 1)
     count = u32(init[0] + 22)
     slots = cleared // 0x1C
-    print(f"  R_DecalRemoveAll<by flag>  hw+{remove[0]:#x}")
+    print(f"  R_DecalRemoveWithFlag      hw+{remove[0]:#x}")
     print(f"  R_DecalInit                hw+{init[0]:#x}")
     print(f"  R_DecalUnlink              hw+{unlink:#x}")
     print(f"  gDecalPool                 {pool:#x} .. {end:#x}")
@@ -655,7 +655,7 @@ def landmarks(hw, entries):
         "81 FE ?? ?? ?? ?? 7C DA"
     )
     if len(remove) == 1:
-        out[remove[0]] = "R_DecalRemoveAllByFlag"
+        out[remove[0]] = "R_DecalRemoveWithFlag"
         unlink = remove[0] + 27 + struct.unpack_from("<i", hw.data, remove[0] + 23)[0]
         out[unlink] = "R_DecalUnlink"
     init = hw.match_pattern(
