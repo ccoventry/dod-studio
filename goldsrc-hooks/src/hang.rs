@@ -50,7 +50,10 @@
 //! reported: HLAE's "you are about to connect" warning, which `map` raises,
 //! showed up as `AfxHookGoldSrc.dll+0x9309` under `USER32.dll`'s dialog loop.
 //! A window behind others still draws (about 45 frames a second, see
-//! `run_in_background.rs`); a minimised window is not measured here.
+//! `run_in_background.rs`), and so does a minimised one: 40 s minimised
+//! (`SW_MINIMIZE`, `IsIconic` true throughout) during `viewdemo` playback
+//! kept about 164 fps with no frame over 18 ms on either build, so being
+//! minimised needs no exception here.
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
