@@ -2,7 +2,7 @@
 // notice (#811) offers Repair now (#15): it repairs the demo into
 // <name>_repaired.dem beside it, shows the repair's progress, and opens the
 // repaired demo. Uses the multi-map harness, which has the damage banner.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const DEMO = 'C:/demos/monday-wsod25_r07_m1_h1.dem';
 const REPAIRED = 'C:/demos/monday-wsod25_r07_m1_h1_repaired.dem';

@@ -7,7 +7,7 @@
 // that would silently regress: that the banner appears at all, that it names
 // the cvar/value/file/line the backend reported, and that it stays hidden
 // when there is nothing to report.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GAME_PATH = 'C:/games/dod/hl.exe';
 

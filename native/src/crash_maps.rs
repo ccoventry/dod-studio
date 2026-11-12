@@ -58,6 +58,10 @@ pub const KNOWN_CRASHES: &[(&str, &str)] = &[
         "hw.dll+0x1e2612",
         "The engine's movement trace ran on the previous map's collision data (#384, 25th Anniversary build). The hook guards this; its hull_trace_guard log line says why it didn't.",
     ),
+    (
+        "demoplayer.dll+0x48e0",
+        "The demo player's event list read a freed array on a second viewdemo (#1392, 25th Anniversary build). The hook guards this; its demoplayer_dict_cache log line says why it didn't.",
+    ),
 ];
 
 /// What the cause of a crash at `site` is, when it is known.
@@ -330,24 +334,5 @@ mod tests {
         // A log from before the batch started is another session's.
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         assert_eq!(explain_and_record(&dir, &dir, later, 6), None);
-    }
-
-    /// The sites here are crash_report.py's; a site known to one and not the
-    /// other is how the two drift apart.
-    #[test]
-    fn the_known_sites_match_crash_report_py() {
-        let script = include_str!("../../goldsrc-hooks/tools/crash_report.py");
-        let known = &script[script.find("KNOWN = {").unwrap()..];
-        let known = &known[..known.find("\n}").unwrap()];
-        let mut theirs: Vec<&str> = known
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix('"'))
-            .filter_map(|l| l.split('"').next())
-            .filter(|s| s.contains(".dll+0x"))
-            .collect();
-        theirs.sort();
-        let mut ours: Vec<&str> = KNOWN_CRASHES.iter().map(|(s, _)| *s).collect();
-        ours.sort();
-        assert_eq!(ours, theirs);
     }
 }

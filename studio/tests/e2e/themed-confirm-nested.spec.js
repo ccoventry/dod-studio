@@ -1,6 +1,6 @@
 // themed_confirm.js opened from a modal declared later in the DOM (#356),
 // driven against tests/e2e/themed-confirm-nested.html with the real styles.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('a confirm opened from inside another modal sits on top and takes the click', async ({ page }) => {
   await page.goto('/tests/e2e/themed-confirm-nested.html');
