@@ -827,18 +827,29 @@ fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
 }
 
 #[test]
-fn agr_fps_follows_the_capture_fps_until_it_is_set() {
+fn agr_fps_is_30_until_it_is_set_whatever_the_capture_fps() {
     let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
     config.capture_fps = 300;
     config.agr_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 300);
-    assert_eq!(agr_host_framerate(&config), 1.0 / 300.0);
+    assert_eq!(crate::patch::DEFAULT_AGR_FPS, 30);
+    assert_eq!(config.effective_agr_fps(), 30);
+    assert_eq!(agr_host_framerate(&config), 1.0 / 30.0);
     config.agr_fps = 120;
     assert_eq!(config.effective_agr_fps(), 120);
     // Never a division by zero, whatever the settings say.
     config.agr_fps = -5;
     config.capture_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 1);
+    assert_eq!(config.effective_agr_fps(), 30);
+}
+
+#[test]
+fn agr_fps_absent_from_saved_settings_reads_as_30() {
+    let mut value = serde_json::to_value(config_in_mode(crate::patch::CaptureMode::Agr)).unwrap();
+    value.as_object_mut().unwrap().remove("agr_fps");
+    value["capture_fps"] = serde_json::json!(300);
+    let config: crate::patch::PatcherConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(config.agr_fps, 0);
+    assert_eq!(config.effective_agr_fps(), 30);
 }
 
 #[test]

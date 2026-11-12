@@ -190,8 +190,12 @@ describe('captureRateOf (#439)', () => {
     expect(captureRateOf('obs', { capture_fps: 300, obs_capture_fps: 0 })).toBe(60);
     expect(captureRateOf('obs', { capture_fps: 300 })).toBeUndefined();
     expect(captureRateOf('agr', settings)).toBe(60);
-    expect(captureRateOf('agr', { capture_fps: 300, agr_fps: 0 })).toBe(300);
     expect(captureRateOf('direct_to_video', settings)).toBe(300);
+  });
+
+  it("an unset AGR FPS records at AGR's own 30, never Capture FPS", () => {
+    expect(captureRateOf('agr', { capture_fps: 300, agr_fps: 0 })).toBe(30);
+    expect(captureRateOf('agr', { capture_fps: 300 })).toBe(30);
   });
 
   it("a dispatch's own rate wins over the clip payload's capture_fps", () => {

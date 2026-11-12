@@ -1,6 +1,10 @@
 //! `ds_demo_reload`: play the current demo again from the start (#330).
 //!
-//! ## Nothing in the engine keeps the name
+//! ## Nothing in `hw.dll` keeps the name
+//!
+//! (Under `viewdemo` the demo player does keep it, `IDemoPlayer::GetFileName`,
+//! vftable slot 39, `this+0x278`; `playdemo` has no such getter, so the DLL
+//! remembers the name either way.)
 //!
 //! `playdemo`'s handler (pre-Anniversary `hw.dll+0x105fd`) copies `Cmd_Argv(1)`
 //! into a 256-byte buffer on its own stack, adds `.dem`, prints "Playing demo

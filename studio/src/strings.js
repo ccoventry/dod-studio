@@ -14,6 +14,8 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+import { DEFAULT_AGR_FPS } from './agr_rate.js';
+
 /**
  * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
  * (#569). `already` counts the upgraded ones too: they are in the cache by
@@ -458,8 +460,9 @@ export const STRINGS = {
     CAPTURE_MODE_AGR_TITLE:
         'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The sound of each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
     AGR_FPS_LABEL: 'AGR FPS:',
+    AGR_FPS_PLACEHOLDER: `e.g. ${DEFAULT_AGR_FPS}`,
     AGR_FPS_TITLE:
-        'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
+        `How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300, and a high rate makes Blender renders far slower. Required in AGR mode: Studio won't start an AGR capture without it, and it never follows Capture FPS.`,
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
@@ -753,10 +756,12 @@ export const STRINGS = {
     HL_PATH_EMPTY: 'Choose your Half-Life install: Start Capture needs hl.exe.',
     HLAE_PATH_EMPTY: 'Set the path to hlae.exe: Start Capture needs it.',
     OUTPUT_DIR_EMPTY: 'Add a Capture Output folder: Start Capture needs somewhere to write.',
+    AGR_FPS_EMPTY: 'Set AGR FPS: AGR captures need their own rate.',
   },
 
   CAPTURE: {
     andNMore: (n) => `...and ${n} more`,
+    AGR_FPS_REQUIRED_WARNING: 'AGR FPS is empty: set it on Configuration → Output Format (marked in red) before starting an AGR capture.',
     PATHS_MISSING_WARNING: 'Set hl.exe and hlae.exe on Configuration → Paths (marked in red) before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
@@ -2398,7 +2403,7 @@ export const STRINGS = {
     MODE_FRAMES: 'Frame sequence',
     modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
     modeObs: (fps) => `OBS @ ${fps} fps`,
-    modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
+    modeAgr: (fps) => (fps > 0 ? `AGR for Blender @ ${fps} fps` : 'AGR for Blender (AGR FPS not set)'),
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
     commands: (name, edited) => `Commands: ${name}${edited ? ' (edited)' : ''}`,
     COMMANDS_NONE: 'Commands: none',

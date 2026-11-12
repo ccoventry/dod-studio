@@ -186,7 +186,7 @@ const CUSTOM_DECAL_FLAG: i32 = 4;
 /// `cachewad_t::cacheExtra` for the decal cache: the `texture_t` prefix in
 /// front of each lump, which `Draw_MiptexTexture` insists on.
 const TEX_PREFIX: usize = 0x20;
-/// `GL_Upload8` reads a whole palette whatever the count says, so every
+/// `GL_Upload16` reads a whole palette whatever the count says, so every
 /// buffer has this much zero after the lump.
 const PALETTE_PAD: usize = 768;
 

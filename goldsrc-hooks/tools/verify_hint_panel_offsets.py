@@ -2,7 +2,7 @@
 """Checks `hint_panel.rs`'s signature against real DoD `client.dll`s (#286).
 
 `hint_panel.rs` writes `ret 4` over the first three bytes of
-`DoDViewport::ShowHint`. Every constant below is read out of `hint_panel.rs`
+`DoDViewport::ShowHintMessage`. Every constant below is read out of `hint_panel.rs`
 rather than restated, so this cannot drift from what the Rust code uses.
 
 Checks, per client.dll:
