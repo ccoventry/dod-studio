@@ -17,6 +17,8 @@ members = [
     # 32-bit cdylib injected into hl.exe; see goldsrc-hooks/README.md. Built
     # for i686-pc-windows-msvc, not the host target.
     "goldsrc-hooks",
+    # Source-reading checks with no dependencies; see its Cargo.toml.
+    "source-checks",
 ]
 
 [workspace.package]

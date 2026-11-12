@@ -206,7 +206,7 @@ pub unsafe fn upload_key(
     {
         return None;
     }
-    // A count of 0 passes `Draw_ValidateCustomLogo` and `GL_Upload8` then
+    // A count of 0 passes `Draw_ValidateCustomLogo` and `GL_Upload16` then
     // reads a full palette anyway (6 of the 216 sprays in one `custom.hpk`
     // are written that way), so it means 256 here too.
     let count = match unsafe { (palette.sub(2) as *const u16).read_unaligned() } {

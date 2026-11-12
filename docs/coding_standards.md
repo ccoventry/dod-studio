@@ -98,8 +98,8 @@ CLAUDE.md has the rules: comments say why, in the present tense; cite the issue,
 
 Today, all in CI (#1179):
 - `cargo fmt --check` and Clippy with `-D warnings`, which includes `too_many_arguments` at threshold 7 (`clippy.toml`). A function that still needs more carries `#[allow(clippy::too_many_arguments)]` with a one-line reason above it; there is no workspace-wide allow.
-- `native/tests/test_attribute_scan.rs` (CLAUDE.md, #743): a `fn` in a `#[cfg(test)] mod` with no `#[test]` that nothing calls fails the build. The heuristic is written at the top of the file.
-- Guideline tests for file size, like `main_js_budget.test.js`: `native/tests/file_ceilings.rs` and `studio/src/file_ceilings.test.js` hold a non-test line ceiling per hot file. A prompt to look, not a limit: raise a number with a reason in the PR.
+- `source-checks/tests/test_attribute_scan.rs` (CLAUDE.md, #743): a `fn` in a `#[cfg(test)] mod` with no `#[test]` that nothing calls fails the build. The heuristic is written at the top of the file.
+- Guideline tests for file size, like `main_js_budget.test.js`: `source-checks/tests/file_ceilings.rs` and `studio/src/file_ceilings.test.js` hold a non-test line ceiling per hot file. A prompt to look, not a limit: raise a number with a reason in the PR.
 - ESLint on `studio/src` (`npm run lint`, CI job "Frontend lint"): `no-unused-vars` is an error, `max-params` (5) a warning. A leading underscore marks a name taken only to be left out.
 
 Measured, not gated (a warning would fail `-D warnings`): `cognitive_complexity` at Clippy's default threshold of 25 (`clippy.toml`). Run it when touching a long function, or before a refactor PR:

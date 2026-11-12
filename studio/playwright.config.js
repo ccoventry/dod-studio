@@ -9,6 +9,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   testMatch: '**/*.spec.js',
   fullyParallel: true,
+  // 4 workers on CI's 4-core runner (the default there is 2).
+  workers: process.env.CI ? 4 : undefined,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:5183',

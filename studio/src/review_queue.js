@@ -17,6 +17,7 @@
 
 import { listedStreaks } from './queue_filters.js';
 import { streakUid, setCuration, CURATION } from './take_index.js';
+import { updateStreakVisuals } from './streak_visuals.js';
 
 /** The game speaks yes/maybe/no; the row keeps Keep/Maybe/Skip. */
 const ANSWER_FOR_MARK = { [CURATION.KEEP]: 'yes', [CURATION.MAYBE]: 'maybe', [CURATION.SKIP]: 'no' };
@@ -207,8 +208,12 @@ export function applyReviewEdit(demos, edit) {
   const last = Math.max((streak.kills || []).length - 1, 0);
   const start = Math.min(Math.max((edit.from || 1) - 1, 0), last);
   const end = Math.min(Math.max((edit.to || 1) - 1, start), last);
+  const moved = streak.start_index !== start || streak.end_index !== end;
   streak.start_index = start;
   streak.end_index = end;
+  // The derived fields (ticks, count, duration, timeline) follow the range,
+  // as for every other range edit (#1396).
+  if (moved) updateStreakVisuals(streak);
   streak.notes = edit.note || '';
   return streak;
 }

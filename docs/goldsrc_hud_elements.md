@@ -172,7 +172,7 @@ queued text went through the vtable slot the old `vgui2print` hide stubbed:
 - A second queueing method (`client+0x3a830`, the same fields) takes every
   centre-print: each `HUD_PRINTCENTER` `TextMsg` (`MsgFunc_TextMsg`'s
   destination-4 branch, `client+0x4c3e9`), which includes the spectator
-  camera mode's name (`CHudSpectator::SetMode` calls `MsgFunc_TextMsg`
+  camera mode's name (`CHudSpectator::SetModes` calls `MsgFunc_TextMsg`
   directly), and the clan-match countdown (`DrawClanTimer`,
   `client+0x2d3f7`). `CHudVGUI2Print::Draw` (`client+0x3aa10`) draws these
   too. The narrow switches are `ds_hud_hide_center_text` (server centre
