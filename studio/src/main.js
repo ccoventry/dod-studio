@@ -61,6 +61,7 @@ import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createQueueSortBy } from './queue_sort_by.js';
 import { createProjectSession } from './project_session.js';
+import { inEffect, startProjectSettingsSnapshot } from './project_settings.js';
 import { createRecentProjects } from './recent_projects.js';
 import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
@@ -96,9 +97,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // and its toggles: demo_folders.js.
   const demoFolders = createDemoFolders({ persist: () => persistAppSettings() });
   const layoutSplits = createLayoutSplits({ persist: () => persistAppSettings() });
-  // Set when the saved pinned list held single demo files (older builds), so
-  // the cleaned list is written back once after settings load.
-  let pinnedListCleaned = false;
+  // Set when the loaded settings need writing back once: the saved pinned list
+  // held single demo files (older builds), or the file had no PC id (#1085).
+  let settingsNeedSave = false;
   // The queue's list and selection, and the rules that change them: queue_state.js.
   // The pieces it draws with are declared further down this scope, so they are
   // reached through closures.
@@ -226,8 +227,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     settings = await getSettings();
     if (settings) {
       updateNotificationSettings(settings);
-      applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI });
-      pinnedListCleaned = demoFolders.load(settings);
+      settingsNeedSave = applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI });
+      settingsNeedSave = demoFolders.load(settings) || settingsNeedSave;
       layoutSplits.load(settings);
       recentProjects.load(settings.recent_projects);
       savedSetupDismissed = !!settings.setup_dismissed;
@@ -238,6 +239,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
+      startProjectSettingsSnapshot(); // What older projects start from (#1085): Configuration as it is now, once.
     }
   } catch (err) {
     console.error("Error loading startup settings:", err);
@@ -248,7 +250,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initUpdater(settings, persistAppSettings, batchGuard);
   startWhatsNew();
   initAppMenu();
-  if (pinnedListCleaned) persistAppSettings();
+  if (settingsNeedSave) persistAppSettings();
 
   const viewLogsBtn = document.querySelector('#view-logs-btn');
   if (viewLogsBtn) {
@@ -417,7 +419,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     finishedRenders: () => finishedRenderOutputs(),
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
   });
-  initRenderUI(folderPools.targetDrives, folderPools.renderExportDirs, persistAppSettings, {
+  // The open project's own folders on this PC, when it has them (#1085).
+  initRenderUI(inEffect('target_drives', folderPools.targetDrives), inEffect('render_export_dirs', folderPools.renderExportDirs), persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: queue.getDemos,
     getProjectTeams: () => projectTeams,
@@ -427,7 +430,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // "When a batch finishes" (#440): queues a verified batch's takes into the
   // Render tab's own queue. capture_pane.js hands it each verified batch.
   initFinishClips({
-    getExportDirs: folderPools.renderExportDirs,
+    getExportDirs: inEffect('render_export_dirs', folderPools.renderExportDirs),
     getClipNames: (exportDirs) => clipNamesForTakes(
       takeIndex, queue.getDemos(), getClipNameTemplate(),
       { maxLength: maxNameLength(exportDirs), projectTeams },
@@ -483,7 +486,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
     },
-    getExportDirList: folderPools.renderExportDirs,
+    getExportDirList: inEffect('render_export_dirs', folderPools.renderExportDirs),
     getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();

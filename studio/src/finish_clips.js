@@ -20,6 +20,7 @@ import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
+import { effectiveSettings } from './project_settings.js';
 
 /** Finish-codec value meaning "whatever Render Settings' own codec is". */
 export const FINISH_CODEC_RENDER_TAB = 'render_tab';
@@ -268,15 +269,22 @@ export function finishSummary(mode) {
   return { enabled: true, codecLabel: option?.textContent?.trim() || codec };
 }
 
-/** Reads the finish settings and the Render tab's shared ones from the page. */
+/** Reads the finish settings and the Render tab's shared ones from the page,
+ *  the open project's own finish step over the form's (#1085). */
 function readSettings() {
   const value = (sel, fallback) => document.querySelector(sel)?.value || fallback;
+  const finish = effectiveSettings({
+    finish_clips_after_batch: value('#config-finish-clips', 'off') === 'finish',
+    finish_codec_obs: value('#config-finish-codec-obs', 'source_copy'),
+    finish_codec_video: value('#config-finish-codec-video', FINISH_CODEC_RENDER_TAB),
+    finish_codec_frames: value('#config-finish-codec-frames', FINISH_CODEC_RENDER_TAB),
+  });
   return {
-    enabled: value('#config-finish-clips', 'off') === 'finish',
+    enabled: finish.finish_clips_after_batch,
     codecs: {
-      obs: value('#config-finish-codec-obs', 'source_copy'),
-      video: value('#config-finish-codec-video', FINISH_CODEC_RENDER_TAB),
-      frames: value('#config-finish-codec-frames', FINISH_CODEC_RENDER_TAB),
+      obs: finish.finish_codec_obs,
+      video: finish.finish_codec_video,
+      frames: finish.finish_codec_frames,
       renderCodec: value('#render-codec-select', 'prores_422'),
       renderCustomArgs: document.querySelector('#render-custom-codec-input')?.value?.trim() || '',
     },

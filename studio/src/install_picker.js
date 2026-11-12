@@ -133,6 +133,34 @@ export async function prefillSingleInstall() {
 }
 
 /**
+ * Makes `hlExe` the install every launch uses, as picking it in the dropdown
+ * does: the Game Folder follows, and a running game started from another
+ * install is closed first if the user says so. Resolves whether it switched
+ * (false when it already was the one, or the user kept the running game).
+ * The field's change event saves the settings and refreshes the dropdown.
+ */
+export async function switchInstall(hlExe) {
+  const input = pathInput();
+  if (!input || pathKey(hlExe) === pathKey(input.value)) return false;
+  // A running game keeps the install it started from (#666): close it or
+  // keep the old install.
+  const closed = await closeGameWithOtherSettings({ game_path: hlExe }, { switching: true });
+  if (!closed) return false;
+  let folders = [];
+  try {
+    folders = (await listGameFolders(hlExe)) || [];
+  } catch {
+    // Logged by the bridge; `dod` then.
+  }
+  setGameFolder(switchedGameFolder(getGameFolder(), folders));
+  input.value = hlExe;
+  // Saves, re-lists the Game Folder and re-checks every hl.exe reader
+  // (config_wiring.js, setup_wiring.js).
+  input.dispatchEvent(new Event('change'));
+  return true;
+}
+
+/**
  * Wires the dropdown. `persist` saves the settings (a hide).
  * @returns {{ refresh: () => Promise<void> }}  finds the installs again and
  *   shows the saved path, for when hl.exe changes (Browse, load)
@@ -179,26 +207,7 @@ export function createInstallPicker({ persist }) {
   }
 
   async function switchTo(hlExe) {
-    const input = pathInput();
-    if (!input || pathKey(hlExe) === pathKey(input.value)) return;
-    // A running game keeps the install it started from (#666): close it or
-    // keep the old install.
-    const closed = await closeGameWithOtherSettings({ game_path: hlExe }, { switching: true });
-    if (!closed) {
-      render();
-      return;
-    }
-    let folders = [];
-    try {
-      folders = (await listGameFolders(hlExe)) || [];
-    } catch {
-      // Logged by the bridge; `dod` then.
-    }
-    setGameFolder(switchedGameFolder(getGameFolder(), folders));
-    input.value = hlExe;
-    // Saves, re-lists the Game Folder and re-checks every hl.exe reader
-    // (config_wiring.js, setup_wiring.js).
-    input.dispatchEvent(new Event('change'));
+    if (!(await switchInstall(hlExe))) render();
   }
 
   async function refresh() {

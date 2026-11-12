@@ -14,7 +14,7 @@ import { rescanOfferSettings, applyRescanOfferSettings } from './rescan_recent.j
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
-import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
+import { setClipNameTemplate, getFormClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
@@ -27,6 +27,7 @@ import { getPickFolders, setPickFolders } from './pick_path.js';
 import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
 import { getKeptJsonProjects, setKeptJsonProjects } from './project_convert.js';
 import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
+import { loadPcId, getPcId, setFormReader, noteFormSaved } from './project_settings.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -36,7 +37,10 @@ import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
  *   and currentCaptureMode().
  */
 export function createSettingsSync({ getState, currentCaptureMode }) {
-  async function persistAppSettings() {
+  // The settings file's values as the form holds them now: what
+  // persistAppSettings saves, and what an open project's own settings are
+  // copied from and compared with (project_settings.js, #1085).
+  function settingsPayloadFromForm() {
     const state = getState();
     const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim() || "";
     const hlPath = document.querySelector('#hl-path-input')?.value?.trim() || "";
@@ -150,7 +154,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       notify_updates: notifyUpdates,
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
-      clip_name_template: getClipNameTemplate(),
+      clip_name_template: getFormClipNameTemplate(),
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
@@ -183,6 +187,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
+      pc_id: getPcId(),
       pinned_folders_reviewed: getPinnedReviewed(),
       players: getPlayers(),
       hidden_installs: getHiddenInstalls(),
@@ -195,6 +200,15 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       ...getRenderWhileCapturing(),
       ...rescanOfferSettings(),
     };
+    return settingsPayload;
+  }
+  setFormReader(settingsPayloadFromForm);
+
+  async function persistAppSettings() {
+    const settingsPayload = settingsPayloadFromForm();
+    // Until the Project settings page exists, an edit here changes the open
+    // project's own settings too.
+    noteFormSaved(settingsPayload);
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
     updateNotificationSettings(settingsPayload);
@@ -210,12 +224,14 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
 
 /**
  * Fills the Configuration form from a loaded settings file. main.js applies
- * the lists and command state afterwards.
+ * the lists and command state afterwards. Returns true when the file needs
+ * saving back once: it had no PC id (#1085), and one was made.
  * @param {object} settings  get_settings' answer
  * @param {object} app  refreshHlaeFfmpegStatus() and applyCaptureModeUI()
  *   from main.js
  */
 export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI }) {
+  const pcIdMade = loadPcId(settings.pc_id);
   if (settings.hlae_path) {
     const inputEl = document.querySelector('#hlae-path-input');
     if (inputEl) inputEl.value = settings.hlae_path;
@@ -421,4 +437,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
   setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
+  return pcIdMade;
 }

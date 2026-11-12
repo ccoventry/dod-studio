@@ -16,7 +16,6 @@ use native::patch::{
     CaptureStreak, PatchJob, PatcherConfig, StreamPatcher, build_preview_patch_jobs,
 };
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 
 // ── Bookmark Previews (.dodstudio_preview) ─────────────────────────────────────
 //
@@ -145,7 +144,8 @@ fn patch_bookmark_previews(
 /// Patches the given demo's highlights into a single bookmarked
 /// `<stem>_preview.dem` — reusing one already on disk from an earlier run
 /// instead of regenerating it — and immediately launches HLAE against it via
-/// `+viewdemo <stem>_preview`.
+/// `+viewdemo <stem>_preview`. `resolution_width`/`resolution_height`: an
+/// open project's own window size (#1085), else the saved one.
 #[tauri::command]
 pub async fn launch_demo_preview(
     app: tauri::AppHandle,
@@ -153,16 +153,21 @@ pub async fn launch_demo_preview(
     game_path: String,
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
+    resolution_width: Option<i32>,
+    resolution_height: Option<i32>,
 ) -> Result<(), String> {
-    // The saved resolution, as Launch Game uses it (#358): the preview
-    // config otherwise keeps PatcherConfig's 1280x720 default.
+    // The size Launch Game would use (#358, #1085): the preview config
+    // otherwise keeps PatcherConfig's 1280x720 default.
     let resolution = {
-        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        (guard.resolution_width, guard.resolution_height)
+        let launch = launch_config(
+            &saved_settings(&app),
+            &LaunchRequest {
+                resolution_width,
+                resolution_height,
+                ..LaunchRequest::default()
+            },
+        );
+        (launch.resolution_width, launch.resolution_height)
     };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let (mut patcher_config, dod_dir) =
@@ -242,12 +247,15 @@ pub async fn send_preview_to_running_game(
     game_path: String,
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
+    resolution_width: Option<i32>,
+    resolution_height: Option<i32>,
 ) -> Result<Option<String>, String> {
     let request = LaunchRequest {
         hlae_path: Some(hlae_path.clone()),
         game_path: Some(game_path.clone()),
         goldsrc_hooks_dll_path: goldsrc_hooks_dll_path.clone(),
-        ..LaunchRequest::default()
+        resolution_width,
+        resolution_height,
     };
     let launch = launch_config(&saved_settings(&app), &request);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {

@@ -153,7 +153,11 @@ pub async fn start_highlight_review(
     highlights: Vec<ReviewHighlight>,
     fast_forward_gap: Option<f64>,
     start_from: Option<f64>,
+    request: Option<crate::game_process_manager::LaunchRequest>,
 ) -> Result<ReviewStarted, String> {
+    // Launch settings over the saved ones: an open project's own window size
+    // (#1085), so the game Review reuses or starts is the one a batch would.
+    let request = request.unwrap_or_default();
     let count = highlights.len();
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
     std::fs::write(
@@ -164,10 +168,7 @@ pub async fn start_highlight_review(
     let settings = crate::game_process_manager::saved_settings(&app);
     let line = review_lines(&queue, settings.players.use_in_game);
 
-    let launch = crate::game_process_manager::launch_config(
-        &settings,
-        &crate::game_process_manager::LaunchRequest::default(),
-    );
+    let launch = crate::game_process_manager::launch_config(&settings, &request);
     let sent = {
         let line = line.clone();
         crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -190,7 +191,7 @@ pub async fn start_highlight_review(
             if !native::sys::process::game_pids().is_empty() {
                 return Err(crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string());
             }
-            crate::game_process_manager::launch_standalone_game(app.clone()).await?;
+            crate::game_process_manager::launch_standalone_game(app.clone(), Some(request)).await?;
             let pid =
                 crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
                     let since = Instant::now();

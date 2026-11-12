@@ -118,15 +118,20 @@ pub(crate) fn running_game_pids() -> Vec<u32> {
 // global actions area rather than the per-demo detail pane.
 
 /// Launches HLAE directly against `hl.exe` with no demo loaded, applying the
-/// persisted resolution/HUD configuration from `AppSettings`. Deliberately
+/// persisted resolution/HUD configuration from `AppSettings`, with `request`
+/// over it: an open project's own window size (#1085). Deliberately
 /// does not apply Initial Commands: this button is for quickly opening
 /// HLAE+DoD, not for reproducing a capture batch's config state, and Initial
 /// Commands lack the guaranteed-last-word property here that they have in a
 /// real batch (no demo to STUFFTEXT-inject into, so they would just be raw
 /// command-line args that config.cfg/movie.cfg can still override).
 #[tauri::command]
-pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn launch_standalone_game(
+    app: tauri::AppHandle,
+    request: Option<LaunchRequest>,
+) -> Result<(), String> {
     let settings = saved_settings(&app);
+    let request = request.unwrap_or_default();
 
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         if settings.hlae_path.trim().is_empty() || settings.hl_path.trim().is_empty() {
@@ -139,7 +144,7 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
         }
 
-        let patcher_config = launch_config(&settings, &LaunchRequest::default());
+        let patcher_config = launch_config(&settings, &request);
         let mut cmd = patcher_config.build_hlae_process("");
         let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae)?;

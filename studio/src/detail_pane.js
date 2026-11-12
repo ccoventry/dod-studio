@@ -2,6 +2,7 @@ import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
 import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame, takeCaptureStates, locateRenderedVideos, revealInExplorer } from './ipc_bridge.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
+import { withProjectLaunchSize } from './project_settings.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus, isSkipped, setCuration, CURATION } from './take_index.js';
@@ -226,7 +227,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // made first: the button shows its steps.
     const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
-      await launchDemoPreview(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      await launchDemoPreview(hlaePath, hlPath, highlights, goldsrcHooksDllPath, withProjectLaunchSize(null));
       showToast(STRINGS.HIGHLIGHTS.PREVIEW_LAUNCHING_TOAST, 'info');
     } catch {
       // Already toasted by ipc_bridge.js.
@@ -247,7 +248,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
-      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath, withProjectLaunchSize(null));
       if (sent) {
         showToast(STRINGS.HIGHLIGHTS.sentToRunningGame(sent), 'success');
         return true;

@@ -143,10 +143,10 @@ describe('createBatchCatchUp', () => {
     await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
 
     const [[backup, backedUp], [path, written]] = io.writeProject.mock.calls;
-    expect(backup).toMatch(/^C:\/projects\/match\.before-v2-.*\.dodstudio$/);
+    expect(backup).toMatch(/^C:\/projects\/match\.before-v3-.*\.dodstudio$/);
     expect(backedUp).toBe(file);
     expect(path).toBe('C:/projects/match.json');
-    expect(JSON.parse(written)).toMatchObject({ schema: 2, saveNeeds: 1, settings: { a: 1 }, profile: 'FOTW' });
+    expect(JSON.parse(written)).toMatchObject({ schema: 3, saveNeeds: 1, settings: { a: 1 }, profile: 'FOTW' });
     expect(io.toast).toHaveBeenCalledWith(expect.stringContaining(`Backup: ${backup}`), 'info');
   });
 

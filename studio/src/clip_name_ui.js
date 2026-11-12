@@ -12,6 +12,7 @@ import { renderPlaceholderChips } from './placeholder_chips.js';
 import { STRINGS } from './strings.js';
 import { markFieldInvalid } from './field_error.js';
 import { onUseAsChange } from './player_alias.js';
+import { effectiveSetting } from './project_settings.js';
 
 let getPreviewHighlight = () => null;
 let getExportDirs = () => [];
@@ -22,10 +23,17 @@ function templateInput() {
   return document.querySelector('#config-clip-name-template');
 }
 
-/** The template in effect: the field's, or the default while it's blank. */
-export function getClipNameTemplate() {
+/** The field's template, or the default while it's blank: the app's value,
+ *  which the settings file saves and the field's own preview shows. */
+export function getFormClipNameTemplate() {
   const value = templateInput()?.value;
   return value && value.trim() ? value : DEFAULT_TEMPLATE;
+}
+
+/** The template in effect: the open project's own (#1085), else the field's. */
+export function getClipNameTemplate() {
+  const template = effectiveSetting('clip_name_template', getFormClipNameTemplate());
+  return template && template.trim() ? template : DEFAULT_TEMPLATE;
 }
 
 /** Sets the field from saved settings. */
@@ -90,7 +98,7 @@ function renderChips(values) {
 /** Re-checks the template and rebuilds the preview (the selection moved,
  *  or an export folder changed). */
 export function refreshClipNamePreview() {
-  const parsed = parseTemplate(getClipNameTemplate());
+  const parsed = parseTemplate(getFormClipNameTemplate());
   showLines('#config-clip-name-errors', parsed.errors);
   // The errors line is its own; the field just turns red alongside it (#25).
   markFieldInvalid(templateInput(), parsed.errors.length > 0);
@@ -109,7 +117,7 @@ export function refreshClipNamePreview() {
   }
   const dirs = (getExportDirs() || []).filter(Boolean);
   const maxLength = maxNameLength(dirs);
-  const typed = clipNameFor(highlight.demo, highlight.streak, getClipNameTemplate(), { maxLength, projectTeams });
+  const typed = clipNameFor(highlight.demo, highlight.streak, getFormClipNameTemplate(), { maxLength, projectTeams });
   const built = typed.typed ? typed : buildName(parsed, values, { maxLength });
   const folder = String(dirs[0] || '').replace(/[\\/]+$/, '');
   const path = folder ? `${folder}\\${built.name}` : built.name;

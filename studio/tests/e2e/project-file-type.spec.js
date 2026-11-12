@@ -44,7 +44,7 @@ test('a project opened from .json keeps saving to that .json, with no dialog', a
   expect(await calls(page, 'plugin:dialog|save')).toEqual([]);
   // The file had no format number yet, so its first save backs it up first.
   const [backup, saved, ...rest] = (await calls(page, 'save_project_session')).map((a) => a.path);
-  expect(backup).toMatch(/^D:\/projects\/old\.before-v2-.*\.dodstudio$/);
+  expect(backup).toMatch(/^D:\/projects\/old\.before-v3-.*\.dodstudio$/);
   expect(saved).toBe('D:/projects/old.json');
   expect(rest).toEqual([]);
   await expect(page.locator('#toast-container')).toContainText(`Backup: ${backup}`);
