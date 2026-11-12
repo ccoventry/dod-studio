@@ -1,7 +1,7 @@
 // players_ui.js's Use as column (#686): a name set there replaces {name} in
 // the clip name preview, clearing it puts the in-game name back, and it is
 // still there after a reload.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const M00CAT = '76561197972576011';
 

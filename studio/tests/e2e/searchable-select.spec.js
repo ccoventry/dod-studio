@@ -5,7 +5,7 @@
 // filters it; a click or Enter picks, closes the list and shows the picked
 // text instead of what was typed; Esc and leaving the box put the picked text
 // back without a pick; arrows move through the list.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.goto('/tests/e2e/searchable-select.html');

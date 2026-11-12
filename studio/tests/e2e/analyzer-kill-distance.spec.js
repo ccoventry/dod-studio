@@ -1,7 +1,7 @@
 // analyzer_pane.js — engagement distance in the Player Details tab (#448): each
 // kill in the kill list, the player's average and the per-weapon average. An
 // unknown position is a blank cell with a tooltip, never a zero.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const DEMO = 'C:/demos/match.dem';
 const time = (secs) => ({ real_offset: { secs, nanos: 0 }, viewdemo_offset: { secs, nanos: 0 }, frame_index: 1 });
