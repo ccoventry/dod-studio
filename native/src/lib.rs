@@ -632,3 +632,4 @@ mod analyzer_cache_tests {
         );
     }
 }
+// ci skip test
