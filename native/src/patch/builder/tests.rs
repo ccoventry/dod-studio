@@ -293,9 +293,12 @@ fn the_projects_field_of_view_follows_the_users_lines_in_every_job() {
         for s in &mut raw_streaks {
             s.viewdemo_times = s.kills.iter().map(|k| k.1).collect();
         }
-        let (jobs, _) =
-            build_batch_queue(raw_streaks.clone(), &config, &std::collections::HashMap::new())
-                .unwrap();
+        let (jobs, _) = build_batch_queue(
+            raw_streaks.clone(),
+            &config,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(jobs.len(), if hook_dll { 2 } else { 3 });
         for job in &jobs {
             let lines = &job.init_commands;
@@ -311,13 +314,16 @@ fn the_projects_field_of_view_follows_the_users_lines_in_every_job() {
                 job.output_demo
             );
             assert!(!lines.iter().any(|l| l == "mirv_fov 105"), "{lines:?}");
-            assert!(lines.iter().all(|l| l.len() < crate::patch::MAX_CONSOLE_CMD_LEN));
+            assert!(
+                lines
+                    .iter()
+                    .all(|l| l.len() < crate::patch::MAX_CONSOLE_CMD_LEN)
+            );
         }
 
         if hook_dll {
             // The hook runs each demo's `init` lines in file order.
-            let file =
-                crate::patch::runtime_batch::batch_file(&jobs, &raw_streaks, false).unwrap();
+            let file = crate::patch::runtime_batch::batch_file(&jobs, &raw_streaks, false).unwrap();
             let inits: Vec<&str> = file.lines().filter(|l| l.starts_with("init\t")).collect();
             for demo in inits.chunks(inits.len() / 2) {
                 let exec = demo.iter().position(|l| *l == "init\texec dicewsod25.cfg");
@@ -335,7 +341,10 @@ fn without_the_projects_field_of_view_the_lines_go_as_typed() {
     let mut config = PatcherConfig::default();
     config.init_commands = vec!["mirv_fov 105".to_string(), "exec x.cfg".to_string()];
     assert_eq!(user_init_commands(&config), config.init_commands);
-    assert_eq!(final_init_commands(&config)[..3], ["mirv_fov 105", "exec x.cfg", "sys_autodir"]);
+    assert_eq!(
+        final_init_commands(&config)[..3],
+        ["mirv_fov 105", "exec x.cfg", "sys_autodir"]
+    );
 }
 
 #[test]

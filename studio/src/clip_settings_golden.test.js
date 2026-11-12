@@ -1,8 +1,8 @@
 // Golden test for #1085 step 8: a project that never set the new fields
 // (field of view on Picture, the Clip settings tab) sends a batch exactly the
 // commands #1364 sends, byte for byte; opening the page and pressing OK
-// changes nothing; and only a project that picks a field of view sees its
-// mirv_fov lines replaced.
+// changes nothing; and only a project with a field of view, with the New UI
+// on, sends one (`picture_fov`, after its lines).
 
 import { describe, it, expect } from 'vitest';
 import { resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits } from './project_settings_logic.js';
@@ -76,14 +76,18 @@ describe('a project that never set the new fields', () => {
   });
 });
 
-describe('a project that picks a field of view', () => {
-  it('sends it in place of every mirv_fov line, the rest in order', () => {
-    const block = { ...projectBlock(), picture: { ...projectBlock().picture, fov: 100 } };
-    const sent = resolveCaptureSettings(batchAsk(), block, PC).init_commands;
-    expect(sent[0]).toBe('mirv_fov 100');
-    expect(sent.filter((line) => /^mirv_fov\b/.test(line))).toEqual(['mirv_fov 100']);
-    expect(sent.slice(1)).toEqual([...OLD_CLEAN_CLIPS, ...OWN].filter((line) => !/^mirv_fov\b/.test(line)));
-    expect(sent).toContain('r_decals 256');
+describe('a project with a field of view', () => {
+  const withFov = () => ({ ...projectBlock(), picture: { ...projectBlock().picture, fov: 100 } });
+
+  it('sends it as picture_fov with the New UI on, the lines as they are (the backend sends it after them)', () => {
+    const sent = resolveCaptureSettings(batchAsk(), withFov(), PC, { pictureFov: true });
+    expect(sent.picture_fov).toBe(100);
+    expect(JSON.stringify(sent.init_commands)).toBe(JSON.stringify([...OLD_CLEAN_CLIPS, ...OWN]));
+  });
+
+  it('sends what #1364 sends with the New UI off', () => {
+    const sent = resolveCaptureSettings(batchAsk(), withFov(), PC);
+    expect(JSON.stringify(sent)).toBe(JSON.stringify(resolveSettings(batchAsk(), withFov(), PC)));
   });
 
   it('writes it under picture.fov from the page, nothing else changed', () => {

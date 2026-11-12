@@ -86,6 +86,8 @@ export function tierNote(name, { scheduled, seeks = true, projectFov = false, li
   if (projectFov && PROJECT_OWNED.includes(name)) {
     if (line === null) return { level: 'warned', text: S.PROJECT_FOV_NAME };
     if (isProjectOwnedLine(line)) return { level: 'refused', text: S.PROJECT_FOV };
+    // A sub-command (handleZoom) is no field of view: fine at demo load.
+    if (!scheduled) return null;
   }
   if (OWNED_BY_STUDIO.includes(name)) return { level: 'refused', text: S.OWNED_BY_STUDIO };
   if (GAME_QUITS_OVER.includes(name)) return { level: 'refused', text: S.GAME_QUITS_OVER };

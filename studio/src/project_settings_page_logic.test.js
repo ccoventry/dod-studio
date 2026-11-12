@@ -21,7 +21,9 @@ const form = (extra = {}) => ({
   finish_clips_after_batch: false, finish_codec_obs: 'source_copy', finish_codec_video: 'render_tab', finish_codec_frames: 'render_tab',
   record_start_lead: 5, record_stop_trail: 5, kill_gaps: { mode: 'keep', over_seconds: 8, speed: 4 },
   clip_name_template: DEFAULT_TEMPLATE, target_drives: ['E:/captures'], render_export_dirs: ['F:/clips'],
-  hl_path: POST, init_commands: ['mirv_fov 90'], ...extra,
+  hl_path: POST, init_commands: ['mirv_fov 90'],
+  // Not Configuration's: the page always has one (blockForPage fills it, #1085).
+  capture_fov: 90, ...extra,
 });
 
 const block = () => ({
@@ -109,6 +111,12 @@ describe('pendingProblems', () => {
 
   it('finds none in good values', () => {
     expect(pendingProblems(ok())).toEqual({});
+  });
+
+  it('refuses a blank field of view: a project always has one (#1085)', () => {
+    for (const capture_fov of [undefined, null, NaN, 0, 180]) {
+      expect(pendingProblems({ ...ok(), capture_fov })).toEqual({ capture_fov: S.BAD_FOV });
+    }
   });
 
   it('refuses a size that is not a whole number above 0', () => {

@@ -1,8 +1,9 @@
 // Project settings › Clip settings (#1085, build plan step 8) in the real app
 // shell: a preset copies its lines in, a row rewrites its line, a row setting
 // typed into Your own commands moves into its row, field of view lives on
-// the Project tab, and what a batch would send follows the project, with
-// mirv_fov replaced only once the project picks a field of view.
+// the Project tab, never unset, and what a batch would send follows the
+// project: its field of view goes as picture_fov, sent after the lines
+// (#1085), and a mirv_fov line shows in Your own commands as refused.
 import { test, expect } from '@playwright/test';
 
 const GIB = 1024 ** 3;
@@ -52,7 +53,7 @@ async function openClipTab(page) {
 const batchCommands = (page) => page.evaluate(async () => {
   const { batchSettingsPayload } = await import('/src/capture_pane.js');
   const payload = batchSettingsPayload({ targetDrives: ['E:/caps'] });
-  return { init: payload.init_commands, custom: payload.custom_commands };
+  return { init: payload.init_commands, custom: payload.custom_commands, fov: payload.picture_fov };
 });
 
 test('the tab lists the rows, the presets, and the lines no row shows', async ({ page }) => {
@@ -97,19 +98,40 @@ test('a row setting typed into Your own commands moves into its row', async ({ p
   await expect(pageRoot(page).locator('[data-field^="own-"]')).toHaveCount(1);
 });
 
-test('field of view is set on the Project tab, and replaces mirv_fov only once picked', async ({ page }) => {
+test('field of view is set on the Project tab, never unset, and goes after the lines', async ({ page }) => {
   await openClipTab(page);
   await chip(page, 'preset', 'Clean clips').click();
+  // Clean clips' own mirv_fov line is no row's: it shows as refused.
+  const own = pageRoot(page).locator('.ps-command', { has: page.locator('[data-field^="own-"]') });
+  await expect(own.locator('[data-field^="own-"]')).toHaveValue('mirv_fov 90');
+  await expect(own.locator('.ps-warn')).toContainText('Project Settings › Picture');
   await expect(pageRoot(page).locator('[data-row="clip-fov"]')).toContainText('90°');
   await pageRoot(page).locator('[data-row="clip-fov"]').getByRole('button', { name: 'Set on the Project tab' }).click();
   await expect(tab(page, 'project')).toHaveClass(/ps-tab-on/);
-  await expect(pageRoot(page).locator('[data-row="capture_fov"]')).toContainText('the Clip settings lines give 90');
+  // Never "not set": 90, the game's own, picked, and no way to clear it.
+  await expect(chip(page, 'fov', '90')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pageRoot(page).locator('[data-row="capture_fov"]')).not.toContainText('Not set');
   await footer(page, 'apply').click();
-  expect((await batchCommands(page)).init).toEqual(CLEAN);
+  expect(await batchCommands(page)).toMatchObject({ init: CLEAN, fov: 90 });
 
   await chip(page, 'fov', '100').click();
   await footer(page, 'ok').click();
-  expect((await batchCommands(page)).init).toEqual(['mirv_fov 100', ...CLEAN.filter((line) => !line.startsWith('mirv_fov'))]);
+  // The lines go as they are: the backend sends 100 after them, leaving
+  // their own mirv_fov out (native picture_fov.rs).
+  expect(await batchCommands(page)).toMatchObject({ init: CLEAN, fov: 100 });
+});
+
+test('a mirv_fov number typed in Your own commands is refused; handleZoom is not', async ({ page }) => {
+  await openClipTab(page);
+  const add = pageRoot(page).getByRole('button', { name: '+ Add a command' }).first();
+  await add.click();
+  const line = pageRoot(page).locator('.ps-command', { has: page.locator('[data-field^="own-"]') }).last();
+  const box = line.locator('[data-field^="own-"]');
+  const note = line.locator('.ps-warn');
+  await box.fill('mirv_fov 105');
+  await expect(note).toContainText('Refused');
+  await box.fill('mirv_fov handleZoom enabled 1');
+  await expect(note).toBeHidden();
 });
 
 test('Save as new puts the rows in a preset on this PC and picks it', async ({ page }) => {

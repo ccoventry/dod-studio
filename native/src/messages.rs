@@ -1825,6 +1825,30 @@ pub fn cache_could_not_analyse(demo: impl Display, why: impl Display) -> String 
 
 // ── patch/builder/mod.rs: activity log (#237) ──────────────────────────────
 
+/// A Scheduled `mirv_fov <n>` while the project sets the field of view.
+pub fn project_fov_scheduled_refused(command: &str) -> String {
+    format!(
+        "\"{command}\" is not allowed in Scheduled Commands: this project's field of view is set in Project Settings › Picture."
+    )
+}
+
+/// A batch starts with the project's field of view (#1085): sent after
+/// Initial Commands, and the `mirv_fov <n>` lines it leaves out of them.
+pub fn project_fov_sent(fov: f32, left_out: &[String]) -> String {
+    let left = if left_out.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; left out {} mirv_fov line(s) of Initial Commands ({})",
+            left_out.len(),
+            left_out.join(", ")
+        )
+    };
+    format!(
+        "[capture] Field of view {fov} from Project Settings › Picture, sent after Initial Commands and any cfg they exec{left}"
+    )
+}
+
 pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Display) -> String {
     format!(
         "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{codec_args}`) instead of \

@@ -1,11 +1,12 @@
 // The Clip settings tab's rules (#1085, build plan step 8): rows read and
 // rewrite Initial Commands lines in place, Your own commands holds the rest,
-// presets copy in, and the project's field of view replaces mirv_fov.
+// presets copy in, and a mirv_fov line stays in Your own commands (the
+// project's field of view is sent after it, #1085).
 
 import { describe, it, expect } from 'vitest';
 import {
   parseSetting, rowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
-  fovFromLines, withPictureFov, presetPick, isUsableNumber, numberRowValue, isUsableFov, clipProblems,
+  fovFromLines, presetPick, isUsableNumber, numberRowValue, isUsableFov, clipProblems,
 } from './clip_settings_logic.js';
 import { CLIP_SETTINGS_ROWS } from './clip_settings_rows.js';
 import { STRINGS } from './strings.js';
@@ -59,8 +60,10 @@ describe('Your own commands', () => {
   const lines = ['r_decals 256', 'cl_righthand 1', '', 'mirv_fov 90', 'exec mine.cfg', 'ds_spec_xray_show 1'];
 
   it('lists the lines no row shows, with their place in the list', () => {
+    // mirv_fov too: it is no row's, so its refused note shows (#1085).
     expect(ownEntries(lines)).toEqual([
-      { index: 1, text: 'cl_righthand 1' }, { index: 2, text: '' }, { index: 4, text: 'exec mine.cfg' },
+      { index: 1, text: 'cl_righthand 1' }, { index: 2, text: '' }, { index: 3, text: 'mirv_fov 90' },
+      { index: 4, text: 'exec mine.cfg' },
     ]);
   });
 
@@ -83,14 +86,8 @@ describe('field of view', () => {
     expect(fovFromLines([])).toBeNull();
   });
 
-  it('puts the Picture value in place of every mirv_fov line, r_decals kept', () => {
-    expect(withPictureFov(['r_decals 256', 'mirv_fov 90', 'ds_spec_match_pov 1', 'mirv_fov 105'], 100))
-      .toEqual(['mirv_fov 100', 'r_decals 256', 'ds_spec_match_pov 1']);
-  });
-
-  it('returns the very list when the project sets no field of view', () => {
-    const lines = ['r_decals 256', 'mirv_fov 90'];
-    for (const fov of [undefined, null, NaN, 0, 180]) expect(withPictureFov(lines, fov)).toBe(lines);
+  it('looks past a handleZoom line to the number before it (#1085)', () => {
+    expect(fovFromLines(['mirv_fov 105', 'mirv_fov handleZoom enabled 1'])).toBe(105);
   });
 
   it('takes 1 to 179', () => {

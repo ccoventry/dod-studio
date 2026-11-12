@@ -486,7 +486,8 @@ fn make_session_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBu
 }
 
 /// Says in the activity log how a direct-to-video or AGR batch records,
-/// since neither writes the frame sequence the other modes do.
+/// since neither writes the frame sequence the other modes do, and the
+/// project's field of view when the batch carries one.
 fn announce_capture_mode(config: &PatcherConfig) {
     if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
         crate::log_markdown(&crate::messages::direct_to_video_capture(
@@ -497,6 +498,14 @@ fn announce_capture_mode(config: &PatcherConfig) {
 
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::log_markdown(&crate::messages::agr_capture(config.effective_agr_fps()));
+    }
+
+    // The project's field of view (#1085), and the lines it leaves out.
+    if let Some(fov) = config.picture_fov {
+        crate::log_markdown(&crate::messages::project_fov_sent(
+            fov,
+            &crate::patch::picture_fov::lines_left_out(config),
+        ));
     }
 }
 

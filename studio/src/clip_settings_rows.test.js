@@ -46,9 +46,14 @@ describe('CLIP_SETTINGS_ROWS', () => {
     for (const cvar of ROW_CVARS.filter((c) => c.startsWith('ds_'))) expect(known.has(cvar), cvar).toBe(true);
   });
 
-  it('shows every line of Clean clips in a row, so picking it fills rows, not Your own commands', () => {
+  it('shows every line of Clean clips in a row but its mirv_fov, so picking it fills rows, not Your own commands', () => {
     const lines = cleanClipsLines();
     expect(lines.length).toBeGreaterThan(20);
-    for (const line of lines) expect(ROW_CVARS.includes(parseSetting(line)?.name), line).toBe(true);
+    for (const line of lines) {
+      // Field of view is the project's (#1085): its line stays in Your own
+      // commands, where its note says a batch leaves it out.
+      const name = parseSetting(line)?.name;
+      expect(ROW_CVARS.includes(name), line).toBe(name !== 'mirv_fov');
+    }
   });
 });

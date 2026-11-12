@@ -67,6 +67,23 @@ pub fn lines_left_out(config: &PatcherConfig) -> Vec<String> {
         .collect()
 }
 
+/// Why Start Capture Batch refuses: the first of the Scheduled `commands`
+/// that sets `mirv_fov <n>` while the project sets the field of view
+/// (`picture_fov` `Some`), pointing at Picture. Initial Commands' own are
+/// left out of what is sent instead ([`lines_sent`]), so they are not
+/// refused.
+pub fn scheduled_refusal<'a>(
+    picture_fov: Option<f32>,
+    commands: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    picture_fov?;
+    let commands: Vec<String> = commands.into_iter().map(str::to_string).collect();
+    cfg_scan::project_owned_commands(&commands)
+        .into_iter()
+        .next()
+        .map(|(_, command)| crate::messages::project_fov_scheduled_refused(&command))
+}
+
 /// One value stated for `mirv_fov`, and where: `file` `None` is a line of
 /// Initial Commands itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -120,7 +137,10 @@ pub fn fov_sources(game_dir: Option<&Path>, init_commands: &[String]) -> FovSour
     // Not `scan_cached`: Studio asks this while it runs, and a config edited
     // since must show.
     let scan = game_dir.map(cfg_scan::scan).unwrap_or_default();
-    if let Some(stated) = scan.effective(FOV_CVAR).and_then(|s| last_in(std::slice::from_ref(s))) {
+    if let Some(stated) = scan
+        .effective(FOV_CVAR)
+        .and_then(|s| last_in(std::slice::from_ref(s)))
+    {
         out.configs.push(stated);
     }
     for command in init_commands {
@@ -183,10 +203,54 @@ mod tests {
         assert_eq!(fov_line(100.5), "mirv_fov 100.5");
     }
 
+    /// With the project's field of view the lines' own `mirv_fov <n>` is
+    /// left out (and logged), `handleZoom` kept; without it nothing is.
+    #[test]
+    fn the_lines_own_field_of_view_is_left_out_only_with_the_projects() {
+        let mut config = PatcherConfig {
+            init_commands: lines(&["mirv_fov 105", "mirv_fov handleZoom enabled 1", "cl_bob 0"]),
+            ..PatcherConfig::default()
+        };
+        assert_eq!(lines_sent(&config), config.init_commands);
+        assert!(lines_left_out(&config).is_empty());
+        config.picture_fov = Some(90.0);
+        assert_eq!(
+            lines_sent(&config),
+            ["mirv_fov handleZoom enabled 1", "cl_bob 0"]
+        );
+        assert_eq!(lines_left_out(&config), ["mirv_fov 105"]);
+        assert_eq!(
+            crate::messages::project_fov_sent(90.0, &lines_left_out(&config)),
+            "[capture] Field of view 90 from Project Settings › Picture, sent after Initial Commands and any cfg they exec; left out 1 mirv_fov line(s) of Initial Commands (mirv_fov 105)"
+        );
+    }
+
+    #[test]
+    fn a_scheduled_mirv_fov_number_is_refused_only_with_the_projects() {
+        let scheduled = ["mirv_fov handleZoom enabled 1", "mirv_fov 100"];
+        assert_eq!(
+            scheduled_refusal(Some(90.0), scheduled).as_deref(),
+            Some(
+                "\"mirv_fov 100\" is not allowed in Scheduled Commands: this project's field of view is set in Project Settings › Picture."
+            )
+        );
+        assert_eq!(scheduled_refusal(None, scheduled), None);
+        assert_eq!(
+            scheduled_refusal(Some(90.0), ["mirv_fov handleZoom enabled 1"]),
+            None
+        );
+    }
+
     #[test]
     fn a_mirv_fov_line_gives_the_field_of_view() {
-        let sources = fov_sources(None, &lines(&["hud_draw 0", "mirv_fov \"100\"", "cl_bob 0"]));
-        assert_eq!(sources.from_lines.map(|s| (s.value, s.file)), Some((100.0, None)));
+        let sources = fov_sources(
+            None,
+            &lines(&["hud_draw 0", "mirv_fov \"100\"", "cl_bob 0"]),
+        );
+        assert_eq!(
+            sources.from_lines.map(|s| (s.value, s.file)),
+            Some((100.0, None))
+        );
     }
 
     #[test]
@@ -195,7 +259,10 @@ mod tests {
         let sources = fov_sources(Some(&dod), &lines(&["exec dicewsod25.cfg"]));
         let from = sources.from_lines.expect("the exec'd cfg sets one");
         assert_eq!(from.value, 110.0);
-        assert_eq!(from.file.as_deref(), Some(dod.join("dicewsod25.cfg").as_path()));
+        assert_eq!(
+            from.file.as_deref(),
+            Some(dod.join("dicewsod25.cfg").as_path())
+        );
         assert_eq!(from.line, 2);
 
         // A line after the exec has the last word; one before it does not.
@@ -214,7 +281,10 @@ mod tests {
         assert_eq!(sources.from_lines, None);
         assert_eq!(sources.configs.len(), 1);
         assert_eq!(sources.configs[0].value, 105.0);
-        assert_eq!(sources.configs[0].file.as_deref(), Some(dod.join("movie.cfg").as_path()));
+        assert_eq!(
+            sources.configs[0].file.as_deref(),
+            Some(dod.join("movie.cfg").as_path())
+        );
     }
 
     #[test]
@@ -229,7 +299,11 @@ mod tests {
     fn handle_zoom_and_unusable_values_set_nothing() {
         let sources = fov_sources(
             None,
-            &lines(&["mirv_fov handleZoom enabled 1", "mirv_fov 0", "mirv_fov wide"]),
+            &lines(&[
+                "mirv_fov handleZoom enabled 1",
+                "mirv_fov 0",
+                "mirv_fov wide",
+            ]),
         );
         assert_eq!(sources.from_lines, None);
     }

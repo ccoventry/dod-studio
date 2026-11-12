@@ -942,7 +942,14 @@ mod tests {
     #[test]
     fn without_the_projects_field_of_view_a_typed_mirv_fov_is_used() {
         let (_dir, game) = fake_game("no_picture_fov");
-        let r = report_for(game, vec!["mirv_fov 100".to_string()], Vec::new(), None, None, None);
+        let r = report_for(
+            game,
+            vec!["mirv_fov 100".to_string()],
+            Vec::new(),
+            None,
+            None,
+            None,
+        );
         assert_eq!(r.project_fov, None);
         assert!(r.project_fov_left_out.is_empty());
         let row = conflict(&r, "mirv_fov").expect("movie.cfg's 105 differs");

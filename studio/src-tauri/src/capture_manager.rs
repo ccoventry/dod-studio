@@ -229,9 +229,8 @@ pub struct CapturePayload {
     /// scheduled/highlight commands.
     #[serde(default)]
     pub init_commands: Vec<String>,
-    /// The project's field of view (Project Settings › Picture, #1085),
-    /// sent after `init_commands`; absent with New UI off or no project
-    /// (`PatcherConfig::picture_fov`).
+    /// The project's field of view, sent after `init_commands` (#1085,
+    /// `PatcherConfig::picture_fov`); absent with New UI off or no project.
     #[serde(default)]
     pub picture_fov: Option<f32>,
     /// User-defined commands scheduled relative to each highlight's bounds.
@@ -1272,23 +1271,6 @@ fn first_banned_command_error(
     })
 }
 
-/// `Some(message)` when the project sets the field of view (`picture_fov`)
-/// and a Scheduled Command sets `mirv_fov <n>`
-/// (`cfg_scan::PROJECT_OWNED_COMMANDS`): refused like any scheduled
-/// `mirv_fov`, but pointing at the place the project sets it. Initial
-/// Commands' own are left out of what is sent instead
-/// (`picture_fov::lines_sent`), so they are not refused here.
-fn project_fov_scheduled_error(
-    picture_fov: Option<f32>,
-    custom_commands: &[CustomCommandPayload],
-) -> Option<String> {
-    picture_fov?;
-    let custom_texts: Vec<String> = custom_commands.iter().map(|c| c.command.clone()).collect();
-    native::patch::cfg_scan::project_owned_commands(&custom_texts)
-        .first()
-        .map(|(_, command)| crate::messages::capture::project_fov_scheduled_refused(command))
-}
-
 /// Async entry point called by the Tauri `start_capture_batch` command.
 pub async fn start_capture_batch_impl(
     app_handle: tauri::AppHandle,
@@ -1301,7 +1283,12 @@ pub async fn start_capture_batch_impl(
     // check is only as good as the frontend" reasoning as the separate-HUD
     // guard below: whatever reaches this command directly must be refused
     // independently, not trusted because some UI state claimed it was clean.
-    if let Some(err) = project_fov_scheduled_error(payload.picture_fov, &payload.custom_commands)
+    // A scheduled mirv_fov <n> while the project sets one (#1085) first.
+    let fov_refusal = native::patch::picture_fov::scheduled_refusal(
+        payload.picture_fov,
+        payload.custom_commands.iter().map(|c| c.command.as_str()),
+    );
+    if let Some(err) = fov_refusal
         .or_else(|| first_banned_command_error(&payload.init_commands, &payload.custom_commands))
     {
         return Err(err);
@@ -1335,12 +1322,6 @@ pub async fn start_capture_batch_impl(
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
     let mut patcher_config = config_from_payload(&payload);
-    if let Some(fov) = patcher_config.picture_fov {
-        log_markdown(&crate::messages::capture::project_fov_sent(
-            fov,
-            &native::patch::picture_fov::lines_left_out(&patcher_config),
-        ));
-    }
     // Configuration > Players' box (#428) is a saved setting, not part of
     // the batch's payload.
     patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
@@ -2791,27 +2772,6 @@ mod tests {
         let err = first_banned_command_error(&[], &scheduled);
         assert!(err.is_some(), "must be refused");
         assert!(err.unwrap().contains("host_framerate"));
-    }
-
-    /// With the project's field of view a scheduled `mirv_fov <n>` is refused
-    /// pointing at Picture; `handleZoom` and a project without one are not
-    /// this guard's (#1085).
-    #[test]
-    fn a_scheduled_mirv_fov_points_at_picture_when_the_project_sets_one() {
-        let scheduled = |command: &str| {
-            vec![CustomCommandPayload {
-                command: command.to_string(),
-                relation: "Before".to_string(),
-                offset_seconds: 1.0,
-            }]
-        };
-        let err = project_fov_scheduled_error(Some(90.0), &scheduled("mirv_fov 100"));
-        assert!(err.is_some_and(|e| e.contains("Project Settings › Picture")));
-        assert!(project_fov_scheduled_error(None, &scheduled("mirv_fov 100")).is_none());
-        assert!(
-            project_fov_scheduled_error(Some(90.0), &scheduled("mirv_fov handleZoom enabled 1"))
-                .is_none()
-        );
     }
 
     #[test]
