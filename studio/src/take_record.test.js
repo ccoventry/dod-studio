@@ -5,6 +5,7 @@ import {
   captureOf, recordCapture, attachCaptures, capturesToSave, carryCaptures, captureRateOf,
 } from './take_record.js';
 import * as before439 from './test_fixtures/take_index_before_439.js';
+import * as before1085Record from './test_fixtures/take_record_before_1085.js';
 
 // A project saved before #439: every take is a bare uid list.
 const oldProject = () => JSON.parse(readFileSync(new URL('./test_fixtures/project_before_439.json', import.meta.url), 'utf8'));
@@ -152,6 +153,36 @@ describe('capture facts', () => {
   });
 });
 
+describe('full capture settings (part of #1085)', () => {
+  const SETTINGS = { hash: 'v1-0123456789abcdef', width: 1920, height: 1080, fov: 90, lines: ['mirv_fov 90'], commands: [] };
+  const streaks = () => [{ player_index: 1, start_tick: 1, end_tick: 2 }];
+
+  it('a verified block records the batch settings beside the take', () => {
+    const takeIndex = {};
+    markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0], capture_settings: SETTINGS },
+      { streaks: streaks(), demoPaths: ['d.dem'] }, takeIndex);
+    expect(captureOf(takeIndex, 's/b0').settings).toEqual(SETTINGS);
+  });
+
+  it('a later mark without settings (a clip-ready payload) keeps the recorded ones', () => {
+    const takeIndex = {};
+    const dispatch = { streaks: streaks(), demoPaths: ['d.dem'] };
+    markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0], capture_settings: SETTINGS }, dispatch, takeIndex);
+    markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0], capture_settings: null }, dispatch, takeIndex);
+    expect(captureOf(takeIndex, 's/b0').settings).toEqual(SETTINGS);
+  });
+
+  it('survive a save and load, and the take record logic of a build before #1085', () => {
+    const takeIndex = { 's/b0': ['u'] };
+    recordCapture(takeIndex, 's/b0', { captured_at: 1, settings: SETTINGS });
+    const saved = JSON.parse(saveProject(takeIndex, ['u']));
+    expect(saved.takeCaptures['s/b0'].settings).toEqual(SETTINGS);
+    const older = saved.takeIndex;
+    before1085Record.attachCaptures(older, saved.takeCaptures);
+    expect(before1085Record.capturesToSave(older)['s/b0'].settings).toEqual(SETTINGS);
+  });
+});
+
 describe('captureRateOf (#439)', () => {
   it('names the rate the mode really records at, not the frame-sequence setting', () => {
     const settings = { capture_fps: 300, obs_capture_fps: 120, agr_fps: 60 };
@@ -159,8 +190,12 @@ describe('captureRateOf (#439)', () => {
     expect(captureRateOf('obs', { capture_fps: 300, obs_capture_fps: 0 })).toBe(60);
     expect(captureRateOf('obs', { capture_fps: 300 })).toBeUndefined();
     expect(captureRateOf('agr', settings)).toBe(60);
-    expect(captureRateOf('agr', { capture_fps: 300, agr_fps: 0 })).toBe(300);
     expect(captureRateOf('direct_to_video', settings)).toBe(300);
+  });
+
+  it("an unset AGR FPS records at AGR's own 30, never Capture FPS", () => {
+    expect(captureRateOf('agr', { capture_fps: 300, agr_fps: 0 })).toBe(30);
+    expect(captureRateOf('agr', { capture_fps: 300 })).toBe(30);
   });
 
   it("a dispatch's own rate wins over the clip payload's capture_fps", () => {

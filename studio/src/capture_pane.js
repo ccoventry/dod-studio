@@ -18,6 +18,7 @@ import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
 import { captureRateOf } from './take_record.js';
+import { effectiveAgrFps } from './agr_rate.js';
 import { STRINGS } from './strings.js';
 import { MAX_PROBLEM_PATHS_SHOWN } from './capture_pane_logic.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
@@ -30,7 +31,8 @@ import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from
 import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_setting.js';
 import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
-import { createCaptureProgress, endKind } from './capture_progress.js';
+import { createCaptureProgress, endKind, completedToast } from './capture_progress.js';
+import { clipVerdictToasts, failedClipCount, shortClipCount } from './clip_verdict_toasts.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -229,7 +231,9 @@ export async function refreshLaunchGuard(state) {
   // batches that fit with room to spare.
   const captureMode = document.querySelector('#config-capture-mode')?.value;
   const agrMode = captureMode === 'agr';
-  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
+  const agrFpsRaw = numberField('#config-agr-fps', 0, { integer: true, positive: true });
+  // Sizing a blocked (blank) AGR batch still needs some rate.
+  const agrFpsVal = effectiveAgrFps(agrFpsRaw);
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -349,8 +353,13 @@ export async function refreshLaunchGuard(state) {
     hlPath: document.querySelector('#hl-path-input')?.value,
     hlaePath: document.querySelector('#hlae-path-input')?.value,
     driveCount: effectiveDrivePool.length,
+    captureMode,
+    agrFps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
   }, !noHighlightsSelected);
-  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
+  // AGR has no default to fall back on: an AGR batch needs its own rate. The
+  // backend refuses a 0 rate too (start_capture_batch_impl).
+  const agrFpsMissing = agrMode && agrFpsRaw <= 0;
+  const blocked = bannedCommandsPresent || pathsMissing || agrFpsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
     startBtn.disabled = blocked;
@@ -369,6 +378,10 @@ export async function refreshLaunchGuard(state) {
     } else if (pathsMissing) {
       warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
+      warningEl.style.display = 'block';
+    } else if (agrFpsMissing) {
+      warningEl.style.color = 'var(--danger)';
+      warningEl.textContent = STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = 'var(--danger)';
@@ -424,7 +437,7 @@ export async function refreshLaunchGuard(state) {
     footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
-  return { requiredBytes, availableBytes, blocked, noHighlightsSelected };
+  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing };
 }
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
@@ -450,8 +463,8 @@ function currentCaptureSetup() {
     mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
-    // An empty AGR FPS records at Capture FPS, as the batch does.
-    agrFps: numberField('#config-agr-fps', numberField('#config-capture-fps', 300, { integer: true, positive: true }), { integer: true, positive: true }),
+    // 0 when empty: the strip says so rather than naming a rate.
+    agrFps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
@@ -600,7 +613,7 @@ function initImportCfgButton() {
 export function batchSettingsPayload(state) {
   const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
   const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-  // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+  // Empty is 0, which Start refuses in AGR mode (refreshLaunchGuard) and so does the backend.
   const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
   const preRollVal = numberField('#config-pre-roll', 5.0);
   const postRollVal = numberField('#config-post-roll', 1.0);
@@ -941,8 +954,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         } else if (kind === 'cancelled') {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
         } else {
-          showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
-          notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
+          // Success only when every clip landed whole (#1401).
+          const done = completedToast(payload);
+          showToast(done.text, done.type);
+          notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, done.text);
         }
       }
     }).then(unlistenFn => {
@@ -1035,7 +1050,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
+        // The batch's settings ride once on the payload, not on every block.
+        const withSettings = { ...block, capture_settings: payload.capture_settings };
+        const marked = markBlockCaptured(withSettings, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });
@@ -1055,12 +1072,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         const cut = blocks.filter((b) => b.cut_short && !b.short_take);
         // OBS started recording after the clip did (#1109).
         const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate)}${marked}`, 'error');
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate, failedClipCount(payload))}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
-      } else {
+      } else if (shortClipCount(payload) === 0) {
+        // A short clip's own warning toast follows; "all verified" would contradict it.
         showToast(`${STRINGS.CAPTURE.allTakesVerified(total)}${marked}`, 'success');
       }
+      // Which highlights the game's failed and short clips are (#1401).
+      clipVerdictToasts(payload, lastDispatch).forEach((t) => showToast(t.text, t.type, 12000));
 
       // "When a batch finishes" (#440) — a no-op unless that is set to finish
       // clips. After the status flip above, so the take index already maps
@@ -1185,6 +1205,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // and it should not arrive behind a modal about closing their game.
         if (guard.noHighlightsSelected) {
           stopWith(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING);
+        } else if (guard.agrFpsMissing) {
+          stopWith(STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING);
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {

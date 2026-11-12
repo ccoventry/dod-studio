@@ -283,7 +283,7 @@ computes two rectangles from `ScreenWidth`/`ScreenHeight` and caches them in
 
 `CHud::GetOverviewMapBounds` (`+0x22a60`, four out-params, `ret 0x10`) hands one
 of the two back depending on `CHud::OverviewMapMode` (`+0x228e0`, which returns
-`_cl_minimap`'s value while a spectator predicate holds and `gHUD`'s FOV field
+`_cl_minimap`'s value while the renderer is hardware (`IsHardware`) and `gHUD`'s FOV field
 is still 90), adding the `54 * ScreenHeight/480` spectator-bar offset to the
 full map's y. Callers: `CHudDeathNotice::Draw`, `CObjectiveIcons`' map path, and
 two more in the spectator GUI.
@@ -447,15 +447,16 @@ Stated plainly, in the habit `docs/goldsrc_death_notices.md` set.
 - **`CHudBase` vftable slot 6.** A seventh virtual DoD added between `Reset` and
   `InitHUDData`. Every element inherits `CHudBase`'s stub (`+0x21970`); nothing
   overrides it, so there is no body to read and no call site was found.
-- **`+0x195e40`**, the spectator predicate `CHud::OverviewMapMode` calls. A
-  `.data` function pointer, zero in the image, that `client.dll`'s code only ever
+- **`+0x195e40`**, the function `CHud::OverviewMapMode` calls. A `.data`
+  function pointer, zero in the image, that `client.dll`'s code only ever
   *calls* — there is no store to it anywhere. It is filled by the 46-dword
-  `rep movsd` at `+0x362f3`, which copies an engine interface handed to
-  `client.dll` during initialisation into `+0x195da0`; the predicate is that
-  table's slot 40. **Which interface that is has not been established.** It is
-  not `gEngfuncs` — that is a separate 135-dword copy at `+0x176388` whose
-  `IsSpectateOnly` slot DoD calls 35 times by the ordinary route — so this is a
-  second mechanism, not the same one.
+  `rep movsd` at `+0x362f3`, which copies the engine's studio interface handed
+  to `client.dll` during initialisation into `+0x195da0`; it is that table's
+  slot 40. A 46-slot table is `engine_studio_api_t`, whose slot 40 is
+  `IsHardware` (inferred from the slot count, #897), so this is not a spectator
+  predicate, as earlier versions of this note said. It is not `gEngfuncs` — that
+  is a separate 135-dword copy at `+0x176388` whose `IsSpectateOnly` slot DoD
+  calls 35 times by the ordinary route.
 - **The objective timer's x.** Four literal digit positions (10, 24, 44, 58) plus
   a literal 0 for the background sprite, in `CObjectiveIcons::DrawDigit`'s
   callers. Five sites rather than one value; reachable but not as one setting.
@@ -517,15 +518,15 @@ A ten-case switch on `DRC_CMD - 1` (its own jump table at `+0x38370`),
 matching [`common/hltv.h`](https://github.com/FWGS/hlsdk-portable/blob/master/common/hltv.h)'s
 `DRC_CMD_*` values `1..10` exactly (case index 1, `DRC_CMD_EVENT`, is the
 sole writer of the spectator-target global; case index 2, `DRC_CMD_MODE`,
-is where `SetMode` gets called from a director message rather than a
+is where `SetModes` gets called from a director message rather than a
 keypress — see #206's own write-up on that issue for the full trace). Not
 `HandleButtonsDown`; that one is elsewhere (below), and is the *input*
-path into `SetMode`, where `DirectorMessage` is the *network* path. This
+path into `SetModes`, where `DirectorMessage` is the *network* path. This
 was the second time the `function_end` padding-heuristic trap mattered for
 `CHudSpectator` in one sitting; nothing past this point relies on it
 without independent confirmation from the raw bytes.
 
-### The mode global has exactly one writer: `SetMode` (`+0x38850`)
+### The mode global has exactly one writer: `SetModes` (`+0x38850`)
 
 `(int mode, ...)`, thiscall. Every one of the four writes to `+0xe88d4` is a
 case in one `switch (mode)` inside this function, `mode` clamped to `1..4`
@@ -539,14 +540,14 @@ carries a null-terminated table at `+0xcee35` — `"#OBS_IN_EYE"`,
 Half-Life SDK's `CHudSpectator::GetModeName`-shaped switch verbatim,
 [`cl_dll/hud_spectator.cpp`](https://github.com/FWGS/hlsdk-portable/blob/master/cl_dll/hud_spectator.cpp)),
 alongside the literal string `"usage:  spec_mode <Main Mode> [<Inset Mode>]"`
-— confirming `SetMode`'s second parameter (previously guessed as a target)
+— confirming `SetModes`'s second parameter (previously guessed as a target)
 is actually **`iNewInsetMode`** (the `spec_pip` inset window's own mode),
 matching what `docs/goldsrc_spectator_camera` memory already said about
 `spec_mode`'s second argument. `OBS_NONE=0, OBS_CHASE_LOCKED=1,
 OBS_CHASE_FREE=2, OBS_ROAMING=3, OBS_IN_EYE=4, OBS_MAP_FREE=5,
 OBS_MAP_CHASE=6` is the standard SDK enum
 ([`pm_shared/pm_shared.h`](https://github.com/FWGS/hlsdk-portable/blob/master/pm_shared/pm_shared.h)) —
-DoD's `SetMode` clamping to `1..4` means it supports every mode except the
+DoD's `SetModes` clamping to `1..4` means it supports every mode except the
 two map ones, consistent with DoD drawing its overview map through a
 separate VGUI2 mechanism (§5) rather than an observer mode.
 
@@ -573,7 +574,7 @@ or re-invoking with the same value.
 ### `HandleButtonsDown` (`+0x386a0`) drives it from input
 
 Reads a button-state bitmask (`bl`/`ebx`) and, gated behind bit `0x2`,
-computes the *next* mode in a fixed cycle and calls `SetMode` with it:
+computes the *next* mode in a fixed cycle and calls `SetModes` with it:
 
 ```
 current == 1 -> next = 2
@@ -585,7 +586,7 @@ anything else (0, unset) -> next = 2
 
 i.e. **the cycle order is 1 -> 2 -> 4 -> 3 -> 1**, not numeric order — bit
 `0x2` is presumably the edge for whatever key steps through the interface
-layouts. `SetMode` is then called unconditionally near the end of the
+layouts. `SetModes` is then called unconditionally near the end of the
 function on every path that reaches that far, passing either the freshly
 cycled mode or whatever `edi` held going in when bit `0x2` was not set — so
 this looks like a per-frame re-assert, not a one-shot keypress handler, but
@@ -637,7 +638,7 @@ input, not confirmed which physical bind maps to which bit.
 python goldsrc-hooks/tools/survey_client_dll.py elements   # CHudSpectator's row now reads 45, not 879
 ```
 
-The rest (`SetMode`, `HandleButtonsDown`, the mode-dispatch table, the button
+The rest (`SetModes`, `HandleButtonsDown`, the mode-dispatch table, the button
 bitmask) was read by hand from `+0x38030`..`+0x38a70` and is not yet folded
 into any automated report section — there is no general "decode a switch
 table and diff its cases" pass, unlike the RTTI-driven element/message/cvar

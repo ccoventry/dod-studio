@@ -187,6 +187,9 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(cache) = crate::demoplayer_dict_cache::status_line() {
+        lines.push(cache);
+    }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
@@ -195,6 +198,9 @@ fn status_text() -> String {
     }
     if let Some(weather) = crate::map_weather::status_line() {
         lines.push(weather);
+    }
+    if let Some(wind) = crate::map_wind::status_line() {
+        lines.push(wind);
     }
     lines.push(crate::map_light::status_line());
     lines.push(crate::player_overrides::status());

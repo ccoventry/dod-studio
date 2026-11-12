@@ -1965,6 +1965,55 @@ button.danger-btn {
   cursor: progress;
 }
 
+/* #15: a queued demo damaged partway; the badge is the Repair button. */
+.damaged-repair-hint {
+  gap: 4px;
+}
+
+.damaged-repair-hint[hidden] {
+  display: none;
+}
+
+.damaged-repair-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--danger-light);
+  background: transparent;
+  border: 1px solid var(--danger-light);
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:disabled:not([data-splitting]),
+.analyzer-multimap-split:disabled[title] {
+  cursor: not-allowed;
+}
+
+.damaged-repair-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.analyzer-damage-repair,
+.analyzer-damage-cannot-repair,
+.analyzer-damage-already-split {
+  margin-left: 8px;
+}
+
+.repair-table td {
+  vertical-align: top;
+}
+
+.repair-result-cell .repair-progress {
+  min-width: 200px;
+}
+
+.repair-result {
+  margin-left: 6px;
+}
+
 .multimap-hint {
   display: inline-flex;
   align-items: center;
@@ -2067,14 +2116,16 @@ button.danger-btn {
   max-height: 220px;
 }
 
-.batch-results-row-missing td:first-child {
+.batch-results-row-missing td:first-child,
+.batch-results-row-failed td:first-child {
   color: var(--danger-light);
 }
 
 .batch-results-row-unrenderable td:first-child,
 .batch-results-row-cut_short td:first-child,
 .batch-results-row-late td:first-child,
-.batch-results-row-short td:first-child {
+.batch-results-row-short td:first-child,
+.batch-results-row-short_plan td:first-child {
   color: var(--warn);
 }
 

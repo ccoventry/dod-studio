@@ -566,7 +566,7 @@ The pool is a fixed array, not a sized allocation: `r_decals` only bounds how
 far the rotating index travels before wrapping, and evicts nothing. Measured:
 
 ```
-R_DecalRemoveAll<by flag>  hw+0x4a000
+R_DecalRemoveWithFlag      hw+0x4a000
 R_DecalInit                hw+0x49da0
 R_DecalUnlink              hw+0x49e80
 gDecalPool                 0x2325cb8 .. 0x2341cb8   (0x1c000 bytes)

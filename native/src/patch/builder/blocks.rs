@@ -5,7 +5,8 @@
 use super::*;
 
 /// One chain job's highlights: every highlight of one demo and one player,
-/// sorted by start tick, each with its index in the batch's highlight list.
+/// sorted by first recorded kill, each with its index in the batch's
+/// highlight list.
 pub(super) struct HighlightGroup<'a> {
     pub source_demo: &'a str,
     pub target_player: Option<&'a str>,
@@ -51,7 +52,13 @@ pub(super) fn group_highlights(highlights: &[CaptureStreak]) -> Vec<HighlightGro
     sorted_groups
         .into_iter()
         .map(|((source_demo, target_player), mut highlights)| {
-            highlights.sort_by_key(|(_, s)| s.start_tick);
+            // By first recorded kill, the frame the record start keys off:
+            // `cut_blocks` keeps a block's first highlight's start, so a
+            // highlight merged in later must not start before it. This is
+            // the `start_tick` order unless `start_tick` is not the first
+            // recorded kill, as after a Kill Range edit in the game's Review,
+            // which leaves it at the whole highlight's first kill (#1395).
+            highlights.sort_by_key(|(_, s)| first_kill_frame(s));
             HighlightGroup {
                 source_demo,
                 target_player,
@@ -80,8 +87,8 @@ pub(super) struct Blocks {
     pub kill_frames: Vec<Vec<i32>>,
 }
 
-/// Cuts one chain job's highlights (sorted by start tick) into recording
-/// blocks, at the demo's `demo_fps`.
+/// Cuts one chain job's highlights (sorted by first recorded kill) into
+/// recording blocks, at the demo's `demo_fps`.
 ///
 /// Two separate questions, deliberately not conflated (they used to be,
 /// which made every roll-window collision collapse into one take full of
@@ -125,6 +132,11 @@ pub(super) fn cut_blocks(
 
         // Past the first highlight the four lists are non-empty: they grow
         // together, and the first highlight always pushes.
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "past the first highlight the four lists are non-empty"
+        )]
         let prev_stop = last_kill_frame(merged_streaks.last().unwrap());
         let next_start = first_kill_frame(&current);
 
@@ -140,6 +152,11 @@ pub(super) fn cut_blocks(
             start_lead_ticks,
             stop_trail_ticks + min_separation_ticks,
         ) {
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             let last = merged_streaks.last_mut().unwrap();
             last.end_tick = last.end_tick.max(current.end_tick);
             // The record-stop mark is derived from kills[end_index], not
@@ -147,13 +164,31 @@ pub(super) fn cut_blocks(
             // join this block's kill list too. Without it recording stops at
             // the *first* highlight's last kill and everything merged in
             // after that is missing from the take — while still looking like
-            // one successfully captured block.
+            // one successfully captured block. A highlight nested inside the
+            // block (it ends before the block does) keeps the block's stop:
+            // moving the mark back to its last kill would cut the longer
+            // highlight's later kills from the take (#1395).
             let absorbed_last = current.end_index.min(current.kills.len().saturating_sub(1));
-            if let Some(kill) = current.kills.get(absorbed_last).cloned() {
+            if let Some(kill) = current
+                .kills
+                .get(absorbed_last)
+                .filter(|kill| kill.0 >= prev_stop)
+                .cloned()
+            {
                 last.kills.push(kill);
                 last.end_index = last.kills.len() - 1;
             }
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             merged_sources.last_mut().unwrap().push(payload_idx);
+            #[allow(
+                clippy::unwrap_used,
+                clippy::expect_used,
+                reason = "past the first highlight the four lists are non-empty"
+            )]
             let kills = merged_kill_frames.last_mut().unwrap();
             kills.extend(current_kills);
             kills.sort_unstable();

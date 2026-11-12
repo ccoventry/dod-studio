@@ -3,7 +3,7 @@
 //!
 //! ## Why the game alone can't
 //!
-//! The engine's overview loader (`hw.dll` PRE `+0x45f50`, Anniversary
+//! The engine's overview loader (`R_LoadMapSprite`, `hw.dll` PRE `+0x45f50`, Anniversary
 //! `+0x243870`) reads the image into a fixed 3 MB RGBA buffer -- 1024x768 at
 //! most -- and cuts it into 128x128 tiles, one sprite frame each, uploaded as
 //! textures named `<image>_<n>`. A bigger image is refused ("Wrong map image
@@ -170,7 +170,7 @@ fn grid(frames: usize) -> Option<(usize, usize)> {
 
 /// # Safety
 ///
-/// `model` is the `model_t` the engine's overview loader just returned.
+/// `model` is the `model_t` the engine's overview loader (`R_LoadMapSprite`) just returned.
 unsafe fn upgrade(model: *mut c_void, path: &Path) -> Result<usize, String> {
     let sprite = unsafe { *((model as *const u8).add(MODEL_SPRITE) as *const usize) };
     if sprite == 0 {

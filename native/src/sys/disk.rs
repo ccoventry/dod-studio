@@ -196,24 +196,18 @@ const TTL_MS: u128 = 2_000;
 
 /// Bumped by [`forget_free_space`]; a cached answer or disk list from an
 /// older epoch is re-read.
-#[cfg(not(target_arch = "wasm32"))]
 static FREE_SPACE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Drops every cached free-space answer, so the next [`get_available_bytes`]
 /// asks the OS again. Call it after deleting files on purpose to make room:
 /// the take cleanup (#644) deletes a take and `build_batch_queue` reads the
 /// drive within the 2 s cache, which then still reported the space as taken.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn forget_free_space() {
     FREE_SPACE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn forget_free_space() {}
-
 /// Free bytes on the volume `path` is on, or `None` when that can't be told:
 /// a malformed, relative or non-directory path, or one under no known mount.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn get_available_bytes(path: &std::path::Path) -> Option<u64> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -319,14 +313,8 @@ pub fn get_available_bytes(path: &std::path::Path) -> Option<u64> {
 
 /// Whether a disk list re-listed at `refreshed_at` is still young enough at
 /// `now` to answer from without re-listing every volume.
-#[cfg(not(target_arch = "wasm32"))]
 fn list_is_fresh(refreshed_at: std::time::Instant, now: std::time::Instant) -> bool {
     now.saturating_duration_since(refreshed_at).as_millis() < TTL_MS
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn get_available_bytes(_path: &std::path::Path) -> Option<u64> {
-    None
 }
 
 /// Why a configured output path can't be used, for surfacing a specific
@@ -348,7 +336,6 @@ pub enum PathStatus {
     NotADirectory,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn diagnose_path(path: &std::path::Path) -> PathStatus {
     if !path.is_absolute() {
         return PathStatus::NotAbsolute;
@@ -370,12 +357,7 @@ pub fn diagnose_path(path: &std::path::Path) -> PathStatus {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn diagnose_path(_path: &std::path::Path) -> PathStatus {
-    PathStatus::Ok
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

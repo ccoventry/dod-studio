@@ -137,6 +137,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
+//!   through its event dictionary's lookup cache, the 25th Anniversary crash
+//!   on a second `viewdemo` of an HLTV demo (#1392). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` turns it off.
 //! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
 //!   models around them, which the engine culled from the map's origin
 //!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
@@ -208,6 +212,8 @@
 //! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
 //!   or none, by pointing the weather updater's type read at our own value
 //!   (#1129).
+//! - `map_wind`: the `ds_map_wind` cvar -- the wind that blows rain, snow
+//!   and smoke, by pointing the particles' wind reads at our own vector.
 //! - `map_cfgs`: the `ds_map_run_cfgs` cvar -- run
 //!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
 //!   demo's map loads, for per-map brightness and gamma, which a server's map
@@ -292,6 +298,7 @@ mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
 mod demo_seek;
+mod demoplayer_dict_cache;
 mod detail_cache;
 mod detour;
 mod engine;
@@ -332,6 +339,7 @@ mod map_light;
 mod map_sounds;
 mod map_text;
 mod map_weather;
+mod map_wind;
 mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
@@ -390,6 +398,7 @@ mod spectator_target;
 mod spectator_text;
 mod spray;
 mod spray_hltv;
+mod spray_lambda;
 mod sprite_blend;
 mod steam_id;
 mod strafe_twitch;
@@ -482,6 +491,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Only empties a cache the demo player rebuilds, so on unless asked not to.
+    demoplayer_dict_cache::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX", true),
         Ordering::Relaxed,
     );
     // Only restores what a chase camera can see, so on unless asked not to.

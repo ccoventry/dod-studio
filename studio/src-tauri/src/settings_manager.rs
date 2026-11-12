@@ -1,4 +1,5 @@
 use crate::capture_manager::CustomCommandPayload;
+use crate::settings_migrations::MIGRATIONS;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -86,9 +87,10 @@ pub struct AppSettings {
     /// `capture_fps` with frame-sequence/direct-to-video.
     #[serde(default = "default_obs_capture_fps")]
     pub obs_capture_fps: i32,
-    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 means "the same
-    /// as `capture_fps`", which is also what a file written before it existed
-    /// gets.
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 means
+    /// `native::patch::DEFAULT_AGR_FPS`, which is also what a file written
+    /// before it existed gets. A setting, so 0 takes the current meaning: no
+    /// capture has been recorded with it yet.
     #[serde(default)]
     pub agr_fps: i32,
     pub pre_roll_seconds: f32,
@@ -201,6 +203,12 @@ pub struct AppSettings {
     /// new default can reach a settings file that saved the old one.
     #[serde(default)]
     pub settings_migrations: u32,
+    /// Migration 3 turned a used table's POV fallback from "Their own spray"
+    /// into "No spray", and Studio hasn't said so yet
+    /// (`players_tab::take_pov_own_spray_notice`). The frontend doesn't
+    /// carry this field; `save_settings` keeps the loaded value.
+    #[serde(default)]
+    pub pov_own_spray_notice: bool,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
@@ -583,6 +591,7 @@ impl Default for AppSettings {
             save_local_patched_copy: false,
             hook_runs_batch: native::patch::types::default_hook_runs_batch(),
             settings_migrations: MIGRATIONS,
+            pov_own_spray_notice: false,
             keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
@@ -653,11 +662,6 @@ fn pinned_review_done_in(text: &str) -> bool {
         .is_ok_and(|v| v["pinned_folders_reviewed"] == true)
 }
 
-/// How many one-time changes to saved values exist; `migrate` runs the ones
-/// past a file's `settings_migrations`. The frontend saves settings without
-/// this field, so `save_settings` keeps the loaded value.
-pub const MIGRATIONS: u32 = 2;
-
 impl AppSettings {
     pub fn load_or_default() -> Self {
         let path = settings_path();
@@ -665,69 +669,17 @@ impl AppSettings {
             && let Ok(content) = fs::read_to_string(&path)
             && let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content)
         {
+            let migrated = settings.settings_migrations < MIGRATIONS;
             settings.migrate();
-            if settings.migrate_console_names() {
-                // Saved at once, so the file on disk matches what Studio shows.
+            if settings.migrate_console_names() || migrated {
+                // Saved at once, so the file on disk matches what Studio
+                // shows, and a one-time change is only ever said once. A
+                // failed save runs it again next start, which is harmless.
                 let _ = settings.save();
             }
             return settings;
         }
         Self::default()
-    }
-
-    /// Moves every hook console name from before #555 (`dodstudio_*`) in
-    /// Initial Commands, Scheduled Commands and the command profiles to the
-    /// name that replaced it (`native::patch::console_prefix::migrated`, from
-    /// the hook's own old -> new table). The game has no
-    /// aliases for the old names, so a list left as it was would do nothing.
-    /// True when anything changed.
-    pub fn migrate_console_names(&mut self) -> bool {
-        fn fix(command: &mut String, changed: &mut bool) {
-            if let Some(new) = native::patch::console_prefix::migrated(command) {
-                *command = new;
-                *changed = true;
-            }
-        }
-        let mut changed = false;
-        let lists = std::iter::once((&mut self.init_commands, &mut self.custom_commands)).chain(
-            self.command_profiles
-                .iter_mut()
-                .map(|p| (&mut p.init_commands, &mut p.custom_commands)),
-        );
-        for (init, scheduled) in lists {
-            for command in init.iter_mut() {
-                fix(command, &mut changed);
-            }
-            for payload in scheduled.iter_mut() {
-                fix(&mut payload.command, &mut changed);
-            }
-        }
-        changed
-    }
-
-    /// Applies the one-time changes this file hasn't had.
-    pub fn migrate(&mut self) {
-        if self.settings_migrations < 1 {
-            // Seek Between Clips was off by default while experimental; a
-            // file saved then has the old default and gets the new one once
-            // (#434). Turning it off again after this sticks.
-            self.hook_runs_batch = true;
-        }
-        // Migration 2 added Clean clips as an editable profile (#898). It is
-        // built in now (#911), so 2 has nothing left to do, and the copies it
-        // made are sorted out below with every other profile that has a
-        // built-in's name. That runs at every load rather than once, so a
-        // built-in added later takes its name the same way.
-        let kept = crate::builtin_profiles::separate_builtin_copies(
-            &mut self.command_profiles,
-            &mut self.command_profile_active,
-        );
-        for name in kept {
-            if !self.builtin_profile_notice.contains(&name) {
-                self.builtin_profile_notice.push(name);
-            }
-        }
-        self.settings_migrations = MIGRATIONS;
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -1206,6 +1158,41 @@ mod tests {
         )
         .expect("a settings file");
         assert_eq!(older.rescan_offered_for, "");
+    }
+
+    /// A settings file from before migration 3, with this Players table.
+    fn file_with_players(players: &str) -> AppSettings {
+        serde_json::from_str(&format!(
+            r#"{{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6,
+                "settings_migrations": 2, "players": {players}}}"#
+        ))
+        .expect("a settings file")
+    }
+
+    #[test]
+    fn migration_3_turns_a_used_tables_own_fallback_into_no_spray_with_a_notice() {
+        let mut settings = file_with_players(
+            r#"{"pov_fallback": "own", "players": [{"name": "m00cat", "png": "a.png"}]}"#,
+        );
+        settings.migrate();
+        assert_eq!(
+            settings.players.pov_fallback,
+            native::player_overrides::SprayFallback::None
+        );
+        assert!(settings.pov_own_spray_notice);
+        assert_eq!(settings.settings_migrations, MIGRATIONS);
+    }
+
+    #[test]
+    fn migration_3_says_nothing_to_someone_who_never_used_the_table() {
+        let mut settings = file_with_players(r#"{"pov_fallback": "own"}"#);
+        settings.migrate();
+        assert_eq!(
+            settings.players.pov_fallback,
+            native::player_overrides::SprayFallback::Png
+        );
+        assert!(!settings.pov_own_spray_notice);
     }
 
     #[test]

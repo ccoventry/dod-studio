@@ -434,6 +434,8 @@ pub fn poll() {
     // Patches Core.dll's packet loop once viewdemo loads it, and logs each
     // load's time (#798).
     crate::fast_load::poll();
+    // Patches DemoPlayer.dll's dictionary grow once viewdemo loads it (#1392).
+    crate::demoplayer_dict_cache::keep_installed();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
@@ -481,6 +483,8 @@ pub fn poll() {
     crate::own_blood::poll();
     // A float compare unless ds_map_weather changed (#1129).
     crate::map_weather::poll();
+    // Two float loads and a level-name hash unless ds_map_wind changed.
+    crate::map_wind::poll();
     crate::map_sounds::poll();
     // A level-name hash and a few byte compares once applied (#1312).
     crate::map_light::poll();

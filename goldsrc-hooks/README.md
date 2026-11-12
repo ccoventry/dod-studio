@@ -370,8 +370,8 @@ to tell two builds at one path apart before reusing the game (#1143).
 > [!WARNING]
 > **Never join a server from a game you loaded this DLL into, and never load
 > it into a game you are about to play online with.** This DLL patches the
-> game in memory, which is what VAC detects. Only use a separate movie copy of
-> Half-Life. The DLL refuses `connect` once it has hooked the engine, but
+> game in memory, which is what VAC detects. Only use a movie copy of
+> the `dod` folder (or of Half-Life). The DLL refuses `connect` once it has hooked the engine, but
 > don't rely on that alone. See [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 The DLL has to be in the game **before `client.dll` starts**: it reaches the
@@ -464,7 +464,10 @@ tab's spray size, in place of the engine's -- whether or not the demo saved
 one, POV or HLTV (#368) -- through the engine's own custom-spray path, on
 both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`); with HD
 textures on, its upload gets the PNG itself. A spray the demo saved is drawn
-untouched ("From the demo", "Their own spray").
+untouched ("From the demo"). `src/spray_lambda.rs` does the same for the
+stock lambda a server places when it has no custom spray for a player: the
+recorder's in a POV demo gets their table spray, any other the fallback
+(#1322; `tools/verify_lambda_spray_offsets.py`, `--anniversary`).
 `ds_player_spray <name>` makes a `logos\<name>.png` the user's own spray for
 live play by writing the game's `tempdecal.wad` (with a backup).
 `src/player_crosshair.rs` gives the crosshair on screen (the recorder's in
@@ -487,6 +490,7 @@ crash. Set the variable to `0` to turn it off.
 | --- | --- | --- |
 | `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `ds_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
 | `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/demoplayer_dict_cache.rs` | `DemoPlayer.dll+0x48e0` crash on a second `viewdemo` of an HLTV demo in one session (25th Anniversary): the demo player's event dictionary grows and keeps a lookup cache that points into the freed array (part of #1392). Both builds patched (`tools/verify_demoplayer_dict_cache_offsets.py`). `ds_debug_status` shows how often it cleared the cache. | `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` |
 | `src/map_file_leak.rs` | `Fatal Error: COM_LoadFile: not enough space for maps/<map>.bsp`, or a silent exit, after about 30 map loads on the pre-Anniversary build: DoD's client leaks a copy of every map's `.bsp` (#1232). `ds_debug_status` shows how many it freed. | `GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX=0` |
 | `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
 | `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |

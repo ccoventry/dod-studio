@@ -15,6 +15,29 @@ pub fn take_verify_settings_not_recorded(folder: impl Display, err: impl Display
     )
 }
 
+/// The settings a batch records beside each of its takes (part of #1085).
+pub fn take_settings_recorded(s: &native::hlcr::take_settings::CaptureSettings) -> String {
+    let hook = if s.hook.is_empty() {
+        "none found"
+    } else {
+        s.hook.as_str()
+    };
+    format!(
+        "[capture] Each take records the settings it was captured with: {mode} {width}x{height} at {fps} fps, FOV {fov}, {install}, hook DLL {hook}, {lines} Initial Commands, {commands} Scheduled Commands, {before} s before and {after} s after. Hash {hash}.",
+        mode = s.mode,
+        width = s.width,
+        height = s.height,
+        fps = s.fps,
+        fov = s.fov,
+        install = s.install,
+        lines = s.lines.len(),
+        commands = s.commands.len(),
+        before = s.before,
+        after = s.after,
+        hash = s.hash,
+    )
+}
+
 /// OBS began recording after the clip's first frame.
 pub fn take_verify_started_late(take_key: &str, ms: impl Display, folder: &str) -> String {
     format!(
@@ -26,6 +49,40 @@ pub fn take_verify_started_late(take_key: &str, ms: impl Display, folder: &str) 
 pub fn take_verify_cut_short(take_key: &str, why: impl Display, folder: &str) -> String {
     format!(
         "[take-verify] {take_key} {why}: not counted as captured. Its partial take is left at {folder}."
+    )
+}
+
+/// A clip the game recorded with no start, no stop or no frames (#1401).
+pub fn take_verify_clip_failed(
+    take_key: &str,
+    why: native::capture_engine::clip_verdict::ClipFailure,
+    folder: &str,
+) -> String {
+    use native::capture_engine::clip_verdict::ClipFailure;
+    let why = match why {
+        ClipFailure::NoStart => "the game never started recording it (no START_RECORD)",
+        ClipFailure::NoStop => "the game never stopped recording it (no STOP_RECORD)",
+        ClipFailure::NoFrames => "the game recorded no frames of it",
+    };
+    format!(
+        "⚠️ [take-verify] {take_key} failed: {why}. Not counted as captured; whatever it left is at {folder}."
+    )
+}
+
+/// A clip the game recorded for less than its plan, or without one of its
+/// planned kills (#1401).
+pub fn take_verify_clip_short(
+    take_key: &str,
+    s: native::capture_engine::clip_verdict::ShortClip,
+) -> String {
+    let what = match s.kills_outside {
+        0 => "is shorter than planned".to_string(),
+        1 => "is missing 1 of its kills (outside the recording)".to_string(),
+        n => format!("is missing {n} of its kills (outside the recording)"),
+    };
+    format!(
+        "⚠️ [take-verify] {take_key} {what}: {:.2} s recorded of {:.2} s planned. Counted as captured; check it before using it.",
+        s.recorded_secs, s.planned_secs
     )
 }
 
@@ -194,6 +251,20 @@ mod tests {
         assert_eq!(
             take_stopped_writing_video(1.0, 2.5),
             "stopped writing video early (1.00 s of video, 2.50 s of audio)"
+        );
+        use native::capture_engine::clip_verdict::{ClipFailure, ShortClip};
+        assert_eq!(
+            take_verify_clip_failed("k", ClipFailure::NoStart, "/f"),
+            "⚠️ [take-verify] k failed: the game never started recording it (no START_RECORD). Not counted as captured; whatever it left is at /f."
+        );
+        let short = ShortClip {
+            recorded_secs: 16.75,
+            planned_secs: 16.76,
+            kills_outside: 1,
+        };
+        assert_eq!(
+            take_verify_clip_short("k", short),
+            "⚠️ [take-verify] k is missing 1 of its kills (outside the recording): 16.75 s recorded of 16.76 s planned. Counted as captured; check it before using it."
         );
     }
 

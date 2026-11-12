@@ -55,9 +55,8 @@ Usage:
     python goldsrc-hooks/tools/verify_lightmap_gamma_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_lightmap_gamma_offsets.py --anniversary [path-to-hw.dll]
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one (the POST-Anniversary movies install has the same
-`hw.dll`). Needs `pip install pefile capstone`.
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install (the 25th Anniversary `hw.dll`). Needs `pip install pefile capstone`.
 """
 
 import re
@@ -76,7 +75,7 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll")
 RUST = Path(__file__).resolve().parent.parent / "src" / "lightmap_gamma.rs"
 
 CVARS = ("gamma", "lightgamma", "texgamma", "brightness")
@@ -232,7 +231,7 @@ def main():
 
     checks = sorted({owner(c.address - base) for c in callers_of(build_gamma)} - {v_init})
     check(checks, f"V_CheckGamma, every other caller of BuildGammaTable: {[hex(v) for v in checks]}"
-                  + (" (the second is the palette pass with it inlined)" if len(checks) == 2 else ""))
+                  + (" (the second is the palette pass, V_UpdatePalette, with it inlined)" if len(checks) == 2 else ""))
     flushes = {}
     for v in checks:
         saved = [i for i in body(v) if i.mnemonic == "ucomiss" or (i.mnemonic == "fld" and "0x" in i.op_str)]
@@ -313,7 +312,7 @@ def main():
     check(rets and all(not r.op_str for r in rets), f"its returns are plain `ret`s ({len(rets)})")
     calls = [i for i in vbody + tail if i.mnemonic == "call" and i.operands[0].type == x86.X86_OP_IMM]
     targets = [c.operands[0].imm - base for c in calls]
-    check(len(targets) >= 3, f"it calls the clamp, BuildGammaTable and the flush: {[hex(t) for t in targets]}")
+    check(len(targets) >= 3, f"it calls the clamp (FilterLightParams), BuildGammaTable and the flush: {[hex(t) for t in targets]}")
     build_gamma, flush = targets[1], targets[2]
     flush_first = next(md.disasm(img[flush:flush + 4], base + flush))
     check(flush_first.mnemonic == "ret", f"the flush at +{flush:#x} is a lone `ret`: lightmaps are never rebuilt on a gamma change")

@@ -32,8 +32,8 @@
 //!
 //! Studio's Configuration > Players: a table of players and the spray each
 //! gets (a PNG in `<game>\logos\`, or "From the demo"), and a fallback for
-//! everyone else per demo type (POV: their own, one PNG or none; HLTV: one
-//! PNG or none), mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
+//! everyone else per demo type (one PNG or none),
+//! mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
 //! (`player_table.rs`). It applies only while a demo plays and
 //! `ds_player_overrides` is 1. Every spray from a PNG, and every "no
 //! spray", is a spray `spray_hltv.rs` builds and shoots in place of the
@@ -42,7 +42,8 @@
 //! textures on, its upload comes back through `texture_hires`' spray arm,
 //! which swaps the PNG itself in at the largest power of two `gl_max_size`
 //! allows, drawn at the built spray's size. A spray the demo saved is never
-//! changed: "From the demo" and "Their own spray" draw it as it is.
+//! changed: "From the demo" draws it as it is. A lambda, which a server places
+//! with no player attached, is `spray_lambda`'s.
 //!
 //! The content key below names a spray in the HD-miss list.
 //!
@@ -205,7 +206,7 @@ pub unsafe fn upload_key(
     {
         return None;
     }
-    // A count of 0 passes `Draw_ValidateCustomLogo` and `GL_Upload8` then
+    // A count of 0 passes `Draw_ValidateCustomLogo` and `GL_Upload16` then
     // reads a full palette anyway (6 of the 216 sprays in one `custom.hpk`
     // are written that way), so it means 256 here too.
     let count = match unsafe { (palette.sub(2) as *const u16).read_unaligned() } {

@@ -27,8 +27,6 @@
 //! hard kill or a power cut. `recover` handles those on the next start
 //! instead, because from outside the process they are indistinguishable.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 pub mod bench;
 pub mod client;
 pub mod drop_rate;

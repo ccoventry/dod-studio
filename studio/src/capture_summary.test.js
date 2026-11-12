@@ -60,3 +60,9 @@ describe('summaryParts', () => {
     });
   });
 });
+
+describe('summaryParts AGR rate', () => {
+  it('says the rate is not set rather than naming one', () => {
+    expect(summaryParts({ ...base, mode: 'agr', agrFps: 0 })[0].text).toContain('AGR FPS not set');
+  });
+});

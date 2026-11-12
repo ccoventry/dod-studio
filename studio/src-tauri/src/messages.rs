@@ -39,6 +39,7 @@ pub mod overview;
 pub mod preview;
 pub mod preview_start;
 pub mod render;
+pub mod repair;
 pub mod review;
 pub mod scan;
 pub mod settings;
@@ -175,6 +176,8 @@ pub fn hd_not_python(path: &str) -> String {
 
 pub const CAPTURE_BATCH_ALREADY_RUNNING: &str = "Capture batch already in progress";
 pub const NO_STREAKS_IN_PAYLOAD: &str = "No streaks in payload";
+pub const AGR_FPS_REQUIRED: &str =
+    "AGR FPS is empty: set it on Configuration > Output Format before starting an AGR capture.";
 
 pub fn configure_paths_before(action: &str) -> String {
     format!(

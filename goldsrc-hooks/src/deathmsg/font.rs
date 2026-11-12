@@ -16,7 +16,8 @@
 //! In `hw.dll`, `pfnDrawConsoleString` draws through the engine's own vgui2
 //! surface (`VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s
 //! `CreateInterface` on both builds) with one font: `"EngineFont"` from the
-//! default scheme, `dod/resource/TrackerScheme.res`, fetched once and kept.
+//! default scheme, `dod/resource/TrackerScheme.res`, fetched once and kept
+//! (`VGUI2_Draw_Init`, PRE `hw.dll+0x69e0`, POST `+0x230d40`).
 //! The call sets the font, the position and the colour, converts the string
 //! to UTF-16 (`ILocalize::ConvertANSIToUnicode`, CP_UTF8), prints it, and then
 //! puts the colour back to `con_color`. Its width is the sum of each
