@@ -1,5 +1,5 @@
 // render_presets_ui.js — named render setups (#108).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.goto('/tests/e2e/render-presets.html');

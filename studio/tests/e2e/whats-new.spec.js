@@ -2,7 +2,7 @@
 // notes from the bundled file, the other versions from the backend's
 // release_history, the update window's pending notes, and the first-start
 // toast.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const BUNDLED = [
   'See assets below to download.',
@@ -39,7 +39,7 @@ function boot(page, { autoCheck = true, seen = null, bundled = BUNDLED } = {}) {
       else localStorage.removeItem('dodstudio.whatsNew.seenVersion');
     } catch { /* no storage */ }
     window.__mockInvokeHandlers = {
-      get_settings: () => ({ pinned_folders: [], target_drives: ['E:/caps'], auto_check_updates: autoCheck }),
+      get_settings: () => ({ setup_dismissed: true, pinned_folders: [], target_drives: ['E:/caps'], auto_check_updates: autoCheck }),
       calculate_export_pool_space: () => 10 * 1024 ** 3,
       system_memory_bytes: () => 16 * 1024 ** 3,
       release_history: ({ offline }) => (offline

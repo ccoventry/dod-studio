@@ -4,7 +4,7 @@
 // count is known), that an Anniversary engine's 1024 drops the mark, and the
 // ask before a batch or a preview: listed demos, Cancel stops, and nothing
 // over the limit asks nothing.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page, engineLimit = null) {
   await page.addInitScript((limit) => {

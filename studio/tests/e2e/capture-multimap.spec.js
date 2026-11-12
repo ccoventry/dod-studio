@@ -1,7 +1,7 @@
 // Start Capture Batch with a highlight picked in a demo that recorded more
 // than one map (#217): the batch starts like any other, on the demo's first
 // map, with no question and no split, and the activity log says so.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('a pick in a multi-map demo starts the batch without asking, and the log says the first map is used', async ({ page }) => {
   await page.addInitScript(() => {

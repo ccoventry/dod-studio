@@ -1,6 +1,6 @@
 // The update and map downloads' step lines and bars (#957), driven against
 // tests/e2e/downloads.html with the backend's events mocked.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const MB = 1024 * 1024;
 
