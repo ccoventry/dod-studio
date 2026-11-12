@@ -208,6 +208,8 @@
 //! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
 //!   or none, by pointing the weather updater's type read at our own value
 //!   (#1129).
+//! - `map_wind`: the `ds_map_wind` cvar -- the wind that blows rain, snow
+//!   and smoke, by pointing the particles' wind reads at our own vector.
 //! - `map_cfgs`: the `ds_map_run_cfgs` cvar -- run
 //!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
 //!   demo's map loads, for per-map brightness and gamma, which a server's map
@@ -332,6 +334,7 @@ mod map_light;
 mod map_sounds;
 mod map_text;
 mod map_weather;
+mod map_wind;
 mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
@@ -390,6 +393,7 @@ mod spectator_target;
 mod spectator_text;
 mod spray;
 mod spray_hltv;
+mod spray_lambda;
 mod sprite_blend;
 mod steam_id;
 mod strafe_twitch;
