@@ -116,7 +116,7 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 
 ### Changing CI (`.github/workflows/`, rulesets)
 Keep checks thorough and wall-clock short; the reasons live as comments in `ci.yml` (#346, #348, #334, #654).
-- **New checks go in their own parallel job**, not appended to an existing one: CI time is the longest job (~3 min), not the sum.
+- **New checks go in their own parallel job**, not appended to an existing one: CI time is the longest job (~4 min, `Rust tests (native)`, measured 2026-11-12; e2e is ~3 min in two shards), not the sum.
 - **Cache Rust with `Swatinem/rust-cache`, saved only from dev** (`save-if: github.ref == 'refs/heads/dev'`). A PR can only restore its base branch's cache, so PR-saved caches are dead weight that evicts the useful ones.
 - **Every cargo command takes `--locked`.** Test builds set `CARGO_PROFILE_{DEV,TEST}_DEBUG=0`. Clippy and rustfmt stay pinned to the toolchain in `ci.yml`.
 - **Prefer prebuilt tools to building them** (`taiki-e/install-action` over `cargo install`), and skip installers that are slow for no gain (Playwright's `--with-deps` on Windows). Don't cache a download that is faster than restoring the cache.
