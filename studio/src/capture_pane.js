@@ -42,6 +42,7 @@ import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
+import { createBatchUntick } from './batch_untick.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -1058,6 +1059,17 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       });
 
       if (total === 0) return;
+
+      // The captured highlights are done: untick them (short ones stay).
+      if (lastDispatch) {
+        createBatchUntick({
+          getDemos: () => (currentGetState ? currentGetState() : null)?.currentScannedDemos || [],
+          onSelectionChange: () => { if (currentOnStatusChange) currentOnStatusChange(); },
+        }).apply({
+          streak_uids: lastDispatch.streaks.map((streak, i) => streakUid(lastDispatch.demoPaths[i], streak)),
+          blocks,
+        });
+      }
 
       if (advanced > 0 || markCleared) {
         // Both tables read status, and neither re-renders on its own.

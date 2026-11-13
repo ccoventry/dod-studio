@@ -1919,6 +1919,11 @@ export const STRINGS = {
     NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
   },
 
+  // ── Highlights unticked once a batch has captured them (batch_untick.js) ──
+  BATCH_UNTICK: {
+    logLine: (unticked, shortLeft) => `Capture batch ended: unticked ${unticked} captured highlight(s), left ${shortLeft} short one(s) ticked.`,
+  },
+
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
   // Map library warnings. A demo names the map it was recorded on and stamps
   // that map's build alongside it, so "missing" and "wrong build" are different
