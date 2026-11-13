@@ -942,6 +942,8 @@ export const STRINGS = {
     START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    cancelQueued: (n) => `Cancel Queued (${n})`,
+    CANCEL_QUEUED_TITLE: 'Stop every row that is waiting to render. Rows already rendering keep going.',
     retrySelected: (n) => `Retry (${n})`,
     RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
     removeSelected: (n) => `Remove (${n})`,
