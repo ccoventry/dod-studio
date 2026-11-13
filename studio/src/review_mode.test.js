@@ -70,3 +70,49 @@ describe('review_event toasts', () => {
     expect(showToast).not.toHaveBeenCalled();
   });
 });
+
+describe('startReview with a demo whose file is missing (#1376)', () => {
+  const streak = (player) => ({ player_index: player, kills: [[10, 1, 'K98'], [20, 2, 'K98'], [30, 3, 'K98']], curation: 'Keep', viewdemo_times: [1, 2, 3] });
+  const demos = () => ['a.dem', 'b.dem'].map((name) => ({ path: `C:/demos/${name}`, name, streaks: [streak(1)] }));
+
+  async function review(settle) {
+    const { startHighlightReview } = await import('./ipc_bridge.js');
+    startHighlightReview.mockReset();
+    startHighlightReview.mockResolvedValue({ count: 1, launched: true });
+    (await import('./running_game_guard.js')).closeGameWithOtherSettings.mockResolvedValue(true);
+    const list = demos();
+    const button = { addEventListener: vi.fn(), disabled: false };
+    globalThis.document = { querySelector: (s) => (s === '#review-highlights-btn' ? button : null) };
+    const { startReview } = initReviewMode({
+      getDemos: () => list, getCheckedPaths: () => [], getShownPaths: () => [], onChanged: vi.fn(), settleMissingDemos: settle(list),
+    });
+    const result = await startReview(list.map((d) => d.path), { covers: 'all' });
+    return { result, sent: startHighlightReview.mock.calls[0]?.[0], list };
+  }
+
+  it('reviews the rest of the queue when the missing demo was skipped', async () => {
+    const { sent, result } = await review((list) => async () => ({ ok: true, touched: true, dropped: new Set([list[0]]) }));
+    expect(result).toBeNull();
+    expect(sent.map((h) => h.demo)).toEqual(['C:/demos/b.dem']);
+  });
+
+  it('sends nothing when the pop-up was closed', async () => {
+    const { sent, result } = await review(() => async () => ({ ok: false, touched: false, dropped: new Set() }));
+    expect(result).toBe(STRINGS.REVIEW.NOT_STARTED);
+    expect(sent).toBeUndefined();
+  });
+
+  it('reviews a located demo under its new path', async () => {
+    const { sent } = await review((list) => async () => {
+      list[0].path = 'C:/demos/moved/a.dem';
+      return { ok: true, touched: true, dropped: new Set() };
+    });
+    expect(sent.map((h) => h.demo).sort()).toEqual(['C:/demos/b.dem', 'C:/demos/moved/a.dem']);
+  });
+
+  it('says nothing is left when the only demo was skipped', async () => {
+    const { sent, result } = await review((list) => async () => ({ ok: true, touched: true, dropped: new Set(list) }));
+    expect(sent).toBeUndefined();
+    expect(result).toBe(STRINGS.REVIEW.NOTHING_LEFT_AFTER_SKIP);
+  });
+});

@@ -15,6 +15,9 @@ import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
+// What settleMissingDemos answers when nothing asks about missing demos.
+const NOTHING_MISSING = async () => ({ ok: true, touched: false, dropped: new Set() });
+
 /**
  * Wires the Master Demo Queue's Review highlights button.
  *  - getDemos(): the queue's demos
@@ -28,10 +31,13 @@ import { STRINGS } from './strings.js';
  *  - onChanged(): re-render and mark the project dirty after an answer
  *  - hltvPick: review_hltv_picker.js's picker, which holds the box's choice
  *    and the players "Players I pick" reviews
+ *  - settleMissingDemos(demos): review_missing_demos.js's, which asks what to
+ *    do about each of a review's demos whose file is gone (Locate, Use found
+ *    copy, Remove, Skip, or cancel the review)
  * Returns `{ startReview }`, which review_from_game.js starts the game's own
  * requests with (#1142).
  */
-export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null }) {
+export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null, settleMissingDemos = NOTHING_MISSING }) {
   const btn = document.querySelector('#review-highlights-btn');
   if (!btn) return { startReview: async () => STRINGS.REVIEW.NOT_STARTED };
   let answers = 0;
@@ -114,7 +120,7 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const picked = hltvPick?.players() || [];
     const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf, picked });
     const order = document.querySelector('#review-order-select')?.value;
-    const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, covers, hltvPlayers, order);
+    let { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, covers, hltvPlayers, order);
     if (highlights.length === 0) {
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
       if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;
@@ -125,6 +131,22 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     }
     btn.disabled = true;
     try {
+      // Only the demos with a highlight in this review: one whose file is
+      // gone is asked about, and the queue is built again without a skipped
+      // one, or with a located one's new path.
+      const reviewed = new Set(highlights.map((h) => h.demo));
+      const asked = getDemos().filter((d) => paths.includes(d.path));
+      const settled = await settleMissingDemos(getDemos().filter((d) => reviewed.has(d.path)));
+      if (!settled.ok) return STRINGS.REVIEW.NOT_STARTED;
+      if (settled.touched) {
+        const now = getDemos();
+        const keptPaths = asked.filter((d) => now.includes(d) && !settled.dropped.has(d)).map((d) => d.path);
+        ({ highlights, skipped, notChosen } = buildReviewQueue(now, keptPaths, covers, hltvPlayers, order));
+        if (highlights.length === 0) {
+          showToast(STRINGS.REVIEW.NOTHING_LEFT_AFTER_SKIP, 'info');
+          return STRINGS.REVIEW.NOTHING_LEFT_AFTER_SKIP;
+        }
+      }
       // A game started with other launch settings is closed and started
       // again, if the user says so; otherwise nothing is sent (#666).
       if (!fromGame && !(await closeGameWithOtherSettings())) return STRINGS.REVIEW.NOT_STARTED;

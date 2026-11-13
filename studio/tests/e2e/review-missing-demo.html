@@ -1,0 +1,105 @@
+<!doctype html>
+<!--
+  Harness for Review reaching a demo whose file is missing (#1376): the real
+  themed dialog, review_mode.js, review_missing_demos.js,
+  demo_file_recheck.js and project_demos.js, wired as main.js wires them.
+  window.__disk is the set of files that are there and window.__renamed maps
+  a gone path to where locate_missing_demos finds it; window.__stopped lists
+  gone paths whose search stopped early. #queue lists the queue's rows.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>review missing demo harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <button id="review-highlights-btn">Review highlights</button>
+  <select id="review-covers-select"><option value="all">All</option></select>
+  <select id="review-order-select"><option value="time">Chronological</option></select>
+  <ul id="queue"></ul>
+
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 420px; padding: 20px;">
+      <h2 id="themed-confirm-title">Confirm</h2>
+      <p id="themed-confirm-message" style="white-space: pre-line;"></p>
+      <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <button id="themed-confirm-ok-btn" class="primary-btn">Confirm</button>
+        <button id="themed-confirm-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { initReviewMode } from '/src/review_mode.js';
+    import { createProjectDemos } from '/src/project_demos.js';
+    import { createDemoFileRecheck } from '/src/demo_file_recheck.js';
+    import { createReviewMissingDemos } from '/src/review_missing_demos.js';
+
+    initThemedConfirm();
+    const life = (at) => ({ target_player: 'p', player_index: 1, kills: [[at, at, 'K98']], viewdemo_times: [at], kill_count: 1, curation: 'Keep' });
+    let demos = ['a', 'b', 'c'].map((n, i) => ({
+      name: `${n}.dem`, path: `D:/tests/${n}.dem`, file_key: `k-${n}`, is_pov: true, streaks: [life(10 + i)],
+    }));
+    window.__disk = new Set(demos.map((d) => d.path));
+    window.__renamed = {};
+    window.__stopped = [];
+    window.__mockInvokeHandlers.files_exist = ({ paths }) => paths.map((p) => window.__disk.has(p));
+    window.__mockInvokeHandlers.locate_missing_demos = ({ demos: asked }) => asked
+      .filter((d) => !window.__disk.has(d.path))
+      .map((d) => ({
+        path: d.path,
+        candidate: window.__renamed[d.path] || null,
+        search_stopped_early: !window.__renamed[d.path] && window.__stopped.includes(d.path),
+      }));
+    window.__mockInvokeHandlers.start_highlight_review = ({ highlights }) => ({ count: highlights.length, launched: false });
+    window.__sent = () => window.__mockInvocations
+      .filter((c) => c.cmd === 'start_highlight_review')
+      .map((c) => c.args.highlights.map((h) => h.demo));
+    window.__logged = () => window.__mockInvocations
+      .filter((c) => c.cmd === 'log_frontend_event').map((c) => c.args.message);
+
+    const draw = () => {
+      document.querySelector('#queue').replaceChildren(...demos.map((d) => {
+        const li = document.createElement('li');
+        li.textContent = `${d.name}${d.missing ? ' (missing)' : ''}`;
+        return li;
+      }));
+    };
+    const projectDemos = createProjectDemos({
+      getDemos: () => demos,
+      getTakeIndex: () => ({}),
+      getScanPaths: () => [],
+      refreshQueue: draw,
+      scan: async () => {},
+      removeDemo: () => {},
+    });
+    const { lookMissing } = createDemoFileRecheck({
+      getDemos: () => demos,
+      markDemosGone: projectDemos.markDemosGone,
+      markDemosBack: projectDemos.markDemosBack,
+      refreshQueue: draw,
+      useFoundCopies: projectDemos.useFoundCopies,
+    });
+    initReviewMode({
+      getDemos: () => demos,
+      getCheckedPaths: () => [],
+      getShownPaths: () => demos.map((d) => d.path),
+      getRecorders: () => [],
+      recorderOf: () => null,
+      onChanged: () => {},
+      settleMissingDemos: createReviewMissingDemos({
+        getDemos: () => demos,
+        lookMissing,
+        locateDemoByHand: projectDemos.locateDemoByHand,
+        useFoundCopies: projectDemos.useFoundCopies,
+        confirmTrackedRemove: async () => true,
+        replaceDemos: (next) => { demos = next; draw(); },
+      }),
+    });
+    draw();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

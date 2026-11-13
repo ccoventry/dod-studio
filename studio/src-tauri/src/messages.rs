@@ -524,17 +524,48 @@ pub fn trimming_demo(demo: &str, step: native::patch::trimmed_copies::Progress) 
 }
 
 /// Why a demo over the engine's entity limit can't be played: no trimmed copy
-/// could be made safely.
+/// could be made safely. Only a pre-Anniversary engine is told to switch
+/// installs: the 25th Anniversary engine takes the most entities of any, so
+/// there the demo can't play at all, unless the copy only lacked room (whose
+/// reason already says to free some).
 pub fn demo_cannot_be_trimmed(
     demo: &str,
     engine: &native::patch::trimmed_copies::Engine,
     why: &native::patch::entity_trim::TrimError,
 ) -> String {
+    use native::patch::entity_trim::TrimError;
+    let advice = match why {
+        _ if engine.limit < native::sys::packet_limit::ANNIVERSARY_PACKET_ENTITIES => {
+            " Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights."
+        }
+        TrimError::NoRoom { .. } => "",
+        _ => {
+            " No install takes more entities than this one, so this demo can't be played: untick its highlights."
+        }
+    };
     format!(
-        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}. \
-         Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights.",
+        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}.{advice}",
         engine.name(),
         engine.limit
+    )
+}
+
+/// A Launch Preview's or a batch's demo that isn't at its path any more:
+/// renamed, moved or deleted since it was added to the queue.
+pub fn demo_file_missing(demo: &std::path::Path) -> String {
+    format!(
+        "{} isn't there any more: it was renamed, moved or deleted. \
+         Use Locate… on its row in the Master Demo Queue to point at it again.",
+        demo.display()
+    )
+}
+
+/// A demo that is there but could not be read to learn whether the engine
+/// can play it: nothing is said about its entities, which are unknown.
+pub fn demo_could_not_be_read(demo: &str, why: &str) -> String {
+    format!(
+        "{demo} could not be read, so it can't be checked against the game's entity limit before it plays: {why}. \
+         If it's still being copied or synced, wait and try again."
     )
 }
 

@@ -53,6 +53,8 @@ import { readHlPath, startHlPathWatch } from './hl_path_watch.js';
 import { renderQueueFooter } from './queue_footer.js';
 import { startAppShortcuts } from './app_shortcuts.js';
 import { createProjectDemos } from './project_demos.js';
+import { createDemoFileRecheck } from './demo_file_recheck.js';
+import { createReviewMissingDemos } from './review_missing_demos.js';
 import { createQueueState } from './queue_state.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
@@ -259,6 +261,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   const {
     checkMissingDemos,
     pickedDemosPresent,
+    markDemosGone, markDemosBack,
     useFoundCopies,
     offerIdenticalCopies,
     locateDemoByHand,
@@ -270,6 +273,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
   });
+  // A demo renamed, moved or deleted while Studio is open: demo_file_recheck.js.
+  const { ensurePresent: ensureDemoFiles, lookMissing } = createDemoFileRecheck({ getDemos: queue.getDemos, markDemosGone, markDemosBack,
+    refreshQueue: queue.refreshAfterRelocation, useFoundCopies });
 
   // Demos that recorded more than one map (#217): queue_split.js.
   const { splitQueuedDemo, captureDemosReady } = createQueueSplit({
@@ -388,9 +394,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
     hltvPick,
+    // Review reaching a demo whose file is gone asks what to do: review_missing_demos.js.
+    settleMissingDemos: createReviewMissingDemos({ getDemos: queue.getDemos, lookMissing, locateDemoByHand, useFoundCopies,
+      confirmTrackedRemove: (demo) => requestTrackedDeleteConfirm(demo), replaceDemos: queue.replace }),
   });
   // Right-click menu on the queue's rows: demo_context_menu.js.
-  startDemoContextMenu({ startReview: reviewMode.startReview });
+  startDemoContextMenu({ startReview: reviewMode.startReview, ensureDemoFiles });
   // The in-game Review tab's From the start / From here (#1142).
   startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
     scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
@@ -506,7 +515,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  }, { getProjectTeams: () => projectTeams, getTakeIndex: () => takeIndex });
+  }, { getProjectTeams: () => projectTeams, getTakeIndex: () => takeIndex, ensureDemoFiles });
 
   // The Demo Analyzer's Explorer shares the pinned folders with Capture Studio.
   demoFolders.startAnalyzerPane();

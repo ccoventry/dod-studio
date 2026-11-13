@@ -334,10 +334,10 @@ fn keying_status_line(done: u32, total: u32) -> String {
 }
 
 /// How deep, and how many entries, a folder scan with "Include subfolders"
-/// walks (#531): the same bounds as the moved-demo search (#21), so a folder
-/// with a deep or huge tree under it cannot turn a scan into a hang. Hitting
-/// either is reported, never silent.
-const SCAN_MAX_DEPTH: usize = LOCATE_MAX_DEPTH;
+/// walks (#531): so a folder with a deep or huge tree under it cannot turn a
+/// scan into a hang. Hitting either is reported, never silent. The moved-demo
+/// search (#21) has its own, shorter limits (LOCATE_*, #1376).
+const SCAN_MAX_DEPTH: usize = 6;
 const SCAN_MAX_ENTRIES: usize = LOCATE_MAX_ENTRIES;
 
 /// Which of the folder scan's bounds stopped it short (#531).
@@ -583,12 +583,34 @@ pub(crate) fn changed_progress_due(
 pub struct MissingDemo {
     pub path: String,
     pub candidate: Option<String>,
+    /// The search ended on its time or entry limit before it had looked
+    /// everywhere, so a demo with no `candidate` may still be in a folder it
+    /// did not reach.
+    #[serde(default)]
+    pub search_stopped_early: bool,
 }
 
-/// How deep, and how many entries, the search for a moved demo will walk, so
-/// pointing it at a drive root cannot turn a project load into a hang.
-const LOCATE_MAX_DEPTH: usize = 6;
+/// How far the search for a moved demo goes, so pointing it at a drive root
+/// cannot turn a project load into a hang. Fixed, with no setting (#1376):
+/// folder levels below each search folder, the time it may take whatever the
+/// depth, and a cap on entries read.
+const LOCATE_MAX_DEPTH: usize = 3;
+const LOCATE_TIME_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 const LOCATE_MAX_ENTRIES: usize = 50_000;
+
+/// The three limits of one search.
+#[derive(Clone, Copy)]
+struct LocateLimits {
+    max_depth: usize,
+    max_entries: usize,
+    budget: std::time::Duration,
+}
+
+const LOCATE_LIMITS: LocateLimits = LocateLimits {
+    max_depth: LOCATE_MAX_DEPTH,
+    max_entries: LOCATE_MAX_ENTRIES,
+    budget: LOCATE_TIME_BUDGET,
+};
 
 /// For every demo in `demos` whose file is gone, looks through `search_dirs`
 /// (recursively, bounded) for a `.dem` with the same `demo_file_key`: the
@@ -613,13 +635,22 @@ pub fn locate_missing_demos(
     search_dirs: &[PathBuf],
     on_search: &mut dyn FnMut(usize),
 ) -> Vec<MissingDemo> {
-    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES, on_search)
+    let started = std::time::Instant::now();
+    locate_missing_demos_within(
+        demos,
+        search_dirs,
+        LOCATE_LIMITS,
+        &mut || started.elapsed(),
+        on_search,
+    )
 }
 
+/// `elapsed` is the time since the search began (a test passes its own).
 fn locate_missing_demos_within(
     demos: &[KnownDemo],
     search_dirs: &[PathBuf],
-    max_entries: usize,
+    limits: LocateLimits,
+    elapsed: &mut dyn FnMut() -> std::time::Duration,
     on_search: &mut dyn FnMut(usize),
 ) -> Vec<MissingDemo> {
     let mut missing: Vec<MissingDemo> = demos
@@ -628,6 +659,7 @@ fn locate_missing_demos_within(
         .map(|d| MissingDemo {
             path: d.path.clone(),
             candidate: None,
+            search_stopped_early: false,
         })
         .collect();
     let wanted: Vec<(usize, &str, u64)> = demos
@@ -650,14 +682,21 @@ fn locate_missing_demos_within(
         .iter()
         .filter(|d| visited.insert(same_path_key(&d.to_string_lossy())))
         .collect();
-    Walker::new()
+    let mut deepest = 0;
+    let mut out_of_time = false;
+    let outcome = Walker::new()
         .breadth_first()
         // A deleted copy in the Recycle Bin has the same key (#843).
         .skip_system_folders()
-        // Folders LOCATE_MAX_DEPTH below a search folder are still read.
-        .max_depth(LOCATE_MAX_DEPTH + 1)
-        .max_entries(max_entries)
+        // Folders max_depth below a search folder are still read.
+        .max_depth(limits.max_depth + 1)
+        .max_entries(limits.max_entries)
         .walk_roots(&roots, &mut |found| {
+            if elapsed() >= limits.budget {
+                out_of_time = true;
+                return Step::Stop;
+            }
+            deepest = deepest.max(found.depth - 1);
             match found.kind {
                 Kind::Dir => {
                     return visited
@@ -690,6 +729,24 @@ fn locate_missing_demos_within(
                 Step::Enter
             }
         });
+    let all_found = missing.iter().all(|m| m.candidate.is_some());
+    let stopped_early = !all_found && (out_of_time || !outcome.complete);
+    for m in &mut missing {
+        m.search_stopped_early = stopped_early;
+    }
+    let end = match (stopped_early, out_of_time) {
+        (false, _) => crate::messages::scan::LocateEnd::Finished,
+        (true, true) => crate::messages::scan::LocateEnd::TimeCap,
+        (true, false) => crate::messages::scan::LocateEnd::EntryCap,
+    };
+    log_markdown(&crate::messages::scan::locate_search_line(
+        roots.len(),
+        deepest,
+        elapsed().as_millis(),
+        end,
+        missing.iter().filter(|m| m.candidate.is_some()).count(),
+        wanted.len(),
+    ));
     missing
 }
 
@@ -1673,7 +1730,17 @@ mod tests {
         }];
         // 30 entries: the big tree has 84, the project folder 1, then its
         // subfolder 1. Depth-first from `big` spent them all first.
-        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30, &mut |_| {});
+        let limits = LocateLimits {
+            max_entries: 30,
+            ..LOCATE_LIMITS
+        };
+        let found = locate_missing_demos_within(
+            &demos,
+            &[project.clone(), big],
+            limits,
+            &mut || std::time::Duration::ZERO,
+            &mut |_| {},
+        );
         assert_eq!(
             found[0].candidate.as_deref(),
             Some(
@@ -1684,6 +1751,80 @@ mod tests {
                     .as_ref()
             )
         );
+    }
+
+    /// A demo `levels` folders below the search folder, searched with the
+    /// real limits and a clock that never runs out.
+    fn search_levels_down(name: &str, levels: usize) -> MissingDemo {
+        let scratch = Scratch::new(name);
+        let original = scratch.path().join("match.dem");
+        std::fs::write(&original, b"HLDEMO the one that moved").unwrap();
+        let key = demo_file_key(&original).unwrap();
+        let mut dir = scratch.path().to_path_buf();
+        for level in 0..levels {
+            dir = dir.join(format!("level{level}"));
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::rename(&original, dir.join("match.dem")).unwrap();
+        let demos = vec![KnownDemo {
+            path: original.to_string_lossy().into_owned(),
+            file_key: key,
+        }];
+        let mut found = locate_missing_demos_within(
+            &demos,
+            &[scratch.path().to_path_buf()],
+            LOCATE_LIMITS,
+            &mut || std::time::Duration::ZERO,
+            &mut |_| {},
+        );
+        found.remove(0)
+    }
+
+    #[test]
+    fn a_demo_three_folders_down_is_found() {
+        let found = search_levels_down("locate_depth3", 3);
+        assert!(found.candidate.is_some(), "{found:?}");
+        assert!(!found.search_stopped_early);
+    }
+
+    #[test]
+    fn a_demo_four_folders_down_is_not_found() {
+        let found = search_levels_down("locate_depth4", 4);
+        assert!(found.candidate.is_none(), "{found:?}");
+    }
+
+    #[test]
+    fn the_time_budget_stops_the_search_and_says_so() {
+        let scratch = Scratch::new("locate_time");
+        let original = scratch.path().join("match.dem");
+        std::fs::write(&original, b"HLDEMO the one that moved").unwrap();
+        let key = demo_file_key(&original).unwrap();
+        std::fs::create_dir_all(scratch.path().join("sub")).unwrap();
+        std::fs::rename(&original, scratch.path().join("sub").join("match.dem")).unwrap();
+        let demos = vec![KnownDemo {
+            path: original.to_string_lossy().into_owned(),
+            file_key: key,
+        }];
+        // The clock starts past the budget: nothing is read.
+        let found = locate_missing_demos_within(
+            &demos,
+            &[scratch.path().to_path_buf()],
+            LOCATE_LIMITS,
+            &mut || LOCATE_TIME_BUDGET,
+            &mut |_| {},
+        );
+        assert!(found[0].candidate.is_none());
+        assert!(found[0].search_stopped_early);
+        // With time left, the same search finds it and does not say stopped.
+        let found = locate_missing_demos_within(
+            &demos,
+            &[scratch.path().to_path_buf()],
+            LOCATE_LIMITS,
+            &mut || LOCATE_TIME_BUDGET / 2,
+            &mut |_| {},
+        );
+        assert!(found[0].candidate.is_some());
+        assert!(!found[0].search_stopped_early);
     }
 
     #[test]
