@@ -736,6 +736,16 @@ export async function calculateExportPoolSpace(paths) {
     });
 }
 
+/** The capture folders' `{ free_bytes, usable_bytes }`: usable leaves out
+ *  what "Keep free on the Windows drive" keeps there (#1430). */
+export async function capturePoolRoom(paths) {
+  return invoke("capture_pool_room", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (capture_pool_room):", err);
+      throw err;
+    });
+}
+
 /** Per-path reason a Capture Output entry isn't usable — "ok" | "not_absolute"
  *  | "malformed" | "not_found" | "not_a_directory". Only worth calling once
  *  the aggregate space check has already found a problem; a per-path OS stat

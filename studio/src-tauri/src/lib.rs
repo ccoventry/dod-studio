@@ -463,6 +463,19 @@ fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     Ok(native::sys::disk::pool_free_bytes(&paths))
 }
 
+/// The capture folders' free space and the part captures may use, which
+/// leaves out what "Keep free on the Windows drive" keeps there (#1430), so
+/// Start Capture Batch's check can name the setting when it's what's short.
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
+#[tauri::command]
+async fn capture_pool_room(paths: Vec<String>) -> Result<native::sys::disk::PoolRoom, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+        native::sys::disk::pool_room(&paths)
+    }))
+    .await
+}
+
 #[derive(serde::Serialize)]
 struct CaptureOutputDiagnostic {
     path: String,
@@ -1035,6 +1048,7 @@ pub fn run() {
             estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
+            capture_pool_room,
             diagnose_capture_output_paths,
             queue_render_batch,
             start_queued_render,

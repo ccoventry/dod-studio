@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  MAX_KEEP_FREE_GB, keepFreeGbFrom, readWindowsDriveKeepFree, applyWindowsDriveKeepFree,
+  MAX_KEEP_FREE_GB, DEFAULT_KEEP_FREE_GB, keepFreeGbFrom, readWindowsDriveKeepFree, applyWindowsDriveKeepFree,
+  usableCaptureBytes, windowsDriveShortWarning,
 } from './windows_drive_setting.js';
 
 describe('Keep free on the Windows drive (#1430)', () => {
@@ -25,6 +26,42 @@ describe('Keep free on the Windows drive (#1430)', () => {
     expect(keepFreeGbFrom('lots', 30)).toBe(30);
     expect(keepFreeGbFrom(undefined, 40)).toBe(40);
     expect(keepFreeGbFrom(null, null)).toBe(null);
+  });
+});
+
+describe("Start Capture Batch's check (#1430 live test)", () => {
+  const GIB = 1024 ** 3;
+
+  it('counts the usable space, or the free space when that is unknown', () => {
+    expect(usableCaptureBytes(2 * GIB, { free_bytes: 2 * GIB, usable_bytes: 0 })).toBe(0);
+    expect(usableCaptureBytes(70 * GIB, { free_bytes: 70 * GIB, usable_bytes: 40 * GIB })).toBe(40 * GIB);
+    expect(usableCaptureBytes(5 * GIB, undefined)).toBe(5 * GIB);
+    expect(usableCaptureBytes(5 * GIB, null)).toBe(5 * GIB);
+  });
+
+  it('a Windows drive below the setting is short of room, not "no free space", and the banner says why', () => {
+    const text = windowsDriveShortWarning({ requiredBytes: 10 * GIB, freeBytes: 2 * GIB, usableBytes: 0, keepFreeGb: 50 });
+    expect(text).toContain('2.00 GB, below the 50 GB');
+    expect(text).toContain('"Keep free on the Windows drive"');
+    expect(text).toContain('Configuration → Destinations');
+    expect(text).toContain('Lower that setting');
+    expect(text).toContain('add a Capture Output folder on another drive');
+  });
+
+  it('names what can be used when the setting holds back only part of the room', () => {
+    const text = windowsDriveShortWarning({ requiredBytes: 60 * GIB, freeBytes: 70 * GIB, usableBytes: 40 * GIB, keepFreeGb: 50 });
+    expect(text).toContain('70.00 GB free, but only 40.00 GB of it can be used');
+    expect(text).toContain('keeps 50 GB free on the Windows drive');
+  });
+
+  it('says nothing when the setting holds nothing back or the capture fits anyway', () => {
+    expect(windowsDriveShortWarning({ requiredBytes: 10 * GIB, freeBytes: 5 * GIB, usableBytes: 5 * GIB, keepFreeGb: 50 })).toBe(null);
+    expect(windowsDriveShortWarning({ requiredBytes: 10 * GIB, freeBytes: 70 * GIB, usableBytes: 20 * GIB, keepFreeGb: 50 })).toBe(null);
+  });
+
+  it('quotes the default before settings load', () => {
+    const text = windowsDriveShortWarning({ requiredBytes: 10 * GIB, freeBytes: 2 * GIB, usableBytes: 0, keepFreeGb: undefined });
+    expect(text).toContain(`below the ${DEFAULT_KEEP_FREE_GB} GB`);
   });
 });
 
