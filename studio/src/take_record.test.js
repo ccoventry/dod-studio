@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { pruneTakeIndex, markBlockCaptured, recordTake, resolveTake, renameDemoInTakeIndex } from './take_index.js';
 import {
-  captureOf, recordCapture, attachCaptures, capturesToSave, carryCaptures, captureRateOf,
+  captureOf, recordCapture, attachCaptures, capturesToSave, carryCaptures, captureRateOf, sessionFolderTime,
 } from './take_record.js';
 import * as before439 from './test_fixtures/take_index_before_439.js';
 import * as before1085Record from './test_fixtures/take_record_before_1085.js';
@@ -206,5 +206,20 @@ describe('captureRateOf (#439)', () => {
       { streaks, demoPaths: ['d.dem'], captureMode: 'obs', captureFps: 120 }, takeIndex,
     );
     expect(captureOf(takeIndex, 's/b0').capture_fps).toBe(120);
+  });
+});
+
+describe('sessionFolderTime', () => {
+  it('reads the local time out of a session folder name, in a path or a take key', () => {
+    const want = new Date(2026, 10, 7, 4, 31, 8).getTime();
+    expect(sessionFolderTime('session_20261107_043108')).toBe(want);
+    expect(sessionFolderTime('D:\caps\session_20261107_043108\chain_00_b0')).toBe(want);
+    expect(sessionFolderTime('session_20261107_043108/chain_00_b0')).toBe(want);
+  });
+  it('is undefined for no such name or an impossible date', () => {
+    expect(sessionFolderTime('D:/caps/misc')).toBeUndefined();
+    expect(sessionFolderTime('')).toBeUndefined();
+    expect(sessionFolderTime(undefined)).toBeUndefined();
+    expect(sessionFolderTime('session_20261345_250000')).toBeUndefined();
   });
 });

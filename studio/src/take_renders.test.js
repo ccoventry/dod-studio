@@ -182,6 +182,28 @@ describe('projectRenderedVideos (the whole-project export list)', () => {
     expect(projectRenderedVideos(index)[0].uids).toEqual(['b']);
   });
 
+  it('orders an undated take by the time in its folder name, among the dated ones', () => {
+    const at = (...parts) => new Date(parts[0], parts[1] - 1, ...parts.slice(2)).getTime();
+    const index = { evening: ['a'], morning: ['b'], none: ['c'], 'session_20261107_050000/chain_00_b0': ['d'] };
+    recordCapture(index, 'evening', { captured_at: at(2026, 11, 7, 17, 39, 0) });
+    recordCapture(index, 'morning', { take_folder: 'D:/caps/session_20261107_043108/chain_00_b0' });
+    recordRender(index, 'evening', finished(1));
+    recordRender(index, 'morning', finished(2));
+    recordRender(index, 'none', finished(3));
+    recordRender(index, 'session_20261107_050000/chain_00_b0', finished(4));
+    expect(projectRenderedVideos(index).map((v) => v.started_unix_ms)).toEqual([2, 4, 1, 3]);
+  });
+
+  it('keeps a take with neither a time nor a dated folder where it was, after the dated', () => {
+    const index = { b: ['a'], a: ['b'], dated: ['c'] };
+    recordCapture(index, 'b', { take_folder: 'D:/caps/misc/chain_00' });
+    recordCapture(index, 'dated', { captured_at: 5 });
+    recordRender(index, 'b', finished(1));
+    recordRender(index, 'a', finished(2));
+    recordRender(index, 'dated', finished(3));
+    expect(projectRenderedVideos(index).map((v) => v.takeKey)).toEqual(['dated', 'a', 'b']);
+  });
+
   it('existingVideos keeps the found ones at their current paths', () => {
     const videos = [{ output_path: 'a' }, { output_path: 'b' }, { output_path: 'c' }];
     expect(existingVideos(videos, ['a', null, 'E:/moved/c'])).toEqual([{ output_path: 'a' }, { output_path: 'E:/moved/c' }]);

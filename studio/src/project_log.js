@@ -68,6 +68,28 @@ export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
 }
 
+/** The whole-project VEGAS export began (#1264). */
+export function projectEdlStartLine(total, chosen, scope) {
+  return `[project] exporting VEGAS EDL: ${chosen} of ${total} recorded video(s) (${scope})`;
+}
+
+/** The whole-project VEGAS export finished. */
+export function projectEdlExportedLine(count, scope, missing, skipped, ms) {
+  return `[project] exported VEGAS EDL of ${count} video(s) (${scope}): ${missing} missing, ${skipped} left out, ${ms} ms`;
+}
+
+/** The whole-project VEGAS export ended without writing an EDL: `why` is
+ *  `missing` (no video found), `unreadable` (FFmpeg read no length) or
+ *  `cancelled` (the save dialog). */
+export function projectEdlNotWrittenLine(why, chosen, scope, ms) {
+  const reason = {
+    missing: `none of the ${chosen} video(s) found`,
+    unreadable: `FFmpeg could not read the length of any video found`,
+    cancelled: 'the save dialog was cancelled',
+  }[why] || why;
+  return `[project] VEGAS export (${scope}) wrote no EDL: ${reason}, ${ms} ms`;
+}
+
 /** A save is about to raise a project's format: the backup comes first. */
 export function projectBackupStartedLine(path, fromSchema, toSchema) {
   return `[project] updating ${path} from format ${fromSchema} to ${toSchema}: backing it up first`;
