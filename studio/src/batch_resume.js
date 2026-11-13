@@ -18,15 +18,11 @@ import { showToast } from './toast.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
+import { blockUids } from './batch_untick.js';
 
 /** The ids of the highlights in `batch`'s blocks that have no take. */
 export function uncapturedUids(batch) {
-  const uids = batch?.streak_uids || [];
-  const left = (batch?.blocks || [])
-    .filter((block) => !block.captured)
-    .flatMap((block) => (block.source_streak_indices || []).map((i) => uids[i]))
-    .filter(Boolean);
-  return [...new Set(left)];
+  return blockUids(batch, (batch?.blocks || []).filter((block) => !block.captured));
 }
 
 /** How many of `uids` are highlights in `demos`. */
