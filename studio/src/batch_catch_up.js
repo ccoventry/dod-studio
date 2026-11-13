@@ -14,6 +14,9 @@
 // with it, unless the project already had unsaved edits, which stay the
 // user's to save (#1344). A batch with no project is
 // marked in the open queue, which matches only if those demos are loaded.
+//
+// A batch that is caught up on in the open queue also has its captured
+// highlights unticked there (batch_untick.js), as at the end of a watched one.
 
 import { listen } from '@tauri-apps/api/event';
 import { catchUpUnwatchedBatches, filesExist, readProjectFile, writeTextFile } from './ipc_bridge.js';
@@ -26,6 +29,7 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
 import { createBatchResume } from './batch_resume.js';
+import { createBatchUntick } from './batch_untick.js';
 
 /** The event the backend sends once a running game has closed. */
 export const CATCH_UP_EVENT = 'batch_catch_up';
@@ -132,6 +136,7 @@ const defaultIo = {
 export function createBatchCatchUp({
   getDemos, getTakeIndex, getSessionPath, onStatusChange, openProject, startCapture, io = defaultIo,
   saveIfOnlyChange = async (change) => ({ result: await change(), saved: false }),
+  untick = createBatchUntick({ getDemos, onSelectionChange: onStatusChange }),
   resume = createBatchResume({ openProject, getSessionPath, getDemos, onSelectionChange: onStatusChange, startCapture }),
 }) {
   /** Marks `batch` in the project file it came from. Returns a note for the toast. */
@@ -171,6 +176,8 @@ export function createBatchCatchUp({
     }
     const { result, saved } = await saveIfOnlyChange(() => {
       const marks = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
+      // Its captured highlights are done: untick them when they are in the open queue.
+      if (untick.apply(batch) > 0) marks.changed = true;
       if (marks.changed) onStatusChange();
       return marks;
     }, { madeChange: (marks) => marks.changed });
