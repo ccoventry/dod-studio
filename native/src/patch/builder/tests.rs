@@ -2234,10 +2234,26 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
 #[test]
 fn a_batch_with_no_room_is_refused_in_plain_words() {
     let gib = 1_073_741_824;
-    let message = no_room_message(31 * gib, 22 * gib);
+    let message = no_room_message(31 * gib, 22 * gib, None);
     assert_eq!(
         message,
         "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
+    );
+}
+
+/// #1430: when a capture folder is on the Windows drive, the refusal says the
+/// drive counts only above "Keep free on the Windows drive".
+#[test]
+fn a_refusal_with_a_capture_folder_on_the_windows_drive_names_the_setting() {
+    let gib = 1_073_741_824;
+    let message = no_room_message(31 * gib, 22 * gib, Some(50 * gib));
+    assert!(
+        message.starts_with("Not enough free space on any capture drive"),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(&crate::messages::windows_drive::kept_free_note(50 * gib)),
+        "{message}"
     );
 }
 

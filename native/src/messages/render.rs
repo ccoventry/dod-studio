@@ -40,6 +40,16 @@ pub fn render_fps(job_id: impl Display, fps_used: u32, source: impl Display) -> 
     format!("[render-fps] job {job_id} — reading the frames at {fps_used} fps, {source}")
 }
 
+/// Why a render is refused when no export folder has room for it: `needed`
+/// is the job's estimate plus the usual safety margin; `note` is added after
+/// (the Windows-drive note, #1430, or nothing).
+pub fn no_export_folder_with_room(folders: usize, needed: u64, note: impl Display) -> String {
+    format!(
+        "Not rendered: every export folder ({folders}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.{note}",
+        needed as f64 / GB
+    )
+}
+
 pub const FPS_FROM_TAKE: &str = "the rate the take was captured at";
 
 pub fn fps_from_render_settings(take_folder: impl Display) -> String {

@@ -19,6 +19,7 @@ import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } 
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
 import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
+import { readWindowsDriveKeepFree, applyWindowsDriveKeepFree } from './windows_drive_setting.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
@@ -193,6 +194,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       ...getTakeCleanupSetting(),
       // "Render while capturing" (#861).
       ...getRenderWhileCapturing(),
+      // "Keep free on the Windows drive" (#1430).
+      windows_drive_keep_free_gb: readWindowsDriveKeepFree(),
       ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -421,4 +424,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
   setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
+  applyWindowsDriveKeepFree(settings.windows_drive_keep_free_gb);
 }

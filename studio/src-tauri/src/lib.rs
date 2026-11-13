@@ -135,6 +135,7 @@ async fn save_settings(
         settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
+        settings_manager::apply_windows_drive_keep_free(&settings);
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");
@@ -461,6 +462,19 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
     Ok(native::sys::disk::pool_free_bytes(&paths))
+}
+
+/// The capture folders' free space and the part captures may use, which
+/// leaves out what "Keep free on the Windows drive" keeps there (#1430), so
+/// Start Capture Batch's check can name the setting when it's what's short.
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
+#[tauri::command]
+async fn capture_pool_room(paths: Vec<String>) -> Result<native::sys::disk::PoolRoom, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+        native::sys::disk::pool_room(&paths)
+    }))
+    .await
 }
 
 #[derive(serde::Serialize)]
@@ -1035,6 +1049,7 @@ pub fn run() {
             estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
+            capture_pool_room,
             diagnose_capture_output_paths,
             queue_render_batch,
             start_queued_render,

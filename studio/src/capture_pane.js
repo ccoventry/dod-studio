@@ -1,5 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, capturePoolRoom, diagnoseCaptureOutputPaths, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
@@ -40,6 +40,7 @@ import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
+import { usableCaptureBytes, windowsDriveShortWarning, readWindowsDriveKeepFree, DEFAULT_KEEP_FREE_GB } from './windows_drive_setting.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 import { createBatchUntick } from './batch_untick.js';
@@ -267,14 +268,23 @@ export async function refreshLaunchGuard(state) {
   // is gone.
   const effectiveDrivePool = (resolvedState.targetDrives || []).filter(Boolean);
 
-  let availableBytes = 0;
+  // The drives' real free space, and the part captures may use: the Windows
+  // drive counts only above "Keep free on the Windows drive" (#1430), so a
+  // C: below it is short of room rather than "no free space".
+  let freeBytes = 0;
+  let room = null;
   let problemPaths = [];
   let willBeCreatedPaths = [];
   if (effectiveDrivePool.length > 0) {
     try {
-      availableBytes = await calculateExportPoolSpace(effectiveDrivePool);
+      freeBytes = await calculateExportPoolSpace(effectiveDrivePool);
     } catch (err) {
       console.error("Error calculating export pool space for launch guard:", err);
+    }
+    try {
+      room = await capturePoolRoom(effectiveDrivePool);
+    } catch {
+      // Logged by the bridge; the real free space stands in.
     }
     // Fetched unconditionally (not just when the pool is fully unusable) so a
     // *partially* bad pool — some valid drives, some typo'd/missing ones —
@@ -316,9 +326,15 @@ export async function refreshLaunchGuard(state) {
   const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
     || !document.querySelector('#hlae-path-input')?.value?.trim();
 
+  const availableBytes = usableCaptureBytes(freeBytes, room);
   const noDrivesConfigured = effectiveDrivePool.length === 0;
-  const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
+  const noUsableSpace = !noDrivesConfigured && freeBytes === 0;
   const insufficientSpace = !noDrivesConfigured && !noUsableSpace && requiredBytes > availableBytes;
+  // Set when the setting is what's short: the folders have the room.
+  const keepFreeGb = readWindowsDriveKeepFree();
+  const windowsDriveShort = insufficientSpace
+    ? windowsDriveShortWarning({ requiredBytes, freeBytes, usableBytes: availableBytes, keepFreeGb })
+    : null;
   // "Only when space is needed" (#644): finished takes on the capture drives
   // may cover the shortfall, and only the backend can tell (make_room runs
   // before the capture and stops the batch when it can't), so short of room
@@ -404,11 +420,15 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = 'var(--warn-orange)';
-      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
+      const heading = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
+      warningEl.textContent = availableBytes < freeBytes
+        ? `${heading} ${STRINGS.WINDOWS_DRIVE.keptFreeNote(keepFreeGb ?? DEFAULT_KEEP_FREE_GB)}`
+        : heading;
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = 'var(--danger)';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
+      warningEl.textContent = windowsDriveShort
+        ?? STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
       warningEl.style.color = 'var(--warn-orange)';
@@ -438,7 +458,7 @@ export async function refreshLaunchGuard(state) {
     footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
-  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing };
+  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing, windowsDriveShort };
 }
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
@@ -1219,6 +1239,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           stopWith(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING);
         } else if (guard.agrFpsMissing) {
           stopWith(STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING);
+        } else if (guard.windowsDriveShort) {
+          stopWith(guard.windowsDriveShort);
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {

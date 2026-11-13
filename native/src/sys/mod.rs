@@ -43,6 +43,9 @@ pub mod steam;
 /// game (#1235).
 #[cfg(windows)]
 pub mod studio_pipe;
+/// "Keep free on the Windows drive" (#1430): what captures and renders leave
+/// free on the drive Windows is installed on.
+pub mod windows_drive;
 /// Ends a launcher a cancelled WMI call starts late (#1243).
 pub mod wmi_late_start;
 /// Starts a process through WMI, outside every job of Studio's (#545).
