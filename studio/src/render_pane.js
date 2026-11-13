@@ -6,6 +6,7 @@ import {
   resetRenderJob,
   removeRenderJob,
   cancelRenderJobs,
+  cancelQueuedRenderJobs,
   resetRenderJobs,
   removeRenderJobs,
   clearRenderQueue,
@@ -557,6 +558,7 @@ function syncSelectionControls() {
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
     queued === 0 || rendering > 0 || noExportDir);
   setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
+  setButton('#cancel-queued-render-btn', queued, R.cancelQueued, R.CANCEL_QUEUED_TITLE);
   setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
   setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
   setButton('#delete-takes-render-btn', targets.deleteFolders.length, R.deleteTakesSelected,
@@ -698,6 +700,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
   const cancelRenderBtn = document.querySelector('#cancel-render-btn');
+  const cancelQueuedBtn = document.querySelector('#cancel-queued-render-btn');
   const retryRenderBtn = document.querySelector('#retry-render-btn');
   const removeRenderBtn = document.querySelector('#remove-render-btn');
   const deleteTakesRenderBtn = document.querySelector('#delete-takes-render-btn');
@@ -1060,6 +1063,22 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         console.error('IPC Execution Error (cancelRenderJobs):', err);
         syncSelectionControls();
       });
+    });
+  }
+
+  if (cancelQueuedBtn) {
+    cancelQueuedBtn.addEventListener('click', () => {
+      const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+      if (!queued) return;
+      cancelQueuedBtn.disabled = true;
+      logFrontendEvent(`[render] Cancel Queued clicked with ${queued} queued row(s)`);
+      cancelQueuedRenderJobs()
+        .then((n) => logFrontendEvent(`[render] Cancel Queued: ${n} row(s) cancelled`))
+        .catch((err) => {
+          console.error('IPC Execution Error (cancelQueuedRenderJobs):', err);
+          logFrontendEvent(`[render] Cancel Queued failed: ${err}`);
+          syncSelectionControls();
+        });
     });
   }
 

@@ -119,6 +119,10 @@ pub fn ticked_jobs_cancelled(cancelled: usize, ticked: usize) -> String {
     format!("[render] cancel_render_jobs: {cancelled} of {ticked} ticked job(s) cancelled")
 }
 
+pub fn queued_jobs_cancelled(cancelled: usize) -> String {
+    format!("[render] cancel_queued_render_jobs: {cancelled} queued job(s) cancelled")
+}
+
 pub fn ticked_jobs_reset(reset: usize, ticked: usize) -> String {
     format!("[render] reset_render_jobs: {reset} of {ticked} ticked job(s) -> Queued")
 }
@@ -171,6 +175,10 @@ mod tests {
         assert_eq!(
             ticked_jobs_cancelled(1, 2),
             "[render] cancel_render_jobs: 1 of 2 ticked job(s) cancelled"
+        );
+        assert_eq!(
+            queued_jobs_cancelled(4),
+            "[render] cancel_queued_render_jobs: 4 queued job(s) cancelled"
         );
         assert_eq!(
             queue_cleared(3),
