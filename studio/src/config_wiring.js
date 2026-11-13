@@ -20,6 +20,7 @@ import { refreshHookDllRow } from './hook_dll_row.js';
 import { initHookDllPicker, refreshHookDllPicker } from './hook_dll_picker.js';
 import { createInstallPicker } from './install_picker.js';
 import { createMenuScaleSetting } from './menu_scale_setting.js';
+import { startWindowsDriveKeepFree } from './windows_drive_setting.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -344,6 +345,9 @@ export async function linkHlaeToFfmpeg() {
 export function initConfigWiring({ persistAppSettings }) {
   wireReviewSettings(persistAppSettings);
   initHookDllPicker();
+  // Keep free on the Windows drive (#1430): the space check before a capture
+  // counts the Windows drive by it, so it is run again once saved.
+  startWindowsDriveKeepFree({ persist: persistAppSettings, onSaved: () => refreshLaunchGuard() });
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
   const gameFolderUi = createGameFolderUi({

@@ -166,9 +166,13 @@ pub fn group_by_volume(
 }
 
 /// Free bytes across `paths`, counting each volume once and skipping paths
-/// whose free space is unknown (`None`).
+/// whose free space is unknown (`None`). The Windows drive counts only above
+/// what "Keep free on the Windows drive" keeps there (#1430), since no capture
+/// or render writes below it.
 pub fn pool_free_bytes(paths: &[std::path::PathBuf]) -> u64 {
-    pool_free_bytes_with(paths, get_available_bytes)
+    pool_free_bytes_with(paths, |path| {
+        get_available_bytes(path).map(|free| super::windows_drive::free_for(path, 0, free))
+    })
 }
 
 fn pool_free_bytes_with(

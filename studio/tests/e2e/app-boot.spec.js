@@ -72,6 +72,25 @@ test('"After a clip is finished" sits in the Destinations tab, since it acts bef
   }
 });
 
+test('"Keep free on the Windows drive" loads into Destinations and saves a change (#1430)', async ({ page }) => {
+  await page.addInitScript(() => {
+    const loaded = window.__mockInvokeHandlers.get_settings();
+    window.__mockInvokeHandlers.get_settings = () => ({ ...loaded, windows_drive_keep_free_gb: 80 });
+  });
+  await page.goto('/index.html');
+  const field = page.locator('#tab-drive-overrides #config-windows-drive-keep-free');
+  await expect(field).toHaveValue('80');
+  // The tab is hidden until opened, so the change is made in the page.
+  await field.evaluate((el) => {
+    el.value = '30';
+    el.dispatchEvent(new Event('change'));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const saves = window.__mockInvocations.filter((c) => c.cmd === 'save_settings');
+    return saves.length ? saves[saves.length - 1].args.settings.windows_drive_keep_free_gb : null;
+  })).toBe(30);
+});
+
 test("+ Add Folder's folder shows in the Explorer's Recent list straight away", async ({ page }) => {
   await page.addInitScript(() => {
     Object.assign(window.__mockInvokeHandlers, {

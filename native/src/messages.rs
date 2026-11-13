@@ -27,6 +27,7 @@ pub mod render;
 pub mod repair;
 pub mod schedule;
 pub mod take_delete;
+pub mod windows_drive;
 
 use std::fmt::Display;
 

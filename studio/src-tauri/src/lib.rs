@@ -134,6 +134,7 @@ async fn save_settings(
         settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
+        settings_manager::apply_windows_drive_keep_free(&settings);
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");

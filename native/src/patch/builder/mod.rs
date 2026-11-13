@@ -336,7 +336,7 @@ pub fn build_batch_queue(
         raw_streaks,
         config,
         global_arrays,
-        crate::sys::disk::get_available_bytes,
+        alloc::plannable_free_bytes,
     )
 }
 
@@ -357,6 +357,14 @@ pub(super) fn build_batch_queue_with(
     // Snapshot every capture directory's free bytes so each clip is routed
     // to a drive with room for it at build time.
     let mut drives = DriveBudget::snapshot(&config.capture_directories, free_of);
+    let windows_keep_free = crate::sys::windows_drive::raised_on_any(
+        &config.capture_directories,
+        alloc::FAILOVER_THRESHOLD,
+    );
+    if let Some(keep_free) = windows_keep_free {
+        alloc::log_windows_drive_folders(&config.capture_directories, keep_free);
+    }
+    drives.note_windows_drive(windows_keep_free);
     let session_dir = make_session_dir(config)?;
 
     let mut helper_cfg = helper_cfg_preamble(config, &dod_dir);

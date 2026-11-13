@@ -1140,6 +1140,14 @@ export const STRINGS = {
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
   },
 
+  // ── Keep free on the Windows drive (#1430) + windows_drive_setting.js ────
+  WINDOWS_DRIVE: {
+    KEEP_FREE_LABEL: 'Keep free on the Windows drive:',
+    KEEP_FREE_TITLE:
+        'Captures and renders skip the drive Windows is installed on once writing there would leave less than this free, so Windows keeps room for updates, its page file and temp files. A capture or export folder on that drive is used only while it has room above this; other drives are not affected. A change applies to the next render, even during a batch; a capture batch picks each clip\'s drive when it starts. 0 turns it off.',
+    KEEP_FREE_UNIT: 'GB',
+  },
+
   // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
   TAKE_CLEANUP: {
     AFTER_LABEL: 'After a clip is finished:',

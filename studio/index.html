@@ -758,6 +758,16 @@
                 </div>
               </div>
               <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
+              <!-- "Keep free on the Windows drive" (#1430) — windows_drive_setting.js.
+                   Here, beside the capture folders, since it steers captures and
+                   renders (Render Output's export folders) alike. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-windows-drive-keep-free" data-str="WINDOWS_DRIVE.KEEP_FREE_LABEL" data-str-title="WINDOWS_DRIVE.KEEP_FREE_TITLE">Keep free on the Windows drive:</label>
+                  <input type="number" id="config-windows-drive-keep-free" value="50" min="0" max="10000" step="1" style="width: 70px;" data-str-title="WINDOWS_DRIVE.KEEP_FREE_TITLE" />
+                  <span data-str="WINDOWS_DRIVE.KEEP_FREE_UNIT">GB</span>
+                </div>
+              </div>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
