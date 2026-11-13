@@ -782,6 +782,17 @@ export async function cancelRenderJobs(jobIds) {
     });
 }
 
+/** Cancels every Queued row; a Rendering one keeps going. The backend picks
+ *  the rows under its lock, so a row that just started is never caught.
+ *  Resolves to how many were cancelled. */
+export async function cancelQueuedRenderJobs() {
+  return invoke("cancel_queued_render_jobs")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_queued_render_jobs):", err);
+      throw err;
+    });
+}
+
 /** Requeues several Cancelled/Finished/Error rows at once (#70); resumes the
  *  scheduler if nothing is Rendering, like a single Reset. */
 export async function resetRenderJobs(jobIds) {
