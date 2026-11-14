@@ -252,6 +252,15 @@ describe('What a review covers (#661)', () => {
     expect(reviewDemoPaths(undefined, undefined)).toEqual([]);
   });
 
+  it('Ticked plays just the highlights ticked for capture, whatever their mark', () => {
+    const t = (curation, at, selected) => ({ ...marked(curation, at), selected });
+    const ticked = demo('b.dem', [t('Keep', 10, true), t('Keep', 20, false), t(undefined, 30, true), t('Skip', 40)]);
+    const rows = buildReviewQueue([ticked], ['b.dem'], REVIEW_COVERS.TICKED).highlights;
+    expect(rows.map((h) => h.kill_times[0])).toEqual([10, 30]);
+    expect(coveredByReview({ selected: true }, REVIEW_COVERS.TICKED)).toBe(true);
+    expect(coveredByReview({ curation: 'Keep' }, REVIEW_COVERS.TICKED)).toBe(false);
+  });
+
   it('coveredByReview agrees with the queue', () => {
     expect(coveredByReview({ curation: 'Maybe' }, REVIEW_COVERS.MAYBE)).toBe(true);
     expect(coveredByReview({ curation: 'Maybe' }, REVIEW_COVERS.UNMARKED)).toBe(false);

@@ -30,6 +30,8 @@ export const REVIEW_COVERS = {
   KEEP: 'keep',
   MAYBE: 'maybe',
   SKIP: 'skip',
+  // The highlights ticked for capture: a last look before a batch.
+  TICKED: 'ticked',
 };
 
 const MARK_FOR_COVERS = {
@@ -47,6 +49,7 @@ export function reviewDemoPaths(checkedPaths, shownPaths) {
 /** True when a review covering `covers` includes this highlight. */
 export function coveredByReview(streak, covers = REVIEW_COVERS.ALL) {
   if (covers === REVIEW_COVERS.UNMARKED) return !streak.curation;
+  if (covers === REVIEW_COVERS.TICKED) return !!streak.selected;
   const mark = MARK_FOR_COVERS[covers];
   return mark ? streak.curation === mark : true;
 }
