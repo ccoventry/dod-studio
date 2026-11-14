@@ -1027,8 +1027,11 @@ fn panel_view(
     };
     let mode = under_form(key_mode(review, keys, now), crate::review_form::is_shown());
     let title = panel_title(&review.queue, review.at);
+    let h = &review.queue[review.at];
     let panel = |status: &str| crate::review_keys::Panel {
         title: title.clone(),
+        range: crate::review_keys::range_line(h.from, h.to, h.kills.len()),
+        note: crate::review_keys::note_shown(&h.note),
         status: status.to_string(),
         keys,
         live: mode == KeyMode::Live,
@@ -1036,7 +1039,6 @@ fn panel_view(
         kills: Vec::new(),
         xray: crate::spec_xray::XRAY.on(),
     };
-    let h = &review.queue[review.at];
     // The clock beside the kills' times, so the next kill's says how soon.
     let now = clock.map_or_else(String::new, now_text);
     let shown = match review.phase {
@@ -1607,6 +1609,34 @@ mod tests {
         assert_eq!(status(&review, None), "");
         review.phase = Phase::Waiting;
         assert_eq!(status(&review, Some(370.0)), "Now 6:10");
+    }
+
+    #[test]
+    fn the_box_shows_the_range_and_note_in_every_phase() {
+        let mut h = highlight("a", None);
+        h.kills = vec![10.0, 12.0, 14.0, 16.0];
+        (h.from, h.to) = (2, 3);
+        h.note = "nice flick".to_string();
+        let mut review = review_of(vec![h], playing());
+        let now = review.keys_from;
+        let shown = |r: &Review| {
+            let panel = panel_view(r, now, Some(11.0)).0.expect("a panel");
+            (panel.range.now, panel.range.was, panel.note)
+        };
+        let expected = (
+            "Kills 2-3".to_string(),
+            " (was 1-4)".to_string(),
+            "nice flick".to_string(),
+        );
+        assert_eq!(shown(&review), expected);
+        review.phase = Phase::Waiting;
+        assert_eq!(shown(&review), expected);
+        review.phase = Phase::Loading {
+            since: Instant::now(),
+            frames: 0,
+            seen_loading: false,
+        };
+        assert_eq!(shown(&review), expected);
     }
 
     #[test]
