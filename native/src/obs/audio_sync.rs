@@ -14,7 +14,7 @@ use super::client::{ObsClient, ObsError};
 /// Measured against HLAE takes of the same spans (sound.wav is timed from the
 /// frames, so it is the reference), 0.8 s pieces of
 /// `ktps8w9-stealth_gskill_rr2_h1`, one PC (#1385): with no offset OBS's sound
-/// was +261 to +296 ms late on PRE and +259 to +321 on POST; with -270 set
+/// was +254 to +296 ms late on PRE and +258 to +321 on POST; with -270 set
 /// before the game's sound started it was +8 to +35 ms on PRE and -12 to +36
 /// on POST, within about two frames at 60 fps. Another PC's waveOut latency
 /// may differ (#646). The game's `_snd_mixahead` (default 0.1 s) is part of it: at 0.05
@@ -23,12 +23,16 @@ pub const GAME_AUDIO_SYNC_OFFSET_MS: i64 = -270;
 
 /// How long the in-between offset stays set: long enough for OBS to take in a
 /// few of the source's 10 ms packets while the game's sound is playing.
+#[cfg(not(test))]
 const STEP_HOLD: Duration = Duration::from_millis(250);
+/// Tests talk to a fake OBS with no sound to wait for.
+#[cfg(test)]
+const STEP_HOLD: Duration = Duration::ZERO;
 
 /// The offsets to set, in order, to take `source` from `current` to `target`.
 ///
 /// OBS re-times a source's sound to a new offset only when the old offset was
-/// nonzero (obs-source.c, `source_output_audio_data`: the
+/// nonzero (`libobs/obs-source.c`, `source_output_audio_data`, OBS 33.0.1: the
 /// `if (source->last_sync_offset)` before `push_back = false`). From 0 it keeps
 /// adding the sound straight after what it already had, at the old time, until
 /// the stream next breaks, and only then does the new offset take effect.

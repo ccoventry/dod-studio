@@ -120,8 +120,8 @@ PC; other PCs' waveOut latency is unmeasured (#646). OBS's sound sat about 14 dB
 sound.wav (mean -24..-26 dB against -10..-12 dB).
 
 **OBS ignores a change of the offset away from 0 while the sound plays (#1385).** OBS re-times a
-source's sound to a new sync offset only when the old one was nonzero (obs-source.c,
-`source_output_audio_data`). From 0 it keeps adding the sound straight after what it had, at the old
+source's sound to a new sync offset only when the old one was nonzero
+(`libobs/obs-source.c`, `source_output_audio_data`, OBS 33.0.1). From 0 it keeps adding the sound straight after what it had, at the old
 time, until the stream next breaks, and only then does the new offset apply. So 0 to -270 set while
 the game plays left the sound ~280 ms late, or flipped between late and in sync within one take; that
 is what a test harness that switched the offset between 0 and -270 during a launch measured. Studio
@@ -131,7 +131,7 @@ the sound plays too. Measured 2026-11-15, 0.8 s pieces of HLAE takes found in th
 
 | Offset, and how it was set | PRE | POST |
 |---|---|---|
-| 0 | +261 to +296 ms | +259 to +321 ms |
+| 0 | +254 to +296 ms | +258 to +321 ms |
 | -270, set while no game ran (Studio's order) | +8 to +35 ms | -12 to +36 ms |
 | -270, set from 0 while the game played | +271 to +293 ms (ignored) | +265 to +300 ms (ignored) |
 | -270, set from 0 through -1 while the game played | +2 to +35 ms | -3 to +28 ms |
