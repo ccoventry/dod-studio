@@ -12,7 +12,8 @@
  * Players > Nameplate. How to use it: docs/vegas_nameplates.md.
  *
  * A clip cut into several back-to-back events (slowed or sped up in VEGAS)
- * gets one nameplate over the whole run, not one per piece.
+ * gets one nameplate over the whole run, not one per piece. So do back-to-back
+ * clips of the same player (JOIN_SAME_PLAYER below).
  *
  * Run it from Tools > Scripting > Run Script... with the clips on the
  * timeline. With some clips selected it does only those (File > Import > EDL
@@ -62,6 +63,12 @@ public class EntryPoint
     // a crossfade) share one nameplate: a clip cut into pieces and slowed
     // down in VEGAS is still one clip.
     const int JOIN_FRAMES = 4;
+
+    // Back-to-back clips of the same player (the same nameplate picture in the
+    // clip list), on the same track and touching as above, share one
+    // nameplate too, so it doesn't fade out and straight back in at the cut.
+    // false gives every clip its own fade-in.
+    const bool JOIN_SAME_PLAYER = true;
 
     // What the clip lists' file names end with, and the undo step's name.
     const string MANIFEST_SUFFIX = ".dodstudio.json";
@@ -135,18 +142,29 @@ public class EntryPoint
 
         // A clip split into back-to-back events (cut, ctrl-dragged to slow
         // motion) gets one nameplate over the whole run, not one per piece.
-        List<Run> runs = RunsToDo(clips, placed);
+        List<Run> runs = RunsToDo(clips, placed, matched);
         int pieces = 0;
-        foreach (Run run in runs) pieces += run.Events.Count;
+        int samePlayerJoins = 0;
+        foreach (Run run in runs)
+        {
+            pieces += run.Events.Count;
+            samePlayerJoins += run.SamePlayerJoins;
+        }
 
-        // A run that already has a nameplate over its exact span is left alone.
+        // A run that already has a nameplate over its span (or inside one, as
+        // when only the middle clip of a joined run is selected) is left alone.
         VideoTrack existing = FindTrack(project);
         List<Run> todo = new List<Run>();
         int alreadyThere = 0;
+        int oldNameplates = 0;
         foreach (Run run in runs)
         {
             if (existing != null && HasNameplate(existing, run.Start, run.Length)) alreadyThere++;
-            else todo.Add(run);
+            else
+            {
+                todo.Add(run);
+                if (existing != null) oldNameplates += CountStartingInside(existing, run.Start, run.Length);
+            }
         }
 
         int added = 0;
@@ -169,7 +187,7 @@ public class EntryPoint
             }
         }
 
-        Say(Summary(added, todo.Count - added, alreadyThere, pieces, runs.Count, notListed, hudPasses, noNameplate, missingFiles, manifests, selectedOnly, clips.Count));
+        Say(Summary(added, todo.Count - added, alreadyThere, pieces, runs.Count, samePlayerJoins, oldNameplates, notListed, hudPasses, noNameplate, missingFiles, manifests, selectedOnly, clips.Count));
     }
 
     /// The first video track named TRACK_NAME, or null.
@@ -182,30 +200,56 @@ public class EntryPoint
         return null;
     }
 
-    /// True when `track` has an event over exactly this start and length.
+    /// True when `track` has an event over this start and length, or one that
+    /// covers all of it (the exact match is the common case).
     static bool HasNameplate(VideoTrack track, Timecode start, Timecode length)
     {
         foreach (TrackEvent ev in track.Events)
         {
-            if (Math.Abs(ev.Start.ToMilliseconds() - start.ToMilliseconds()) < 0.5
-                && Math.Abs(ev.Length.ToMilliseconds() - length.ToMilliseconds()) < 0.5) return true;
+            double evStart = ev.Start.ToMilliseconds();
+            if (Covers(evStart, evStart + ev.Length.ToMilliseconds(), start.ToMilliseconds(), start.ToMilliseconds() + length.ToMilliseconds())) return true;
         }
         return false;
     }
 
-    /// One nameplate's worth of events: one clip, or several pieces of it.
+    /// True when [outerStart, outerEnd] holds [start, end], give or take half a millisecond.
+    internal static bool Covers(double outerStart, double outerEnd, double start, double end)
+    {
+        return outerStart <= start + 0.5 && outerEnd >= end - 0.5;
+    }
+
+    /// How many events of `track` start inside the span: nameplates an earlier
+    /// run put over single clips, which a new joined one doesn't replace.
+    static int CountStartingInside(VideoTrack track, Timecode start, Timecode length)
+    {
+        int n = 0;
+        double from = start.ToMilliseconds();
+        foreach (TrackEvent ev in track.Events)
+        {
+            double at = ev.Start.ToMilliseconds();
+            if (at >= from - 0.5 && at < from + length.ToMilliseconds() - 0.5) n++;
+        }
+        return n;
+    }
+
+    /// One nameplate's worth of events: one clip, several pieces of it, or
+    /// back-to-back clips of one player.
     class Run
     {
         public List<VideoEvent> Events = new List<VideoEvent>();
         public Timecode Start;
         public Timecode Length;
+        // How many events joined the one before them as another clip of the
+        // same player (a different media file), not as a piece of the same clip.
+        public int SamePlayerJoins;
     }
 
-    /// Joins the pieces of a split clip (see GroupPieces) among `clips`, and
+    /// Joins the pieces of a split clip and back-to-back clips of one player
+    /// (see GroupPieces) among `clips`, and
     /// keeps the runs whose events are in `placed`. Events of other media
     /// (a HUD pass, a clip not in any list) are in the sequence and so break
     /// a run; they just get no nameplate.
-    static List<Run> RunsToDo(List<VideoEvent> clips, List<VideoEvent> placed)
+    static List<Run> RunsToDo(List<VideoEvent> clips, List<VideoEvent> placed, Dictionary<VideoEvent, ClipEntry> matched)
     {
         List<Piece> pieces = new List<Piece>();
         foreach (VideoEvent clip in clips)
@@ -213,16 +257,19 @@ public class EntryPoint
             Piece piece = new Piece();
             piece.Track = clip.Track.Index;
             piece.Key = PathKey(MediaPath(clip));
+            // Only a clip that gets a nameplate has a player's picture to share.
+            piece.Plate = placed.Contains(clip) ? PathKey(matched[clip].Nameplate) : null;
             piece.Start = clip.Start.ToMilliseconds();
             piece.End = clip.End.ToMilliseconds();
             pieces.Add(piece);
         }
         double frame = 1000.0 / Math.Max(1.0, clips[0].Project.Video.FrameRate);
         List<Run> runs = new List<Run>();
-        foreach (List<int> group in GroupPieces(pieces, JOIN_FRAMES * frame))
+        foreach (List<int> group in GroupPieces(pieces, JOIN_FRAMES * frame, JOIN_SAME_PLAYER))
         {
             if (!placed.Contains(clips[group[0]])) continue;
             Run run = new Run();
+            run.SamePlayerJoins = SamePlayerJoins(pieces, group);
             Timecode end = clips[group[0]].End;
             foreach (int i in group)
             {
@@ -241,17 +288,34 @@ public class EntryPoint
     {
         public int Track;
         public string Key;
+        // The nameplate picture, or null when the event gets none (it never
+        // joins another event by player).
+        public string Plate;
         public double Start;
         public double End;
     }
 
-    /// Groups of indexes into `pieces`, each group one clip's back-to-back
-    /// events. Per track, in start order, a piece joins the group before it
+    /// How many pieces of `group` (indexes into `pieces`, in group order) joined
+    /// the one before them by being the same player's clip, not the same media.
+    internal static int SamePlayerJoins(List<Piece> pieces, List<int> group)
+    {
+        int n = 0;
+        for (int k = 1; k < group.Count; k++)
+        {
+            if (pieces[group[k]].Key != pieces[group[k - 1]].Key) n++;
+        }
+        return n;
+    }
+
+    /// Groups of indexes into `pieces`, each group one nameplate's worth of
+    /// back-to-back events: pieces of one clip, or clips of one player. Per track, in start order, a piece joins the group before it
     /// when it is the same media (`Key`: speed and length don't matter) and
     /// starts no later than `toleranceMs` after the group's end (an overlap,
     /// like a crossfade, joins too). Anything between them on the track, or a
-    /// real gap, starts a new group.
-    internal static List<List<int>> GroupPieces(List<Piece> pieces, double toleranceMs)
+    /// real gap, starts a new group. With `joinSamePlayer`, a piece also joins
+    /// when it has the same non-null `Plate` as the one before it, whatever its
+    /// media: back-to-back clips of one player share a nameplate.
+    internal static List<List<int>> GroupPieces(List<Piece> pieces, double toleranceMs, bool joinSamePlayer)
     {
         List<int> order = new List<int>();
         for (int i = 0; i < pieces.Count; i++) order.Add(i);
@@ -268,7 +332,8 @@ public class EntryPoint
         {
             Piece p = pieces[i];
             Piece last = current == null ? null : pieces[current[current.Count - 1]];
-            bool joins = last != null && last.Track == p.Track && last.Key == p.Key
+            bool joins = last != null && last.Track == p.Track
+                && (last.Key == p.Key || (joinSamePlayer && p.Plate != null && last.Plate == p.Plate))
                 && p.Start <= currentEnd + toleranceMs;
             if (!joins)
             {
@@ -499,12 +564,16 @@ public class EntryPoint
         }
     }
 
-    static string Summary(int added, int unopened, int alreadyThere, int pieces, int runCount, int notListed, int hudPasses, int noNameplate, List<string> missingFiles, Manifests manifests, bool selectedOnly, int clipCount)
+    static string Summary(int added, int unopened, int alreadyThere, int pieces, int runCount, int samePlayerJoins, int oldNameplates, int notListed, int hudPasses, int noNameplate, List<string> missingFiles, Manifests manifests, bool selectedOnly, int clipCount)
     {
         StringBuilder text = new StringBuilder();
         if (added > 0) text.AppendLine("Added " + Count(added, "nameplate") + " on the \"" + TRACK_NAME + "\" track. Ctrl+Z takes them all away again.");
         else text.AppendLine("No nameplates were added.");
-        if (pieces > runCount) text.AppendLine(Count(runCount, "nameplate") + " for " + Count(pieces, "event") + ": " + Count(pieces - runCount, "split piece") + " joined into the clip before " + (pieces - runCount == 1 ? "it" : "them") + ".");
+        int splitPieces = pieces - runCount - samePlayerJoins;
+        if (pieces > runCount) text.AppendLine(Count(runCount, "nameplate") + " for " + Count(pieces, "event") + ".");
+        if (splitPieces > 0) text.AppendLine(Count(splitPieces, "split piece") + " joined into the clip before " + (splitPieces == 1 ? "it" : "them") + ".");
+        if (samePlayerJoins > 0) text.AppendLine(Count(samePlayerJoins, "clip") + " of the same player joined into the clip before " + (samePlayerJoins == 1 ? "it" : "them") + ".");
+        if (added > 0 && oldNameplates > 0) text.AppendLine(Count(oldNameplates, "nameplate") + " from an earlier run start inside the new ones and stay for you to delete.");
         if (alreadyThere > 0) text.AppendLine(Count(alreadyThere, "clip") + " already had a nameplate over its exact start and length, so " + (alreadyThere == 1 ? "it was" : "they were") + " left alone.");
         text.AppendLine();
         if (selectedOnly) text.AppendLine("Worked on the " + Count(clipCount, "selected clip") + " only. With nothing selected (Edit > Select None) it does every clip.");

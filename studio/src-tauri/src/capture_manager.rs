@@ -11,6 +11,7 @@
 //     async Tauri command never parks the main thread.
 // ============================================================
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -450,7 +451,7 @@ impl CaptureManager {
 
     /// Returns `true` if a batch is currently executing.
     pub fn is_running(&self) -> bool {
-        *self.is_running.lock().unwrap_or_else(|p| p.into_inner())
+        *lock_or_recover(&self.is_running)
     }
 }
 
@@ -1070,7 +1071,7 @@ fn check_takes(
 ) -> Option<TakeReport> {
     let outcome = end.outcome;
     let manifest = {
-        let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(manifest_slot);
         match guard.as_ref() {
             Some(m) if !m.blocks.is_empty() => m.clone(),
             _ => return None,
@@ -1193,7 +1194,7 @@ fn finish_batch(
     rendered_while_capturing: bool,
 ) {
     let report = check_takes(app, manifest_slot, &end, rendered_while_capturing);
-    *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
+    *lock_or_recover(is_running) = false;
     let mut status = serde_json::json!({
         "running": false,
         "status": end.status,
@@ -1300,7 +1301,7 @@ pub async fn start_capture_batch_impl(
     // leave the manager wedged.
     // ── Guard: reject concurrent batches ──────────────────────────────────────
     {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         if *running {
             return Err(crate::messages::CAPTURE_BATCH_ALREADY_RUNNING.to_string());
         }
@@ -1329,10 +1330,7 @@ pub async fn start_capture_batch_impl(
         && patcher_config.hook_runs_batch
         && saved_settings(&app_handle).take_after_finish == "delete";
     {
-        let mut slot = manager
-            .last_config
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut slot = lock_or_recover(&manager.last_config);
         *slot = Some(patcher_config.clone());
     }
 
@@ -1354,7 +1352,7 @@ pub async fn start_capture_batch_impl(
         .collect();
 
     if raw_streaks.is_empty() {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         *running = false;
         let _ = app_handle.emit(
             "capture_status",
@@ -1398,7 +1396,7 @@ pub async fn start_capture_batch_impl(
             .map_err(crate::messages::failed_to_check_demo_sources)
         {
             log_markdown(&crate::messages::capture::capture_error_line(&e));
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1438,7 +1436,7 @@ pub async fn start_capture_batch_impl(
                 },
             );
             if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1474,7 +1472,7 @@ pub async fn start_capture_batch_impl(
             Ok(v) => v,
             Err(e) => {
                 log_markdown(&crate::messages::capture::build_batch_queue_failed(&e));
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1522,13 +1520,13 @@ pub async fn start_capture_batch_impl(
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
             crate::manifest_file::write(&manifest, "planned", None);
-            let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut slot = lock_or_recover(&manifest_arc);
             *slot = Some(manifest);
         }
 
         if patch_jobs.is_empty() {
             log_markdown(crate::messages::capture::BUILD_BATCH_QUEUE_NO_JOBS);
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1552,7 +1550,7 @@ pub async fn start_capture_batch_impl(
         ) {
             Ok(batch) => batch,
             Err(status) => {
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1583,7 +1581,7 @@ pub async fn start_capture_batch_impl(
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
                     log_markdown(&crate::messages::capture::batch_not_started_line(&status));
-                    let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut running = lock_or_recover(&is_running_arc);
                     *running = false;
                     let _ = app_handle_clone.emit(
                         "capture_status",
@@ -1629,7 +1627,7 @@ pub async fn start_capture_batch_impl(
                 log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
                 // The manifest was written before the route was known, and
                 // its blocks carry the plans the takes are checked against.
-                let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut slot = lock_or_recover(&manifest_arc);
                 if let Some(manifest) = slot.as_mut() {
                     manifest
                         .blocks
@@ -1810,8 +1808,7 @@ pub async fn start_capture_batch_impl(
                             }
                             Err(e) => {
                                 {
-                                    let mut slot =
-                                        first_error.lock().unwrap_or_else(|p| p.into_inner());
+                                    let mut slot = lock_or_recover(first_error);
                                     if slot.is_none() {
                                         *slot = Some((job.source_demo.clone(), e));
                                     }
@@ -1832,14 +1829,14 @@ pub async fn start_capture_batch_impl(
         });
 
         let was_cancelled = cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed);
-        let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let failure = lock_or_recover(&first_error).take();
 
         if let Some((source_demo, e)) = failure {
             log_markdown(&crate::messages::capture::patch_failed_line(
                 &source_demo,
                 &e,
             ));
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1852,7 +1849,7 @@ pub async fn start_capture_batch_impl(
             return;
         }
         if was_cancelled {
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -2086,8 +2083,7 @@ pub async fn start_capture_batch_impl(
                             break;
                         }
                         EngineEvent::Error(msg) => {
-                            let mut running =
-                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            let mut running = lock_or_recover(&is_running_clone);
                             *running = false;
                             let _ = app_emitter.emit(
                                 "capture_status",
@@ -2134,9 +2130,7 @@ pub async fn start_capture_batch_impl(
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
                 log_markdown(&crate::messages::capture::listener_panicked_line(&msg));
-                let mut running = is_running_for_panic
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_for_panic);
                 *running = false;
                 let _ = app_emitter_for_panic.emit(
                     "capture_status",

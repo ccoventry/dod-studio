@@ -38,13 +38,15 @@ With some clips selected it does only those; with none selected, every video cli
 
 It adds a track called **Nameplates** above every video track (so above a HUD pass laid over a clip too, which never covers it), and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now.
 
-**A clip you cut into pieces gets one nameplate, not one per piece.** Events that are on the same track, play the same media file (the same entry in the clip list) and touch end to start are one clip: the nameplate runs from the first piece's start to the last piece's end. "Touch" allows a gap of up to 4 frames (`JOIN_FRAMES`, in the script's defaults) and any overlap, so a crossfade between pieces still joins them. Speed changes (ctrl-drag slow motion or fast forward) don't matter: the script compares the media, never the length or the offset. A different clip between two pieces, or a real gap, starts a new nameplate. The box at the end says how many it added and how many pieces it joined, for example "5 nameplates for 9 events: 4 split pieces joined into the clip before them." The joining rule is `GroupPieces` in the script; `powershell -ExecutionPolicy Bypass -File vegas\tests\run.ps1` runs its tests (no VEGAS needed to run them).
+**A clip you cut into pieces gets one nameplate, not one per piece.** Events that are on the same track, play the same media file (the same entry in the clip list) and touch end to start are one clip: the nameplate runs from the first piece's start to the last piece's end. "Touch" allows a gap of up to 4 frames (`JOIN_FRAMES`, in the script's defaults) and any overlap, so a crossfade between pieces still joins them. Speed changes (ctrl-drag slow motion or fast forward) don't matter: the script compares the media, never the length or the offset. A different clip between two pieces, or a real gap, starts a new nameplate. The box at the end says how many it added and how many pieces it joined, for example "5 nameplates for 9 events." then "4 split pieces joined into the clip before them." The joining rule is `GroupPieces` in the script; `powershell -ExecutionPolicy Bypass -File vegas\tests\run.ps1` runs its tests (no VEGAS needed to run them).
+
+**Back-to-back clips of the same player share one nameplate too.** Events on the same track that touch as above and have the same nameplate picture in the clip list (the same player), even when they are different media files, get one nameplate from the first clip's start to the last one's end, so it doesn't fade out and straight back in at the cut. Another player's clip, a clip with no nameplate, or a real gap between them starts a new nameplate. The box counts these separately: "3 clips of the same player joined into the clip before them." A run whose clips each had their own nameplate from an earlier run gets the new joined one and the old ones stay for you to delete, like a stretched clip below. To give every clip its own fade-in instead, set `JOIN_SAME_PLAYER` to `false` in the script's defaults.
 
 A box then says how many nameplates it added and why any clip got none.
 
 It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
 
-Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A clip you stretched or trimmed since gets a new one and its old one stays for you to delete. The box says how many clips already had one.
+Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A run that sits wholly inside an existing nameplate counts as already done (so selecting only the middle clip of a joined run and rerunning adds nothing); a clip you stretched since, or a run whose clips each had their own nameplate before, gets a new one and the old ones stay for you to delete (the box counts them). A clip you trimmed shorter still sits inside its old nameplate, so it keeps it: delete that nameplate to get a fresh one. The box says how many clips already had one.
 
 ### Changing the defaults
 
@@ -56,6 +58,8 @@ The defaults are at the top of the script, with a comment each:
 | `MARGIN` | `0.04` | the gap to the frame's edges, as a share of the frame's height |
 | `CORNER` | `"BottomLeft"` | `BottomLeft`, `BottomRight`, `TopLeft` or `TopRight` |
 | `FADE_IN_SECONDS`, `FADE_OUT_SECONDS` | `0.25` | fades; `0` for none, never more than a third of a short clip |
+| `JOIN_FRAMES` | `4` | how many frames apart (or overlapping) events may be and still share a nameplate |
+| `JOIN_SAME_PLAYER` | `true` | back-to-back clips of the same player share one nameplate; `false` gives each clip its own |
 | `TRACK_NAME` | `"Nameplates"` | the new track's name |
 
 Edit them in any text editor and run the script again. The placement is each event's Pan/Crop, so one clip's nameplate can be moved on its own afterwards (Event Pan/Crop), or all of them at once with the track's Track Motion.
