@@ -10,7 +10,31 @@ game is marked as such, and what is inferred says so.
 
 ## Short answer
 
-LIVE_SUMMARY
+- **Moving a player works**, as a file edit through `dem-patch`'s writer,
+  and plays on PRE and POST with no error: he is drawn on the new path and joins
+  the real data with no snap; his shots would follow him (events take his
+  drawn position; inferred, he does not fire in the test). **What
+  breaks:** nothing collides, so a bend into a wall draws him inside it (all
+  black: no light inside solid), and his footsteps and other sounds stay
+  where he really was (`svc_sound` carries its own position).
+- **Filling a gap works** under `dem_forcehltv 1`: 4 s of made-up data for
+  Tron.bsod in `tr2.dem` before he first appears, walked along a real path
+  borrowed from another player's track in the same demo, gives an in-eye and
+  chase camera that move through those seconds and join his real data at
+  5:02:07 with no visible snap, on PRE and POST. The data is invented: no
+  shots, no sounds, not where he really was. The 4:54:19 kill is in the demo
+  only as the kill feed and the victim; nothing of Tron's.
+- **The recorder's own view (step 3) can be moved too**: four plain fields
+  per frame. The gun must move with it (the recorded view-model origin), and
+  the camera passes through walls.
+- **Edit the file, not the hook**, for all three (table at the end).
+- **Recommendation:** a "fill the gap" tool for clips is not worth building
+  as a Studio feature. It can only start a clip a few seconds earlier with
+  movement that never happened and no action in it, and the moments users
+  want (Tron's 4:54:19 kill) need the shooter, which no POV demo of someone
+  else holds. Keep `entity_edit_probe` as the R&D tool; if a creative "edit
+  a scene" feature is ever wanted, the pieces below (bend with a BSP hull
+  check, borrowed paths, the event and count bookkeeping) are what it needs.
 
 ## How a player is stored, and what an edit has to keep true
 
@@ -65,7 +89,41 @@ rests on:
 
 ## Step 1: move a player in a POV demo
 
-STEP1
+`solifotw-pb2.dem` (a smooth POV in both installs), entity 4, a player who
+walks a straight 907 units south ahead of and beside the recorder, 150-1500
+units from his camera within 30 degrees of where he looks, at 13:57:80 to
+14:01:90 (svc 837.8-841.9; `find` lists such stretches). `bend ... 4 837.8
+841.9 160` swerves him up to 160 units to his left (east), `160 * sin^2(pi
+u)`, out and back, so the real packets after the window join with no snap.
+375 packets edited, no count changed (he was in every snapshot already), the
+file grows by 563 bytes and re-parses (`pb2_bend_ent4.dem`).
+
+**In the game** (viewdemo by full path, `ds_demo_seek_to 831`, HLAE frames at
+30 fps of demo time, side by side with the original, PRE and POST):
+
+- Plays on both builds: no `svc_bad`, no `Fatal Error`, no crash.
+- **He goes where the file says.** In the original he walks through the arch
+  ahead of the camera; bent, he leaves that line and is drawn off to the side.
+- **Nothing stops him at a wall.** At the swerve's widest he is inside the
+  arch's wall, and the model is drawn there, all black: a model is lit from the
+  world under its origin, and an origin inside solid gets no light (PRE,
+  2.16 s on `step1_bend_ent4_PRE.mp4`). The footprint check (no bent point more
+  than 64 units across from a place some player stood) passed for all 375
+  points: a place someone stood 60 units away can still be on the other side
+  of a wall. A bend needs a real collision test against the BSP (a hull trace),
+  or a path borrowed from real movement as step 2 does.
+- **No snap where the edit starts or ends**: the sin^2 ramp starts and ends at
+  zero offset, and the frames at the window's edges match the original
+  (inferred from the data and seen on the sampled frames; the clips were not
+  watched frame by frame for interpolation jitter).
+- **What stays at the old place** (from the file; not listened to in the
+  game): his footsteps and landings, 102
+  `svc_sound`s in the window, each with its own x, y and z. His shots would not
+  (events take his drawn position), but he does not fire in this window.
+- His legs and upper body play the server's sequences for walking straight;
+  a sideways swerve with unchanged `angles` is a strafe. Whether DoD's client
+  turns the legs (GoldSrc estimates gait from the movement between frames)
+  could not be judged from the clips at this distance.
 
 ## Step 2: fill a gap before a player first appears
 
@@ -107,7 +165,14 @@ and the analyzer reads it (13 players).
   the original too (#1452's clip at 5:02:1x).
 - PRE and POST draw the same frames (mean difference 5/255 between the two
   clips once lined up).
-- His body in a chase camera through the made-up stretch: CHASE
+- **His body in a chase camera** (`spec_mode 1`) walks the made-up stretch
+  with his own model, lit normally, legs in a running stride and the MG42
+  carried (his sequence 159, gait 12 from his arrival state; the client
+  animates the legs from the movement), through the house and out of the
+  window, then carries on into his real data (firing from the hip at 5:02:2x,
+  real). Only the borrowed player's path and angles are used, never his
+  sequences: his class and weapon differ from Tron's. PRE and POST draw the
+  same frames here too (mean difference 1.8/255).
 
 **What a fill cannot give:**
 
@@ -123,10 +188,33 @@ and the analyzer reads it (13 players).
 - Where he really was. The borrowed path is a place someone walked in that
   half, not where Tron went.
 
+## Step 3: change the recorder's own view
 
-## Step 3: change the recorder's own view (plan)
+The issue asks only for a plan here; it turned out small, so it was built
+and tried (`bend-recorder ... 837.8 841.9 120`, `pb2_bend_recorder2.dem`). In a POV demo
+the recorder's position is not in the entity packets. What has to move
+together, all plain fields:
 
-STEP3
+- each network frame header's `refparams.vieworg` and `simorg` (the drawn
+  view: POV playback copies the recorded view over the live one);
+- the header's `view` (offset 420 of `demo_info_t`), the **view model's
+  origin**: it equals `vieworg` (-251.77, 1963.70, 49.74 against -251.46,
+  1963.39, 50.76 on the first edited frame). The first build left it alone,
+  and in the game (PRE and POST) the camera moved while the gun stayed on the
+  old path: no gun, or a gun floating off to the side. Moved too, the gun
+  stays in the hand;
+- the type-4 client-data frames' `origin` (982 in the window);
+- `svc_clientdata`'s `origin[0]`/`[1]` where a frame lists them (374), for
+  prediction;
+- his own shots' origins (type-6 events), none in this window.
+
+In the game the swerved camera plays on both builds with no error, the gun
+in the hand, and the camera **passes through walls** (inside a stone wall at
+2.50 s on `step3_recorder_PRE.mp4`): nothing in playback collides. What it
+cannot change: anything the recorder's client baked into the view (his
+screen shake, his aim), what the other players did about where he really
+was (they shoot at the old spot), and his footsteps (type-8 sounds play at
+the listener, so they follow, which is right).
 
 ## Step 4: bigger edits (plan)
 
@@ -139,8 +227,8 @@ Each is the same toolkit (`set_entity_fields`, `restate_counts`,
   baseline, as `fill` does). Counts drop by one (`restate_counts`). Every
   event pointing at a place past his moves *down* one; his own events go.
   His `svc_sound`s go (they name him). What stays and gives him away: the
-  kill feed (`DeathMsg`), the scoreboard's user messages, his name in `SayText`, and the blood and impacts other
-  players' shots leave where he stood (temp entities and decals carry their
+  kill feed (`DeathMsg`), the scoreboard's user messages, his name in `SayText`, and the
+  blood and impacts other players' shots leave where he stood (temp entities and decals carry their
   own positions). The recorder's own view of him, if the recorder aimed at
   him, does not change: the recorded camera is baked in.
 - **Swap who wins a fight.** The kill is a `DeathMsg` user message
@@ -181,4 +269,23 @@ while reviewing" control), not for a stored edit.
 ## Files
 
 Kept out of the repo, in `D:\dodstudio-tests\unattended-2026-11-16\demoedit\`:
-FILES
+
+- `pb2_bend_ent4.dem`, `pb2_bend_recorder2.dem` (`pb2_bend_recorder.dem`: the
+  first build, without the view-model origin), `tr2_fill_ent7.dem`, with the
+  probe's logs.
+- `step1_bend_ent4_PRE.mp4` / `_POST.mp4`: original beside bent, stopwatch;
+  the swerve (13:57:80-14:01:90) is about 0.7-4.8 s on the clock.
+- `step3_recorder_PRE.mp4` / `_POST.mp4`: original beside the swerved
+  recorder (with the gun fix).
+- `step2_fill_tron_ineye_PRE_POST.mp4`: in-eye on Tron, PRE beside POST,
+  clock 0 at about 4:58:80; the made-up data ends at 3.28 s.
+- `step2_fill_tron_chase_PRE_POST.mp4`: the same in a chase camera, clock 0
+  at about 4:58:10; the made-up data ends at about 3.97 s.
+- `step1*_pre|post`, `step2*_pre|post`: the game_probe reports and frames.
+
+Stills in the main checkout's `local\review-images\1469\`:
+`step1_bend_ent4_PRE_detail.png` (the black model in the wall at 2.16 s),
+`step1_bend_ent4_*_sheet.png`, `step3_recorder_*_sheet.png`,
+`step2_fill_POST_frames.png` (in-eye across the join),
+`step2_fill_PRE_chase_frames.png` (his body in the made-up stretch),
+`ref_1452_orig_around_302.png` (#1452's original clip around the join).

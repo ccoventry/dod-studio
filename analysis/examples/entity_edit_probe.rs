@@ -128,8 +128,16 @@ fn angles_of(d: &Delta) -> [f32; 3] {
 /// view's, the other way up (GoldSrc's `pev->angles.x = -v_angle.x / 3`;
 /// DoD's in-eye camera multiplies it back by -3).
 fn model_angles_from_view(view: [f32; 3]) -> [f32; 3] {
-    let pitch = if view[0] > 180.0 { view[0] - 360.0 } else { view[0] };
-    [(-pitch / 3.0).rem_euclid(360.0), view[1].rem_euclid(360.0), 0.0]
+    let pitch = if view[0] > 180.0 {
+        view[0] - 360.0
+    } else {
+        view[0]
+    };
+    [
+        (-pitch / 3.0).rem_euclid(360.0),
+        view[1].rem_euclid(360.0),
+        0.0,
+    ]
 }
 
 /// Every network frame's entity packet, replayed. `tracked` is the player
@@ -249,7 +257,10 @@ fn summary(d: &Delta) -> String {
 fn print_track(packets: &[PacketAt], from: f32, to: f32) {
     let mut last: Option<[f32; 3]> = None;
     let mut last_t = 0.0;
-    for p in packets.iter().filter(|p| p.svc_time >= from && p.svc_time <= to) {
+    for p in packets
+        .iter()
+        .filter(|p| p.svc_time >= from && p.svc_time <= to)
+    {
         let Some(state) = &p.state else {
             println!("{:.3}\t-", p.svc_time);
             last = None;
@@ -281,7 +292,11 @@ fn print_track(packets: &[PacketAt], from: f32, to: f32) {
 /// The angle in degrees between where the camera looks and the player.
 fn off_center(view_origin: [f32; 3], view_angles: [f32; 3], target: [f32; 3]) -> (f32, f32) {
     let (pitch, yaw) = (view_angles[0].to_radians(), view_angles[1].to_radians());
-    let fwd = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
+    let fwd = [
+        pitch.cos() * yaw.cos(),
+        pitch.cos() * yaw.sin(),
+        -pitch.sin(),
+    ];
     // Aim at his chest, not his feet: the origin is the hull's centre.
     let to = [
         target[0] - view_origin[0],
@@ -461,7 +476,8 @@ fn heard(demo: &Demo, entity: u16, from: f32, to: f32) -> Vec<Heard> {
                     EngineMessage::SvcEvent(ev) if svc_time >= from && svc_time <= to => {
                         for e in &ev.events {
                             let packet = e.packet_index.as_ref().map(|b| b.to_u32() as usize);
-                            let resolved = packet.and_then(|p| replay.entities().get(p).map(|x| x.0));
+                            let resolved =
+                                packet.and_then(|p| replay.entities().get(p).map(|x| x.0));
                             let own = e.delta.as_ref().and_then(|d| get_u32(d, "entindex\0"));
                             if resolved != Some(entity) && own != Some(u32::from(entity)) {
                                 continue;
@@ -566,8 +582,7 @@ fn packet_mut(
     frame: usize,
     message: usize,
 ) -> Option<&mut EngineMessage> {
-    let FrameData::NetworkMessage(bt) =
-        &mut demo.directory.entries[entry].frames[frame].frame_data
+    let FrameData::NetworkMessage(bt) = &mut demo.directory.entries[entry].frames[frame].frame_data
     else {
         return None;
     };
@@ -736,7 +751,10 @@ fn bend_recorder(demo: &mut Demo, from: f32, to: f32, units: f32) -> Result<Reco
         if t < from || t > to {
             return [0.0; 3];
         }
-        let s = (std::f32::consts::PI * (t - from) / (to - from)).sin().powi(2) * units;
+        let s = (std::f32::consts::PI * (t - from) / (to - from))
+            .sin()
+            .powi(2)
+            * units;
         [left[0] * s, left[1] * s, 0.0]
     };
     let mut edits = RecorderEdits::default();
@@ -851,7 +869,9 @@ fn bend(demo: &mut Demo, entity: u16, from: f32, to: f32, units: f32) -> Result<
         "walks {:.0} units on heading {:.0} deg; offset towards {:.0} deg",
         len,
         dy.atan2(dx).to_degrees(),
-        (left[1] * units.signum()).atan2(left[0] * units.signum()).to_degrees()
+        (left[1] * units.signum())
+            .atan2(left[0] * units.signum())
+            .to_degrees()
     );
     let edits: Vec<(usize, usize, usize, Delta)> = window
         .iter()
@@ -898,7 +918,11 @@ fn stood(packets: &[PacketAt]) -> Vec<[f32; 3]> {
     let mut out = Vec::new();
     for p in packets {
         for (_, o, _) in &p.players {
-            let key = ((o[0] / 16.0) as i32, (o[1] / 16.0) as i32, (o[2] / 16.0) as i32);
+            let key = (
+                (o[0] / 16.0) as i32,
+                (o[1] / 16.0) as i32,
+                (o[2] / 16.0) as i32,
+            );
             if seen.insert(key) {
                 out.push(*o);
             }
@@ -1020,7 +1044,11 @@ fn sample_at(track: &[Sample], t: f32) -> Option<Sample> {
         return Some(b);
     }
     let a = track[i - 1];
-    let u = if b.t > a.t { (t - a.t) / (b.t - a.t) } else { 0.0 };
+    let u = if b.t > a.t {
+        (t - a.t) / (b.t - a.t)
+    } else {
+        0.0
+    };
     Some(Sample {
         t,
         origin: [
@@ -1076,8 +1104,8 @@ fn borrowed_path(
             let Some(before) = sample_at(track, end.t - 0.15) else {
                 continue;
             };
-            let turn = (heading(before.origin, oj) - arrival_heading + 540.0).rem_euclid(360.0)
-                - 180.0;
+            let turn =
+                (heading(before.origin, oj) - arrival_heading + 540.0).rem_euclid(360.0) - 180.0;
             if turn.abs() > BORROW_TURN {
                 continue;
             }
@@ -1178,8 +1206,12 @@ fn fill(demo: &mut Demo, plan: &FillPlan) -> Result<usize, String> {
                 .find(|p| p.svc_time >= first.svc_time + 0.15)
                 .and_then(|p| origin_of(p.state.as_ref()?))
                 .ok_or("he leaves again within 0.15 s")?;
-            let path =
-                borrowed_path(&packets, plan.entity, &times, (first.svc_time, o1, heading(o1, later)))?;
+            let path = borrowed_path(
+                &packets,
+                plan.entity,
+                &times,
+                (first.svc_time, o1, heading(o1, later)),
+            )?;
             (path, 0)
         }
     };
