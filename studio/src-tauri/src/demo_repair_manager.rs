@@ -3,6 +3,7 @@
 //! `hl_demo_auditor::repair` (files) over `analysis::repair` (bytes); this is
 //! the IPC around it: progress events, cancelling, and the activity log.
 
+use native::shared::lock::lock_or_recover;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -38,7 +39,7 @@ impl DemoRepairManager {
     /// while another repair of it runs. Two at once wrote two repairs of one
     /// demo, and the first to end dropped the second's cancel flag.
     fn claim(&self, path: &str) -> Option<Arc<AtomicBool>> {
-        let mut repairs = self.repairs.lock().unwrap_or_else(|p| p.into_inner());
+        let mut repairs = lock_or_recover(&self.repairs);
         let key = repair_key(path);
         if repairs.contains_key(&key) {
             return None;
@@ -49,10 +50,7 @@ impl DemoRepairManager {
     }
 
     fn release(&self, path: &str) {
-        self.repairs
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&repair_key(path));
+        lock_or_recover(&self.repairs).remove(&repair_key(path));
     }
 }
 
@@ -266,12 +264,7 @@ pub fn cancel_demo_repair(
     state: tauri::State<'_, DemoRepairManager>,
     path: String,
 ) -> Result<(), String> {
-    if let Some(flag) = state
-        .repairs
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(&repair_key(&path))
-    {
+    if let Some(flag) = lock_or_recover(&state.repairs).get(&repair_key(&path)) {
         flag.store(true, Ordering::SeqCst);
     }
     Ok(())
