@@ -226,6 +226,9 @@ fn status_text() -> String {
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
     }
+    if let Some(models) = crate::env_models::status_line() {
+        lines.push(models);
+    }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
     }
