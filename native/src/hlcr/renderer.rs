@@ -667,20 +667,31 @@ impl OutputNaming {
 
     /// Reserves the output's name in `output_folder` for an output with
     /// `file_ext` (with its dot), made unique there: the clip name (#441),
-    /// else `<demo>_<take><wav part>_<stream>_<hash>`. Held until the job
-    /// ends (`partial_output`, #1439).
+    /// cut to fit that folder (#1430), else
+    /// `<demo>_<take><wav part>_<stream>_<hash>`. Held until the job ends
+    /// (`partial_output`, #1439).
     fn reserve(
         &self,
         job: &RenderJob,
         output_folder: &Path,
         file_ext: &str,
     ) -> partial_output::Reserved<'static> {
-        let stem = clip_file_stem(&job.clip, &self.wav_part, job.is_hud).unwrap_or_else(|| {
-            format!(
-                "{}_{}{}_{}_{}",
-                self.demo_name, self.take_name, self.wav_part, self.stream_type, self.hash_str
-            )
-        });
+        let room = name_room(output_folder, &self.wav_part, job.is_hud, file_ext);
+        if let Some(name) = job.clip.clip_name.as_deref()
+            && sanitize_file_stem(name).encode_utf16().count() > room
+        {
+            crate::log_markdown(&crate::messages::render::clip_name_shortened(
+                name,
+                output_folder.display(),
+            ));
+        }
+        let stem =
+            clip_file_stem(&job.clip, &self.wav_part, job.is_hud, room).unwrap_or_else(|| {
+                format!(
+                    "{}_{}{}_{}_{}",
+                    self.demo_name, self.take_name, self.wav_part, self.stream_type, self.hash_str
+                )
+            });
         partial_output::in_flight().reserve(output_folder, &stem, file_ext)
     }
 }
@@ -859,12 +870,58 @@ pub fn stop_renders_for_exit() {
     }
 }
 
+/// The longest output path a render writes, in UTF-16 units as Windows
+/// counts them: `PATH_LIMIT` in `studio/src/clip_name.js`, which cuts clip
+/// names to fit the longest export folder when they are queued.
+const OUTPUT_PATH_LIMIT: usize = 250;
+/// What reserving a free name may add (`_99`, `partial_output`).
+const UNIQUE_SUFFIX_UNITS: usize = 3;
+
+/// How many UTF-16 units a clip name may take in `output_folder` so the
+/// whole path, with the wav suffix, `_hud`, a uniqueness suffix, the
+/// [`PARTIAL_MARK`] the file is written under until it is finished (#1439)
+/// and the extension, stays within [`OUTPUT_PATH_LIMIT`]: the unfinished
+/// file's path is the longer one, so it is the one that must fit. Names are cut to fit when
+/// they are queued, but an export folder added mid-batch (#1430) can be
+/// longer than the ones they were cut for.
+fn name_room(output_folder: &Path, wav_part: &str, is_hud: bool, file_ext: &str) -> usize {
+    let units = |s: &str| s.encode_utf16().count();
+    let taken = units(&output_folder.to_string_lossy())
+        + 1
+        + units(wav_part)
+        + if is_hud { units("_hud") } else { 0 }
+        + UNIQUE_SUFFIX_UNITS
+        + units(PARTIAL_MARK)
+        + units(file_ext);
+    OUTPUT_PATH_LIMIT.saturating_sub(taken)
+}
+
+/// `name` cut to at most `room` UTF-16 units, without the trailing dots and
+/// spaces Windows drops.
+fn fit_name(name: &str, room: usize) -> String {
+    let mut used = 0;
+    let cut: String = name
+        .chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= room
+        })
+        .collect();
+    cut.trim_end_matches(['.', ' ']).to_string()
+}
+
 /// The finished file's name, without its extension, when the take has a clip
-/// name (#441): the name, the wav suffix, and `_hud` for the HUD stream. The
-/// caller makes it unique, so a re-render never overwrites an earlier file.
-/// `None` without a usable clip name.
-fn clip_file_stem(clip: &ClipData, wav_part: &str, is_hud: bool) -> Option<String> {
-    let name = sanitize_file_stem(clip.clip_name.as_deref()?);
+/// name (#441): the name cut to `name_room` ([`name_room`]), the wav suffix,
+/// and `_hud` for the HUD stream. The caller makes it unique, so a re-render
+/// never overwrites an earlier file. `None` without a usable clip name, or
+/// with no room left for one (the hashed default name is used then).
+fn clip_file_stem(
+    clip: &ClipData,
+    wav_part: &str,
+    is_hud: bool,
+    name_room: usize,
+) -> Option<String> {
+    let name = fit_name(&sanitize_file_stem(clip.clip_name.as_deref()?), name_room);
     if name.is_empty() {
         return None;
     }
@@ -1453,6 +1510,78 @@ mod tests {
         }
         assert!(export_dir.join("anzio_krod_4k.mp4").is_file());
         assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
+    }
+
+    /// #1430: a clip name cut for the export folders at queue time can meet
+    /// a longer folder added mid-batch; the render cuts it again so the path
+    /// stays within the limit, keeping the wav and HUD suffixes.
+    #[test]
+    fn a_clip_name_is_cut_to_fit_a_longer_export_folder() {
+        let short = Path::new("D:/clips");
+        let long_name = "x".repeat(200);
+        let long = PathBuf::from(format!("E:/{}", "f".repeat(100)));
+        let clip = ClipData {
+            clip_name: Some(long_name.clone()),
+            ..sized_clip(1, 1, 1, "single")
+        };
+        let room = name_room(short, "-sound", true, ".mov");
+        let stem = clip_file_stem(&clip, "-sound", true, room).unwrap();
+        assert_eq!(stem, format!("{long_name}-sound_hud"));
+
+        let room = name_room(&long, "-sound", true, ".mov");
+        let stem = clip_file_stem(&clip, "-sound", true, room).unwrap();
+        assert!(stem.ends_with("-sound_hud"));
+        // The unfinished file's path, the longer of the two, is the one that
+        // fits exactly (#1439).
+        let path_units =
+            long.to_string_lossy().len() + 1 + stem.len() + 3 + PARTIAL_MARK.len() + ".mov".len();
+        assert_eq!(path_units, OUTPUT_PATH_LIMIT);
+
+        // No room at all: the default name, not an empty one.
+        let deep = PathBuf::from(format!("E:/{}", "f".repeat(300)));
+        let room = name_room(&deep, "", false, ".mov");
+        assert_eq!(clip_file_stem(&clip, "", false, room), None);
+        assert_eq!(fit_name("ab. c", 3), "ab");
+        assert_eq!(fit_name("é😀", 2), "é");
+    }
+
+    /// #1430 with #1439: the name a render reserves, and so the unfinished
+    /// `.partial` file it writes, is the cut name, and the unfinished file's
+    /// path stays within the limit even when `_N` is added for a clash.
+    #[test]
+    fn the_reserved_and_partial_names_are_the_cut_clip_name() {
+        let root = scratch("reserve_cut_name");
+        let used = root.to_string_lossy().encode_utf16().count();
+        let folder = root.join("f".repeat(OUTPUT_PATH_LIMIT - used - 60));
+        let clip = ClipData {
+            clip_name: Some("x".repeat(200)),
+            ..sized_clip(1, 1, 1, "single")
+        };
+        let (tx, _rx) = mpsc::channel();
+        let job = RenderJob::new(
+            "0".to_string(),
+            clip,
+            source_copy_config(&folder),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let naming = OutputNaming::new(&job);
+        let first = naming.reserve(&job, &folder, ".mov");
+        // A second render of the same clip while the first is in flight.
+        let second = naming.reserve(&job, &folder, ".mov");
+
+        let room = name_room(&folder, &naming.wav_part, false, ".mov");
+        let cut = "x".repeat(room);
+        assert_eq!(first.out_file, folder.join(format!("{cut}.mov")));
+        assert_eq!(
+            first.partial,
+            folder.join(format!("{cut}{PARTIAL_MARK}.mov"))
+        );
+        assert_eq!(second.out_file, folder.join(format!("{cut}_1.mov")));
+        for reserved in [&first, &second] {
+            let units = reserved.partial.to_string_lossy().encode_utf16().count();
+            assert!(units <= OUTPUT_PATH_LIMIT, "{units} units");
+        }
     }
 
     #[test]

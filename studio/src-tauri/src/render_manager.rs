@@ -9,6 +9,7 @@
 // a `.render_autosave.json` crash-recovery lockfile, and a wake lock held
 // for the batch's duration.
 
+use crate::render_export_dirs::LiveExportDirs;
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
@@ -342,6 +343,8 @@ pub struct RenderManager {
     /// The volume a held capture waits on for room (#1438): queued renders
     /// of takes there start first, since only they free it.
     room_volume: Arc<RwLock<Option<String>>>,
+    /// The export folders as Settings saved them last (#1430).
+    export_dirs: LiveExportDirs,
 }
 
 /// What the scheduler may run at once: the batch's own number, or, while a
@@ -386,6 +389,7 @@ struct SchedulerHandles {
     renders_while_capturing: Arc<AtomicUsize>,
     capture_held: Arc<AtomicBool>,
     room_volume: Arc<RwLock<Option<String>>>,
+    export_dirs: LiveExportDirs,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -417,6 +421,7 @@ impl RenderManager {
             renders_while_capturing: Arc::new(AtomicUsize::new(1)),
             capture_held: Arc::new(AtomicBool::new(false)),
             room_volume: Arc::new(RwLock::new(None)),
+            export_dirs: LiveExportDirs::default(),
         }
     }
 
@@ -432,6 +437,13 @@ impl RenderManager {
     /// The capture holds between clips (true) or records again (false).
     pub(crate) fn set_capture_held(&self, held: bool) {
         self.capture_held.store(held, Ordering::SeqCst);
+    }
+
+    /// The export folders as Settings has them (#1430), which settings
+    /// loading and `save_settings` update: a running batch's next renders go
+    /// to them, and so does Start Render Batch on the rows already listed.
+    pub(crate) fn export_dirs(&self) -> LiveExportDirs {
+        self.export_dirs.clone()
     }
 
     /// The volume (`volume_of`) a capture holds for room on, whose takes'
@@ -609,7 +621,15 @@ impl RenderManager {
             return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
         }
         match self.last_config.lock().unwrap().clone() {
-            Some(config) => Ok((config, starting)),
+            Some(mut config) => {
+                // The folders Settings has now, not the ones the last scan
+                // brought (#1430).
+                let live = self.export_dirs.dirs();
+                if !live.is_empty() {
+                    config.export_directories = live;
+                }
+                Ok((config, starting))
+            }
             None => Err(self
                 .recovery_gap
                 .lock()
@@ -656,6 +676,7 @@ impl RenderManager {
             renders_while_capturing: self.renders_while_capturing.clone(),
             capture_held: self.capture_held.clone(),
             room_volume: self.room_volume.clone(),
+            export_dirs: self.export_dirs.clone(),
         }
     }
 }
@@ -879,6 +900,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         // Takes with a job that finished in this run, for the automatic take
         // cleanup (#644) once the run ends.
         let mut finished_takes: Vec<String> = Vec::new();
+        // The export pool follows Settings while the batch runs (#1430):
+        // Render While Capturing keeps one batch going for days.
+        let mut export_dirs = handles.export_dirs.follow(&config.export_directories);
         // Each take folder's volume, looked up once (it asks Windows): the
         // start order reads it under the jobs lock every pass while a capture
         // holds (#1438).
@@ -943,6 +967,11 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             }
 
             let mut attempts_started: Vec<(String, RenderAttempt)> = Vec::new();
+            let (exports_now, exports_changed) = export_dirs.current();
+            let exports_now = exports_now.to_vec();
+            if exports_changed {
+                log_markdown(&crate::messages::render::export_dirs_changed(&exports_now));
+            }
             let started_any = {
                 let mut guard = handles.jobs.lock().unwrap();
                 let active_count = guard.iter().filter(|j| j.status == "Rendering").count();
@@ -1032,6 +1061,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             // export pool, concurrency) genuinely is
                             // batch-wide, so still comes from config.
                             let mut job_config = config.clone();
+                            job_config.export_directories = exports_now.clone();
                             job_config.target_codec = job.codec;
                             job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
