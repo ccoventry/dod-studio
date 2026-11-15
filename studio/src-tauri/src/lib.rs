@@ -43,6 +43,7 @@ mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod project_convert;
+mod render_export_dirs;
 mod render_manager;
 mod review_library;
 mod review_manager;
@@ -118,9 +119,11 @@ async fn get_settings(state: tauri::State<'_, SettingsManager>) -> Result<AppSet
 #[tauri::command]
 async fn save_settings(
     state: tauri::State<'_, SettingsManager>,
+    render: tauri::State<'_, render_manager::RenderManager>,
     settings: AppSettings,
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
+    let export_dirs = settings.render_export_dirs.clone();
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
@@ -141,7 +144,11 @@ async fn save_settings(
         native::log_markdown("[settings] saved");
         Ok(())
     }))
-    .await
+    .await?;
+    // A running render batch takes the new export folders for the renders it
+    // starts next (#1430).
+    render.export_dirs_saved(&export_dirs);
+    Ok(())
 }
 
 /// The built-in command profiles (#911), which the Commands tab lists locked
