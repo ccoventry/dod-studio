@@ -2,6 +2,7 @@
 #![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+use crate::shared::lock::lock_or_recover;
 use analysis::Analysis;
 use std::fs;
 use std::io::Read;
@@ -392,7 +393,7 @@ pub fn log_markdown(msg: &str) {
         use std::io::Write;
 
         static LOG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_or_recover(&LOG_MUTEX);
 
         let dir = activity_log_dir();
         let _ = std::fs::create_dir_all(&dir);
@@ -401,7 +402,7 @@ pub fn log_markdown(msg: &str) {
         let is_first_write =
             !SESSION_HEADER_WRITTEN.swap(true, std::sync::atomic::Ordering::SeqCst);
 
-        let mut last_date = LAST_LOG_DATE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last_date = lock_or_recover(&LAST_LOG_DATE);
         if is_first_write {
             prune_old_activity_logs(&dir);
         } else if last_date.as_deref().is_some_and(|prev| prev != today) {
@@ -503,7 +504,7 @@ mod activity_log_tests {
 
     #[test]
     fn the_env_override_outranks_everything() {
-        let _guard = ENV_VAR_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_or_recover(&ENV_VAR_TEST_MUTEX);
         // The override exists for the case cfg(test) cannot reach: a binary or
         // integration test that links this crate as an ordinary dependency, so
         // it is compiled without cfg(test) and would otherwise write to the
@@ -521,7 +522,7 @@ mod activity_log_tests {
 
     #[test]
     fn writing_a_line_lands_in_the_redirected_directory() {
-        let _guard = ENV_VAR_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_or_recover(&ENV_VAR_TEST_MUTEX);
         // Not just the path calculation — the whole write path, since
         // `log_markdown` computes the directory itself rather than taking one.
         log_markdown("activity log redirect probe");

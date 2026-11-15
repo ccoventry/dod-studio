@@ -313,10 +313,12 @@ is the complete list):
   `src/review.rs`. The answer comes from keys on the game screen (Y M N R B Space S,
   ESC for the Review tab), while a highlight plays (#1141) or at its end,
   through `client.dll`'s `HUD_Key_Event`, with a box
-  drawn from `HUD_Redraw` saying which highlight plays, its kill range (with
-  the scan's in grey beside it when it was changed) and its note (#660,
-  #1399, `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
-  instead.
+  drawn from `HUD_Redraw` saying which highlight plays, whose, its kill range
+  (with the scan's in grey beside it when it was changed) and its whole
+  note, labels and values in two colours (#660, #1399, #1437,
+  `src/review_keys.rs`, `src/review_header.rs`); Up and Down step the speed
+  through 0.25x to 4x while it plays (`src/review_speed.rs`).
+  `ds_ui_review_keys 0` pauses on the Review tab instead.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
