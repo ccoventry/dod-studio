@@ -9,6 +9,9 @@ use super::scanner::ClipData;
 mod ffmpeg_args;
 mod ffmpeg_run;
 mod partial_output;
+/// What marks a render's unfinished file name (#1439): a folder walk for
+/// finished clips skips names with it.
+pub use partial_output::PARTIAL_MARK;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
