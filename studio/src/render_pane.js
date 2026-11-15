@@ -43,6 +43,7 @@ import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { startVegasEdlExport } from './vegas_edl_export.js';
+import { startProjectVegasExport } from './project_vegas_export.js';
 import { startVegasScriptInstall } from './vegas_script_install.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
@@ -726,6 +727,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
   startVegasScriptInstall();
+  startProjectVegasExport({
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   startVegasEdlExport({
     getJobs: () => jobs,
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
