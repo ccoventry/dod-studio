@@ -3,6 +3,7 @@
 //! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,7 +68,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
     // gl_max_size (#680).
     let init_commands = {
         let settings = app.state::<crate::settings_manager::SettingsManager>();
-        let guard = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&settings.inner);
         guard.init_commands.clone()
     };
     // A big HD folder is tens of thousands of files, and finding Python runs
