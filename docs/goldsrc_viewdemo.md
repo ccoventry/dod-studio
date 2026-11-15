@@ -291,7 +291,15 @@ kills from before the last 10 s still up, on PRE and POST. A seek made while
 another is still stepping (two quick presses of the Playback tab's -10, Review's
 Next twice) counts a relative time from that seek's target, not from the clock
 mid-steps, and steps even when short, so the feed is emptied of what the first
-one's steps replayed (`demo_seek/chain.rs`). A capture batch goes back with its
+one's steps replayed (`demo_seek/chain.rs`). The kills replayed after the
+clear need their time put right too: the HUD stamps each notice with its own
+clock (`gHUD.m_flTime`), which runs in real time and ignores the demo clock's
+jumps, so every kill of those last 10 s came out stamped as new and stayed up a
+full 10 s past the landing (PRE, rr2/thunder/pb2: 9.97-9.99 s left on every
+notice, where playing in leaves 0.05-7.5 s). So after the clear the steps are
+0.5 s, each notice is noted with the step it arrived in, and the landing
+re-stamps it to its kill's demo time plus the lifetime
+(`deathmsg/seek_restamp.rs`, #1392). A capture batch goes back with its
 `back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)

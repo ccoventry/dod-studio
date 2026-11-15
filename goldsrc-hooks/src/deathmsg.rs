@@ -85,6 +85,7 @@ mod layout_report;
 mod name_cap;
 mod replace;
 mod scale;
+pub(crate) mod seek_restamp;
 
 /// A translucent box under a HUD draw; the review's panel (#660) uses it too.
 #[cfg(target_arch = "x86")]
@@ -727,15 +728,17 @@ pub(crate) fn notice_lifetime() -> Option<f64> {
 }
 
 /// Empties the kill feed during a rewind (`demo_seek`, #1085): its steps
-/// replay every kill before the landing within a second or two.
-/// Returns how many lines went.
+/// replay every kill before the landing within a second or two. The kills
+/// replayed from here, with the clock at `clock`, are re-dated at the landing
+/// ([`seek_restamp`]). Returns how many lines went.
 // Only the 32-bit demo player rewinds; a host build has none.
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
-pub(crate) fn clear_for_rewind() -> Result<usize, String> {
+pub(crate) fn clear_for_rewind(clock: f64) -> Result<usize, String> {
     let Some(base) = engine::client_module_base() else {
         return Err("client.dll is not loaded yet".to_string());
     };
     ensure_verified(base)?;
+    seek_restamp::begin(clock);
     Ok(clear::expire_all())
 }
 
@@ -962,6 +965,9 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     if let Some([killer, victim, butt::BUTT_WEAPON]) = shown {
         note_butt(i32::from(killer), i32::from(victim));
     }
+    if shown.is_some() {
+        seek_restamp::on_arrival();
+    }
     // After the game has added the line, so `clear_on death` takes it too.
     // The death happened whatever `replace` or `block` showed of it.
     if let Some(victim) = victim {
@@ -1080,6 +1086,7 @@ pub fn poll() {
         || clear::wants_death_msg()
         || even::wanted()
         || crate::headshot_sound::wants_kills()
+        || seek_restamp::recording()
     {
         install_hook();
     }

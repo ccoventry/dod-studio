@@ -222,7 +222,7 @@ fn decide(now: f32, set_at: f32, fire_at: f32) -> Decision {
 /// `gHUD.m_flTime`: the clock `flDisplayTime` is stamped in and `Draw`
 /// compares against. `None` unless `MsgFunc_DeathMsg`'s own `fadd` still
 /// reads it at the address this module expects.
-fn hud_time() -> Option<f32> {
+pub(super) fn hud_time() -> Option<f32> {
     let base = engine::client_module_base()?;
     // Safety: both RVAs are inside client.dll's code, which `deathmsg`'s
     // stock check covers; the operand is read before it is trusted.
@@ -294,6 +294,20 @@ fn expire_up_to(cutoff: f32) -> usize {
             count += 1;
         }
     }
+    count
+}
+
+/// Gives every line the stamp `new` returns for its stamp, leaving those it
+/// returns `None` for (`seek_restamp`). Returns how many changed.
+pub(super) fn restamp_lines(mut new: impl FnMut(f32) -> Option<f32>) -> usize {
+    let mut count = 0;
+    for_each_line(|item| {
+        if let Some(to) = new(stamp(item)) {
+            // Safety: as `stamp`.
+            unsafe { std::ptr::write_unaligned((item + FIELD_DISPLAY_TIME) as *mut f32, to) };
+            count += 1;
+        }
+    });
     count
 }
 

@@ -74,12 +74,14 @@ pub(super) fn stepped_seek(
     seek
 }
 
-/// The words a seek's landing line adds when it emptied the kill feed.
-pub(super) fn feed_note(seek: &Pending) -> &'static str {
+/// The words a seek's landing line adds when it emptied the kill feed, with
+/// how many of the kills it replayed after that it re-dated
+/// (`deathmsg::seek_restamp`).
+pub(super) fn feed_note(seek: &Pending, redated: usize) -> String {
     if seek.feed_at.is_some() {
-        ", the kill feed emptied on the way"
+        format!(", the kill feed emptied on the way ({redated} kill(s) re-dated)")
     } else {
-        ""
+        String::new()
     }
 }
 
@@ -154,9 +156,15 @@ mod tests {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
         let next = stepped_seek(1500.0, None, 700.0, chain, Some(10.0));
         assert_eq!(next.feed_at, Some(1490.0));
-        assert_eq!(rewind_step(700.0, 1500.0, next.feed_at), Step::To(705.0));
-        assert_eq!(rewind_step(1490.0, 1500.0, next.feed_at), Step::ClearFeed);
-        assert!(!feed_note(&next).is_empty());
+        assert_eq!(
+            rewind_step(700.0, 1500.0, next.feed_at, false),
+            Step::To(705.0)
+        );
+        assert_eq!(
+            rewind_step(1490.0, 1500.0, next.feed_at, false),
+            Step::ClearFeed
+        );
+        assert!(feed_note(&next, 2).contains("2 kill(s) re-dated"));
         // The PRE pb2 forward seek that kept three old kills.
         let alone = stepped_seek(978.61, None, 878.7, None, Some(10.0));
         assert!((alone.feed_at.unwrap() - 968.61).abs() < 1e-9);
@@ -165,15 +173,23 @@ mod tests {
 
     /// A short hop past the step clock steps when it replaces a seek on its
     /// way: past the clear point already, it empties the feed at once, then
-    /// lands. With nothing on its way it lands at once, as it always has.
+    /// steps on to its target in the short steps that follow a clear. With
+    /// nothing on its way it lands at once, as it always has.
     #[test]
     fn a_short_seek_that_replaces_another_still_empties_the_feed() {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
         assert!(steps(1368.0, 1371.0, false, chain));
         assert!(!steps(1368.0, 1371.0, false, None));
         let hop = stepped_seek(1371.0, None, 1368.0, chain, Some(10.0));
-        assert_eq!(rewind_step(1368.0, 1371.0, hop.feed_at), Step::ClearFeed);
-        assert_eq!(rewind_step(1368.0, 1371.0, None), Step::Land(1371.0));
+        assert_eq!(
+            rewind_step(1368.0, 1371.0, hop.feed_at, false),
+            Step::ClearFeed
+        );
+        assert_eq!(
+            rewind_step(1368.0, 1371.0, hop.feed_at, true),
+            Step::To(1368.5)
+        );
+        assert_eq!(rewind_step(1368.0, 1371.0, None, false), Step::Land(1371.0));
     }
 
     /// A rewind whose start frame is not out yet passes that wait on.

@@ -32,20 +32,35 @@
 //! the feed there, and steps on: the kills it then replays are the ones
 //! playing up to the target would still show (#1085: on `solifotw-pb2` a
 //! clear just before the last step also took a kill 2.5 s before the target,
-//! since that step starts anywhere up to 5 s back).
+//! since that step starts anywhere up to 5 s back). From the clear on it
+//! steps [`FEED_STEP_SECONDS`] at a time, and the landing re-dates each kill
+//! replayed since to its step (`deathmsg::seek_restamp`): the HUD stamps a
+//! notice by its own real-time clock, so without that every kill of the last
+//! lifetime stayed up a full lifetime past the landing (#1392).
 
 use super::{GAP_LANDING_BEFORE, GAP_SECONDS, STEP_SECONDS, Step, next_step};
 
-/// One frame of a stepped seek, a rewind or a forward one (`chain.rs`), still
-/// to empty the kill feed at `feed_at`: step to exactly there, then clear;
-/// `None` once cleared, stepping as any seek.
-pub(super) fn rewind_step(now: f64, target: f64, feed_at: Option<f64>) -> Step {
+/// One frame of a stepped seek, a rewind or a forward one (`chain.rs`), that
+/// empties the kill feed at `feed_at`: step to exactly there, clear, then
+/// step on in [`FEED_STEP_SECONDS`] until the target (`cleared` once the
+/// clear has run). `None` steps as any seek.
+pub(super) fn rewind_step(now: f64, target: f64, feed_at: Option<f64>, cleared: bool) -> Step {
     match feed_at {
-        Some(at) if now < at - 0.001 => Step::To((now + STEP_SECONDS).min(at)),
-        Some(_) => Step::ClearFeed,
+        Some(at) if !cleared && now < at - 0.001 => Step::To((now + STEP_SECONDS).min(at)),
+        Some(_) if !cleared => Step::ClearFeed,
+        // The 1 ms keeps float drift from adding a step past the target.
+        Some(_) if target - now > FEED_STEP_SECONDS + 0.001 => Step::To(now + FEED_STEP_SECONDS),
+        Some(_) => Step::Land(target),
         None => next_step(now, target),
     }
 }
+
+/// How far a step goes once the kill feed has been emptied: the landing
+/// re-dates each kill those steps replay to the middle of the step it came in
+/// (`deathmsg::seek_restamp`), so a kill's notice is off by at most half a
+/// step. 5 s steps would leave it up to 2.5 s off; these cost about 18 more
+/// frames per seek.
+pub(super) const FEED_STEP_SECONDS: f64 = 0.5;
 
 /// Frames the kill feed is emptied on during a rewind: the last step's
 /// `DeathMsg`s may reach the client a frame after the player sent them, so
@@ -189,16 +204,52 @@ mod tests {
     fn a_rewind_empties_the_kill_feed_one_notice_lifetime_before_landing() {
         let at = feed_clear_at(978.61, Some(10.0));
         assert!((at - 968.61).abs() < 1e-9);
-        assert_eq!(rewind_step(566.49, 978.61, Some(at)), Step::To(571.49));
-        assert_eq!(rewind_step(965.0, 978.61, Some(at)), Step::To(at));
-        assert_eq!(rewind_step(968.62, 978.61, Some(at)), Step::ClearFeed);
-        assert_eq!(rewind_step(968.62, 978.61, None), Step::To(973.62));
-        assert_eq!(rewind_step(975.0, 978.61, None), Step::Land(978.61));
-        // A target nearer the start than one lifetime clears at once.
         assert_eq!(
-            rewind_step(566.49, 570.0, Some(feed_clear_at(570.0, Some(10.0)))),
+            rewind_step(566.49, 978.61, Some(at), false),
+            Step::To(571.49)
+        );
+        assert_eq!(rewind_step(965.0, 978.61, Some(at), false), Step::To(at));
+        assert_eq!(
+            rewind_step(968.62, 978.61, Some(at), false),
             Step::ClearFeed
         );
+        assert_eq!(rewind_step(968.62, 978.61, None, false), Step::To(973.62));
+        assert_eq!(rewind_step(975.0, 978.61, None, false), Step::Land(978.61));
+        // A target nearer the start than one lifetime clears at once.
+        assert_eq!(
+            rewind_step(566.49, 570.0, Some(feed_clear_at(570.0, Some(10.0))), false),
+            Step::ClearFeed
+        );
+    }
+
+    /// #1392: after the clear, no step is longer than `FEED_STEP_SECONDS`,
+    /// so the landing dates each replayed kill to within half of one.
+    #[test]
+    fn after_the_clear_no_step_stamps_a_kill_more_than_a_short_step_late() {
+        let (target, at) = (1229.92, feed_clear_at(1229.92, Some(10.0)));
+        let mut now = at;
+        let mut steps = 0;
+        loop {
+            match rewind_step(now, target, Some(at), true) {
+                Step::To(t) => {
+                    assert!(t - now <= FEED_STEP_SECONDS + 1e-9, "{now} -> {t}");
+                    now = t;
+                }
+                Step::Land(t) => {
+                    assert!(t - now <= FEED_STEP_SECONDS + 0.001, "{now} -> {t}");
+                    assert_eq!(t, target);
+                    break;
+                }
+                Step::ClearFeed => panic!("cleared twice"),
+            }
+            steps += 1;
+            assert!(steps < 100, "never landed");
+        }
+        assert_eq!(steps, 19, "10 s in 0.5 s steps, the last one lands");
+    }
+
+    #[test]
+    fn a_notice_lifetime_out_of_range_is_held_in_range() {
         assert_eq!(feed_clear_at(100.0, None), 100.0);
         assert_eq!(feed_clear_at(100.0, Some(1e6)), 40.0);
     }

@@ -222,6 +222,7 @@ static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
 /// moving on to another demo can land inside one. `try_lock`: only `poll` and
 /// a seek starting hold it, both on this thread and never across this call.
 fn cancel_pending() -> Option<f64> {
+    crate::deathmsg::seek_restamp::cancel();
     PENDING
         .try_lock()
         .ok()
@@ -803,10 +804,11 @@ fn poll_pending() {
                 crate::review_lock::let_through(then);
                 engine::client_cmd(&line);
             }
+            let redated = crate::deathmsg::seek_restamp::land(seek.target);
             format!(
                 "{SEEK_TO_NAME}: at {:.2} s{} after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
                 seek.target,
-                chain::feed_note(seek),
+                chain::feed_note(seek, redated),
                 seek.steps,
                 seek.started.elapsed().as_millis(),
                 seek.dropped,
@@ -816,6 +818,7 @@ fn poll_pending() {
         Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),
     };
     *pending = None;
+    crate::deathmsg::seek_restamp::cancel();
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
 }
 
@@ -1183,16 +1186,14 @@ mod player {
             }
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let feed_at = seek
-                .feed_at
-                .filter(|_| seek.feed_cleared < FEED_CLEAR_FRAMES);
-            let t = match rewind_step(get_now(player), seek.target, feed_at) {
+            let cleared = seek.feed_cleared >= FEED_CLEAR_FRAMES;
+            let t = match rewind_step(get_now(player), seek.target, seek.feed_at, cleared) {
                 Step::To(t) => t,
                 Step::ClearFeed => {
                     // The kills the steps replayed too early to still be up
                     // at the target (module doc).
                     seek.feed_cleared += 1;
-                    if let Err(why) = crate::deathmsg::clear_for_rewind() {
+                    if let Err(why) = crate::deathmsg::clear_for_rewind(seek.last_set) {
                         crate::debug::report(&format!(
                             "demo_seek: could not empty the kill feed before the seek lands: {why}"
                         ));
@@ -1204,6 +1205,7 @@ mod player {
                     t
                 }
             };
+            crate::deathmsg::seek_restamp::step_to(t);
             set_world_time(player, t, 0);
             seek.last_set = t;
         }
@@ -1259,6 +1261,7 @@ mod player {
             let (now, start, end) = (get_now(player), get_start(player), get_end(player));
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
             let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            crate::deathmsg::seek_restamp::cancel(); // a stepped one notes anew from its clear
             // A seek on its way: count from where it is heading (`chain.rs`).
             let chain = in_flight(pending.as_ref());
             let to = landing(counted_from(now, chain), arg, relative, start, end);
