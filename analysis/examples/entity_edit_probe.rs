@@ -761,6 +761,17 @@ fn bend_recorder(demo: &mut Demo, from: f32, to: f32, units: f32) -> Result<Reco
                     let info = &mut bt.1.info;
                     shift3(&mut info.refparams.view_origin, by);
                     shift3(&mut info.refparams.sim_org, by);
+                    // The recorded view-model origin (`demo_info_t`'s `view`,
+                    // offset 420): playback draws the gun there, so left
+                    // alone the gun stays on the old path (seen in the first
+                    // live run: no gun, or a gun off to the side).
+                    if edits.frame_views == 0 {
+                        println!(
+                            "first edited frame: vieworg {:?}, view-model origin {:?}",
+                            info.refparams.view_origin, info.view
+                        );
+                    }
+                    shift3(&mut info.view, by);
                     edits.frame_views += 1;
                     let MessageData::Parsed(msgs) = bt.1.messages_mut() else {
                         continue;
