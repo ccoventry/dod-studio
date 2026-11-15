@@ -128,7 +128,7 @@ Ranked by how much each hurts a clip:
 | # | gap | why | fixable? |
 | --- | --- | --- | --- |
 | 1 | camera frozen at his last spot whenever the recorder's client did not have him (4:50-5:02 of the run) | not in the demo | no. Studio can say which stretches exist (the probe's track mode) |
-| 2 | no gun with `ds_spec_match_pov 1`; drawn with `0` (POST, two moments, 30 frames each) | the hook: something under the switch hides or moves the view model off screen for this view. Suspect: `spectator_gun`'s lowering stuck on (a lowering signal reading differently on a POV demo's player entity); not confirmed | yes, small: find which signal holds the gun down (`ds_debug_status` prints the lowering), fix the rule |
+| 2 | no gun with `ds_spec_match_pov 1`; the MG42 is drawn with `0` (PRE and POST, 2 s clips each, every frame) | the hook: something under the switch hides the view model in this view. Not the gun lowering: `ds_debug_log_gun_lowered` had the gun up for most of the run and `ds_debug_status` said "the gun is up (lowered 0 of 55)" while it was not drawn. Which part it is was not found | yes, likely small once found: switch the match_pov parts off one at a time in a forcehltv session |
 | 3 | odd shapes at the edges of the view at times (a roof, a camo-textured wedge) | the in-eye camera sits at origin + fixed eye height (DoD's `V_GetInEyePos`, 22 or 18 units); on a roof edge or prone it ends up in or against geometry, and possibly inside his own model. Same as HLTV in-eye, not forcehltv-specific | partly: `ds_spec_match_pov`'s prone/crouch heights apply; the rest is the HLTV in-eye camera |
 | 4 | his own footsteps and landing sounds missing | never sent: footsteps are played by each client for itself; a POV demo holds only the recorder's | no (an HLTV demo lacks them too) |
 | 5 | movement a little less smooth than a POV | entity updates at the server's rate, interpolated, vs the recorder's per-frame view | no, same as HLTV |
@@ -155,8 +155,10 @@ Kept out of the repo. In the main checkout's `local\review-images\1452\caleb\`:
   (5:06:05) and an MG42 kill (5:11:21). PRE.
 - `pre_tron_eye_run.png`, `post_tron_eye_run.png`: frames through the run,
   frozen until 5:02, then following him.
-- `post_knobs_matchpov_gun.png`: `ds_spec_match_pov 1` (no gun) next to `0`
-  (MG42 drawn), `__mirv_fixforcehltv 0`, and a chase camera.
+- `post_knobs_matchpov_gun.png`, `pre_knobs_matchpov_gun.png`:
+  `ds_spec_match_pov 1` (no gun) next to `0` (MG42 drawn), HLAE's
+  `__mirv_fixforcehltv 0` (inconclusive: the camera sat frozen in that
+  stretch) and a chase camera.
 
 Clips (with a stopwatch) in `D:\dodstudio-tests\caleb-avalanche\preview\`:
 `tron_forcehltv_ineye_4m52-5m18_PRE.mp4`, `tron_forcehltv_ineye_5m01-5m15_POST.mp4`.
