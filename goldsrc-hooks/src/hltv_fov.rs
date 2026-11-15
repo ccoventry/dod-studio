@@ -207,9 +207,11 @@ fn needs_settling(current: i32, spectator: i32) -> bool {
     current != spectator && current != MENU_FOV
 }
 
-/// Where `gHUD.m_iFOV` is, found once per session ([`located_table`]); 0
-/// until found, and [`HUD_FOV_REFUSED`] stops the search after a refusal.
+/// Where `gHUD.m_iFOV` is ([`located_table`]), and the `client.dll` base it
+/// was found at: 0 until found, found again if the base ever changes.
+/// [`HUD_FOV_REFUSED`] stops the search after a refusal.
 static HUD_FOV_AT: AtomicUsize = AtomicUsize::new(0);
+static HUD_FOV_BASE: AtomicUsize = AtomicUsize::new(0);
 static HUD_FOV_REFUSED: AtomicBool = AtomicBool::new(false);
 /// How many times [`settle_hud_fov`] has put the FOV right this session.
 static SETTLED: AtomicU32 = AtomicU32::new(0);
@@ -219,8 +221,9 @@ const SETTLED_LOG_LINES: u32 = 8;
 /// `gHUD.m_iFOV`'s address, or `None` when this isn't the analysed
 /// `client.dll` (logged once).
 fn hud_fov_address() -> Option<usize> {
+    let base = engine::client_module_base()?;
     let known = HUD_FOV_AT.load(Ordering::Relaxed);
-    if known != 0 {
+    if known != 0 && HUD_FOV_BASE.load(Ordering::Relaxed) == base {
         return Some(known);
     }
     if HUD_FOV_REFUSED.load(Ordering::Relaxed) {
@@ -230,6 +233,7 @@ fn hud_fov_address() -> Option<usize> {
         Ok(table) => {
             let at = table - TABLE_OFFSET + HUD_FOV_OFFSET;
             HUD_FOV_AT.store(at, Ordering::Relaxed);
+            HUD_FOV_BASE.store(base, Ordering::Relaxed);
             Some(at)
         }
         Err(why) => {
