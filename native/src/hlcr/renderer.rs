@@ -295,6 +295,11 @@ pub async fn run_render_job(
     cancel_rx: Arc<AtomicBool>,
     reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
 ) {
+    // Studio is closing (#1439): a job the scheduler started on its way out
+    // does nothing and says nothing.
+    if is_exiting() {
+        return;
+    }
     let job = RenderJob::new(job_id, clip, config, tx, cancel_rx);
     // The take's own capture rate when its `dodstudio_take.json` says, else
     // Render Settings' Source FPS (`take_meta::render_fps`).
@@ -333,8 +338,7 @@ pub async fn run_render_job(
             return;
         }
     };
-    let out_file = output_folder.join(naming.file_name(&job, &output_folder, encode.file_ext));
-    let partial = partial_output::partial_path(&out_file);
+    let output = naming.reserve(&job, &output_folder, encode.file_ext);
     let threads = ffmpeg_args::threads_per_process(
         std::thread::available_parallelism().ok().map(|n| n.get()),
         job.config.max_concurrent_renders,
@@ -344,10 +348,10 @@ pub async fn run_render_job(
         fps: fps_used,
         encode: &encode,
         threads,
-        out_file: &partial,
+        out_file: &output.partial,
     }
     .to_args();
-    ffmpeg_run::run_ffmpeg(&job, args, &partial, &out_file).await;
+    ffmpeg_run::run_ffmpeg(&job, args, &output).await;
 }
 
 /// One render job as every stage sees it: the job, where its updates go,
@@ -658,22 +662,23 @@ impl OutputNaming {
         }
     }
 
-    /// The file name in `output_folder` for an output with `file_ext` (with
-    /// its dot): the clip name made unique there (#441), else
-    /// `<demo>_<take><wav part>_<stream>_<hash><ext>`.
-    fn file_name(&self, job: &RenderJob, output_folder: &Path, file_ext: &str) -> String {
-        match clip_file_stem(&job.clip, &self.wav_part, job.is_hud) {
-            Some(stem) => get_unique_filename(output_folder, &stem, file_ext),
-            None => format!(
-                "{}_{}{}_{}_{}{}",
-                self.demo_name,
-                self.take_name,
-                self.wav_part,
-                self.stream_type,
-                self.hash_str,
-                file_ext
-            ),
-        }
+    /// Reserves the output's name in `output_folder` for an output with
+    /// `file_ext` (with its dot), made unique there: the clip name (#441),
+    /// else `<demo>_<take><wav part>_<stream>_<hash>`. Held until the job
+    /// ends (`partial_output`, #1439).
+    fn reserve(
+        &self,
+        job: &RenderJob,
+        output_folder: &Path,
+        file_ext: &str,
+    ) -> partial_output::Reserved<'static> {
+        let stem = clip_file_stem(&job.clip, &self.wav_part, job.is_hud).unwrap_or_else(|| {
+            format!(
+                "{}_{}{}_{}_{}",
+                self.demo_name, self.take_name, self.wav_part, self.stream_type, self.hash_str
+            )
+        });
+        partial_output::in_flight().reserve(output_folder, &stem, file_ext)
     }
 }
 
@@ -718,9 +723,7 @@ async fn copy_source_video(job: &RenderJob, output_folder: &Path, naming: &Outpu
         .extension()
         .map(|e| e.to_string_lossy().into_owned())
         .unwrap_or_else(|| "mp4".to_string());
-    let final_name = naming.file_name(job, output_folder, &format!(".{ext}"));
-    let out_file = output_folder.join(&final_name);
-    let out_file_str = out_file.to_string_lossy().into_owned();
+    let output = naming.reserve(job, output_folder, &format!(".{ext}"));
 
     if job.cancel.load(Ordering::Relaxed) {
         job.finish_cancelled();
@@ -734,10 +737,26 @@ async fn copy_source_video(job: &RenderJob, output_folder: &Path, naming: &Outpu
     // during a large copy (Custom Output/lossless OBS captures — see
     // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
     // being silently ignored until the whole file has already moved.
-    match copy_cancellable(&source_video, &out_file, &job.cancel).await {
+    // Like FFmpeg, the copy writes under the partial name and takes the
+    // real one only once it is whole (#1439).
+    let copied = copy_cancellable(&source_video, &output.partial, &job.cancel).await;
+    if is_exiting() {
+        return;
+    }
+    match copied {
         Ok(true) => job.finish_cancelled(),
-        Ok(false) => job.finish_ok(out_file_str),
-        Err(e) => job.finish_error(format!("Failed to copy source video to export pool: {}", e)),
+        Ok(false) => match partial_output::in_flight().finish(&output) {
+            Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
+            Err(e) => job.finish_error(crate::messages::render::rename_failed(
+                output.partial.display(),
+                output.out_file.display(),
+                e,
+            )),
+        },
+        Err(e) => {
+            remove_partial_output(&output.partial).await;
+            job.finish_error(format!("Failed to copy source video to export pool: {}", e));
+        }
     }
 }
 
@@ -765,9 +784,9 @@ pub fn hold_render_wake_lock() -> Option<RenderWakeLock> {
 /// silently do nothing until the whole file had already moved, unlike the
 /// FFmpeg path, which polls its cancel flag every 200ms and kills the child.
 ///
-/// Returns `Ok(true)` if cancelled partway through, in which case the partial
-/// `dst` is removed before returning — a truncated file left behind under
-/// the pipeline's naming would look like a finished export.
+/// Returns `Ok(true)` if cancelled partway through, or Studio is closing
+/// (#1439), in which case the partial `dst` is removed before returning — a
+/// truncated file left behind would look like a finished export.
 async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::io::Result<bool> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -778,7 +797,7 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     // disk.
     let mut buf = vec![0u8; 2 * 1024 * 1024];
     loop {
-        if cancel.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) || is_exiting() {
             drop(writer);
             let _ = tokio::fs::remove_file(dst).await;
             return Ok(true);
@@ -793,30 +812,39 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     Ok(false)
 }
 
-/// Removes what FFmpeg wrote of `out_file` before it was stopped or failed:
-/// a truncated file under the pipeline's naming looks like a finished export,
-/// the same reason `copy_cancellable` removes its partial copy. A file that was
-/// there before the job started is never touched.
-async fn remove_partial_output(out_file: &Path, existed_before: bool) {
-    if !existed_before {
-        let _ = tokio::fs::remove_file(out_file).await;
-    }
+/// Removes what a stopped or failed render wrote of its partial file. The
+/// name is the job's own reservation (`partial_output`), so whatever is there
+/// is this job's, or a leftover of a render that never finished.
+async fn remove_partial_output(partial: &Path) {
+    let _ = tokio::fs::remove_file(partial).await;
+}
+
+/// Set once Studio is on its way out (#1439): renders stopped then report
+/// nothing and rename nothing, and the scheduler starts nothing more.
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+/// Whether Studio is closing: see [`stop_renders_for_exit`].
+pub fn is_exiting() -> bool {
+    EXITING.load(Ordering::SeqCst)
 }
 
 /// Studio's way out (#1439): ends every render FFmpeg at once and removes
 /// the unfinished files they were writing, so none outlives Studio or stays
-/// in an export folder. Blocks for up to about 2 s while Windows lets go of
-/// the files. Logs what it did.
+/// in an export folder. Marks Studio as exiting first, so a stopped render
+/// isn't recorded as failed and nothing new starts. Blocks for up to about
+/// 2 s while Windows lets go of the files. Logs what it did.
 pub fn stop_renders_for_exit() {
+    EXITING.store(true, Ordering::SeqCst);
     let began = std::time::Instant::now();
     if let Err(e) = crate::sys::child_job::end_all_with_studio() {
         crate::log_markdown(&crate::messages::render::exit_stop_failed(e));
     }
     let removed = partial_output::in_flight().remove_all();
-    if removed.removed == 0 && removed.failed.is_empty() {
+    if removed.in_flight == 0 {
         return;
     }
-    crate::log_markdown(&crate::messages::render::exit_partials_removed(
+    crate::log_markdown(&crate::messages::render::exit_renders_stopped(
+        removed.in_flight,
         removed.removed,
         began.elapsed(),
     ));
@@ -858,22 +886,6 @@ fn sanitize_file_stem(name: &str) -> String {
         })
         .collect();
     replaced.trim().trim_end_matches(['.', ' ']).to_string()
-}
-
-/// `base_name` + `ext` in `output_dir`, or with the first free `_N` suffix.
-/// A name another render is still writing (its partial file) is taken too.
-fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String {
-    let taken = |name: &str| {
-        let path = output_dir.join(name);
-        path.exists() || partial_output::partial_path(&path).exists()
-    };
-    let mut counter = 1;
-    let mut final_name = format!("{}{}", base_name, ext);
-    while taken(&final_name) {
-        final_name = format!("{}_{}{}", base_name, counter, ext);
-        counter += 1;
-    }
-    final_name
 }
 
 #[cfg(test)]
@@ -1440,15 +1452,6 @@ mod tests {
         assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
     }
 
-    /// Two renders of one clip name at once: the second must not pick the
-    /// name the first is still writing under its partial name (#1439).
-    #[test]
-    fn a_name_another_render_is_still_writing_is_taken() {
-        let root = scratch("unique_partial");
-        std::fs::write(root.join("Kill.partial.mov"), b"half").unwrap();
-        assert_eq!(get_unique_filename(&root, "Kill", ".mov"), "Kill_1.mov");
-    }
-
     #[test]
     fn a_clip_name_is_cleaned_for_windows() {
         assert_eq!(sanitize_file_stem("anzio: krod?  "), "anzio_ krod_");
@@ -1676,20 +1679,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A cancelled or failed FFmpeg render removes the file it was writing,
-    /// but never one that was there before the job started.
+    /// A cancelled or failed render removes its partial file. A finished
+    /// clip is never at risk: its name is never a partial name (#1439).
     #[tokio::test]
-    async fn remove_partial_output_only_removes_the_jobs_own_file() {
+    async fn remove_partial_output_removes_the_jobs_partial_file() {
         let root = scratch("partial_output");
-        let written = root.join("clip.mp4");
+        let written = root.join("clip.partial.mp4");
         std::fs::write(&written, b"48 bytes of a header").unwrap();
-        remove_partial_output(&written, false).await;
+        remove_partial_output(&written).await;
         assert!(!written.exists(), "the job's partial file must go");
-
-        let earlier = root.join("earlier.mp4");
-        std::fs::write(&earlier, b"someone's finished clip").unwrap();
-        remove_partial_output(&earlier, true).await;
-        assert!(earlier.exists(), "a file from before the job must stay");
+        // Already gone is fine.
+        remove_partial_output(&written).await;
         let _ = std::fs::remove_dir_all(&root);
     }
 

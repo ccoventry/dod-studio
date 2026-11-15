@@ -77,12 +77,19 @@ pub fn exit_stop_failed(err: impl Display) -> String {
     format!("[render] DoD Studio is closing: could not stop its running renders: {err}")
 }
 
-/// Studio's way out removed the unfinished files of the renders it stopped.
-pub fn exit_partials_removed(count: usize, took: std::time::Duration) -> String {
+/// Studio's way out stopped `stopped` renders and removed `removed` of their
+/// unfinished files (one not written yet has none to remove).
+pub fn exit_renders_stopped(stopped: usize, removed: usize, took: std::time::Duration) -> String {
     format!(
-        "[render] DoD Studio is closing: stopped its running renders and removed {count} unfinished file(s) in {} ms",
+        "[render] DoD Studio is closing: stopped {stopped} running render(s) and removed {removed} unfinished file(s) in {} ms",
         took.as_millis()
     )
+}
+
+/// A render took a name whose unfinished file a render that never finished
+/// left behind (#1439): it is written over.
+pub fn leftover_partial_replaced(partial: impl Display) -> String {
+    format!("[render] {partial} was left by a render that never finished: writing over it")
 }
 
 /// An unfinished render file Studio's way out could not remove.

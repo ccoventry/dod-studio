@@ -3,7 +3,6 @@
 //! is polled, never waited on blindly: the cancel flag is checked every
 //! 200 ms while it reads frames and while it exits.
 
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -11,20 +10,17 @@ use tokio::process::{Child, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::Interval;
 
-use super::partial_output;
-use super::{RenderJob, RenderUpdate, record_output_size, remove_partial_output};
+use super::partial_output::{self, Reserved};
+use super::{RenderJob, RenderUpdate, is_exiting, record_output_size, remove_partial_output};
 
 /// Runs FFmpeg with `args` for `job` and sends every update up to its
-/// `Finished`. `partial` is the file the last argument names: renamed to
-/// `out_file` when FFmpeg succeeds, removed if the render is cancelled or
-/// fails, unless it was there before. FFmpeg ends with Studio, however
-/// Studio exits (#1439).
-pub(super) async fn run_ffmpeg(
-    job: &RenderJob,
-    args: Vec<String>,
-    partial: &Path,
-    out_file: &Path,
-) {
+/// `Finished`. `output.partial` is the file the last argument names: renamed
+/// to `output.out_file` when FFmpeg succeeds, removed if the render is
+/// cancelled or fails. FFmpeg ends with Studio, however Studio exits; once
+/// Studio is closing, the job sends nothing and renames nothing, and Studio's
+/// way out removes its file (#1439).
+pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Reserved<'_>) {
+    let partial = output.partial.as_path();
     let mut cmd = ffmpeg_command(job, args);
 
     job.send(RenderUpdate::Status(
@@ -32,9 +28,9 @@ pub(super) async fn run_ffmpeg(
         "Rendering".to_string(),
     ));
 
-    let existed_before = partial.exists();
-    // Listed before FFmpeg can create it, so Studio's way out finds it.
-    let _in_flight = partial_output::in_flight().add(partial);
+    if is_exiting() {
+        return;
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -71,10 +67,13 @@ pub(super) async fn run_ffmpeg(
             Polled::Done(status) => Some(status),
         },
     };
+    if is_exiting() {
+        return;
+    }
     let Some(exit_status) = exit_status else {
         let _ = child.kill().await;
         let _ = child.wait().await;
-        remove_partial_output(partial, existed_before).await;
+        remove_partial_output(partial).await;
         job.finish_cancelled();
         return;
     };
@@ -91,13 +90,13 @@ pub(super) async fn run_ffmpeg(
                     meta.len(),
                 );
             }
-            match partial_output::finish(partial, out_file) {
+            match partial_output::in_flight().finish(output) {
                 Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
                 // The render itself is good: it stays under its partial name
                 // for the user to rename, and the error says where.
                 Err(e) => job.finish_error(crate::messages::render::rename_failed(
                     partial.display(),
-                    out_file.display(),
+                    output.out_file.display(),
                     e,
                 )),
             }
@@ -112,7 +111,7 @@ pub(super) async fn run_ffmpeg(
                 exit_code,
                 err_log.as_deref().unwrap_or("")
             );
-            remove_partial_output(partial, existed_before).await;
+            remove_partial_output(partial).await;
             job.finish_error(error_msg);
         }
         Err(e) => {
