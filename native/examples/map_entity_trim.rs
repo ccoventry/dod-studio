@@ -186,8 +186,8 @@ fn main() {
     };
 
     let bytes = std::fs::read(&map_path).unwrap_or_else(|e| fail(&format!("{map_path}: {e}")));
-    let checksum = map_checksum(&bytes).unwrap_or_else(|e| fail(&e));
-    let bsp = Bsp::parse(&bytes).unwrap_or_else(|e| fail(&e));
+    let checksum = map_checksum(&bytes).unwrap_or_else(|e| fail(&e.to_string()));
+    let bsp = Bsp::parse(&bytes).unwrap_or_else(|e| fail(&e.to_string()));
     let entities = parse_entities(&bytes).unwrap_or_else(|e| fail(&e));
 
     // Where players have actually been, harvested from real demos of the map --
@@ -564,7 +564,7 @@ fn apply(
 
     let trimmed =
         rewrite_entity_lump(bytes, &serialize_entities(&kept)).unwrap_or_else(|e| fail(&e));
-    let after = map_checksum(&trimmed).unwrap_or_else(|e| fail(&e));
+    let after = map_checksum(&trimmed).unwrap_or_else(|e| fail(&e.to_string()));
     if after != checksum {
         fail(&format!(
             "map checksum moved (0x{checksum:08X} -> 0x{after:08X}); refusing to write, \
