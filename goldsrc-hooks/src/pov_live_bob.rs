@@ -18,10 +18,12 @@
 //! 0.39-0.43 x bob forward and -0.03..-0.06 x bob up (#889).
 //!
 //! But in POV playback `V_RenderView` throws that away: right after
-//! `ClientDLL_CalcRefdef` it calls the demo view override (pre-Anniversary
-//! `hw.dll+0xd75d`, 25th Anniversary `+0x198e90`; `playdemo` and `viewdemo`
-//! alike), which copies the recorded `ref_params_s` over the live one and
-//! puts the gun at the recorded position; the engine then sets the gun's
+//! `ClientDLL_CalcRefdef` it calls the demo view override
+//! (`CL_GetDemoViewInfo`, pre-Anniversary `hw.dll+0xd75d`, 25th Anniversary
+//! `+0x198e90`), which dispatches to `DemoPlayer_GetDemoViewInfo` under
+//! `viewdemo` and `CL_GetDemoViewInfo_OLD` under `playdemo`, so `playdemo` and
+//! `viewdemo` alike. Either way it copies the recorded `ref_params_s` over the
+//! live one and puts the gun at the recorded position; the engine then sets the gun's
 //! angles from the recorded view angles alone. So the view and gun carry the
 //! recorder's bob, the gun's tilt is lost even for recorders who had one, and
 //! changing `cl_bob` does nothing. HLTV demos skip the override (the engine's

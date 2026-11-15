@@ -1449,8 +1449,9 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     result
 }
 
-/// Sets the in-eye camera's crouch height for the frame (`spectator_eye`),
-/// runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
+/// Puts back the HUD's FOV a POV demo played as HLTV left behind
+/// (`hltv_fov`), sets the in-eye camera's crouch height for the frame
+/// (`spectator_eye`), runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
 /// position where the engine culls an HLTV demo's entities from
 /// (`spectator_chase_pvs`), lets the spectated view
 /// replace the camera for a dead player (`spectator_deathcam`, before the
@@ -1466,6 +1467,10 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     let main_view = unsafe { crate::spectator_chase_pvs::is_main_view(pparams) };
     crate::spec_xray::before_calc_refdef();
+    if main_view {
+        // Before the viewmodel is drawn, which reads the HUD's FOV.
+        crate::hltv_fov::settle_hud_fov();
+    }
     // Before: `V_GetInEyePos` reads the height inside `V_CalcRefdef`.
     unsafe { crate::spectator_eye::before_calc_refdef(pparams) };
     unsafe { real(pparams) };

@@ -9,6 +9,7 @@
 //! what is left: after a schema bump, most of a folder is cached again in
 //! seconds instead of a parse per demo.
 
+use crate::shared::lock::lock_or_recover;
 use analysis::cache::{NotUpgraded, WorkPlan};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -165,7 +166,7 @@ fn upgrade_entries_with(
         total: paths.len(),
         ..UpgradeProgress::default()
     });
-    on_progress(&progress.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    on_progress(&lock_or_recover(&progress).clone());
     let started = Instant::now();
     // Milliseconds since `started` of the last report, shared by the workers.
     let last_report = AtomicU32::new(0);
@@ -179,7 +180,7 @@ fn upgrade_entries_with(
                     };
                     let result = upgrade(path);
                     let snapshot = {
-                        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut p = lock_or_recover(&progress);
                         p.done += 1;
                         match result {
                             Ok(()) => p.upgraded += 1,
@@ -234,7 +235,7 @@ fn cache_demos_with(
     }));
     // The cache check is done: the page leaves "Checking the analyzer
     // cache…" now rather than after the first demo, which may be a parse.
-    on_progress(&progress.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    on_progress(&lock_or_recover(&progress).clone());
     let next = Arc::new(AtomicUsize::new(0));
     let paths = Arc::new(paths);
     let plan = Arc::new(plan);
@@ -262,7 +263,7 @@ fn cache_demos_with(
                     let Some(path) = paths.get(index) else { break };
                     let result = analyse(path);
                     let snapshot = {
-                        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut p = lock_or_recover(&progress);
                         p.done += 1;
                         if !plan.fresh.get(index).copied().unwrap_or(false) {
                             p.parsed += 1;
@@ -290,7 +291,7 @@ fn cache_demos_with(
     for worker in workers {
         let _ = worker.join();
     }
-    let mut last = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut last = lock_or_recover(&progress).clone();
     last.finished = true;
     last.cancelled = cancel.load(Ordering::Acquire) && last.done < last.total;
     on_progress(&last);

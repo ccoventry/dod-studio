@@ -1,6 +1,6 @@
 // The Master Demo Queue row's right-click menu (#1111) — driven against
 // tests/e2e/master-pane-menu.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 

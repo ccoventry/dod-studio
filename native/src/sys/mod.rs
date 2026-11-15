@@ -5,6 +5,8 @@ pub mod analysis_server;
 /// would come.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bring_forward;
+/// A job object that ends the processes put in it when Studio exits (#1439).
+pub mod child_job;
 /// Whether reading a file would download it from a cloud drive (#992).
 pub mod cloud_file;
 /// Releases the mouse a killed game left confined (#1095).
@@ -47,6 +49,9 @@ pub mod steam;
 /// game (#1235).
 #[cfg(windows)]
 pub mod studio_pipe;
+/// "Keep free on the Windows drive" (#1430): what captures and renders leave
+/// free on the drive Windows is installed on.
+pub mod windows_drive;
 /// Ends a launcher a cancelled WMI call starts late (#1243).
 pub mod wmi_late_start;
 /// Starts a process through WMI, outside every job of Studio's (#545).

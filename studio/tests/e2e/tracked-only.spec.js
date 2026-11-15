@@ -1,6 +1,6 @@
 // The Master Queue's Tracked only filter (#127), driven against
 // tests/e2e/tracked-only.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/tracked-only.html');

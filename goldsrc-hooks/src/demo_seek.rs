@@ -113,8 +113,9 @@
 //! often minutes later (median 103 s over 469 POV demos). The player's clock
 //! starts at the LOADING frames, so the first stretch of it has no frames.
 //!
-//! The player means to jump such a gap: `RunClocks` (PRE `DemoPlayer.dll`
-//! `+0x42e0`, Anniversary `+0x3c40`) moves the clock to 0.01 s before the next
+//! The player means to jump such a gap: `DemoPlayer::RunClocks` (PRE
+//! `DemoPlayer.dll+0x42b0`; inlined into `DemoPlayer::RunFrame`, `+0x3c00`, in
+//! the Anniversary build) moves the clock to 0.01 s before the next
 //! frame when the frame after the last one sent is more than 2 s on. But it
 //! looks only from the last frame *sent*, and `WriteDatagram` sends the first
 //! frame at or after the clock. The LOADING frames span about 14 ms of server

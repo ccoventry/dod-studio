@@ -9,14 +9,17 @@ import { setFieldError, clearFieldError } from './field_error.js';
 
 /**
  * The reason for each field, '' when that field is fine.
- * @param {{ hlPath: string, hlaePath: string, driveCount: number }} s
+ * AGR FPS counts only in AGR mode (no default stands in for it there); the
+ * other modes ignore the box.
+ * @param {{ hlPath: string, hlaePath: string, driveCount: number, captureMode?: string, agrFps?: number }} s
  */
-export function captureFieldProblems({ hlPath, hlaePath, driveCount }) {
+export function captureFieldProblems({ hlPath, hlaePath, driveCount, captureMode, agrFps }) {
   const F = STRINGS.CAPTURE_FIELDS;
   return {
     hl: hlPath?.trim() ? '' : F.HL_PATH_EMPTY,
     hlae: hlaePath?.trim() ? '' : F.HLAE_PATH_EMPTY,
     drive: driveCount > 0 ? '' : F.OUTPUT_DIR_EMPTY,
+    agr: captureMode === 'agr' && !(Number.isFinite(agrFps) && agrFps > 0) ? F.AGR_FPS_EMPTY : '',
   };
 }
 
@@ -26,16 +29,17 @@ const FIELDS = [
   ['hl', '#hl-install-choice', null],
   ['hlae', '#hlae-path-input', null],
   ['drive', '#drive-path-input', '#target-drive-list'],
+  ['agr', '#config-agr-fps', null],
 ];
 
 /**
- * Marks or clears the three fields from the current form. Only touches a
+ * Marks or clears the capture fields from the current form. Only touches a
  * mark this module set, so the Render tab's own error on the same folder field
  * is left alone.
  * @param {boolean} show false clears our marks (nothing is being captured yet)
  */
-export function syncCaptureFieldErrors({ hlPath, hlaePath, driveCount }, show = true) {
-  const problems = captureFieldProblems({ hlPath, hlaePath, driveCount });
+export function syncCaptureFieldErrors({ hlPath, hlaePath, driveCount, captureMode, agrFps }, show = true) {
+  const problems = captureFieldProblems({ hlPath, hlaePath, driveCount, captureMode, agrFps });
   for (const [key, selector] of FIELDS) {
     const input = document.querySelector(selector);
     if (!input) continue;

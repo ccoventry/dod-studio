@@ -1,3 +1,4 @@
+use crate::shared::lock::{read_or_recover, write_or_recover};
 use std::path::{Path, PathBuf};
 
 /// Name of this app's directory under `%APPDATA%`.
@@ -340,7 +341,7 @@ pub fn set_game_folder(name: &str) -> Result<(), String> {
     if !name.is_empty() {
         validate_game_folder(name)?;
     }
-    let mut guard = GAME_FOLDER.write().unwrap_or_else(|p| p.into_inner());
+    let mut guard = write_or_recover(&GAME_FOLDER);
     *guard = name.to_string();
     Ok(())
 }
@@ -348,7 +349,7 @@ pub fn set_game_folder(name: &str) -> Result<(), String> {
 /// The game folder's name: the `<mod>` in `-game <mod>`, `dod` by default
 /// (#402).
 pub fn game_folder() -> String {
-    let guard = GAME_FOLDER.read().unwrap_or_else(|p| p.into_inner());
+    let guard = read_or_recover(&GAME_FOLDER);
     if guard.is_empty() {
         DEFAULT_GAME_FOLDER.to_string()
     } else {

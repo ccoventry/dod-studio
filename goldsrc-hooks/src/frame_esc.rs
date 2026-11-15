@@ -6,7 +6,7 @@
 //! ## Why they close
 //!
 //! None of those windows handles keys itself, so ESC reaches
-//! `Frame::OnKeyCodeTyped` (vftable slot 100, the one function every GameUI
+//! `Frame::OnKeyCodePressed` (vftable slot 100, the one function every GameUI
 //! `Frame` inherits). On ESC (vgui2 `KEY_ESCAPE`, 70), when the engine's
 //! surface supports the escape key, that function:
 //!
@@ -46,7 +46,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
 
 use crate::scan;
 
-/// `Frame::OnKeyCodeTyped`'s entry in the Anniversary build, through its
+/// `Frame::OnKeyCodePressed`'s entry in the Anniversary build, through its
 /// `cmp [ebp+8], KEY_ESCAPE; jne`: the SEH frame and stack cookie with their
 /// addresses wildcarded.
 const PATTERN: &str = "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 56 A1 ?? ?? ?? ?? \
@@ -110,7 +110,7 @@ fn check(base: usize) -> Result<usize, String> {
     });
     if starts != [true, true] {
         return Err(format!(
-            "Frame::OnKeyCodeTyped's blocks don't start at +{CLOSE_BLOCK:#x} and +{CANCEL_BLOCK:#x}"
+            "Frame::OnKeyCodePressed's blocks don't start at +{CLOSE_BLOCK:#x} and +{CANCEL_BLOCK:#x}"
         ));
     }
     let push = entry + CLOSE_PUSH;
@@ -124,7 +124,7 @@ fn check(base: usize) -> Result<usize, String> {
     };
     if pushed != Some(CLOSE_MESSAGE) {
         return Err(format!(
-            "Frame::OnKeyCodeTyped doesn't push \"CloseFrameButtonPressed\" at +{:#x}",
+            "Frame::OnKeyCodePressed doesn't push \"CloseFrameButtonPressed\" at +{:#x}",
             push - base
         ));
     }
@@ -135,7 +135,7 @@ fn install(base: usize) -> Result<usize, String> {
     let entry = check(base)?;
     // Safety: the two bytes checked above, one whole instruction.
     if !unsafe { crate::patch::write_code_bytes(entry + CLOSE_BLOCK, &skip()) } {
-        return Err("could not make Frame::OnKeyCodeTyped writable".to_string());
+        return Err("could not make Frame::OnKeyCodePressed writable".to_string());
     }
     Ok(entry - base)
 }
@@ -165,7 +165,7 @@ pub fn poll() {
         Ok(entry) => {
             INSTALLED.store(true, Ordering::Relaxed);
             format!(
-                "frame_esc: ESC no longer closes GameUI's windows (Frame::OnKeyCodeTyped +{entry:#x} skips CloseFrameButtonPressed) (#369, #408)"
+                "frame_esc: ESC no longer closes GameUI's windows (Frame::OnKeyCodePressed +{entry:#x} skips CloseFrameButtonPressed) (#369, #408)"
             )
         }
         Err(why) => format!("frame_esc: not installed -- {why}"),

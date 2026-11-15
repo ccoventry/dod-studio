@@ -1,6 +1,10 @@
 //! `ds_demo_reload`: play the current demo again from the start (#330).
 //!
-//! ## Nothing in the engine keeps the name
+//! ## Nothing in `hw.dll` keeps the name
+//!
+//! (Under `viewdemo` the demo player does keep it, `IDemoPlayer::GetFileName`,
+//! vftable slot 39, `this+0x278`; `playdemo` has no such getter, so the DLL
+//! remembers the name either way.)
 //!
 //! `playdemo`'s handler (pre-Anniversary `hw.dll+0x105fd`) copies `Cmd_Argv(1)`
 //! into a 256-byte buffer on its own stack, adds `.dem`, prints "Playing demo
@@ -135,6 +139,9 @@ unsafe extern "C" fn wrapped_viewdemo() {
         crate::map_cfgs::before_demo(&name);
     }
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // The command has just loaded DemoPlayer.dll: patch it before the
+    // demo's first events are read (#1392).
+    crate::demoplayer_dict_cache::keep_installed();
     // A seek later on this command line waits for this demo to load (#928).
     crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Viewdemo);
     // ds_ui_viewdemo_in_panel: the DoD Studio window stands in for the bar.

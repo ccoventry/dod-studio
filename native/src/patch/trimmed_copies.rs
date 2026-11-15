@@ -25,6 +25,7 @@
 //! read the copy again. The entry keeps the original's file info, so Studio's
 //! list of analysed demos shows the demo once, by its own name.
 
+use crate::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
@@ -120,7 +121,7 @@ static PINNED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 fn pinned() -> MutexGuard<'static, Vec<PathBuf>> {
     // The list stays whole if a holder panicked: each push or remove is one call.
-    PINNED.lock().unwrap_or_else(|p| p.into_inner())
+    lock_or_recover(&PINNED)
 }
 
 /// Keeps copies from being pruned while it lives. A batch holds one from the

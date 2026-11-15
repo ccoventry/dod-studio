@@ -203,6 +203,23 @@ describe('Review highlights answers (#623)', () => {
     expect(applyReviewEdit([d], { ...edit, key: 'nope' })).toBeNull();
   });
 
+  it('a range narrowed in game refreshes kill count, ticks, duration and timeline (#1396)', () => {
+    const s = streak();
+    const d = demo('a.dem', [s]);
+    applyReviewEdit([d], { demo: d.path, key: streakUid(d.path, s), from: 2, to: 2, note: '' });
+    expect(s).toMatchObject({ kill_count: 1, start_tick: 200, end_tick: 200, duration_string: '0:00', timeline_string: 'K98' });
+    applyReviewAnswer([d], answerFor(d, s, { from: 1, to: 3 }));
+    expect(s).toMatchObject({ kill_count: 3, start_tick: 100, end_tick: 300 });
+    expect(s.timeline_string).toContain('Colt');
+  });
+
+  it('an answer that keeps the range leaves the derived fields alone (#1396)', () => {
+    const s = streak({ start_index: 1, end_index: 2, kill_count: 99, start_tick: 1, end_tick: 2 });
+    const d = demo('a.dem', [s]);
+    applyReviewAnswer([d], answerFor(d, s));
+    expect(s).toMatchObject({ kill_count: 99, start_tick: 1, end_tick: 2 });
+  });
+
   it('an answer for a highlight no longer in the queue changes nothing', () => {
     const s = streak();
     const d = demo('a.dem', [s]);
@@ -233,6 +250,15 @@ describe('What a review covers (#661)', () => {
     expect(reviewDemoPaths(['b.dem'], ['a.dem', 'b.dem'])).toEqual(['b.dem']);
     expect(reviewDemoPaths([], ['a.dem', 'b.dem'])).toEqual(['a.dem', 'b.dem']);
     expect(reviewDemoPaths(undefined, undefined)).toEqual([]);
+  });
+
+  it('Ticked plays just the highlights ticked for capture, whatever their mark', () => {
+    const t = (curation, at, selected) => ({ ...marked(curation, at), selected });
+    const ticked = demo('b.dem', [t('Keep', 10, true), t('Keep', 20, false), t(undefined, 30, true), t('Skip', 40)]);
+    const rows = buildReviewQueue([ticked], ['b.dem'], REVIEW_COVERS.TICKED).highlights;
+    expect(rows.map((h) => h.kill_times[0])).toEqual([10, 30]);
+    expect(coveredByReview({ selected: true }, REVIEW_COVERS.TICKED)).toBe(true);
+    expect(coveredByReview({ curation: 'Keep' }, REVIEW_COVERS.TICKED)).toBe(false);
   });
 
   it('coveredByReview agrees with the queue', () => {
