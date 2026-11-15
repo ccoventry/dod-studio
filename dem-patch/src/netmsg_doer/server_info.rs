@@ -1,11 +1,12 @@
 use super::*;
 
 /// How many bytes an old server build (seen: `BUILD 2693`, 2004-era) sends
-/// after the VAC byte when that byte is set. Today's client reads only the VAC
-/// byte (Xash3D's GoldSrc client the same), and no server build in a library
-/// of 1,105 demos (builds 3647 to 10210) sends anything after it. The bytes
-/// look like an opaque block (the same 21 in two recordings of different
-/// sessions), so they are kept as-is and written back unchanged.
+/// after the VAC byte when that byte is set. Xash3D's GoldSrc client reads
+/// only the VAC byte, and no server build in a library of 1,105 demos (builds
+/// 3647 to 10210) sends anything after it. What the block means is not known
+/// (the same 21 bytes in two recordings of different sessions; the
+/// pre-Anniversary game plays such a demo as it is), so it is kept as-is and
+/// written back unchanged.
 const LEGACY_TRAILER_LEN: usize = 21;
 
 /// `svc_sendextrainfo`: the message every server sends straight after
