@@ -1895,6 +1895,15 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── Closing while renders run (render_close_prompt.js, #1439) ──
+  RENDER_CLOSE_MODAL: {
+    TITLE: 'Renders running',
+    message: (running) => `${running === 1 ? 'A render is' : `${running} renders are`} running. Closing DoD Studio stops ${running === 1 ? 'it' : 'them'} and removes the unfinished clip${running === 1 ? '' : 's'}.`,
+    CLOSE_BUTTON: 'Stop renders and close',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+    logLine: (running, closed) => `Close asked while ${running} render(s) ran: ${closed ? 'closed, stopping them' : 'kept Studio open'}`,
+  },
+
   // ── What a running batch holds back (batch_guard.js, #1085) ──
   BATCH_GUARD: {
     HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',

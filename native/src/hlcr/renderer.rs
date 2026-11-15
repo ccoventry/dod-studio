@@ -8,6 +8,7 @@ use super::scanner::ClipData;
 
 mod ffmpeg_args;
 mod ffmpeg_run;
+mod partial_output;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
@@ -333,6 +334,7 @@ pub async fn run_render_job(
         }
     };
     let out_file = output_folder.join(naming.file_name(&job, &output_folder, encode.file_ext));
+    let partial = partial_output::partial_path(&out_file);
     let threads = ffmpeg_args::threads_per_process(
         std::thread::available_parallelism().ok().map(|n| n.get()),
         job.config.max_concurrent_renders,
@@ -342,10 +344,10 @@ pub async fn run_render_job(
         fps: fps_used,
         encode: &encode,
         threads,
-        out_file: &out_file,
+        out_file: &partial,
     }
     .to_args();
-    ffmpeg_run::run_ffmpeg(&job, args, &out_file).await;
+    ffmpeg_run::run_ffmpeg(&job, args, &partial, &out_file).await;
 }
 
 /// One render job as every stage sees it: the job, where its updates go,
@@ -801,6 +803,31 @@ async fn remove_partial_output(out_file: &Path, existed_before: bool) {
     }
 }
 
+/// Studio's way out (#1439): ends every render FFmpeg at once and removes
+/// the unfinished files they were writing, so none outlives Studio or stays
+/// in an export folder. Blocks for up to about 2 s while Windows lets go of
+/// the files. Logs what it did.
+pub fn stop_renders_for_exit() {
+    let began = std::time::Instant::now();
+    if let Err(e) = crate::sys::child_job::end_all_with_studio() {
+        crate::log_markdown(&crate::messages::render::exit_stop_failed(e));
+    }
+    let removed = partial_output::in_flight().remove_all();
+    if removed.removed == 0 && removed.failed.is_empty() {
+        return;
+    }
+    crate::log_markdown(&crate::messages::render::exit_partials_removed(
+        removed.removed,
+        began.elapsed(),
+    ));
+    for (path, error) in &removed.failed {
+        crate::log_markdown(&crate::messages::render::exit_partial_left(
+            path.display(),
+            error,
+        ));
+    }
+}
+
 /// The finished file's name, without its extension, when the take has a clip
 /// name (#441): the name, the wav suffix, and `_hud` for the HUD stream. The
 /// caller makes it unique, so a re-render never overwrites an earlier file.
@@ -833,10 +860,16 @@ fn sanitize_file_stem(name: &str) -> String {
     replaced.trim().trim_end_matches(['.', ' ']).to_string()
 }
 
+/// `base_name` + `ext` in `output_dir`, or with the first free `_N` suffix.
+/// A name another render is still writing (its partial file) is taken too.
 fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String {
+    let taken = |name: &str| {
+        let path = output_dir.join(name);
+        path.exists() || partial_output::partial_path(&path).exists()
+    };
     let mut counter = 1;
     let mut final_name = format!("{}{}", base_name, ext);
-    while output_dir.join(&final_name).exists() {
+    while taken(&final_name) {
         final_name = format!("{}_{}{}", base_name, counter, ext);
         counter += 1;
     }
@@ -1405,6 +1438,15 @@ mod tests {
         }
         assert!(export_dir.join("anzio_krod_4k.mp4").is_file());
         assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
+    }
+
+    /// Two renders of one clip name at once: the second must not pick the
+    /// name the first is still writing under its partial name (#1439).
+    #[test]
+    fn a_name_another_render_is_still_writing_is_taken() {
+        let root = scratch("unique_partial");
+        std::fs::write(root.join("Kill.partial.mov"), b"half").unwrap();
+        assert_eq!(get_unique_filename(&root, "Kill", ".mov"), "Kill_1.mov");
     }
 
     #[test]
