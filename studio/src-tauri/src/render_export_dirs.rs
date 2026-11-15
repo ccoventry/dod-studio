@@ -6,6 +6,7 @@
 //! "Keep free on the Windows drive" needs nothing here: every render reads
 //! it as it picks its folder (`native::sys::windows_drive`).
 
+use native::shared::lock::{read_or_recover, write_or_recover};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -23,7 +24,7 @@ impl LiveExportDirs {
         if dirs.is_empty() {
             return;
         }
-        let mut live = self.0.write().unwrap_or_else(|p| p.into_inner());
+        let mut live = write_or_recover(&self.0);
         if live.1 != dirs {
             live.0 += 1;
             live.1 = dirs;
@@ -31,7 +32,7 @@ impl LiveExportDirs {
     }
 
     fn snapshot(&self) -> (u64, Vec<PathBuf>) {
-        self.0.read().unwrap_or_else(|p| p.into_inner()).clone()
+        read_or_recover(&self.0).clone()
     }
 
     /// The list Settings has; empty only when it has none.

@@ -39,6 +39,21 @@ test('a finished batch lists each take: what it was, whether it landed, its size
   expect(opened).toBe('C:\caps\a');
 });
 
+test('a cancelled batch shows the clips it never reached as not reached, not missing (#1434)', async ({ page }) => {
+  await loadHarness(page);
+  const [a, b, c] = PAYLOAD.blocks;
+  const cancelled = {
+    ...PAYLOAD, captured_count: 1, renderable_count: 1, ended_by: 'cancel',
+    blocks: [a, { ...b, captured: false, bytes: 0 }, { ...c, not_reached: true }],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('cancelled', ''); window.__verified(p, d); }, [cancelled, DISPATCH]);
+  const rows = page.locator('#batch-results tbody tr');
+  await expect(rows.nth(1)).toContainText('Missing');
+  await expect(rows.nth(2)).toContainText('Not reached: the batch was cancelled first');
+  await expect(rows.nth(2)).toHaveClass(/batch-results-row-not_reached/);
+  await expect(rows.nth(2).getByRole('button')).toHaveCount(0);
+});
+
 test('the takes can arrive before the outcome, an error says why, and the next batch clears it', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(([p, d]) => window.__verified(p, d), [PAYLOAD, DISPATCH]);

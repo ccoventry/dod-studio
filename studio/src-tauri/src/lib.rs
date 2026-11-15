@@ -55,6 +55,7 @@ mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
 mod trimmed_demos;
+mod unreached_clips;
 mod updater_manager;
 mod vegas_manager;
 
@@ -930,13 +931,9 @@ pub fn run() {
     // them by a running batch (#1430).
     let settings_manager = SettingsManager::new();
     let render_manager = RenderManager::new();
-    render_manager.export_dirs().saved(
-        &settings_manager
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .render_export_dirs,
-    );
+    render_manager
+        .export_dirs()
+        .saved(&native::shared::lock::lock_or_recover(&settings_manager.inner).render_export_dirs);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -1199,8 +1196,15 @@ pub fn run() {
             project_convert::project_convert_offer,
             project_convert::convert_project_file,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // Render FFmpegs end with Studio's process anyway (their job
+            // object); this also removes the clips they were writing (#1439).
+            if let tauri::RunEvent::Exit = event {
+                native::hlcr::renderer::stop_renders_for_exit();
+            }
+        });
 }
 
 #[cfg(test)]

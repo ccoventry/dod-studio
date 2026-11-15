@@ -3,7 +3,6 @@
 //! is polled, never waited on blindly: the cancel flag is checked every
 //! 200 ms while it reads frames and while it exits.
 
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -11,12 +10,17 @@ use tokio::process::{Child, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::Interval;
 
-use super::{RenderJob, RenderUpdate, record_output_size, remove_partial_output};
+use super::partial_output::{self, Reserved};
+use super::{RenderJob, RenderUpdate, is_exiting, record_output_size, remove_partial_output};
 
 /// Runs FFmpeg with `args` for `job` and sends every update up to its
-/// `Finished`. `out_file` is the file the last argument names: removed if
-/// the render is cancelled or fails, unless it was there before.
-pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Path) {
+/// `Finished`. `output.partial` is the file the last argument names: renamed
+/// to `output.out_file` when FFmpeg succeeds, removed if the render is
+/// cancelled or fails. FFmpeg ends with Studio, however Studio exits; once
+/// Studio is closing, the job sends nothing and renames nothing, and Studio's
+/// way out removes its file (#1439).
+pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Reserved<'_>) {
+    let partial = output.partial.as_path();
     let mut cmd = ffmpeg_command(job, args);
 
     job.send(RenderUpdate::Status(
@@ -24,7 +28,9 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
         "Rendering".to_string(),
     ));
 
-    let existed_before = out_file.exists();
+    if is_exiting() {
+        return;
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -32,6 +38,9 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
             return;
         }
     };
+    if let Err(e) = crate::sys::child_job::end_with_studio(&child) {
+        crate::log_markdown(&crate::messages::render::not_tied_to_studio(&job.job_id, e));
+    }
 
     // Both pipes are set to piped by `ffmpeg_command`, so `take()` has them.
     // Stderr is read on its own task so a full pipe can't stall FFmpeg.
@@ -58,10 +67,13 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
             Polled::Done(status) => Some(status),
         },
     };
+    if is_exiting() {
+        return;
+    }
     let Some(exit_status) = exit_status else {
         let _ = child.kill().await;
         let _ = child.wait().await;
-        remove_partial_output(out_file, existed_before).await;
+        remove_partial_output(partial).await;
         job.finish_cancelled();
         return;
     };
@@ -70,7 +82,7 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
 
     match exit_status {
         Ok(status) if status.success() => {
-            if let Ok(meta) = std::fs::metadata(out_file) {
+            if let Ok(meta) = std::fs::metadata(partial) {
                 record_output_size(
                     &job.clip,
                     job.config.target_codec,
@@ -78,7 +90,16 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
                     meta.len(),
                 );
             }
-            job.finish_ok(out_file.to_string_lossy().into_owned());
+            match partial_output::in_flight().finish(output) {
+                Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
+                // The render itself is good: it stays under its partial name
+                // for the user to rename, and the error says where.
+                Err(e) => job.finish_error(crate::messages::render::rename_failed(
+                    partial.display(),
+                    output.out_file.display(),
+                    e,
+                )),
+            }
         }
         Ok(status) => {
             let exit_code = status
@@ -90,7 +111,7 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
                 exit_code,
                 err_log.as_deref().unwrap_or("")
             );
-            remove_partial_output(out_file, existed_before).await;
+            remove_partial_output(partial).await;
             job.finish_error(error_msg);
         }
         Err(e) => {

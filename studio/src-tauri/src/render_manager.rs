@@ -909,6 +909,13 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         let mut take_volumes: HashMap<String, String> = HashMap::new();
 
         loop {
+            // Studio is closing (#1439): its way out has stopped the renders
+            // and removes their files. The loop stops at once, so nothing new
+            // starts, no stopped render is recorded as failed, and the
+            // autosave stays for the recovery offer at the next start.
+            if native::hlcr::renderer::is_exiting() {
+                return;
+            }
             if handles.global_cancel.load(Ordering::SeqCst) {
                 let mut guard = handles.jobs.lock().unwrap();
                 for job in guard.iter_mut() {
@@ -969,7 +976,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 let mut guard = handles.jobs.lock().unwrap();
                 let active_count = guard.iter().filter(|j| j.status == "Rendering").count();
                 let mut started = 0usize;
-                if active_count < max_concurrent {
+                // Checked again under the lock: the way out may have begun
+                // since the top of this pass.
+                if active_count < max_concurrent && !native::hlcr::renderer::is_exiting() {
                     let limit = max_concurrent - active_count;
                     let queued_count = guard.iter().filter(|j| j.status == "Queued").count();
                     let jobs_starting = queued_count.min(limit);
@@ -1096,6 +1105,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             // merging Queued rows in (#772) either lands before it, and the
             // loop keeps going for them, or after it, and writes its own
             // autosave once this one is gone.
+            if native::hlcr::renderer::is_exiting() {
+                return;
+            }
             let finished = {
                 let mut guard = handles.jobs.lock().unwrap();
                 let has_active_or_queued = guard
