@@ -13,6 +13,12 @@
 //!   replayed origin, angles and animation fields.
 //! - `deaths <demo> <from> <to>`: the `DeathMsg`s in the window, with which of
 //!   the two players the recorder's client held at that moment.
+//! - `heard <demo> <entity> <from> <to>`: the server's events and sounds about
+//!   him in the window, named from the resource list, and whether each
+//!   carries its own origin or takes his (an event's `packet_index`).
+//! - `roundtrip <demo>`: whether the writer gives back the same bytes.
+//! - `bend-recorder <demo> <out> <from> <to> <units>`: step 3, the recorder
+//!   himself swerved the same way (`bend_recorder` says what that touches).
 //! - `bend <demo> <out> <entity> <from> <to> <units>`: step 1. Offsets his
 //!   origin sideways (to his left for a positive `units`, right for a
 //!   negative) by `units * sin^2(pi u)` over the window, so he swerves and
@@ -402,6 +408,110 @@ fn recorder_entity(demo: &Demo) -> u16 {
     0
 }
 
+/// Every entity the client holds, in snapshot order: what an event's
+/// `packet_index` counts into (`CL_ParseEvent` reads
+/// `cl.frames[parsecountmod].packet_entities.entities[packet_index]`).
+const ALL_ENTITIES: std::ops::RangeInclusive<u16> = 0..=2047;
+
+/// What one event or sound in a window says, and about whom.
+struct Heard {
+    svc_time: f32,
+    line: String,
+}
+
+/// `svc_event`s in the window: which entity each `packet_index` resolves to
+/// and whether it carries its own origin; and `svc_sound`s naming `entity`.
+/// Sounds and events of the edited player are the server's, so they stay
+/// where the original path had him unless the client takes his position.
+fn heard(demo: &Demo, entity: u16, from: f32, to: f32) -> Vec<Heard> {
+    let mut replay: EntityReplay<Delta> = EntityReplay::new(ALL_ENTITIES);
+    let mut svc_time = 0.0f32;
+    let mut out = Vec::new();
+    // (resource type, index) -> name: type 0 sounds, 5 events.
+    let mut names: HashMap<(u8, u32), String> = HashMap::new();
+    let name = |names: &HashMap<(u8, u32), String>, kind: u8, index: Option<u32>| {
+        index
+            .and_then(|i| names.get(&(kind, i)).cloned())
+            .unwrap_or_default()
+    };
+    for entry in &demo.directory.entries {
+        for frame in &entry.frames {
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            replay.begin_frame(bt.1.sequence_info.incoming_sequence);
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
+            for m in msgs {
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
+                match &**em {
+                    EngineMessage::SvcTime(t) => svc_time = t.time,
+                    EngineMessage::SvcResourceList(list) => {
+                        for r in &list.resources {
+                            names.insert(
+                                (r.type_.to_u8(), r.index.to_u32()),
+                                r.name.get_string().trim_end_matches('\0').to_string(),
+                            );
+                        }
+                    }
+                    EngineMessage::SvcServerInfo(_) => replay.reset(ALL_ENTITIES),
+                    EngineMessage::SvcEvent(ev) if svc_time >= from && svc_time <= to => {
+                        for e in &ev.events {
+                            let packet = e.packet_index.as_ref().map(|b| b.to_u32() as usize);
+                            let resolved = packet.and_then(|p| replay.entities().get(p).map(|x| x.0));
+                            let own = e.delta.as_ref().and_then(|d| get_u32(d, "entindex\0"));
+                            if resolved != Some(entity) && own != Some(u32::from(entity)) {
+                                continue;
+                            }
+                            let origin = e.delta.as_ref().and_then(origin_of);
+                            out.push(Heard {
+                                svc_time,
+                                line: format!(
+                                    "event {} {} packet_index {:?} -> entity {:?}, entindex {:?}, own origin {:?}",
+                                    e.event_index.to_u32(),
+                                    name(&names, 5, Some(e.event_index.to_u32())),
+                                    packet,
+                                    resolved,
+                                    own,
+                                    origin
+                                ),
+                            });
+                        }
+                    }
+                    EngineMessage::SvcSound(s)
+                        if svc_time >= from
+                            && svc_time <= to
+                            && s.entity_index.to_u32() == entity as u32 =>
+                    {
+                        let index = s
+                            .sound_index_short
+                            .as_ref()
+                            .or(s.sound_index_long.as_ref())
+                            .map(|b| b.to_u32());
+                        out.push(Heard {
+                            svc_time,
+                            line: format!(
+                                "sound channel {} {} at x {} y {} z {}",
+                                s.channel.to_u32(),
+                                name(&names, 0, index),
+                                s.has_x,
+                                s.has_y,
+                                s.has_z
+                            ),
+                        });
+                    }
+                    _ => {}
+                }
+                replay.apply(em);
+            }
+        }
+    }
+    out
+}
+
 fn deaths(demo: &Demo, packets: &[PacketAt], from: f32, to: f32) {
     // DeathMsg is [killer, victim, weapon]; indices are 1-based slots, so
     // they are the entity indices directly.
@@ -579,6 +689,125 @@ fn restate_counts(demo: &mut Demo) -> usize {
 
 fn f32_value(v: f32) -> dem::types::DeltaValue {
     v.to_le_bytes().into()
+}
+
+/// What `bend_recorder` changed, by kind.
+#[derive(Default, Debug)]
+struct RecorderEdits {
+    frame_views: usize,
+    client_data_frames: usize,
+    own_events: usize,
+    svc_clientdata: usize,
+}
+
+/// Adds `by` to the first three values of `v`.
+fn shift3(v: &mut [f32], by: [f32; 3]) {
+    for (x, d) in v.iter_mut().zip(by) {
+        *x += d;
+    }
+}
+
+/// Step 3: swerves the recorder himself, sideways by `units * sin^2(pi u)`.
+/// In a POV demo his position is not in the entity packets: playback draws
+/// each frame header's recorded view (`refparams`: `vieworg`, `simorg`), the
+/// type-4 client-data frames carry his origin again, his own shots (type-6
+/// events) carry the origin they fire from, and `svc_clientdata` carries it
+/// for prediction. All four move together.
+fn bend_recorder(demo: &mut Demo, from: f32, to: f32, units: f32) -> Result<RecorderEdits, String> {
+    let packets = timeline(demo, 0);
+    let path: Vec<[f32; 3]> = packets
+        .iter()
+        .filter(|p| p.svc_time >= from && p.svc_time <= to)
+        .map(|p| p.recorder_origin)
+        .collect();
+    let (first, last) = (
+        *path.first().ok_or("no frames in the window")?,
+        *path.last().ok_or("no frames in the window")?,
+    );
+    let (dx, dy) = (last[0] - first[0], last[1] - first[1]);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let left = [-dy / len, dx / len];
+    println!(
+        "he walks {:.0} units on heading {:.0} deg",
+        len,
+        dy.atan2(dx).to_degrees()
+    );
+    let offset = |t: f32| -> [f32; 3] {
+        if t < from || t > to {
+            return [0.0; 3];
+        }
+        let s = (std::f32::consts::PI * (t - from) / (to - from)).sin().powi(2) * units;
+        [left[0] * s, left[1] * s, 0.0]
+    };
+    let mut edits = RecorderEdits::default();
+    let mut svc_time = 0.0f32;
+    for entry in demo.directory.entries.iter_mut() {
+        for frame in entry.frames.iter_mut() {
+            match &mut frame.frame_data {
+                FrameData::NetworkMessage(bt) => {
+                    if let MessageData::Parsed(msgs) = &bt.1.messages {
+                        for m in msgs {
+                            if let NetMessage::EngineMessage(em) = m
+                                && let EngineMessage::SvcTime(t) = &**em
+                            {
+                                svc_time = t.time;
+                            }
+                        }
+                    }
+                    let by = offset(svc_time);
+                    if by == [0.0; 3] {
+                        continue;
+                    }
+                    let info = &mut bt.1.info;
+                    shift3(&mut info.refparams.view_origin, by);
+                    shift3(&mut info.refparams.sim_org, by);
+                    edits.frame_views += 1;
+                    let MessageData::Parsed(msgs) = bt.1.messages_mut() else {
+                        continue;
+                    };
+                    for m in msgs.iter_mut() {
+                        let NetMessage::EngineMessage(em) = m else {
+                            continue;
+                        };
+                        let EngineMessage::SvcClientData(cd) = &mut **em else {
+                            continue;
+                        };
+                        let mut touched = false;
+                        for (k, v) in cd.client_data.iter_mut() {
+                            let axis = match trimmed(k).as_str() {
+                                "origin[0]" => 0,
+                                "origin[1]" => 1,
+                                _ => continue,
+                            };
+                            if let Some(x) = field_f32(v) {
+                                *v = f32_value(x + by[axis]);
+                                touched = true;
+                            }
+                        }
+                        if touched {
+                            edits.svc_clientdata += 1;
+                        }
+                    }
+                }
+                FrameData::ClientData(cd) => {
+                    let by = offset(svc_time);
+                    if by != [0.0; 3] {
+                        shift3(&mut cd.origin, by);
+                        edits.client_data_frames += 1;
+                    }
+                }
+                FrameData::Event(ev) => {
+                    let by = offset(svc_time);
+                    if by != [0.0; 3] && ev.args.origin.iter().any(|x| *x != 0.0) {
+                        shift3(&mut ev.args.origin, by);
+                        edits.own_events += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(edits)
 }
 
 fn bend(demo: &mut Demo, entity: u16, from: f32, to: f32, units: f32) -> Result<usize, String> {
@@ -996,11 +1225,13 @@ fn fill(demo: &mut Demo, plan: &FillPlan) -> Result<usize, String> {
         );
     }
     let mut done = 0;
+    let mut frames = std::collections::HashSet::new();
     for (e, f, m, d) in edits {
         if let Some(em) = packet_mut(demo, e, f, m)
             && set_entity_fields(em, plan.entity, &d)
         {
             done += 1;
+            frames.insert((e, f));
         }
     }
     // The first real packet: list everything he has there, so nothing the
@@ -1008,7 +1239,72 @@ fn fill(demo: &mut Demo, plan: &FillPlan) -> Result<usize, String> {
     if let Some(em) = packet_mut(demo, first.entry, first.frame, first.message) {
         set_entity_fields(em, plan.entity, &arrival);
     }
+    let shifted = shift_event_packet_indices(demo, &frames, plan.entity);
+    println!("event packet indices moved up past him: {shifted}");
     Ok(done)
+}
+
+/// An event names its entity by place in the frame's snapshot
+/// (`packet_index`), not by number, and the client takes the entity's
+/// origin and angles from there. Adding a player to a snapshot moves every
+/// higher-numbered entity one place up, so in each frame in `frames` an
+/// event pointing at or past his place is moved up one, or it would fire
+/// from the wrong entity. Returns how many moved.
+fn shift_event_packet_indices(
+    demo: &mut Demo,
+    frames: &std::collections::HashSet<(usize, usize)>,
+    entity: u16,
+) -> usize {
+    let mut replay: EntityReplay<Delta> = EntityReplay::new(ALL_ENTITIES);
+    let mut moves = Vec::new();
+    for (ei, entry) in demo.directory.entries.iter().enumerate() {
+        for (fi, frame) in entry.frames.iter().enumerate() {
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            replay.begin_frame(bt.1.sequence_info.incoming_sequence);
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
+            for m in msgs {
+                if let NetMessage::EngineMessage(em) = m {
+                    if let EngineMessage::SvcServerInfo(_) = &**em {
+                        replay.reset(ALL_ENTITIES);
+                    }
+                    replay.apply(em);
+                }
+            }
+            if !frames.contains(&(ei, fi)) {
+                continue;
+            }
+            // His place in this frame's (edited) snapshot.
+            let Some(place) = replay.entities().iter().position(|(i, _)| *i == entity) else {
+                continue;
+            };
+            for (mi, m) in msgs.iter().enumerate() {
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
+                let EngineMessage::SvcEvent(ev) = &**em else {
+                    continue;
+                };
+                for (k, e) in ev.events.iter().enumerate() {
+                    if let Some(p) = e.packet_index.as_ref().map(|b| b.to_u32() as usize)
+                        && p >= place
+                    {
+                        moves.push((ei, fi, mi, k, p + 1));
+                    }
+                }
+            }
+        }
+    }
+    let n = moves.len();
+    for (ei, fi, mi, k, p) in moves {
+        if let Some(EngineMessage::SvcEvent(ev)) = packet_mut(demo, ei, fi, mi) {
+            ev.events[k].packet_index = Some(dem::nbit_num!(p as u32, 11));
+        }
+    }
+    n
 }
 
 fn arg<T: std::str::FromStr>(args: &[String], i: usize, what: &str) -> T {
@@ -1096,6 +1392,24 @@ fn main() {
         "deaths" => {
             let packets = timeline(&demo, 0);
             deaths(&demo, &packets, arg(&args, 2, "from"), arg(&args, 3, "to"));
+        }
+        "heard" => {
+            let entity: u16 = arg(&args, 2, "entity");
+            for h in heard(&demo, entity, arg(&args, 3, "from"), arg(&args, 4, "to")) {
+                println!("{:.3}\t{}", h.svc_time, h.line);
+            }
+        }
+        "bend-recorder" => {
+            let out: String = arg(&args, 2, "out");
+            let (from, to): (f32, f32) = (arg(&args, 3, "from"), arg(&args, 4, "to"));
+            match bend_recorder(&mut demo, from, to, arg(&args, 5, "units")) {
+                Ok(e) => println!("bent the recorder: {e:?}"),
+                Err(e) => {
+                    eprintln!("bend-recorder: {e}");
+                    std::process::exit(1);
+                }
+            }
+            write_checked(&mut demo, &bytes, &out, 0, from, from);
         }
         "bend" => {
             let out: String = arg(&args, 2, "out");
