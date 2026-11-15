@@ -24,6 +24,7 @@
 use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use crate::take_delete_manager::capture_dirs;
+use crate::take_preview_manager::TakePreviewManager;
 use native::hlcr::take_cleanup::{
     AfterFinish, CleanupPolicy, RoomPlan, RoomStep, SpaceNeed, finished_at, folder_key, format_gb,
     plan_room,
@@ -319,6 +320,24 @@ fn take_out_of_list(
     }
 }
 
+/// How long a delete waits for the take's pictures pass to stop: FFmpeg is
+/// killed within a frame of the cancel.
+const PICTURES_STOP_WAIT: Duration = Duration::from_secs(5);
+
+/// Stops the Render tab's pictures pass when it is reading or writing in
+/// `take_folder`, so the delete isn't refused with "being used by another
+/// process" (#1438).
+fn stop_take_pictures(app: &AppHandle, take_folder: &Path) {
+    if app
+        .state::<TakePreviewManager>()
+        .stop_for_take(take_folder, PICTURES_STOP_WAIT)
+    {
+        log_markdown(
+            &crate::messages::take_cleanup::take_cleanup_stopped_pictures(take_folder.display()),
+        );
+    }
+}
+
 /// After a render batch: the takes in `finished_takes` (each had a job finish
 /// in that run) go, if the setting says so right after finish. Runs on a
 /// blocking thread; returns at once.
@@ -388,6 +407,7 @@ fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
                 ));
                 continue;
             }
+            stop_take_pictures(&app, path);
             let outcome = match method {
                 AfterFinish::Recycle => plan_take_deletion(path, &dirs)
                     .and_then(|plan| recycle_take(&plan).map(|()| plan)),
@@ -515,6 +535,7 @@ pub(crate) fn make_room(
             ));
             continue;
         }
+        stop_take_pictures(app, &plan.take_folder);
         let outcome = delete_take_permanently(&plan.take_folder, &dirs);
         done.record(why, AfterFinish::Delete, &plan.take_folder, outcome);
     }
