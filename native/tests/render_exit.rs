@@ -90,6 +90,7 @@ async fn closing_studio_stops_a_render_silently_and_leaves_no_file() {
         // Slow on purpose, so the render is still running at the close.
         custom_codec_args: "-c:v libx264 -preset placebo -crf 0".to_string(),
         max_concurrent_renders: 1,
+        clip_tag: None,
     };
     let (tx, rx) = mpsc::channel();
     let reservations = Arc::new(Mutex::new(HashMap::new()));

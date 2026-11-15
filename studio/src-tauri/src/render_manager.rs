@@ -9,7 +9,9 @@
 // a `.render_autosave.json` crash-recovery lockfile, and a wake lock held
 // for the batch's duration.
 
+use crate::render_export_dirs::LiveExportDirs;
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
+use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
@@ -18,12 +20,13 @@ use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_backgro
 use native::hlcr::take_cleanup::attempt_stream;
 use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
+use native::shared::lock::lock_or_recover;
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -172,6 +175,36 @@ fn last_finished_output(history: &[HistoryEntry], stream: &str) -> Option<(Strin
             });
             (h.attempt.output_path.clone(), size)
         })
+}
+
+/// The drives this batch's stream tags couldn't be written to (#1442),
+/// cleared when the batch ends.
+static STREAM_TAG_FAILURES: std::sync::LazyLock<Mutex<StreamTagFailures>> =
+    std::sync::LazyLock::new(|| Mutex::new(StreamTagFailures::default()));
+
+/// Tags the video a render just finished (#1442): its stream tag, beside the
+/// in-file tag FFmpeg wrote, and its fingerprint, returned for the project to
+/// keep. `attempt.output_path` is the final name (the one `OutputPath`
+/// reported). A stream that can't be written (a FAT/exFAT export drive) is
+/// logged once per drive per batch; the in-file tag and the fingerprint
+/// still find the clip.
+fn stamp_finished_render(attempt: &RenderAttempt, take_key: &str) -> Option<String> {
+    let path = std::path::Path::new(&attempt.output_path);
+    let stamp = stamp_new_render(
+        path,
+        &ClipTag::new(take_key, attempt.started_unix_ms, &attempt.stream),
+    );
+    if let Some(error) = &stamp.stream_error {
+        let first = lock_or_recover(&STREAM_TAG_FAILURES).first_on_drive(path);
+        if let Some(drive) = first {
+            log_markdown(&crate::messages::clip_relink::stream_tag_not_written(
+                &drive,
+                path.display(),
+                error,
+            ));
+        }
+    }
+    stamp.content_hash
 }
 
 /// The first non-empty line of an FFmpeg error log, cut to a readable
@@ -339,6 +372,11 @@ pub struct RenderManager {
     /// The capture is held between clips for space (#861): nothing records,
     /// so renders started now get the machine as they would without a capture.
     capture_held: Arc<AtomicBool>,
+    /// The volume a held capture waits on for room (#1438): queued renders
+    /// of takes there start first, since only they free it.
+    room_volume: Arc<RwLock<Option<String>>>,
+    /// The export folders as Settings saved them last (#1430).
+    export_dirs: LiveExportDirs,
 }
 
 /// What the scheduler may run at once: the batch's own number, or, while a
@@ -353,6 +391,14 @@ fn concurrency_cap(configured: usize, while_capturing: Option<usize>) -> usize {
         Some(renders) => configured.min(renders.max(1)),
         None => configured,
     }
+}
+
+/// The order queued jobs start in, given each one's index in the list and
+/// whether its take is on the drive a held capture waits on: those first,
+/// since only they free its room (#1438), then the rest, each in list order.
+fn start_order(queued: impl IntoIterator<Item = (usize, bool)>) -> Vec<usize> {
+    let (first, rest): (Vec<_>, Vec<_>) = queued.into_iter().partition(|&(_, on)| on);
+    first.into_iter().chain(rest).map(|(i, _)| i).collect()
 }
 
 /// One render job of a take, for Render While Capturing's space check (#861).
@@ -374,6 +420,8 @@ struct SchedulerHandles {
     while_capturing: Arc<AtomicBool>,
     renders_while_capturing: Arc<AtomicUsize>,
     capture_held: Arc<AtomicBool>,
+    room_volume: Arc<RwLock<Option<String>>>,
+    export_dirs: LiveExportDirs,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -404,6 +452,8 @@ impl RenderManager {
             while_capturing: Arc::new(AtomicBool::new(false)),
             renders_while_capturing: Arc::new(AtomicUsize::new(1)),
             capture_held: Arc::new(AtomicBool::new(false)),
+            room_volume: Arc::new(RwLock::new(None)),
+            export_dirs: LiveExportDirs::default(),
         }
     }
 
@@ -419,6 +469,19 @@ impl RenderManager {
     /// The capture holds between clips (true) or records again (false).
     pub(crate) fn set_capture_held(&self, held: bool) {
         self.capture_held.store(held, Ordering::SeqCst);
+    }
+
+    /// The export folders as Settings has them (#1430), which settings
+    /// loading and `save_settings` update: a running batch's next renders go
+    /// to them, and so does Start Render Batch on the rows already listed.
+    pub(crate) fn export_dirs(&self) -> LiveExportDirs {
+        self.export_dirs.clone()
+    }
+
+    /// The volume (`volume_of`) a capture holds for room on, whose takes'
+    /// renders start first (#1438), or `None` once it has room again.
+    pub(crate) fn set_room_volume(&self, volume: Option<String>) {
+        *self.room_volume.write().unwrap_or_else(|p| p.into_inner()) = volume;
     }
 
     /// The render jobs of the take(s) under `folder`, a capture block's
@@ -590,7 +653,15 @@ impl RenderManager {
             return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
         }
         match self.last_config.lock().unwrap().clone() {
-            Some(config) => Ok((config, starting)),
+            Some(mut config) => {
+                // The folders Settings has now, not the ones the last scan
+                // brought (#1430).
+                let live = self.export_dirs.dirs();
+                if !live.is_empty() {
+                    config.export_directories = live;
+                }
+                Ok((config, starting))
+            }
             None => Err(self
                 .recovery_gap
                 .lock()
@@ -636,6 +707,8 @@ impl RenderManager {
             while_capturing: self.while_capturing.clone(),
             renders_while_capturing: self.renders_while_capturing.clone(),
             capture_held: self.capture_held.clone(),
+            room_volume: self.room_volume.clone(),
+            export_dirs: self.export_dirs.clone(),
         }
     }
 }
@@ -802,6 +875,10 @@ fn apply_render_update(
             }
             if let Some((take_folder, base_name, clip_type, _)) = &just_finished {
                 let key = take_key(std::path::Path::new(take_folder));
+                let content_hash = finished_attempt
+                    .as_ref()
+                    .zip(key.as_deref())
+                    .and_then(|(attempt, key)| stamp_finished_render(attempt, key));
                 log_markdown(&crate::messages::render::take_finished(
                     &id,
                     &key,
@@ -818,6 +895,7 @@ fn apply_render_update(
                         "base_name": base_name,
                         "clip_type": clip_type,
                         "render": finished_attempt,
+                        "content_hash": content_hash,
                     }),
                 );
             }
@@ -859,6 +937,13 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         // Takes with a job that finished in this run, for the automatic take
         // cleanup (#644) once the run ends.
         let mut finished_takes: Vec<String> = Vec::new();
+        // The export pool follows Settings while the batch runs (#1430):
+        // Render While Capturing keeps one batch going for days.
+        let mut export_dirs = handles.export_dirs.follow(&config.export_directories);
+        // Each take folder's volume, looked up once (it asks Windows): the
+        // start order reads it under the jobs lock every pass while a capture
+        // holds (#1438).
+        let mut take_volumes: HashMap<String, String> = HashMap::new();
 
         loop {
             // Studio is closing (#1439): its way out has stopped the renders
@@ -919,6 +1004,11 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
             }
 
             let mut attempts_started: Vec<(String, RenderAttempt)> = Vec::new();
+            let (exports_now, exports_changed) = export_dirs.current();
+            let exports_now = exports_now.to_vec();
+            if exports_changed {
+                log_markdown(&crate::messages::render::export_dirs_changed(&exports_now));
+            }
             let started_any = {
                 let mut guard = handles.jobs.lock().unwrap();
                 let active_count = guard.iter().filter(|j| j.status == "Rendering").count();
@@ -942,7 +1032,32 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         effective_concurrent
                     };
 
-                    for job in guard.iter_mut() {
+                    let room_volume = handles
+                        .room_volume
+                        .read()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clone();
+                    let order = start_order(
+                        guard
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, j)| j.status == "Queued")
+                            .map(|(i, j)| {
+                                let on = room_volume.as_ref().is_some_and(|v| {
+                                    *take_volumes
+                                        .entry(j.clip.take_folder.clone())
+                                        .or_insert_with(|| {
+                                            native::hlcr::take_cleanup::volume_of(Path::new(
+                                                &j.clip.take_folder,
+                                            ))
+                                        })
+                                        == *v
+                                });
+                                (i, on)
+                            }),
+                    );
+                    for index in order {
+                        let job = &mut guard[index];
                         if started >= limit {
                             break;
                         }
@@ -969,6 +1084,12 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                                 error: None,
                             };
                             job.current_attempt = Some(attempt.started_unix_ms);
+                            // #1442: the tag the project finds this video by.
+                            let clip_tag = take_key(std::path::Path::new(&job.clip.take_folder))
+                                .map(|key| {
+                                    ClipTag::new(&key, attempt.started_unix_ms, &attempt.stream)
+                                        .to_string()
+                                });
                             job.history.push(HistoryEntry {
                                 attempt: attempt.clone(),
                                 output_exists: false,
@@ -983,10 +1104,12 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             // export pool, concurrency) genuinely is
                             // batch-wide, so still comes from config.
                             let mut job_config = config.clone();
+                            job_config.export_directories = exports_now.clone();
                             job_config.target_codec = job.codec;
                             job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
                             job_config.max_concurrent_renders = thread_share;
+                            job_config.clip_tag = clip_tag;
                             let tx2 = tx.clone();
                             let reservations = handles.export_reservations.clone();
                             tokio::spawn(async move {
@@ -1046,6 +1169,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     }
                     handles.global_cancel.store(false, Ordering::SeqCst);
                     handles.is_rendering.store(false, Ordering::SeqCst);
+                    lock_or_recover(&STREAM_TAG_FAILURES).clear();
                 }
                 !has_active_or_queued
             };
@@ -1241,6 +1365,7 @@ async fn scan_and_merge(
         target_codec: RenderCodec::from_str_id(&payload.codec),
         custom_codec_args: payload.custom_codec_args.clone(),
         max_concurrent_renders: payload.max_concurrent_renders.max(1),
+        clip_tag: None,
     };
     let new_job_settings = NewJobSettings {
         codec: config.target_codec,
@@ -1855,6 +1980,18 @@ mod tests {
         assert_eq!(concurrency_cap(4, Some(0)), 1);
         assert_eq!(concurrency_cap(0, None), 1);
         assert_eq!(concurrency_cap(0, Some(1)), 1);
+    }
+
+    /// #1438: while a capture holds for room on one drive, queued renders of
+    /// takes there start first; the rest keep their order behind them.
+    #[test]
+    fn renders_that_free_the_held_drive_start_first() {
+        assert_eq!(
+            start_order([(0, false), (2, true), (3, false), (5, true)]),
+            vec![2, 5, 0, 3]
+        );
+        assert_eq!(start_order([(1, false), (4, false)]), vec![1, 4]);
+        assert!(start_order([]).is_empty());
     }
 
     #[test]

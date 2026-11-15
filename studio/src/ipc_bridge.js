@@ -909,6 +909,31 @@ export async function locateRenderedVideos(paths) {
     });
 }
 
+/** Find Moved Videos (#1442): where each of the project's rendered `clips`
+ *  (`{ take_key, started_unix_ms, stream, output_path, output_size_bytes,
+ *  content_hash }`) is now, found by its DoD Studio tag in the render export
+ *  folders and `extraFolder` (null for none). Resolves to the report
+ *  (`{ clips: [{ path, found_by, size_bytes, content_hash }], files_checked,
+ *  search_complete, stream_tags_written, stream_tags_failed }`); rejects with
+ *  the reason when the picked folder isn't there. Sends
+ *  `clip_relink_progress` while it runs. */
+export async function relinkRenderedClips(clips, extraFolder) {
+  return invoke("relink_rendered_clips", { clips, extraFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (relink_rendered_clips):", err);
+      throw err;
+    });
+}
+
+/** Find Moved Videos' Cancel (#1442): the running scan stops at its next
+ *  clip or file and resolves with what it found. */
+export async function cancelRelinkRenderedClips() {
+  return invoke("cancel_relink_rendered_clips")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_relink_rendered_clips):", err);
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */

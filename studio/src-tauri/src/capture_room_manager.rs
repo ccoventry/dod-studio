@@ -22,10 +22,11 @@
 //! batch still renders as it goes, but can't wait.
 
 use crate::render_manager::RenderManager;
+use crate::render_manager::TakeRender;
 use crate::settings_manager::SettingsManager;
 use native::hlcr::capture_room::{
-    ClipSizeModel, OutputRatio, PendingTake, RoomDecision, RoomInputs, decide, hold_seconds,
-    may_resume,
+    ClipSizeModel, OutputRatio, PendingTake, RoomDecision, RoomInputs, StopDebounce,
+    TakeRenderState, decide, hold_seconds, may_resume, render_coming,
 };
 use native::hlcr::take_cleanup::{AfterFinish, CleanupPolicy, format_gb, volume_of};
 use native::log_markdown;
@@ -91,6 +92,12 @@ struct State {
     ratio: OutputRatio,
     /// Blocks recorded so far, with what they held once settled.
     recorded: Vec<(usize, u64)>,
+    /// When each recorded block's take was handed to the Render tab, for
+    /// whether its render is still coming (`render_coming`, #1438).
+    handed_over: std::collections::HashMap<usize, Instant>,
+    /// When each recorded block's renders were first seen all finished: a
+    /// take still there long after was declined by take cleanup (#1438).
+    finished_seen: std::collections::HashMap<usize, Instant>,
     /// Partial takes (#1105), with what they hold: kept for the user and
     /// never deleted from here, so a hold never counts on their space.
     partial: Vec<(usize, u64)>,
@@ -125,6 +132,7 @@ impl State {
             Some(bytes) => {
                 self.sizes.learn(bytes, ticks);
                 self.recorded.push((index, bytes));
+                self.handed_over.insert(index, Instant::now());
             }
             None => {}
         }
@@ -142,6 +150,52 @@ fn partial_note(partial_bytes: u64, count: usize) -> String {
         format_gb(partial_bytes),
         if count == 1 { "" } else { "s" }
     )
+}
+
+/// What one look found about a recorded take on the drive a hold waits on.
+struct TakeFacts<'a> {
+    /// What the take holds on disk now.
+    raw_bytes: u64,
+    /// Its rows in the Render tab.
+    renders: &'a [TakeRender],
+    /// The drive (`volume_of`) the hold waits on.
+    volume: &'a str,
+    /// An export folder is on that drive.
+    exports_here: bool,
+    /// "After a clip is finished" deletes takes for good.
+    deletes: bool,
+    since_handover: Option<Duration>,
+    since_finished: Option<Duration>,
+    /// Take cleanup is deleting it now.
+    deleting: bool,
+}
+
+/// What the take frees once rendered, as `capture_room::decide` counts it.
+fn pending_take(take: &TakeFacts) -> PendingTake {
+    let renders = take.renders;
+    let statuses: Vec<&str> = renders.iter().map(|r| r.status.as_str()).collect();
+    let finished: Vec<_> = renders.iter().filter(|r| r.status == "Finished").collect();
+    let output_bytes = (!renders.is_empty() && finished.len() == renders.len())
+        .then(|| finished.iter().filter_map(|r| r.output_size_bytes).sum());
+    let output_on_same_drive = if finished.is_empty() {
+        take.exports_here
+    } else {
+        finished
+            .iter()
+            .any(|r| volume_of(Path::new(&r.output_path)) == take.volume)
+    };
+    PendingTake {
+        raw_bytes: take.raw_bytes,
+        output_bytes,
+        output_on_same_drive,
+        deleted_after_render: take.deletes,
+        render_coming: render_coming(&TakeRenderState {
+            statuses: &statuses,
+            since_handover: take.since_handover,
+            since_finished: take.since_finished,
+            deleting: take.deleting,
+        }),
+    }
 }
 
 /// One look at the drive before a clip boundary.
@@ -276,9 +330,9 @@ impl CaptureRoom {
     /// The batch ended, however it ended.
     pub(crate) fn finish(&self) {
         self.hold.store(false, Ordering::Relaxed);
-        self.app
-            .state::<RenderManager>()
-            .set_while_capturing(false, 1);
+        let render = self.app.state::<RenderManager>();
+        render.set_while_capturing(false, 1);
+        render.set_room_volume(None);
         let _ = self
             .app
             .emit("capture_room_status", serde_json::Value::Null);
@@ -295,12 +349,19 @@ impl CaptureRoom {
     }
 
     /// The batch's pending takes on `volume`, priced from their renders.
-    fn pending_on(&self, state: &State, volume: &str, policy: CleanupPolicy) -> Vec<PendingTake> {
+    /// Notes when each recorded block's renders were first seen all finished
+    /// (`finished_seen`), and forgets it when a retry queues one again.
+    fn pending_on(
+        &self,
+        state: &mut State,
+        volume: &str,
+        policy: CleanupPolicy,
+    ) -> Vec<PendingTake> {
         let render = self.app.state::<RenderManager>();
-        let exports = export_volumes(&self.app);
+        let exports_here = export_volumes(&self.app).iter().any(|v| v == volume);
         let deletes = policy.after_finish == AfterFinish::Delete;
-        state
-            .recorded
+        let recorded = state.recorded.clone();
+        recorded
             .iter()
             .filter_map(|&(index, _)| {
                 let block = self.blocks.get(index)?;
@@ -314,22 +375,26 @@ impl CaptureRoom {
                     return None;
                 }
                 let renders = render.renders_under(&block.folder.to_string_lossy());
-                let finished: Vec<_> = renders.iter().filter(|r| r.status == "Finished").collect();
-                let output_bytes = (!renders.is_empty() && finished.len() == renders.len())
-                    .then(|| finished.iter().filter_map(|r| r.output_size_bytes).sum());
-                let output_on_same_drive = if finished.is_empty() {
-                    exports.iter().any(|v| v == volume)
+                let all_finished =
+                    !renders.is_empty() && renders.iter().all(|r| r.status == "Finished");
+                if all_finished {
+                    state
+                        .finished_seen
+                        .entry(index)
+                        .or_insert_with(Instant::now);
                 } else {
-                    finished
-                        .iter()
-                        .any(|r| volume_of(Path::new(&r.output_path)) == volume)
-                };
-                Some(PendingTake {
+                    state.finished_seen.remove(&index);
+                }
+                Some(pending_take(&TakeFacts {
                     raw_bytes,
-                    output_bytes,
-                    output_on_same_drive,
-                    deleted_after_render: deletes,
-                })
+                    renders: &renders,
+                    volume,
+                    exports_here,
+                    deletes,
+                    since_handover: state.handed_over.get(&index).map(Instant::elapsed),
+                    since_finished: state.finished_seen.get(&index).map(Instant::elapsed),
+                    deleting: crate::take_cleanup_manager::deleting_under(&block.folder),
+                }))
             })
             .collect()
     }
@@ -338,11 +403,11 @@ impl CaptureRoom {
     /// bytes still to come from the clip recording now. `None` after the
     /// last block, or when the drive's free space can't be read.
     fn check(&self, next: usize, writing: u64) -> Option<Check> {
-        let state = self.lock();
+        let mut state = self.lock();
         let next_bytes = self.clip_bytes(&state, next)?;
         let folder = &self.blocks[next].folder;
         let free = native::sys::disk::get_available_bytes(existing_ancestor(folder))?;
-        let pending = self.pending_on(&state, &volume_of(folder), policy(&self.app));
+        let pending = self.pending_on(&mut state, &volume_of(folder), policy(&self.app));
         let inputs = RoomInputs {
             free_bytes: free,
             headroom_bytes: block_headroom(folder),
@@ -401,6 +466,14 @@ impl CaptureRoom {
             check.decision,
         ));
         self.hold.store(true, Ordering::Relaxed);
+        // Only renders of takes on that drive free its room: they go first.
+        let folder = &self.blocks[index + 1].folder;
+        self.app
+            .state::<RenderManager>()
+            .set_room_volume(Some(volume_of(folder)));
+        log_markdown(&crate::messages::capture::room_renders_first(&drive_label(
+            folder,
+        )));
         self.lock().watching = true;
         self.emit_status(&STRINGS_HOLDING, None);
         let room = Arc::clone(self);
@@ -500,6 +573,7 @@ impl CaptureRoom {
     fn watch(self: Arc<Self>, next: usize) {
         let started = Instant::now();
         let mut idle_since: Option<Instant> = None;
+        let mut cannot_fit = StopDebounce::default();
         let mut first_free: Option<(Instant, u64)> = None;
         loop {
             if self.cancel.load(Ordering::Relaxed) || !self.hold.load(Ordering::Relaxed) {
@@ -564,24 +638,35 @@ impl CaptureRoom {
             } else {
                 idle_since.or(Some(Instant::now()))
             };
+            // "Can't fit" must last (`STOP_DEBOUNCE`): a take between losing
+            // its rows and its files, or a render that just errored, can say
+            // so for a moment.
+            let gave_up = cannot_fit.should_stop(
+                held && !settling && matches!(check.decision, RoomDecision::CannotFit { .. }),
+                free,
+                Instant::now(),
+            );
             let stuck = held
                 && !settling
-                && (matches!(check.decision, RoomDecision::CannotFit { .. })
-                    || idle_since.is_some_and(|t| t.elapsed() >= IDLE_HOLD_LIMIT));
+                && (gave_up || idle_since.is_some_and(|t| t.elapsed() >= IDLE_HOLD_LIMIT));
             if stuck {
+                let drive = drive_label(&self.blocks[next].folder);
                 let why = match check.decision {
-                    RoomDecision::CannotFit { short_bytes } => format!(
-                        "clip {} needs {} more than the drive will have even after every recorded take is rendered and deleted",
+                    RoomDecision::CannotFit { short_bytes } => {
+                        crate::messages::capture::room_cannot_fit_reason(
+                            next + 1,
+                            &drive,
+                            format_gb(short_bytes),
+                        )
+                    }
+                    _ => crate::messages::capture::room_idle_reason(
                         next + 1,
-                        format_gb(short_bytes)
-                    ),
-                    _ => format!(
-                        "clip {} needs {} more, and no render has run for a minute to free it",
-                        next + 1,
-                        format_gb(short)
+                        &drive,
+                        format_gb(short),
                     ),
                 };
                 let why = why
+                    + crate::messages::capture::ROOM_REPLAN_HINT
                     + &self.partial_on_drive(next)
                     + &windows_drive_note(&self.blocks[next].folder);
                 log_markdown(&crate::messages::capture::room_stopping_batch(
@@ -606,6 +691,9 @@ impl CaptureRoom {
             );
             std::thread::sleep(HOLD_POLL);
         }
+        // Before `watching` clears, so a hold starting right after keeps its
+        // own drive.
+        self.app.state::<RenderManager>().set_room_volume(None);
         self.lock().watching = false;
         let _ = self
             .app
@@ -707,6 +795,17 @@ fn windows_drive_note(folder: &Path) -> String {
         )
     } else {
         String::new()
+    }
+}
+
+/// The drive a block records to, as the player knows it (`F:`), for a
+/// stopped batch's reason; the whole path when it has no drive letter.
+fn drive_label(folder: &Path) -> String {
+    match folder.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => {
+            prefix.as_os_str().to_string_lossy().into_owned()
+        }
+        _ => folder.display().to_string(),
     }
 }
 
@@ -863,6 +962,81 @@ mod tests {
             ..usual
         };
         assert!(matches!(decide(&windows), RoomDecision::CannotFit { .. }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_stopped_batch_names_the_drive_letter() {
+        assert_eq!(drive_label(Path::new(r"F:\DICE\session\clip_b0")), "F:");
+        assert_eq!(drive_label(Path::new("relative")), "relative");
+    }
+
+    /// #1438: take cleanup takes a rendered take's rows out of the list
+    /// before its files go. In that window the take (handed over long ago,
+    /// no rows) is still counted as freeing its space, so a hold that is
+    /// about to have room doesn't stop; once nothing is deleting it, the
+    /// same take frees nothing.
+    #[test]
+    fn a_take_losing_its_rows_to_cleanup_still_frees_its_space() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let facts = |deleting| TakeFacts {
+            raw_bytes: 10 * GB,
+            renders: &[],
+            volume: "F",
+            exports_here: false,
+            deletes: true,
+            since_handover: Some(Duration::from_secs(600)),
+            since_finished: None,
+            deleting,
+        };
+        let decide_with = |take: PendingTake| {
+            decide(&RoomInputs {
+                free_bytes: 16 * GB,
+                headroom_bytes: 15 * GB,
+                writing_bytes: 0,
+                next_clip_bytes: 5 * GB,
+                pending: &[take],
+                output_ratio: None,
+            })
+        };
+        assert_eq!(
+            decide_with(pending_take(&facts(true))),
+            RoomDecision::Hold {
+                short_bytes: 4 * GB,
+                reclaimable_bytes: 10 * GB
+            }
+        );
+        assert_eq!(
+            decide_with(pending_take(&facts(false))),
+            RoomDecision::CannotFit {
+                short_bytes: 4 * GB
+            }
+        );
+    }
+
+    /// A take whose renders all finished counts while cleanup can still
+    /// delete it, and not once it has stayed past `FINISHED_GRACE`.
+    #[test]
+    fn a_rendered_take_cleanup_keeps_stops_counting() {
+        let finished = [TakeRender {
+            status: "Finished".into(),
+            output_path: String::new(),
+            output_size_bytes: Some(1),
+        }];
+        let facts = |since_finished| TakeFacts {
+            raw_bytes: 10,
+            renders: &finished,
+            volume: "F",
+            exports_here: false,
+            deletes: true,
+            since_handover: None,
+            since_finished,
+            deleting: false,
+        };
+        assert!(pending_take(&facts(Some(Duration::from_secs(1)))).render_coming);
+        assert!(
+            !pending_take(&facts(Some(native::hlcr::capture_room::FINISHED_GRACE))).render_coming
+        );
     }
 
     #[test]

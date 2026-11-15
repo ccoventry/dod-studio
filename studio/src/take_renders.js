@@ -6,7 +6,7 @@
 // Same pattern as take_record.js (#439): the project file's `takeIndex` stays
 // `take_key -> uid[]`, and the renders live in a sibling `takeRenders` key,
 // `take_key -> [{ started_unix_ms, stream, codec, custom_codec_args?, fps,
-// output_path, output_size_bytes? }]`, oldest first: one entry per finished
+// output_path, output_size_bytes?, content_hash? }]`, oldest first: one entry per finished
 // render, in the shape of the take folder's own history (#438), so the render
 // history's line builder reads both. Older builds ignore the key (and drop it
 // when they save). In memory the map rides on the take index as a
@@ -17,7 +17,7 @@ import { capturedAtOf } from './take_record.js';
 const RENDERS = 'takeRenders';
 
 /** The fields a recorded render keeps. */
-const RENDER_FIELDS = ['started_unix_ms', 'stream', 'codec', 'custom_codec_args', 'fps', 'output_path', 'output_size_bytes'];
+const RENDER_FIELDS = ['started_unix_ms', 'stream', 'codec', 'custom_codec_args', 'fps', 'output_path', 'output_size_bytes', 'content_hash'];
 
 /** The index's render map, made on first use. */
 function renderMapOf(takeIndex) {
@@ -58,6 +58,26 @@ export function recordRender(takeIndex, takeKey, attempt) {
   });
   renderMapOf(takeIndex)[takeKey] = [...list, render].sort((a, b) => a.started_unix_ms - b.started_unix_ms);
   return true;
+}
+
+/**
+ * Points a recorded render at where a Find Moved Videos scan found it
+ * (#1442): `found` is `{ output_path, output_size_bytes, content_hash }`, a
+ * field left null keeps what was recorded. `render` is the recorded entry or
+ * a copy of it (`projectRenderedVideos`), matched by start and stream.
+ * Returns true when the record changed.
+ */
+export function relocateRender(takeIndex, takeKey, render, found) {
+  const known = rendersOf(takeIndex, takeKey).find((entry) => sameRender(entry, render));
+  if (!known || !found) return false;
+  let changed = false;
+  ['output_path', 'output_size_bytes', 'content_hash'].forEach((field) => {
+    const value = found[field];
+    if (value === undefined || value === null || value === '' || known[field] === value) return;
+    known[field] = value;
+    changed = true;
+  });
+  return changed;
 }
 
 /** Records every finished render in a take folder's history (#438). Returns

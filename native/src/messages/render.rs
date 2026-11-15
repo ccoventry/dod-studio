@@ -59,6 +59,14 @@ pub fn fps_from_render_settings(take_folder: impl Display) -> String {
     )
 }
 
+/// A clip name cut at render time to keep its path within Windows' limit in
+/// an export folder longer than the ones it was cut for when queued (#1430).
+pub fn clip_name_shortened(name: &str, folder: impl Display) -> String {
+    format!(
+        "[render] Clip name \"{name}\" shortened to fit the path limit in {folder}, an export folder longer than the ones it was named for"
+    )
+}
+
 /// A render's FFmpeg could not be tied to Studio's job object (#1439): it
 /// would outlive a Studio that exits while it runs.
 pub fn not_tied_to_studio(job_id: impl Display, err: impl Display) -> String {

@@ -38,8 +38,11 @@ const INVALID_CHARS_ALL = /[\\/:*?"<>|\x00-\x1f]/g;
 export const NAME_WARN_LENGTH = 120;
 /** The full output path is kept under this, below Windows' 260. */
 export const PATH_LIMIT = 250;
-/** Room for what the renderer adds: `_hud`, a wav suffix, `_NN`, extension. */
-const RENDER_SUFFIX_MARGIN = 20;
+/** Room for what the renderer adds: `_hud`, a wav suffix, `_NN`, extension,
+ *  and the `.partial` mark the file carries until it is finished (#1439);
+ *  `name_room` in renderer.rs counts the mark too, so a name cut here isn't
+ *  cut again at render for it. */
+const RENDER_SUFFIX_MARGIN = 28;
 
 /** What a template may hold, and what to warn about. A clip name's by
  *  default; the Demo Auditor's renamer (#469) passes its own. */
