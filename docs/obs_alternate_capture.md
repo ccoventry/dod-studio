@@ -119,6 +119,28 @@ sound was +20 to +29 ms from HLAE's with the same -270 ms, so one offset fits bo
 PC; other PCs' waveOut latency is unmeasured (#646). OBS's sound sat about 14 dB below HLAE's
 sound.wav (mean -24..-26 dB against -10..-12 dB).
 
+**OBS ignores a change of the offset away from 0 while the sound plays (#1385).** OBS re-times a
+source's sound to a new sync offset only when the old one was nonzero (obs-source.c,
+`source_output_audio_data`). From 0 it keeps adding the sound straight after what it had, at the old
+time, until the stream next breaks, and only then does the new offset apply. So 0 to -270 set while
+the game plays left the sound ~280 ms late, or flipped between late and in sync within one take; that
+is what a test harness that switched the offset between 0 and -270 during a launch measured. Studio
+sets the offset in two steps when it is 0 (-1 first, then -270, `obs::audio_sync`), which works while
+the sound plays too. Measured 2026-11-15, 0.8 s pieces of HLAE takes found in the OBS files
+(`ktps8w9-stealth_gskill_rr2_h1`, Brain account, this PC):
+
+| Offset, and how it was set | PRE | POST |
+|---|---|---|
+| 0 | +261 to +296 ms | +259 to +321 ms |
+| -270, set while no game ran (Studio's order) | +8 to +35 ms | -12 to +36 ms |
+| -270, set from 0 while the game played | +271 to +293 ms (ignored) | +265 to +300 ms (ignored) |
+| -270, set from 0 through -1 while the game played | +2 to +35 ms | -3 to +28 ms |
+
+OBS also has to buffer at least the offset's worth of sound; with the offset in place when the sound
+starts it grows its buffering on its own (298 ms, logged as "adding 298 milliseconds of audio
+buffering"). The game's `_snd_mixahead` (0.1 s by default) is about 50 ms of the latency: at 0.05 the
+sound was ~220 ms late with no offset.
+
 **`stopsound` at the record start** (`sys_record_start`) left ~250 ms of silence one second into
 every OBS clip. OBS mode no longer sends it there; the `AUDIO_SYNC` one, which clears the
 fast-forward's sound just before OBS starts, stays.
