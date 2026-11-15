@@ -5,7 +5,7 @@
 // shows each group under a header line (a match first half first), that a
 // grouping never changes which demos count as shown, that the choice is
 // remembered, and that the demos' match info never reaches the project file.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 // native::match_groups::Grouping, as serde sends it.
 const D = (name) => `C:\\demos\\${name}`;

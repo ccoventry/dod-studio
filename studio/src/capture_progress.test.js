@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  CAPTURE_SHARES, captureStepView, heldView, endLine, endKind, createCaptureProgress,
+  CAPTURE_SHARES, captureStepView, heldView, endLine, endKind, createCaptureProgress, completedToast,
 } from './capture_progress.js';
 
 afterEach(() => vi.useRealTimers());
@@ -77,10 +77,30 @@ describe('the end of a batch', () => {
     expect(endLine({ status: 'Complete', clips_captured: 12, clips_total: 12 }, 372_000))
       .toBe('Done in 6 min 12 s: 12 clips captured');
     expect(endLine({ status: 'Complete', clips_captured: 10, clips_total: 12 }, 42_000))
-      .toBe('Done in 42.0 s: 10 of 12 clips captured');
+      .toBe('Done in 42.0 s: 10 of 12 clips captured, 2 failed');
     expect(endLine({ status: 'Complete', clips_captured: 1, clips_total: 1 }, 42_000))
       .toBe('Done in 42.0 s: 1 clip captured');
     expect(endLine({ status: 'Complete' }, 4_200)).toBe('Done in 4.2 s');
+    // Captured, but shorter than planned (#1401).
+    expect(endLine({ status: 'Complete', clips_captured: 2, clips_total: 2, clips_short: 1 }, 42_000))
+      .toBe('Done in 42.0 s: 2 clips captured, 1 shorter than planned');
+  });
+
+  // #1398's case S: the game recorded nothing, and the batch said
+  // "Batch capture completed successfully!" (#1401).
+  it('does not call a batch with a failed clip a success', () => {
+    const t = completedToast({ status: 'Complete', clips_captured: 0, clips_total: 1 });
+    expect(t.type).toBe('error');
+    expect(t.text).toBe('Batch capture finished, but 1 of 1 clip failed: not marked Captured. See Last Batch and the activity log.');
+    expect(t.text).not.toContain('successfully');
+  });
+
+  it('warns about a short clip and is a success only when every clip landed whole', () => {
+    const short = completedToast({ status: 'Complete', clips_captured: 3, clips_total: 3, clips_short: 1 });
+    expect(short).toEqual({ type: 'warning', text: 'Batch capture finished: 1 of 3 clips are shorter than planned. Check it before using it.' });
+    expect(completedToast({ status: 'Complete', clips_captured: 3, clips_total: 3, clips_short: 0 }).type).toBe('success');
+    // A batch that planned no takes has nothing to count.
+    expect(completedToast({ status: 'Complete' }).type).toBe('success');
   });
 
   it('says a cancelled or failed batch as today', () => {
@@ -122,6 +142,13 @@ describe('createCaptureProgress', () => {
     expect(progress.isRunning()).toBe(false);
     expect(statusEl.textContent).toBe('Done in 6 min 12 s: 2 clips captured');
     expect(log).toHaveBeenLastCalledWith('[capture] completed after 6 min 12 s: 2 of 2 clip(s) captured');
+
+    // The log line carries the footer's failed and short counts (#1401).
+    const log2 = vi.fn();
+    const p2 = createCaptureProgress({ statusEl, container: null, now: () => t, log: log2 });
+    p2.update({ running: true, stage: 'capturing', index: 0, total: 3 });
+    p2.end({ running: false, status: 'Complete', clips_captured: 2, clips_total: 3, clips_short: 1 });
+    expect(log2).toHaveBeenLastCalledWith('[capture] completed after 0.0 s: 2 of 3 clip(s) captured, 1 failed, 1 shorter than planned');
   });
 
   it('keeps the hold line on through the clock and later reports', () => {

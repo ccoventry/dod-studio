@@ -9,9 +9,24 @@
 window.__mockInvocations = window.__mockInvocations || [];
 window.__mockInvokeHandlers = window.__mockInvokeHandlers || {};
 
+// What the boot-time commands answer when a test did not stub them: the empty
+// answer of the real command, so a pane that reads the result (`.map`, `.demos`,
+// `for..of`) boots instead of throwing on `undefined`. A test still overrides
+// any of these through `__mockInvokeHandlers`, which it often replaces whole.
+const DEFAULT_HANDLERS = {
+  diagnose_executable_paths: () => [],
+  diagnose_capture_output_paths: () => [],
+  scan_demo_folders: () => [],
+  overview_installs: () => [],
+  get_export_pool_free_gb: () => 0,
+  browse_directory: (args) => ({ path: args?.path ?? '', dirs: [], subdirs: [], demos: [] }),
+  // No HD folder: the pane shows its own error line.
+  hd_status: () => Promise.reject('hd_status is not stubbed'),
+};
+
 export function invoke(cmd, args) {
   window.__mockInvocations.push({ cmd, args });
-  const handler = window.__mockInvokeHandlers[cmd];
+  const handler = window.__mockInvokeHandlers[cmd] || DEFAULT_HANDLERS[cmd];
   if (handler) {
     const result = handler(args);
     return result instanceof Promise ? result : Promise.resolve(result);

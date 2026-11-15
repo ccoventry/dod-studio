@@ -512,8 +512,8 @@ mod tests {
     #[test]
     #[ignore = "needs the damaged/good armory_h2 pair from #41"]
     fn the_damaged_copy_from_41_is_broken_and_the_good_one_is_ok() {
-        const DAMAGED: &str = "wsod25-po_r3_sf-m00cat_ih_m3_armory_h2.dem";
-        const GOOD: &str = "wsod25-po_r3_sf-m00cat_ih_m3_armory_h2-1.dem";
+        const DAMAGED: &str = "wsod25_ply2_m3_h2_m00cat.dem";
+        const GOOD: &str = "wsod25_ply2_m3_h2_m00cat-1.dem";
         let folder = std::env::var_os("DOD_INTEGRITY_DEMOS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {

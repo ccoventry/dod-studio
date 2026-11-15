@@ -3,7 +3,7 @@
 // Pins the list (filled from the finished renders, reorder, remove, add
 // files without duplicates), what the plan line says for each way of
 // joining, and what Combine sends: the clips in order and the path saved to.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const A = 'C:\\renders\\anzio_krod_4k.mp4';
 const B = 'C:\\renders\\harrington_krod_3k.mp4';

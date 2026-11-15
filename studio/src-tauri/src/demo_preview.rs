@@ -3,6 +3,7 @@
 // the game (or sent to a game already running), and the Clear Previews sweep
 // of the preview files left behind.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -158,10 +159,7 @@ pub async fn launch_demo_preview(
     // config otherwise keeps PatcherConfig's 1280x720 default.
     let resolution = {
         let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&settings_state.inner);
         (guard.resolution_width, guard.resolution_height)
     };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {

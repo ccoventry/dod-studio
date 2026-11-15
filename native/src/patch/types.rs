@@ -430,6 +430,13 @@ impl KillGaps {
 /// depending on the `obs` module.
 pub const OBS_TAKE_SEPARATION_SECONDS: f32 = 2.0;
 
+/// The rate AGR mode records at when `PatcherConfig::agr_fps` is 0 or absent.
+/// AGR's own rate rather than Capture FPS: an AGR take is rebuilt in Blender,
+/// and a high recorded rate makes those renders far slower, so following a
+/// 300 fps Capture FPS was the wrong default for it. Studio's
+/// `DEFAULT_AGR_FPS` in `studio/src/agr_rate.js` mirrors it (a test checks).
+pub const DEFAULT_AGR_FPS: i32 = 30;
+
 /// Where OBS is and how to talk to it.
 ///
 /// Only read when `capture_mode` is `Obs`. The password is the user's own
@@ -535,7 +542,7 @@ pub struct PatcherConfig {
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
     /// AGR mode's recorded rate, in frames per game second. `0` (the default)
-    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// means `DEFAULT_AGR_FPS` — see `effective_agr_fps`. Its own
     /// setting because the cost is different: an AGR frame is a few KB, so a
     /// preview can drop to 30 while a slow-motion take wants 300.
     #[serde(default)]
@@ -736,13 +743,14 @@ impl PatcherConfig {
             })
     }
 
-    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
-    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise
+    /// `DEFAULT_AGR_FPS`. Never `capture_fps`: AGR's rate is its own, and
+    /// following a 300 fps Capture FPS made Blender renders far slower.
     pub fn effective_agr_fps(&self) -> i32 {
         if self.agr_fps > 0 {
             self.agr_fps
         } else {
-            self.capture_fps.max(1)
+            DEFAULT_AGR_FPS
         }
     }
 

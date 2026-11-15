@@ -104,6 +104,7 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
+    lines.push(format!("in-eye HUD FOV: {}", crate::hltv_fov::status()));
     lines.push(format!(
         "{} = {} -- strafe twitch: {}",
         crate::strafe_twitch::NAME,
@@ -187,6 +188,12 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(cache) = crate::demoplayer_dict_cache::status_line() {
+        lines.push(cache);
+    }
+    if let Some(hang) = crate::hang::status_line() {
+        lines.push(hang);
+    }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
@@ -218,6 +225,9 @@ fn status_text() -> String {
     }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
+    }
+    if let Some(models) = crate::env_models::status_line() {
+        lines.push(models);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);

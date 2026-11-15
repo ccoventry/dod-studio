@@ -1,7 +1,7 @@
 // players_ui.js's Nameplate column (#429): a PNG picked with the file dialog
 // is saved on the player's row, shown by its file name, still there after a
 // reload, marked plainly when the file is gone, and cleared with ×.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const M00CAT = '76561197972576011';
 const PNG = 'D:\\movie\\nameplates\\m00cat.png';
