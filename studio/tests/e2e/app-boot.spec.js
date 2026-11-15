@@ -182,6 +182,20 @@ test("Studio's first sub-tab is Highlights, and every queue filter sits in one F
   await expect(page.locator('#input-min-kills')).toHaveCount(0);
 });
 
+test('Find Moved Videos is wired to the Render tab and says when the project has no videos (#1442)', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  const button = page.locator('#find-moved-videos-btn');
+  await expect(button).toHaveText('Find Moved Videos');
+  await page.evaluate(() => document.querySelector('#find-moved-videos-btn').click());
+  await expect(page.locator('#toast-container')).toContainText('No videos have been rendered for the loaded project yet');
+  await expect(button).toBeEnabled();
+  await expect(page.locator('#find-moved-progress')).toBeHidden();
+  await expect(page.locator('#find-moved-cancel-btn')).toBeHidden();
+  const asked = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'relink_rendered_clips').length);
+  expect(asked).toBe(0);
+});
+
 test('the boot watchdog hears the boot finish and shows nothing', async ({ page }) => {
   await page.goto('/index.html');
   await expect.poll(() => page.evaluate(() => window.dodStudioBoot?.state())).toBe('started');

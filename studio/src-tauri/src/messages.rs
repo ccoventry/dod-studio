@@ -31,6 +31,7 @@ pub mod batch;
 pub mod blender;
 pub mod capture;
 pub mod catch_up;
+pub mod clip_relink;
 pub mod combine;
 pub mod game_process;
 pub mod hd;

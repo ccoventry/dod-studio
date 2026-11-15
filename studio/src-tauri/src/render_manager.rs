@@ -11,6 +11,7 @@
 
 use crate::render_export_dirs::LiveExportDirs;
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
+use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
@@ -19,6 +20,7 @@ use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_backgro
 use native::hlcr::take_cleanup::attempt_stream;
 use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
+use native::shared::lock::lock_or_recover;
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -173,6 +175,36 @@ fn last_finished_output(history: &[HistoryEntry], stream: &str) -> Option<(Strin
             });
             (h.attempt.output_path.clone(), size)
         })
+}
+
+/// The drives this batch's stream tags couldn't be written to (#1442),
+/// cleared when the batch ends.
+static STREAM_TAG_FAILURES: std::sync::LazyLock<Mutex<StreamTagFailures>> =
+    std::sync::LazyLock::new(|| Mutex::new(StreamTagFailures::default()));
+
+/// Tags the video a render just finished (#1442): its stream tag, beside the
+/// in-file tag FFmpeg wrote, and its fingerprint, returned for the project to
+/// keep. `attempt.output_path` is the final name (the one `OutputPath`
+/// reported). A stream that can't be written (a FAT/exFAT export drive) is
+/// logged once per drive per batch; the in-file tag and the fingerprint
+/// still find the clip.
+fn stamp_finished_render(attempt: &RenderAttempt, take_key: &str) -> Option<String> {
+    let path = std::path::Path::new(&attempt.output_path);
+    let stamp = stamp_new_render(
+        path,
+        &ClipTag::new(take_key, attempt.started_unix_ms, &attempt.stream),
+    );
+    if let Some(error) = &stamp.stream_error {
+        let first = lock_or_recover(&STREAM_TAG_FAILURES).first_on_drive(path);
+        if let Some(drive) = first {
+            log_markdown(&crate::messages::clip_relink::stream_tag_not_written(
+                &drive,
+                path.display(),
+                error,
+            ));
+        }
+    }
+    stamp.content_hash
 }
 
 /// The first non-empty line of an FFmpeg error log, cut to a readable
@@ -843,6 +875,10 @@ fn apply_render_update(
             }
             if let Some((take_folder, base_name, clip_type, _)) = &just_finished {
                 let key = take_key(std::path::Path::new(take_folder));
+                let content_hash = finished_attempt
+                    .as_ref()
+                    .zip(key.as_deref())
+                    .and_then(|(attempt, key)| stamp_finished_render(attempt, key));
                 log_markdown(&crate::messages::render::take_finished(
                     &id,
                     &key,
@@ -859,6 +895,7 @@ fn apply_render_update(
                         "base_name": base_name,
                         "clip_type": clip_type,
                         "render": finished_attempt,
+                        "content_hash": content_hash,
                     }),
                 );
             }
@@ -1047,6 +1084,12 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                                 error: None,
                             };
                             job.current_attempt = Some(attempt.started_unix_ms);
+                            // #1442: the tag the project finds this video by.
+                            let clip_tag = take_key(std::path::Path::new(&job.clip.take_folder))
+                                .map(|key| {
+                                    ClipTag::new(&key, attempt.started_unix_ms, &attempt.stream)
+                                        .to_string()
+                                });
                             job.history.push(HistoryEntry {
                                 attempt: attempt.clone(),
                                 output_exists: false,
@@ -1066,6 +1109,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
                             job_config.max_concurrent_renders = thread_share;
+                            job_config.clip_tag = clip_tag;
                             let tx2 = tx.clone();
                             let reservations = handles.export_reservations.clone();
                             tokio::spawn(async move {
@@ -1125,6 +1169,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     }
                     handles.global_cancel.store(false, Ordering::SeqCst);
                     handles.is_rendering.store(false, Ordering::SeqCst);
+                    lock_or_recover(&STREAM_TAG_FAILURES).clear();
                 }
                 !has_active_or_queued
             };
@@ -1320,6 +1365,7 @@ async fn scan_and_merge(
         target_codec: RenderCodec::from_str_id(&payload.codec),
         custom_codec_args: payload.custom_codec_args.clone(),
         max_concurrent_renders: payload.max_concurrent_renders.max(1),
+        clip_tag: None,
     };
     let new_job_settings = NewJobSettings {
         codec: config.target_codec,

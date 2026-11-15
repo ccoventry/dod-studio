@@ -9,6 +9,7 @@ mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
 mod catch_up_takes;
+mod clip_relink_manager;
 mod clip_verdicts;
 mod combine_manager;
 mod config_checks_cmd;
@@ -1083,6 +1084,8 @@ pub fn run() {
             clear_render_queue,
             capture_history_manager::take_capture_states,
             capture_history_manager::locate_rendered_videos,
+            clip_relink_manager::relink_rendered_clips,
+            clip_relink_manager::cancel_relink_rendered_clips,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,
