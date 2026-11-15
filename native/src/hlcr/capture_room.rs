@@ -13,7 +13,7 @@
 //! takes, this decides. Sizes are bytes on the drive the next clip records
 //! to; takes and render output on other drives free or cost nothing there.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// One take this batch recorded that is still on disk.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,18 +59,87 @@ impl PendingTake {
 /// for about 10 s while a scan the user started holds the queue.
 pub const QUEUE_GRACE: Duration = Duration::from_secs(120);
 
-/// Whether a take's render will still free its space, from the statuses of
-/// its rows in the Render tab and how long ago it was handed over (`None`:
-/// never handed over). Queued or rendering: coming. All finished: its take
-/// goes now. No row past [`QUEUE_GRACE`], or every row ended without all
+/// How long a take whose renders all finished still counts on being
+/// deleted: take cleanup deletes it at once, or, with "Only when space is
+/// needed", the hold's own `make_room` does within a second or two. One
+/// still there after this was declined (rendered from outside the
+/// Destinations folders, a render file missing, no room plan that frees
+/// enough), so it never goes from here (#1438).
+pub const FINISHED_GRACE: Duration = Duration::from_secs(60);
+
+/// What is known about one take's render, for [`render_coming`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TakeRenderState<'a> {
+    /// The statuses of its rows in the Render tab.
+    pub statuses: &'a [&'a str],
+    /// How long ago it was handed to the Render tab; `None`: never.
+    pub since_handover: Option<Duration>,
+    /// How long ago its rows were first seen all finished; `None`: not yet,
+    /// or just now.
+    pub since_finished: Option<Duration>,
+    /// Take cleanup is deleting it now. Its rows leave the list a moment
+    /// before its files go (seconds, for a frame sequence).
+    pub deleting: bool,
+}
+
+/// Whether a take's render will still free its space (#1438). Being deleted,
+/// queued or rendering: coming. All finished: for [`FINISHED_GRACE`]. No row
+/// past [`QUEUE_GRACE`] after the hand-over, or every row ended without all
 /// finishing (an error, a cancel): nothing will ever delete it, until the
-/// user retries it, which queues it again (#1438).
-pub fn render_coming(statuses: &[&str], since_handover: Option<Duration>) -> bool {
-    if statuses.is_empty() {
-        return since_handover.is_some_and(|d| d < QUEUE_GRACE);
+/// user retries it, which queues it again.
+pub fn render_coming(take: &TakeRenderState) -> bool {
+    if take.deleting {
+        return true;
     }
-    statuses.iter().any(|s| *s == "Queued" || *s == "Rendering")
-        || statuses.iter().all(|s| *s == "Finished")
+    let statuses = take.statuses;
+    if statuses.is_empty() {
+        return take.since_handover.is_some_and(|d| d < QUEUE_GRACE);
+    }
+    if statuses.iter().any(|s| *s == "Queued" || *s == "Rendering") {
+        return true;
+    }
+    statuses.iter().all(|s| *s == "Finished")
+        && take.since_finished.is_none_or(|d| d < FINISHED_GRACE)
+}
+
+/// How long a held batch must stay unable to fit, with its drive's free
+/// space not rising, before it stops: a take between losing its rows and
+/// losing its files, or a render that errored, can make one look say "can
+/// never fit" for a moment (#1438).
+pub const STOP_DEBOUNCE: Duration = Duration::from_secs(20);
+
+/// A rise in free space this large restarts [`STOP_DEBOUNCE`]: something is
+/// still freeing the drive. Smaller ones are other programs' writes coming
+/// and going.
+pub const FREEING_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Whether a held batch that can't fit has stayed that way long enough to
+/// stop.
+#[derive(Debug, Clone, Default)]
+pub struct StopDebounce {
+    /// When the current run of "can't fit" began, and the free space then.
+    since: Option<(Instant, u64)>,
+}
+
+impl StopDebounce {
+    /// One look: `cannot_fit` from [`decide`], `free` the drive's free bytes.
+    /// True once it has been unable to fit for [`STOP_DEBOUNCE`] with free
+    /// space not rising by [`FREEING_BYTES`].
+    pub fn should_stop(&mut self, cannot_fit: bool, free: u64, now: Instant) -> bool {
+        if !cannot_fit {
+            self.since = None;
+            return false;
+        }
+        match self.since {
+            Some((at, base)) if free <= base.saturating_add(FREEING_BYTES) => {
+                now.saturating_duration_since(at) >= STOP_DEBOUNCE
+            }
+            _ => {
+                self.since = Some((now, free));
+                false
+            }
+        }
+    }
 }
 
 /// Where the batch stands at a clip boundary.
@@ -410,22 +479,87 @@ mod tests {
         assert!(may_resume(&inputs(20 * GB, 5 * GB, &[gone])));
     }
 
+    fn coming(statuses: &[&str], since_handover: Option<Duration>) -> bool {
+        render_coming(&TakeRenderState {
+            statuses,
+            since_handover,
+            ..TakeRenderState::default()
+        })
+    }
+
     #[test]
     fn a_render_is_coming_while_queued_running_or_just_handed_over() {
         let secs = |s| Some(Duration::from_secs(s));
-        assert!(render_coming(&["Queued"], None));
-        assert!(render_coming(&["Finished", "Rendering"], None));
-        assert!(render_coming(&["Error", "Queued"], None));
-        // All finished: the take goes now.
-        assert!(render_coming(&["Finished", "Finished"], None));
+        assert!(coming(&["Queued"], None));
+        assert!(coming(&["Finished", "Rendering"], None));
+        assert!(coming(&["Error", "Queued"], None));
+        // All finished, just seen: the take goes now.
+        assert!(coming(&["Finished", "Finished"], None));
         // Not in the list yet: coming for a while after the hand-over.
-        assert!(render_coming(&[], secs(5)));
-        assert!(!render_coming(&[], Some(QUEUE_GRACE)));
-        assert!(!render_coming(&[], None));
+        assert!(coming(&[], secs(5)));
+        assert!(!coming(&[], Some(QUEUE_GRACE)));
+        assert!(!coming(&[], None));
         // Every row ended and not all finished: nothing will delete it.
-        assert!(!render_coming(&["Error"], None));
-        assert!(!render_coming(&["Cancelled"], secs(5)));
-        assert!(!render_coming(&["Finished", "Error"], None));
+        assert!(!coming(&["Error"], None));
+        assert!(!coming(&["Cancelled"], secs(5)));
+        assert!(!coming(&["Finished", "Error"], None));
+    }
+
+    /// Take cleanup takes a rendered take's rows out of the list before it
+    /// deletes its files: in that window it is still coming, however long
+    /// ago it was handed over.
+    #[test]
+    fn a_take_being_deleted_is_still_coming_with_no_rows_left() {
+        let deleting = TakeRenderState {
+            statuses: &[],
+            since_handover: Some(QUEUE_GRACE * 3),
+            deleting: true,
+            ..TakeRenderState::default()
+        };
+        assert!(render_coming(&deleting));
+        assert!(!render_coming(&TakeRenderState {
+            deleting: false,
+            ..deleting
+        }));
+    }
+
+    /// A take whose renders all finished but that cleanup declined to delete
+    /// stops counting after [`FINISHED_GRACE`], instead of holding for good.
+    #[test]
+    fn a_finished_take_cleanup_never_deletes_stops_counting() {
+        let finished = |since| TakeRenderState {
+            statuses: &["Finished"],
+            since_finished: Some(since),
+            ..TakeRenderState::default()
+        };
+        assert!(render_coming(&finished(Duration::from_secs(5))));
+        assert!(!render_coming(&finished(FINISHED_GRACE)));
+    }
+
+    #[test]
+    fn a_held_batch_stops_only_after_it_stays_unable_to_fit() {
+        let t0 = Instant::now();
+        let at = |s| t0 + Duration::from_secs(s);
+        let mut stop = StopDebounce::default();
+        assert!(!stop.should_stop(true, 10 * GB, at(0)));
+        assert!(!stop.should_stop(true, 10 * GB, at(19)));
+        assert!(stop.should_stop(true, 10 * GB, at(20)));
+
+        // A look that fits starts it over.
+        let mut stop = StopDebounce::default();
+        assert!(!stop.should_stop(true, 10 * GB, at(0)));
+        assert!(!stop.should_stop(false, 10 * GB, at(10)));
+        assert!(!stop.should_stop(true, 10 * GB, at(25)));
+        assert!(stop.should_stop(true, 10 * GB, at(45)));
+
+        // Free space rising (a take being deleted) starts it over; small
+        // wobbles don't.
+        let mut stop = StopDebounce::default();
+        assert!(!stop.should_stop(true, 10 * GB, at(0)));
+        assert!(!stop.should_stop(true, 12 * GB, at(15)));
+        assert!(!stop.should_stop(true, 12 * GB, at(30)));
+        assert!(!stop.should_stop(true, 12 * GB + FREEING_BYTES, at(34)));
+        assert!(stop.should_stop(true, 12 * GB, at(35)));
     }
 
     #[test]
