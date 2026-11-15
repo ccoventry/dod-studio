@@ -191,6 +191,7 @@ test('Find Moved Videos is wired to the Render tab and says when the project has
   await expect(page.locator('#toast-container')).toContainText('No videos have been rendered for the loaded project yet');
   await expect(button).toBeEnabled();
   await expect(page.locator('#find-moved-progress')).toBeHidden();
+  await expect(page.locator('#find-moved-cancel-btn')).toBeHidden();
   const asked = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'relink_rendered_clips').length);
   expect(asked).toBe(0);
 });
