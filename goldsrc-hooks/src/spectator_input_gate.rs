@@ -33,7 +33,8 @@
 //! ## The fix
 //!
 //! Every frame, when the gate is more than [`SLACK`] ahead of the client
-//! clock, it is set back to 0, which the game's own `InitHUDData` writes. The
+//! clock, it is set back to 0, which the game's own `InitHUDData` writes (or
+//! to the clock, while the clock is below 0: [`cleared`]). The
 //! gate is never legitimately more than 0.2 s ahead, so a press made since the
 //! clock went back keeps its 0.2 s. A plain store into `client.dll`'s data,
 //! not code: no page protection changes.
@@ -111,6 +112,16 @@ fn is_stale(gate: f32, now: f32) -> bool {
     gate - now > SLACK
 }
 
+/// What a stale gate is set to at client time `now`: 0, as `InitHUDData`
+/// writes, or the clock itself while the clock is below 0. After a backward
+/// jump the client clock can run negative (-6.14 s, #1464); a 0 there is
+/// still ahead of it, so the gate stayed shut until the clock reached 0 and
+/// was found stale and logged again every frame (24,658 such lines in the
+/// hook logs, all "a click's 0.00 s").
+fn cleared(now: f32) -> f32 {
+    now.min(0.0)
+}
+
 /// Clears a gate left ahead of the clock. Called every frame from
 /// `commands::poll`, on the engine's thread (the only one that writes it).
 pub fn poll() {
@@ -143,7 +154,7 @@ pub fn poll() {
     // long as the module; only the engine's thread, this one, touches it.
     let ahead = unsafe { std::ptr::read_volatile(gate as *const f32) };
     if is_stale(ahead, now) {
-        unsafe { std::ptr::write_volatile(gate as *mut f32, 0.0) };
+        unsafe { std::ptr::write_volatile(gate as *mut f32, cleared(now)) };
         unsafe {
             crate::debug::report(&format!(
                 "spectator_input_gate: the demo clock went back to {now:.2} s past a click's {ahead:.2} s -- spectator clicks and keys work again (#1296)"
@@ -167,6 +178,23 @@ mod tests {
     fn a_press_from_later_in_the_demo_is_stale() {
         // #1296's probe: pressed at 61.29 during the load, clock back at 1.
         assert!(is_stale(61.49, 1.0));
+    }
+
+    #[test]
+    fn a_cleared_gate_is_open_and_stays_cleared() {
+        // A fresh clock, and #1464's negative one after a backward jump.
+        for now in [10.0, 0.5, 0.0, -6.14] {
+            let gate = cleared(now);
+            assert!(
+                gate <= now,
+                "the game ignores clicks while the gate is ahead ({now})"
+            );
+            assert!(
+                !is_stale(gate, now),
+                "cleared again on the next frame ({now})"
+            );
+            assert!(!is_stale(gate, now + 0.01), "{now}");
+        }
     }
 
     #[test]
