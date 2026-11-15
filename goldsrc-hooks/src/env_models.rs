@@ -30,8 +30,10 @@
 //!
 //! [`poll`], once a frame on the engine's thread: in a spectate-only demo
 //! session, while the table holds models and the carrier pointer is NULL,
-//! call the game's own `Think` on the game's own object -- exactly the call
-//! `CHud::Think` makes. It only acts on a NULL pointer, which `InitHUD`
+//! call the game's own `Think` on the game's own object, as `CHud::Think`
+//! does for every element flagged `HUD_ACTIVE` (this one always is:
+//! `CClientEnvModel::Init` sets the flag and nothing clears it, so the hook
+//! does not re-check it). It only acts on a NULL pointer, which `InitHUD`
 //! leaves and `Think` replaces, so in an HLTV demo, where `CHud::Think` runs
 //! every frame, it finds nothing to do or makes the same call a moment
 //! earlier. A pointer left over from an earlier level is never touched:
@@ -122,7 +124,9 @@ fn object_from_call(
         ));
     }
     let object = word(OBJECT_AT) as usize;
-    if object < base || object + COUNT_OFFSET + 4 > base + image_size {
+    let end = object.checked_add(COUNT_OFFSET + 4);
+    let image_end = base.checked_add(image_size);
+    if object < base || end.is_none() || image_end.is_none() || end > image_end {
         return Err(format!(
             "the env_model call passes {object:#x}, outside client.dll"
         ));
@@ -189,6 +193,15 @@ fn locate() -> Option<Code> {
 
 /// Whether `Think` should be called: the table holds models and no carrier
 /// draws them.
+///
+/// `Think` itself also replaces a non-NULL carrier whose `die` is 0 or less;
+/// this deliberately does not. The only writer of such a `die` is
+/// `RemoveAllModels` (at `InitHUD`), which NULLs the pointer in the same
+/// breath, and a pointer left from an earlier level points into the engine's
+/// temp-entity pool, which the new level has already cleared: calling
+/// `Think` there before the new `InitHUD` would make a carrier `InitHUD`
+/// then orphans, a second one drawing every model twice. Waiting for the
+/// NULL costs nothing, since `InitHUD` always comes.
 fn needs_carrier(count: i32, carrier: usize) -> bool {
     carrier == 0 && (1..=MAX_MODELS).contains(&count)
 }
@@ -319,6 +332,20 @@ mod tests {
         let mut below = call();
         below[OBJECT_AT..OBJECT_AT + 4].copy_from_slice(&0x1000u32.to_le_bytes());
         assert!(object_from_call(SITE, &below, ADD, BASE, SIZE).is_err());
+    }
+
+    /// An object at the top of the address space is refused, not wrapped
+    /// past the image's end check.
+    #[test]
+    fn an_object_at_the_top_of_memory_is_refused() {
+        let base = 0xfff0_0000usize;
+        let site = base + 0x2_c032;
+        let add = base + 0x2_98e0;
+        let mut c = call();
+        c[OBJECT_AT..OBJECT_AT + 4].copy_from_slice(&0xffff_fff0u32.to_le_bytes());
+        let rel = (add as i64 - (site + CALL_END) as i64) as i32;
+        c[CALL_REL_AT..CALL_END].copy_from_slice(&rel.to_le_bytes());
+        assert!(object_from_call(site, &c, add, base, 0xf_0000).is_err());
     }
 
     /// Only a NULL carrier with models stored: a carrier already there (an
