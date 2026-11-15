@@ -242,7 +242,7 @@ pub(super) fn hud_time() -> Option<f32> {
 
 /// Calls `each` with every occupied slot's address, in order. The game keeps
 /// them packed from slot 0, so the first empty one ends the list.
-fn for_each_line(mut each: impl FnMut(usize)) {
+pub(super) fn for_each_line(mut each: impl FnMut(usize)) {
     let Some(base) = engine::client_module_base() else {
         return;
     };
@@ -258,7 +258,7 @@ fn for_each_line(mut each: impl FnMut(usize)) {
     }
 }
 
-fn stamp(item: usize) -> f32 {
+pub(super) fn stamp(item: usize) -> f32 {
     // Safety: `item` is a slot `for_each_line` handed out.
     unsafe { std::ptr::read_unaligned((item + FIELD_DISPLAY_TIME) as *const f32) }
 }
@@ -297,17 +297,24 @@ fn expire_up_to(cutoff: f32) -> usize {
     count
 }
 
-/// Gives every line the stamp `new` returns for its stamp, leaving those it
-/// returns `None` for (`seek_restamp`). Returns how many changed.
-pub(super) fn restamp_lines(mut new: impl FnMut(f32) -> Option<f32>) -> usize {
-    let mut count = 0;
+/// Gives the lines the stamps `new` returns for all their stamps, in the
+/// feed's order, leaving those it returns `None` for (`seek_restamp`).
+/// Returns how many changed.
+pub(super) fn restamp_lines(new: impl FnOnce(&[f32]) -> Vec<Option<f32>>) -> usize {
+    let mut items = Vec::new();
+    let mut stamps = Vec::new();
     for_each_line(|item| {
-        if let Some(to) = new(stamp(item)) {
+        items.push(item);
+        stamps.push(stamp(item));
+    });
+    let mut count = 0;
+    for (item, to) in items.into_iter().zip(new(&stamps)) {
+        if let Some(to) = to {
             // Safety: as `stamp`.
             unsafe { std::ptr::write_unaligned((item + FIELD_DISPLAY_TIME) as *mut f32, to) };
             count += 1;
         }
-    });
+    }
     count
 }
 

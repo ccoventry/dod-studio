@@ -298,8 +298,12 @@ jumps, so every kill of those last 10 s came out stamped as new and stayed up a
 full 10 s past the landing (PRE, rr2/thunder/pb2: 9.97-9.99 s left on every
 notice, where playing in leaves 0.05-7.5 s). So after the clear the steps are
 0.5 s, each notice is noted with the step it arrived in, and the landing
-re-stamps it to its kill's demo time plus the lifetime
-(`deathmsg/seek_restamp.rs`, #1392). A capture batch goes back with its
+re-stamps it to its kill's demo time plus the lifetime, counted in the HUD's
+seconds from the engine's client clock (`deathmsg/seek_restamp.rs`, #1392).
+`m_flTime` stands still while the console or the game menu is up, so a seek
+typed there stamps every kill alike; equal stamps are matched to the kills by
+order. A plain forward stepped seek shorter than a lifetime keeps the kills
+already up and re-dates them too, rather than emptying the feed. A capture batch goes back with its
 `back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)

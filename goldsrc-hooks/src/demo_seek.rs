@@ -186,13 +186,8 @@ struct Pending {
     /// `m_LastFrameTime` before it, until the player has sent the start
     /// frame.
     rewind_from: Option<f64>,
-    /// Where a stepped seek, rewinds included (`chain.rs`), empties the kill
-    /// feed: the target less a notice's lifetime
-    /// ([`rewind_step`](rewind::rewind_step)). `None` for one that lands at once.
-    feed_at: Option<f64>,
-    /// Frames the kill feed has been emptied on
-    /// ([`FEED_CLEAR_FRAMES`](rewind::FEED_CLEAR_FRAMES)).
-    feed_cleared: u32,
+    /// How a stepped seek empties the kill feed on its way ([`chain::Feed`]).
+    feed: chain::Feed,
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
     steps: u32,
@@ -262,8 +257,7 @@ impl Pending {
             landed: false,
             last_set,
             rewind_from: None,
-            feed_at: None,
-            feed_cleared: 0,
+            feed: chain::Feed::default(),
             waited: 0,
             steps: 0,
             dropped: 0,
@@ -1186,14 +1180,16 @@ mod player {
             }
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let cleared = seek.feed_cleared >= FEED_CLEAR_FRAMES;
-            let t = match rewind_step(get_now(player), seek.target, seek.feed_at, cleared) {
+            let cleared = seek.feed.cleared >= FEED_CLEAR_FRAMES;
+            let t = match rewind_step(get_now(player), seek.target, seek.feed.at, cleared) {
                 Step::To(t) => t,
                 Step::ClearFeed => {
                     // The kills the steps replayed too early to still be up
                     // at the target (module doc).
-                    seek.feed_cleared += 1;
-                    if let Err(why) = crate::deathmsg::clear_for_rewind(seek.last_set) {
+                    seek.feed.cleared += 1;
+                    if let Err(why) =
+                        crate::deathmsg::clear_for_rewind(seek.last_set, seek.feed.keep)
+                    {
                         crate::debug::report(&format!(
                             "demo_seek: could not empty the kill feed before the seek lands: {why}"
                         ));
@@ -1281,7 +1277,7 @@ mod player {
                 set_world_time(player, base, 0);
                 let mut seek = Pending::new(to, then, base);
                 seek.rewind_from = Some(from);
-                seek.feed_at = Some(feed_clear_at(to, crate::deathmsg::notice_lifetime()));
+                seek.feed.at = Some(feed_clear_at(to, crate::deathmsg::notice_lifetime()));
                 *pending = Some(seek);
                 let from_where = if recording.is_some() {
                     "the first recorded frame"

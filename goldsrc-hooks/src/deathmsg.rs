@@ -727,17 +727,23 @@ pub(crate) fn notice_lifetime() -> Option<f64> {
     Some(f64::from(lifetime.trunc()))
 }
 
-/// Empties the kill feed during a rewind (`demo_seek`, #1085): its steps
-/// replay every kill before the landing within a second or two. The kills
-/// replayed from here, with the clock at `clock`, are re-dated at the landing
-/// ([`seek_restamp`]). Returns how many lines went.
-// Only the 32-bit demo player rewinds; a host build has none.
+/// Empties the kill feed during a stepped seek (`demo_seek`, #1085): its
+/// steps replay every kill before the landing within a second or two. The
+/// kills replayed from here, with the clock at `clock`, are re-dated at the
+/// landing ([`seek_restamp`]). With `keep` (a plain forward seek shorter than
+/// a notice lifetime) the lines up stay and are re-dated with them. Returns
+/// how many lines went.
+// Only the 32-bit demo player steps; a host build has none.
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
-pub(crate) fn clear_for_rewind(clock: f64) -> Result<usize, String> {
+pub(crate) fn clear_for_rewind(clock: f64, keep: bool) -> Result<usize, String> {
     let Some(base) = engine::client_module_base() else {
         return Err("client.dll is not loaded yet".to_string());
     };
     ensure_verified(base)?;
+    if keep {
+        seek_restamp::adopt(clock);
+        return Ok(0);
+    }
     seek_restamp::begin(clock);
     Ok(clear::expire_all())
 }

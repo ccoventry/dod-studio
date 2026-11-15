@@ -58,9 +58,26 @@ pub(super) fn steps(now: f64, to: f64, skip_between: bool, chain: Option<InFligh
     super::stepped(now, to, skip_between) || (!skip_between && chain.is_some())
 }
 
+/// How a stepped seek treats the kill feed on its way (`rewind_step`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct Feed {
+    /// Where it empties the feed: the target less a notice's lifetime.
+    /// `None` for a seek that lands at once.
+    pub(super) at: Option<f64>,
+    /// Frames it has been emptied on (`rewind::FEED_CLEAR_FRAMES`).
+    pub(super) cleared: u32,
+    /// Keep the lines up and re-date them instead of emptying the feed
+    /// (`deathmsg::seek_restamp`): a plain forward seek shorter than a
+    /// notice lifetime starts where playing in put them, and its clear point
+    /// is behind it.
+    pub(super) keep: bool,
+}
+
 /// A forward stepped seek to `to` from `now`: it empties the kill feed one
 /// notice lifetime (`lifetime`) before `to`, and waits for the start frame of
-/// a rewind it replaces.
+/// a rewind it replaces. One that replaces nothing and starts past that
+/// point keeps the lines up (#1392's review: a 7 s seek emptied kills from
+/// the 3 s before it that playing in still shows).
 pub(super) fn stepped_seek(
     to: f64,
     then: Option<String>,
@@ -69,7 +86,9 @@ pub(super) fn stepped_seek(
     lifetime: Option<f64>,
 ) -> Pending {
     let mut seek = Pending::new(to, then, now);
-    seek.feed_at = Some(feed_clear_at(to, lifetime));
+    let at = feed_clear_at(to, lifetime);
+    seek.feed.at = Some(at);
+    seek.feed.keep = chain.is_none() && at < now;
     seek.rewind_from = chain.and_then(|old| old.rewind_from);
     seek
 }
@@ -78,10 +97,10 @@ pub(super) fn stepped_seek(
 /// how many of the kills it replayed after that it re-dated
 /// (`deathmsg::seek_restamp`).
 pub(super) fn feed_note(seek: &Pending, redated: usize) -> String {
-    if seek.feed_at.is_some() {
-        format!(", the kill feed emptied on the way ({redated} kill(s) re-dated)")
-    } else {
-        String::new()
+    match seek.feed {
+        Feed { at: None, .. } => String::new(),
+        Feed { keep: true, .. } => format!(", the kill feed kept ({redated} kill(s) re-dated)"),
+        Feed { .. } => format!(", the kill feed emptied on the way ({redated} kill(s) re-dated)"),
     }
 }
 
@@ -95,7 +114,7 @@ mod tests {
     fn rewind(target: f64, base: f64, from: Option<f64>) -> Pending {
         let mut seek = Pending::new(target, None, base);
         seek.rewind_from = from;
-        seek.feed_at = Some(feed_clear_at(target, Some(10.0)));
+        seek.feed.at = Some(feed_clear_at(target, Some(10.0)));
         seek
     }
 
@@ -155,20 +174,48 @@ mod tests {
     fn a_stepped_seek_empties_the_kill_feed_one_notice_lifetime_before_landing() {
         let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
         let next = stepped_seek(1500.0, None, 700.0, chain, Some(10.0));
-        assert_eq!(next.feed_at, Some(1490.0));
+        assert_eq!(next.feed.at, Some(1490.0));
         assert_eq!(
-            rewind_step(700.0, 1500.0, next.feed_at, false),
+            rewind_step(700.0, 1500.0, next.feed.at, false),
             Step::To(705.0)
         );
         assert_eq!(
-            rewind_step(1490.0, 1500.0, next.feed_at, false),
+            rewind_step(1490.0, 1500.0, next.feed.at, false),
             Step::ClearFeed
         );
         assert!(feed_note(&next, 2).contains("2 kill(s) re-dated"));
         // The PRE pb2 forward seek that kept three old kills.
         let alone = stepped_seek(978.61, None, 878.7, None, Some(10.0));
-        assert!((alone.feed_at.unwrap() - 968.61).abs() < 1e-9);
+        assert!((alone.feed.at.unwrap() - 968.61).abs() < 1e-9);
         assert_eq!(alone.rewind_from, None);
+        assert!(
+            !alone.feed.keep,
+            "its clear point is ahead: the feed empties"
+        );
+        assert!(
+            !next.feed.keep,
+            "it replaces a seek: what that one replayed goes"
+        );
+    }
+
+    /// #1392's review: a plain 7 s forward seek starts past its clear point,
+    /// so it keeps the kills playing in left up (re-dated at the landing)
+    /// instead of emptying them; replacing a seek, it still empties.
+    #[test]
+    fn a_plain_forward_seek_shorter_than_a_lifetime_keeps_the_feed() {
+        let short = stepped_seek(1007.0, None, 1000.0, None, Some(10.0));
+        assert!(short.feed.keep);
+        assert_eq!(
+            rewind_step(1000.0, 1007.0, short.feed.at, false),
+            Step::ClearFeed
+        );
+        assert!(feed_note(&short, 1).contains("kept"));
+        let chain = in_flight(Some(&rewind(1370.0, 566.49, None)));
+        assert!(
+            !stepped_seek(1007.0, None, 1000.0, chain, Some(10.0))
+                .feed
+                .keep
+        );
     }
 
     /// A short hop past the step clock steps when it replaces a seek on its
@@ -182,11 +229,11 @@ mod tests {
         assert!(!steps(1368.0, 1371.0, false, None));
         let hop = stepped_seek(1371.0, None, 1368.0, chain, Some(10.0));
         assert_eq!(
-            rewind_step(1368.0, 1371.0, hop.feed_at, false),
+            rewind_step(1368.0, 1371.0, hop.feed.at, false),
             Step::ClearFeed
         );
         assert_eq!(
-            rewind_step(1368.0, 1371.0, hop.feed_at, true),
+            rewind_step(1368.0, 1371.0, hop.feed.at, true),
             Step::To(1368.5)
         );
         assert_eq!(rewind_step(1368.0, 1371.0, None, false), Step::Land(1371.0));
