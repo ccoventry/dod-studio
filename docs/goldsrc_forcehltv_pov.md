@@ -172,7 +172,8 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
   `ds_demo_seek_to`.
 - A `viewdemo` of a demo in `dod_addon` leaves `lookahead` looking for it in
   `dod\` ("can't open ...\dod\ds1452_tr2.dem"), so the look-ahead part of the
-  animation fix is off for such demos.
+  animation fix is off for such demos. Fixed in #1463: it looks in the
+  engine's search paths, `dod_addon` first with `-addons`.
 - After a backward jump `spectator_input_gate` logs "the demo clock went
   back" on every frame (217 lines in one session): its log line needs a
   budget.
@@ -185,7 +186,7 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
 
 1. The gun under `ds_spec_match_pov` in a forcehltv view (gap 2).
 2. `lookahead` should open the demo the engine actually opened (`dod_addon`,
-   subfolders, `../` paths).
+   subfolders, `../` paths): done in #1463.
 3. `spectator_input_gate`'s per-frame log line.
 4. If Studio offers "watch another player" for POV demos: show the stretches
    where the demo holds that player (`forcehltv_pov_probe` track mode), and
