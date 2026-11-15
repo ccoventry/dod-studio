@@ -114,9 +114,9 @@ test('a damaged demo with more than one map greys out Split now and offers Repai
   await page.waitForFunction(() => typeof window.__finishSplit === 'function');
   expect(await page.evaluate(() => window.__splitPath)).toBe('C:/demos/monday-wsod25_r07_m1_h2_repaired.dem');
   await page.evaluate(() => window.__mockEmit('split_progress', {
-    path: 'C:/demos/monday-wsod25_r07_m1_h2_repaired.dem', progress: { fraction: 0.5, stage: 'writing', map: 'dod_anzio', part: 1, parts: 2 },
+    path: 'C:/demos/monday-wsod25_r07_m1_h2_repaired.dem', progress: { fraction: 0.5, stage: 'writing', map: 'dod_anzio', part: 1, parts: 2, index: 0, done: 0 },
   }));
-  await expect(banner.locator('.split-progress-text')).toHaveText('Splitting the repaired demo: Writing dod_anzio (1 of 2)… 50%');
+  await expect(banner.locator('.split-progress-text')).toHaveText('Splitting the repaired demo: Writing and checking 2 maps: 0 done… 50%');
   await expect(banner.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 75%/);
   await page.evaluate(() => window.__finishSplit());
   await expect(page.locator('#analyzer-current-file')).toHaveText('monday-wsod25_r07_m1_h2_repaired_split1_anzio.dem');
