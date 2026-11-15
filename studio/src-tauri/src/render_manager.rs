@@ -879,6 +879,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         // Takes with a job that finished in this run, for the automatic take
         // cleanup (#644) once the run ends.
         let mut finished_takes: Vec<String> = Vec::new();
+        // Each take folder's volume, looked up once (it asks Windows): the
+        // start order reads it under the jobs lock every pass while a capture
+        // holds (#1438).
+        let mut take_volumes: HashMap<String, String> = HashMap::new();
 
         loop {
             if handles.global_cancel.load(Ordering::SeqCst) {
@@ -965,9 +969,14 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             .filter(|(_, j)| j.status == "Queued")
                             .map(|(i, j)| {
                                 let on = room_volume.as_ref().is_some_and(|v| {
-                                    native::hlcr::take_cleanup::volume_of(Path::new(
-                                        &j.clip.take_folder,
-                                    )) == *v
+                                    *take_volumes
+                                        .entry(j.clip.take_folder.clone())
+                                        .or_insert_with(|| {
+                                            native::hlcr::take_cleanup::volume_of(Path::new(
+                                                &j.clip.take_folder,
+                                            ))
+                                        })
+                                        == *v
                                 });
                                 (i, on)
                             }),

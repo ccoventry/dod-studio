@@ -35,6 +35,7 @@ use native::log_markdown;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -259,6 +260,49 @@ pub(crate) fn busy_refusal(take_folder: &str, statuses: &[&str]) -> Option<Strin
         .then(|| crate::messages::take_is_queued_or_rendering(take_folder))
 }
 
+/// The takes being deleted now (`folder_key`s), from just before their rows
+/// leave the Render tab until their delete returns. Render While Capturing
+/// counts their space as coming back: with no rows left they otherwise look
+/// like takes no render will ever delete, and a held batch could stop just
+/// as they went (#1438).
+static DELETING: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// A take on [`DELETING`] while this lives, so every way out of a delete
+/// (refused, failed, done) takes it off again.
+struct Deleting(String);
+
+impl Deleting {
+    fn start(take_folder: &Path) -> Self {
+        let key = folder_key(&take_folder.to_string_lossy());
+        DELETING
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(key.clone());
+        Deleting(key)
+    }
+}
+
+impl Drop for Deleting {
+    fn drop(&mut self) {
+        let mut list = DELETING.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(i) = list.iter().position(|k| *k == self.0) {
+            list.swap_remove(i);
+        }
+    }
+}
+
+/// Whether a take in `folder` (a capture block's folder, or the take's own)
+/// is being deleted now.
+pub(crate) fn deleting_under(folder: &Path) -> bool {
+    let key = folder_key(&folder.to_string_lossy());
+    let inside = format!("{key}\\");
+    DELETING
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .any(|k| *k == key || k.starts_with(&inside))
+}
+
 /// Takes the rows of a take out of the Render tab before its folder goes, so a
 /// Reset can't start a render of a folder that's gone. `remove_idle_take_rows`
 /// re-checks under the job lock that none is queued or rendering. A take
@@ -336,6 +380,7 @@ fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
                 ));
                 continue;
             }
+            let _deleting = Deleting::start(path);
             if let Err(e) = take_out_of_list(&app, &render, path) {
                 log_markdown(&crate::messages::take_cleanup::take_cleanup_stays(
                     path.display(),
@@ -462,6 +507,7 @@ pub(crate) fn make_room(
         if progress.report("deleting", i, total) {
             on_step(&crate::messages::making_room_deleting(i, total), i, total);
         }
+        let _deleting = Deleting::start(&plan.take_folder);
         if let Err(e) = take_out_of_list(app, &render, &plan.take_folder) {
             log_markdown(&crate::messages::take_cleanup::take_cleanup_stays(
                 plan.take_folder.display(),
@@ -488,6 +534,24 @@ pub(crate) fn make_room(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1438: from just before its rows leave the list until its delete
+    /// returns, a take reads as being deleted, from its block folder too.
+    #[test]
+    fn a_take_reads_as_deleting_only_while_its_delete_runs() {
+        let block = std::env::temp_dir()
+            .join("dod_test_deleting_1438")
+            .join("clip_b0");
+        let take = block.join("take0000");
+        assert!(!deleting_under(&block));
+        {
+            let _deleting = Deleting::start(&take);
+            assert!(deleting_under(&block));
+            assert!(deleting_under(&take));
+            assert!(!deleting_under(&block.with_file_name("clip_b1")));
+        }
+        assert!(!deleting_under(&block));
+    }
 
     #[test]
     fn a_take_goes_only_when_every_job_of_it_finished() {
