@@ -439,17 +439,11 @@ impl RenderManager {
         self.capture_held.store(held, Ordering::SeqCst);
     }
 
-    /// Settings were saved with these export folders (#1430): a running
-    /// batch's next renders go to them, and so does Start Render Batch on
-    /// the rows already listed.
-    pub(crate) fn export_dirs_saved(&self, dirs: &[String]) {
-        self.export_dirs.saved(dirs);
-        if let Some(config) = self.last_config.lock().unwrap().as_mut() {
-            let live = self.export_dirs.dirs();
-            if !live.is_empty() {
-                config.export_directories = live;
-            }
-        }
+    /// The export folders as Settings has them (#1430), which settings
+    /// loading and `save_settings` update: a running batch's next renders go
+    /// to them, and so does Start Render Batch on the rows already listed.
+    pub(crate) fn export_dirs(&self) -> LiveExportDirs {
+        self.export_dirs.clone()
     }
 
     /// The volume (`volume_of`) a capture holds for room on, whose takes'
@@ -627,7 +621,15 @@ impl RenderManager {
             return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
         }
         match self.last_config.lock().unwrap().clone() {
-            Some(config) => Ok((config, starting)),
+            Some(mut config) => {
+                // The folders Settings has now, not the ones the last scan
+                // brought (#1430).
+                let live = self.export_dirs.dirs();
+                if !live.is_empty() {
+                    config.export_directories = live;
+                }
+                Ok((config, starting))
+            }
             None => Err(self
                 .recovery_gap
                 .lock()
@@ -900,9 +902,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         let mut finished_takes: Vec<String> = Vec::new();
         // The export pool follows Settings while the batch runs (#1430):
         // Render While Capturing keeps one batch going for days.
-        let mut export_dirs = handles
-            .export_dirs
-            .follow(config.export_directories.clone());
+        let mut export_dirs = handles.export_dirs.follow(&config.export_directories);
         // Each take folder's volume, looked up once (it asks Windows): the
         // start order reads it under the jobs lock every pass while a capture
         // holds (#1438).

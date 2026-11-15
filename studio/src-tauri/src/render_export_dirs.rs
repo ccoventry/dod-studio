@@ -14,16 +14,12 @@ use std::sync::{Arc, RwLock};
 pub(crate) struct LiveExportDirs(Arc<RwLock<(u64, Vec<PathBuf>)>>);
 
 impl LiveExportDirs {
-    /// Settings were saved with `dirs`. Counts a change only when the list
-    /// differs, blank entries left out. An emptied list is not taken: a
+    /// Settings were loaded or saved with `dirs`. Counts a change only when
+    /// the list differs once [`normalized`]. An emptied list is not taken: a
     /// running batch keeps the folders it has rather than renders failing
     /// for want of one (a new scan refuses without a folder anyway).
     pub fn saved(&self, dirs: &[String]) {
-        let dirs: Vec<PathBuf> = dirs
-            .iter()
-            .filter(|d| !d.trim().is_empty())
-            .map(PathBuf::from)
-            .collect();
+        let dirs = normalized(dirs.iter().map(String::as_str));
         if dirs.is_empty() {
             return;
         }
@@ -38,20 +34,30 @@ impl LiveExportDirs {
         self.0.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// The list Settings saved last; empty before the first save.
+    /// The list Settings has; empty only when it has none.
     pub fn dirs(&self) -> Vec<PathBuf> {
         self.snapshot().1
     }
 
     /// Follows the list for one render batch that started with
     /// `started_with` (its payload's, which Settings had then).
-    pub fn follow(&self, started_with: Vec<PathBuf>) -> ExportDirsInUse {
+    pub fn follow(&self, started_with: &[PathBuf]) -> ExportDirsInUse {
         ExportDirsInUse {
             live: self.clone(),
             seen: self.snapshot().0,
-            dirs: started_with,
+            dirs: normalized(started_with.iter().map(|d| d.to_str().unwrap_or_default())),
         }
     }
+}
+
+/// A folder list as both sides compare it: each entry trimmed, blank ones
+/// left out. The frontend's payload drops only empty strings, Settings' list
+/// can hold a blank row, so the same list must not read as a change.
+fn normalized<'a>(dirs: impl Iterator<Item = &'a str>) -> Vec<PathBuf> {
+    dirs.map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// The export folders one render batch uses, following [`LiveExportDirs`].
@@ -92,7 +98,7 @@ mod tests {
     fn a_running_batch_takes_the_export_folders_saved_after_it_started() {
         let live = LiveExportDirs::default();
         live.saved(&["C:/clips".into(), "D:/clips".into()]);
-        let mut batch = live.follow(paths(&["C:/clips", "D:/clips"]));
+        let mut batch = live.follow(&paths(&["C:/clips", "D:/clips"]));
         assert_eq!(
             batch.current(),
             (&paths(&["C:/clips", "D:/clips"])[..], false)
@@ -111,15 +117,28 @@ mod tests {
     fn only_a_change_after_the_batch_started_moves_it() {
         let live = LiveExportDirs::default();
         live.saved(&["E:/clips".into()]);
-        let mut batch = live.follow(paths(&["F:/clips"]));
+        let mut batch = live.follow(&paths(&["F:/clips"]));
         live.saved(&["E:/clips".into()]);
         assert_eq!(batch.current(), (&paths(&["F:/clips"])[..], false));
+    }
+
+    /// Studio seeds the list from settings.json at start: the first save of
+    /// some other setting, with the same folders, is no change, even when the
+    /// payload carried a blank or padded entry Settings has trimmed.
+    #[test]
+    fn a_save_with_the_same_folders_is_no_change_however_they_are_padded() {
+        let live = LiveExportDirs::default();
+        live.saved(&["D:/clips".into(), "  ".into()]);
+        let mut batch = live.follow(&paths(&["D:/clips ", "  "]));
+        live.saved(&["D:/clips".into()]);
+        live.saved(&[" D:/clips".into(), "".into()]);
+        assert_eq!(batch.current(), (&paths(&["D:/clips"])[..], false));
     }
 
     #[test]
     fn an_emptied_list_keeps_the_folders_a_batch_has() {
         let live = LiveExportDirs::default();
-        let mut batch = live.follow(paths(&["D:/clips"]));
+        let mut batch = live.follow(&paths(&["D:/clips"]));
         live.saved(&[]);
         live.saved(&["  ".into()]);
         assert_eq!(batch.current(), (&paths(&["D:/clips"])[..], false));
@@ -131,7 +150,7 @@ mod tests {
     fn a_change_back_to_the_same_list_is_not_news() {
         let live = LiveExportDirs::default();
         live.saved(&["D:/clips".into()]);
-        let mut batch = live.follow(paths(&["D:/clips"]));
+        let mut batch = live.follow(&paths(&["D:/clips"]));
         live.saved(&["E:/clips".into()]);
         live.saved(&["D:/clips".into()]);
         assert_eq!(batch.current(), (&paths(&["D:/clips"])[..], false));

@@ -123,7 +123,10 @@ async fn save_settings(
     settings: AppSettings,
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
-    let export_dirs = settings.render_export_dirs.clone();
+    // A running render batch takes the new export folders for the renders it
+    // starts next (#1430). Handed over under the settings lock, so two saves
+    // close together can't leave it the older list.
+    let export_dirs = render.export_dirs();
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
@@ -139,16 +142,13 @@ async fn save_settings(
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
         settings_manager::apply_windows_drive_keep_free(&settings);
+        export_dirs.saved(&settings.render_export_dirs);
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");
         Ok(())
     }))
-    .await?;
-    // A running render batch takes the new export folders for the renders it
-    // starts next (#1430).
-    render.export_dirs_saved(&export_dirs);
-    Ok(())
+    .await
 }
 
 /// The built-in command profiles (#911), which the Commands tab lists locked
@@ -925,17 +925,30 @@ pub fn run() {
         ));
     }
 
+    // The render manager starts from the export folders settings.json has,
+    // so the first save of some other setting isn't taken for a change of
+    // them by a running batch (#1430).
+    let settings_manager = SettingsManager::new();
+    let render_manager = RenderManager::new();
+    render_manager.export_dirs().saved(
+        &settings_manager
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .render_export_dirs,
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
-        .manage(RenderManager::new())
+        .manage(render_manager)
         .manage(take_preview_manager::TakePreviewManager::default())
         .manage(take_checks_manager::TakeChecksManager::default())
         .manage(ScanManager::default())
-        .manage(SettingsManager::new())
+        .manage(settings_manager)
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(demo_repair_manager::DemoRepairManager::default())

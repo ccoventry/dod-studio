@@ -58,6 +58,14 @@ pub fn fps_from_render_settings(take_folder: impl Display) -> String {
     )
 }
 
+/// A clip name cut at render time to keep its path within Windows' limit in
+/// an export folder longer than the ones it was cut for when queued (#1430).
+pub fn clip_name_shortened(name: &str, folder: impl Display) -> String {
+    format!(
+        "[render] Clip name \"{name}\" shortened to fit the path limit in {folder}, an export folder longer than the ones it was named for"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
