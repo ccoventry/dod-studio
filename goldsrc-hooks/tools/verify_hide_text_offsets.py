@@ -10,7 +10,7 @@ where it lands.
 `spectator_text.rs`, the camera mode name:
 
   1. The signature matches exactly once, a few instructions after
-     `push "#Spec_Mode%d"` (so it is `CHudSpectator::SetMode`).
+     `push "#Spec_Mode%d"` (so it is `CHudSpectator::SetModes`).
   2. The patched span is one `call`, to the function the `TextMsg` message
      thunk (`msglog.rs`'s table) calls: `MsgFunc_TextMsg`.
   3. Every `ret` in that function is `ret 0xc`, and exactly three arguments
@@ -235,7 +235,7 @@ def main() -> int:
         start = hits[0]
         spec_mode = im.cstr_rva(b"#Spec_Mode%d")
         pushes = [i for i in im.dis(start - 0x40, 0x40) if i.mnemonic == "push" and i.op_str == hex(spec_mode + im.base)]
-        check(pushes, 'it follows `push "#Spec_Mode%d"` (CHudSpectator::SetMode)', 'no `push "#Spec_Mode%d"` in the 0x40 bytes before it')
+        check(pushes, 'it follows `push "#Spec_Mode%d"` (CHudSpectator::SetModes)', 'no `push "#Spec_Mode%d"` in the 0x40 bytes before it')
         site = start + at
         ins = im.one(site)
         check(ins.mnemonic == "call" and ins.size == len(hidden) and im.target(ins) == textmsg,

@@ -1,7 +1,7 @@
 // info_tooltip.js — hover/focus tooltip that replaces the native `title`
 // attribute for .info-icon (see #164: native tooltips need a motionless
 // cursor for ~1s and silently reset on any movement).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/tests/e2e/info-tooltip.html');

@@ -110,7 +110,7 @@ export function createProjectTab({ getState, onEdit }) {
     })];
     if (picked === 'custom') {
       controls.push(el('div', { class: 'ps-inline' }, [
-        numberBox(key, rate, (v) => onEdit({ [key]: v })), unit(S.FPS_UNIT),
+        numberBox(key, rate, (v) => onEdit({ [key]: v }), mode === 'agr' ? { placeholder: S.AGR_RATE_PLACEHOLDER } : {}), unit(S.FPS_UNIT),
       ]));
     }
     // AGR records positions, not frames; its own rate is the one that counts (R14).

@@ -1,6 +1,6 @@
 // Finish clips after a capture batch (#440), driven against
 // tests/e2e/finish-clips.html — see that file and tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const BLOCK_A = 'D:\\cap\\s1\\demo1_b0';
 const BLOCK_B = 'D:\\cap\\s1\\demo1_b1';

@@ -1,6 +1,7 @@
 pub mod agr_take;
 pub mod autosave;
 pub mod capture_room;
+pub mod clip_id;
 pub mod combine;
 pub mod config;
 pub mod render_locate;

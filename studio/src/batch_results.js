@@ -67,10 +67,17 @@ export function resultsOf(payload, dispatch) {
     // clip, with what ended it (`cut_by`); short: one FFmpeg stopped writing
     // mid-clip (#1105).
     // late: OBS started recording after the clip did (#1109).
-    status: b.started_late_ms ? 'late' : b.short_take ? 'short' : b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    // failed / short_plan: what the game reported about the clip (#1401).
+    // not_reached: the batch ended before it got to the clip (#1434).
+    status: b.started_late_ms ? 'late' : b.short_take ? 'short' : b.cut_short ? 'cut_short'
+      : b.clip_verdict?.failed && !b.captured ? 'failed'
+        : b.not_reached ? 'not_reached'
+          : !b.captured ? 'missing' : b.clip_verdict?.short ? 'short_plan' : b.renderable ? 'ok' : 'unrenderable',
     short: b.short_take || null,
+    verdict: b.clip_verdict || null,
     lateMs: b.started_late_ms || null,
     cutBy: b.cut_by || null,
+    endedBy: payload?.ended_by || null,
     bytes: b.bytes || 0,
     folder: b.take_folder,
   }));
@@ -137,13 +144,20 @@ function render() {
         ? S.startedLate(row.lateMs)
         : row.short
         ? S.shortTake(row.short.video_secs, row.short.audio_secs)
-        : row.status === 'cut_short' ? S.cutShortBy(row.cutBy) : S.STATUS[row.status];
+        : row.status === 'cut_short' ? S.cutShortBy(row.cutBy)
+          : row.status === 'not_reached' ? S.notReachedBy(row.endedBy)
+          : row.status === 'failed' ? S.clipFailed(row.verdict.failed)
+            : row.status === 'short_plan'
+              ? S.clipShort(row.verdict.short.recorded_secs, row.verdict.short.planned_secs, row.verdict.short.kills_outside)
+              : S.STATUS[row.status];
       const label = document.createElement('td');
       label.textContent = row.label;
       const size = document.createElement('td');
-      size.textContent = row.status === 'missing' ? '—' : gbOrMbText(row.bytes);
+      // No take to size or open: nothing was written.
+      const noTake = row.status === 'missing' || row.status === 'not_reached';
+      size.textContent = noTake ? '—' : gbOrMbText(row.bytes);
       const open = document.createElement('td');
-      if (row.status !== 'missing' && row.folder) {
+      if (!noTake && row.folder) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = S.OPEN_FOLDER;

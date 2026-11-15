@@ -55,10 +55,10 @@ export function chips(name, choices, picked, onPick) {
 }
 
 /** A number box: `onValue(number|NaN)` on every keystroke. */
-export function numberBox(name, value, onValue, { step = '1', width = '84px', title } = {}) {
+export function numberBox(name, value, onValue, { step = '1', width = '84px', title, placeholder = '' } = {}) {
   const input = el('input', {
     type: 'number', class: 'ps-number', step, value: value === undefined || value === null ? '' : String(value),
-    title: title || '', dataset: { field: name },
+    title: title || '', placeholder, dataset: { field: name },
   });
   input.style.width = width;
   input.addEventListener('input', () => onValue(input.value.trim() === '' ? NaN : Number(input.value)));

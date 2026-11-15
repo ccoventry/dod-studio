@@ -614,6 +614,12 @@ impl ObsClient {
         Ok(())
     }
 
+    /// An audio source's current sync offset, in milliseconds.
+    pub fn input_audio_sync_offset(&mut self, name: &str) -> Result<i64, ObsError> {
+        let reply = self.request("GetInputAudioSyncOffset", json!({ "inputName": name }))?;
+        Ok(reply["inputAudioSyncOffset"].as_i64().unwrap_or_default())
+    }
+
     /// OBS's own version, e.g. `32.2.2`.
     pub fn obs_version(&mut self) -> Result<String, ObsError> {
         Ok(self.request("GetVersion", json!({}))?["obsVersion"]

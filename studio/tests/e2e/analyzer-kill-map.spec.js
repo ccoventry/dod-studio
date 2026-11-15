@@ -5,7 +5,7 @@
 // in the image's own pixels), what the hover says, the engagement-distance
 // table, and that a map with no overview still gets the table and a plain
 // reason instead of a broken image.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const DEMO = 'C:/demos/match.dem';
 

@@ -2,13 +2,13 @@
 """Checks `frame_esc.rs` against the real `GameUI.dll`s (issues #369, #408).
 
 `frame_esc.rs` turns the first two bytes of the `CloseFrameButtonPressed`
-block in the 25th Anniversary `Frame::OnKeyCodeTyped` into a short jump over
+block in the 25th Anniversary `Frame::OnKeyCodePressed` into a short jump over
 it, so ESC posts only `Cancel`, as on the pre-Anniversary build. The unit
 test proves the jump lands where the constants say; this proves what the
 patch relies on:
 
   1. `PATTERN` matches exactly once in the code section, and that function is
-     `Frame@vgui2`'s vftable slot 100 (`OnKeyCodeTyped`).
+     `Frame@vgui2`'s vftable slot 100 (`OnKeyCodePressed`).
   2. It is `thiscall` with one argument (`this` from `ecx`, every return
      `ret 4`) and compares that argument, `[ebp+8]`, with `KEY_ESCAPE`.
   3. `CLOSE_BLOCK` and `CANCEL_BLOCK` each start an instruction `push 0x18`;
@@ -20,7 +20,7 @@ patch relies on:
   5. Which windows it reaches: every GameUI class whose vftable slot 100 is
      that function (listed, by RTTI).
   6. The pre-Anniversary GameUI has no match, so the module refuses there,
-     and its own `Frame::OnKeyCodeTyped` posts no `CloseFrameButtonPressed`:
+     and its own `Frame::OnKeyCodePressed` posts no `CloseFrameButtonPressed`:
      nothing to fix.
 
 Every constant comes out of `frame_esc.rs` rather than being restated here,
@@ -137,7 +137,7 @@ def main():
     tables = img.vftables()
     frame = next((vt for vt, n in tables.items() if n == ".?AVFrame@vgui2@@"), None)
     check(frame and img.rva(img.u32(frame + 4 * SLOT)) == fn,
-          f"it is Frame@vgui2's vftable slot {SLOT} (OnKeyCodeTyped), +{fn:#x}")
+          f"it is Frame@vgui2's vftable slot {SLOT} (OnKeyCodePressed), +{fn:#x}")
 
     body = []
     for ins in md.disasm(img.img[fn:fn + 0x200], img.base + fn):
@@ -183,7 +183,7 @@ def main():
     pre_fn = pre.rva(pre.u32(pre_frame + 4 * SLOT))
     close = pre.img.find(b"CloseFrameButtonPressed\0")
     pushes_close = close >= 0 and struct.pack("<BI", 0x68, pre.base + close) in pre.img[pre_fn:pre_fn + 0x100]
-    check(not pushes_close, f"its Frame::OnKeyCodeTyped (+{pre_fn:#x}) doesn't post CloseFrameButtonPressed: nothing to fix")
+    check(not pushes_close, f"its Frame::OnKeyCodePressed (+{pre_fn:#x}) doesn't post CloseFrameButtonPressed: nothing to fix")
 
     print("\nVERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

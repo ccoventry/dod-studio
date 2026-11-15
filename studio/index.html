@@ -159,6 +159,7 @@
                   <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
                   <option value="maybe" data-str="REVIEW.COVERS_MAYBE">Maybe</option>
                   <option value="skip" data-str="REVIEW.COVERS_SKIP">Skip</option>
+                  <option value="ticked" data-str="REVIEW.COVERS_TICKED">Ticked</option>
                 </select>
                 <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
@@ -765,6 +766,16 @@
                 </div>
               </div>
               <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
+              <!-- "Keep free on the Windows drive" (#1430) — windows_drive_setting.js.
+                   Here, beside the capture folders, since it steers captures and
+                   renders (Render Output's export folders) alike. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-windows-drive-keep-free" data-str="WINDOWS_DRIVE.KEEP_FREE_LABEL" data-str-title="WINDOWS_DRIVE.KEEP_FREE_TITLE">Keep free on the Windows drive:</label>
+                  <input type="number" id="config-windows-drive-keep-free" value="50" min="0" max="10000" step="1" style="width: 70px;" data-str-title="WINDOWS_DRIVE.KEEP_FREE_TITLE" />
+                  <span data-str="WINDOWS_DRIVE.KEEP_FREE_UNIT">GB</span>
+                </div>
+              </div>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
@@ -1059,8 +1070,15 @@
               <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
               <button id="export-vegas-edl-btn" data-str="RENDER.EXPORT_EDL_BUTTON" data-str-title="RENDER.EXPORT_EDL_TITLE">Export VEGAS EDL…</button>
+              <button id="export-project-edl-btn" data-str="RENDER.EXPORT_PROJECT_EDL_BUTTON" data-str-title="RENDER.EXPORT_PROJECT_EDL_TITLE">Export Project to VEGAS…</button>
+              <button id="find-moved-videos-btn" data-str="RENDER.FIND_MOVED_BUTTON" data-str-title="RENDER.FIND_MOVED_TITLE">Find Moved Videos</button>
               <button id="vegas-script-install-btn" data-str="RENDER.VEGAS_SCRIPT_BUTTON" data-str-title="RENDER.VEGAS_SCRIPT_TITLE">Add Nameplate Script to VEGAS</button>
             </div>
+            <div id="export-project-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+            <p id="export-project-status" class="combine-plan" aria-live="polite"></p>
+            <div id="find-moved-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+            <p id="find-moved-status" class="combine-plan" aria-live="polite"></p>
+            <button id="find-moved-cancel-btn" data-str="RENDER.FIND_MOVED_CANCEL_BUTTON" hidden>Cancel</button>
             <div id="render-job-container"></div>
 
             <!-- #70: the ticked rows are what the footer buttons act on. -->
@@ -1128,6 +1146,7 @@
                      label's count and the tooltip. -->
                 <button id="start-render-btn" class="primary-btn" disabled data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
                 <button id="cancel-render-btn" disabled>Cancel (0)</button>
+                <button id="cancel-queued-render-btn" disabled>Cancel Queued (0)</button>
                 <button id="retry-render-btn" disabled>Retry (0)</button>
                 <button id="remove-render-btn" disabled>Remove (0)</button>
                 <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
