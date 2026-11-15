@@ -142,6 +142,8 @@ DEMO PLAYBACK
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   ds_demo_review form
       The kill range and note form over the demo, as E opens it during a review highlight.
+  ds_demo_review faster|slower
+      Play the review highlight one step faster or slower (0.25x to 4x), as Up and Down do; bind them to other keys.
   ds_demo_review ask start|here
       With no review running, ask DoD Studio to review the demo playing, from its first highlight or from the next one from here (the Review tab's From the start and From here).
   ds_demo_ex_interp_max <ms>
@@ -177,9 +179,9 @@ DOD STUDIO WINDOW
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
   ds_ui_review_keys 0/1
-      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; ESC opens the Review tab. 0: the Review tab opens at each end.
+      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; Up and Down play it faster or slower; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, its kill range (the original in grey when changed) and note, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, its kill range (the original in grey when changed), its whole note and the speed when it isn't 1x, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
