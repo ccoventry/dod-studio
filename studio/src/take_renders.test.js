@@ -4,7 +4,7 @@ import { pruneTakeIndex, markBlockCaptured, resolveTake } from './take_index.js'
 import { attachCaptures, capturesToSave, recordCapture } from './take_record.js';
 import {
   rendersOf, recordRender, recordTakeFolderRenders, attachRenders, rendersToSave, carryRenders,
-  projectRenderedVideos, existingVideos,
+  projectRenderedVideos, existingVideos, relocateRender,
 } from './take_renders.js';
 import * as before1264Index from './test_fixtures/take_index_before_1264.js';
 import * as before1264Record from './test_fixtures/take_record_before_1264.js';
@@ -213,5 +213,29 @@ describe('projectRenderedVideos (the whole-project export list)', () => {
   it('nothing for an index with no renders', () => {
     expect(projectRenderedVideos({ k: ['u'] })).toEqual([]);
     expect(projectRenderedVideos(undefined)).toEqual([]);
+  });
+});
+
+describe('relocateRender (#1442)', () => {
+  it('points a recorded render at where a scan found it, from a copy of the entry', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    expect(relocateRender(index, KEY, copy, { output_path: 'E:/sorted/best.mov', output_size_bytes: null, content_hash: 'abc' })).toBe(true);
+    expect(rendersOf(index, KEY)[0]).toMatchObject({ output_path: 'E:/sorted/best.mov', output_size_bytes: 10, content_hash: 'abc' });
+    expect(relocateRender(index, KEY, copy, { output_path: 'E:/sorted/best.mov', content_hash: 'abc' })).toBe(false);
+  });
+
+  it('changes nothing for a render the project does not have', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    expect(relocateRender(index, KEY, finished(2), { output_path: 'E:/x.mov' })).toBe(false);
+    expect(relocateRender(index, 'other/key', finished(1), { output_path: 'E:/x.mov' })).toBe(false);
+  });
+
+  it('keeps a fingerprint the render recorded through a save and load', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1, { content_hash: 'f00d' }));
+    expect(rendersOf(loadProject(saveProject(index, new Set([FIRST]))), KEY)[0].content_hash).toBe('f00d');
   });
 });

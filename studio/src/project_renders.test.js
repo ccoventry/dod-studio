@@ -43,6 +43,13 @@ describe('a render finishing', () => {
     expect(io.log.mock.calls[0][0]).toContain('s/b0');
   });
 
+  it('keeps the fingerprint the backend took as the render finished (#1442)', () => {
+    const { index, renders, fire } = setUp([]);
+    renders.startRecording();
+    fire({ take_key: 's/b0', render: finished(5), content_hash: 'beef' });
+    expect(rendersOf(index, 's/b0')[0].content_hash).toBe('beef');
+  });
+
   it('changes nothing for a take the project does not know, or a payload from an older backend', () => {
     const { renders, markDirty } = setUp([]);
     renders.noteFinished({ take_key: 'elsewhere/b0', render: finished(5) });

@@ -901,6 +901,24 @@ export const STRINGS = {
     EXPORT_PROJECT_WRITING: 'Writing the EDL and the clip list…',
     exportProjectLookFailed: "Couldn't look for the project's videos on disk.",
     exportProjectDone: (count, scope, missing, skipped, nameplates = 0) => `EDL saved (${count} video${count === 1 ? '' : 's'}${scope === 'ticked' ? ' from the ticked highlights' : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${missing > 0 ? `, ${missing} missing` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    // #1442: find the project's videos again by the DoD Studio tag on each.
+    FIND_MOVED_BUTTON: 'Find Moved Videos',
+    FIND_MOVED_TITLE: "Find the videos rendered for the loaded project after you moved or renamed them, by the DoD Studio tag on each video, and point the project at their new place. Looks in the render export folders and their subfolders; when some still aren't found, you can pick another folder. Videos still where they were rendered get the tag too, so they can be found after a move. Tagging never changes the video.",
+    findMovedNone: 'No videos have been rendered for the loaded project yet, so there is nothing to find.',
+    findMovedTagging: (n, total) => `Looking at video ${n} of ${total} where it was rendered…`,
+    findMovedListing: (files) => `Listing the folders: ${files} video file${files === 1 ? '' : 's'} so far…`,
+    findMovedChecking: (n, total) => `Reading the tag of file ${n} of ${total}…`,
+    findMovedDone: (moved, notFound, total, complete) => {
+      const found = moved > 0
+        ? `Found ${moved} moved video${moved === 1 ? '' : 's'} and pointed the project at ${moved === 1 ? 'it' : 'them'}.`
+        : `No moved videos found${notFound === 0 ? `: all ${total} are where they were rendered` : ''}.`;
+      if (notFound === 0) return found;
+      const stopped = complete ? '' : ' The search stopped at its limit, so look in a smaller folder.';
+      return `${found} ${notFound} of ${total} still not found.${stopped}`;
+    },
+    FIND_MOVED_PICK_ACTION: 'Look in a folder…',
+    FIND_MOVED_PICK_TITLE: 'Folder to look for the videos in',
+    findMovedFailed: (err) => `Couldn't look for the project's videos: ${err}`,
     // #429: the nameplate script into VEGAS's script menu.
     VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
     VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
