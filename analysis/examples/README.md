@@ -114,6 +114,7 @@ is `analysis::repair`, run by `hl-demo-auditor --repair` and Studio (#15);
 | `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
 | `crouch_eye_probe` | Camera and origin heights through a crouch: the POV recorder's per frame, every player's `usehull` and gait per snapshot (#1144). |
 | `forcehltv_pov_probe` | What a POV demo loses under `dem_forcehltv 1`, and when it holds another player (`FH_TRACK`) (#1452). |
+| `sandbag_probe` | A demo's model precache, spawn baselines and the entities around a window of the viewdemo clock, with model names, origins and render fields; `SB_VIEW=1` prints the recorder's view every 0.5 s. Showed a map's `env_model`s are never networked (the forcehltv sandbag case). |
 | `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |
