@@ -14,6 +14,7 @@
 //! read: reading its tag would download it. It is counted instead.
 
 use super::{ClipTag, METADATA_KEY, fingerprint, mov_tags, stream_tag};
+use crate::hlcr::renderer::PARTIAL_MARK;
 use crate::sys::cloud_file::CloudCheck;
 use crate::sys::folder_walk::{Kind, Step, Walker};
 use std::collections::{HashMap, HashSet};
@@ -219,16 +220,14 @@ fn is_clip_at(clip: &RecordedClip, path: &Path) -> bool {
     }
 }
 
-/// What a render still being written is named before it gets its real name
-/// (`<name>.partial<ext>`, #1439): never a finished clip, so never matched.
-const PARTIAL_SUFFIX: &str = ".partial";
-
-/// Whether `path` is a finished video a render could have made.
+/// Whether `path` is a finished video a render could have made. A render
+/// still being written (`<name>.partial<ext>`, #1439) is never a finished
+/// clip, so never matched.
 fn is_video(path: &Path) -> bool {
     let is_partial = path.file_stem().is_some_and(|stem| {
         stem.to_string_lossy()
             .to_lowercase()
-            .ends_with(PARTIAL_SUFFIX)
+            .ends_with(PARTIAL_MARK)
     });
     !is_partial
         && path.extension().is_some_and(|ext| {

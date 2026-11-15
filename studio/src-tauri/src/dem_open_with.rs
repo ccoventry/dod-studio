@@ -218,6 +218,7 @@ pub fn set_dem_open_with(enabled: bool) -> Result<DemOpenWith, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use native::shared::lock::lock_or_recover;
 
     #[test]
     fn the_command_quotes_the_exe_and_the_demo() {
@@ -262,7 +263,7 @@ mod tests {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0);
                 let name = format!(r"{TEST_PARENT}\{tag}-{}-{nanos}", std::process::id());
-                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
+                let _turn = lock_or_recover(&PARENT_TURN);
                 let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
                     .create_subkey(&name)
                     .expect("create the test key");
@@ -272,7 +273,7 @@ mod tests {
 
         impl Drop for TestRoot {
             fn drop(&mut self) {
-                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
+                let _turn = lock_or_recover(&PARENT_TURN);
                 let hkcu = RegKey::predef(HKEY_CURRENT_USER);
                 let _ = hkcu.delete_subkey_all(&self.name);
                 // Only when no other test still has a key in it.

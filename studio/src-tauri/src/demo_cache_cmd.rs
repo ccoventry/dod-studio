@@ -4,6 +4,7 @@
 //! after the throttled ones of its first step, upgrading older cache entries.
 //! One run at a time; **Stop** sets the run's cancel flag.
 
+use native::shared::lock::lock_or_recover;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,7 +21,7 @@ pub fn cache_demos(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), Stri
         return Err(crate::messages::DEMO_CACHE_ALREADY_RUNNING.to_string());
     }
     let cancel = Arc::new(AtomicBool::new(false));
-    *CANCEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(cancel.clone());
+    *lock_or_recover(&CANCEL) = Some(cancel.clone());
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     native::log_markdown(&crate::messages::scan::cache_demos_started(paths.len()));
     std::thread::spawn(move || {
@@ -49,7 +50,7 @@ pub fn cache_demos(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), Stri
 /// Stops the running cache job after the demos it is on.
 #[tauri::command]
 pub fn cancel_demo_cache() {
-    if let Some(cancel) = CANCEL.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(cancel) = lock_or_recover(&CANCEL).as_ref() {
         cancel.store(true, Ordering::Release);
     }
 }
