@@ -1,6 +1,6 @@
 // menu_scale_setting.js — Configuration > Paths' "Size the Game's Menus Like
 // the Pre-Anniversary Engine" (#985).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const POST = 'C:\\Steam\\steamapps\\common\\Half-Life - POST-Anniversary for Movies\\hl.exe';
 const PATH = 'C:\\Steam\\steamapps\\common\\Half-Life - POST-Anniversary for Movies\\dod_addon\\resource\\TrackerScheme.res';

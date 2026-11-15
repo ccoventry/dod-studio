@@ -19,6 +19,14 @@ pub fn game_folder_fell_back(err: impl Display, default: impl Display) -> String
     )
 }
 
+/// "Keep free on the Windows drive" (#1430) now keeps `bytes`.
+pub fn windows_drive_keep_free(bytes: u64) -> String {
+    format!(
+        "[settings] Keep free on the Windows drive: {} (captures and renders skip the Windows drive once it would drop to this)",
+        native::hlcr::take_cleanup::format_gb(bytes)
+    )
+}
+
 pub fn project_switched(from: impl Display, to: impl Display) -> String {
     format!("📁 **Project** — switched {from} to {to}")
 }

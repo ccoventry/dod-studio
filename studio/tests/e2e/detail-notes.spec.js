@@ -1,6 +1,6 @@
 // Highlight Details' Notes column (#605) -- driven against
 // tests/e2e/detail-notes.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/detail-notes.html');

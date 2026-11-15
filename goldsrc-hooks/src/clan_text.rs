@@ -17,14 +17,16 @@
 //!   (`#Clan_awaiting_ready` would come the same way). Dropped whole when the
 //!   key starts `#clan_`, in any case.
 //! - **`ClanTimer`**, one byte of seconds: `client.dll` stores
-//!   `seconds + time` (`+0x2cce0`) and `CHudDoDCrossHair::DrawClanTimer` then
-//!   draws `#Clan_time_remaining` every frame until the last two seconds, and
+//!   `seconds + time` (`CHudDoDCrossHair::MsgFunc_ClanTimer`, `+0x2cce0`) and
+//!   `CHudDoDCrossHair::DrawClanTimer` then draws `#Clan_time_remaining` every
+//!   frame until the last two seconds, and
 //!   `#Clan_match_live` for those. So both the countdown and "MATCH IS LIVE!"
 //!   are this one message, and it is swallowed.
 //! - **`GameRules`**, two bytes of flags: bit 4 of the second is warm-up mode
-//!   (`+0x2c650` stores it at `+0x108eb0`), which makes the objective icons'
-//!   `Draw` put `clan_warmup_mode` on the left of the screen. Forwarded with
-//!   that bit cleared; every other flag (paratroopers, infinite lives,
+//!   (`CHudDoDCommon::MsgFunc_GameRules`, `+0x2c650`, stores it at
+//!   `+0x108eb0`), which makes the objective icons' `Draw` put
+//!   `clan_warmup_mode` on the left of the screen. Forwarded with that bit
+//!   cleared; every other flag (paratroopers, infinite lives,
 //!   British) still reaches the game.
 //!
 //! `#Clan_axis_ready` and `#Clan_allies_ready` arrive on `HudText`, which the

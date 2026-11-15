@@ -94,3 +94,27 @@ fn a_highlight_whose_range_starts_late_is_not_the_takes_start() {
     assert_eq!(blocks.sources, vec![vec![1], vec![0]]);
     assert_eq!(record_marks(&blocks), vec![(1000, 1100), (2000, 2200)]);
 }
+
+#[test]
+fn highlights_sharing_a_first_kill_are_ordered_by_their_last_kill_not_batch_order() {
+    let long = streak_with_kills(1000, 1400, &[1000, 1200, 1400]);
+    let short = streak_with_kills(1000, 1150, &[1000, 1150]);
+
+    let order = |highlights: &[CaptureStreak]| -> Vec<Vec<i32>> {
+        group_highlights(highlights)[0]
+            .highlights
+            .iter()
+            .map(|(_, s)| s.kills.iter().map(|k| k.0).collect())
+            .collect()
+    };
+
+    let sent_long_first = order(&[long.clone(), short.clone()]);
+    let sent_short_first = order(&[short, long]);
+
+    assert_eq!(sent_long_first, sent_short_first);
+    assert_eq!(
+        sent_long_first[0],
+        vec![1000, 1150],
+        "the shorter one is #1"
+    );
+}

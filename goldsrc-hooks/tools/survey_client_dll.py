@@ -120,8 +120,8 @@ KNOWN_FUNCTIONS = {
     0x30620: "CObjectiveIcons::DrawDigit",
     # (int mode, ...) -- the only writer of the spectator-interface-mode global
     # at +0xe88d4 (modes 1-4). See docs/goldsrc_client_dll_survey.md #11.
-    0x38850: "CHudSpectator::SetMode",
-    # Cycles the interface mode 1->2->4->3->1 and calls SetMode with the
+    0x38850: "CHudSpectator::SetModes",
+    # Cycles the interface mode 1->2->4->3->1 and calls SetModes with the
     # result; the per-frame input handler for whatever key is bound to it.
     0x386A0: "CHudSpectator::HandleButtonsDown",
 }

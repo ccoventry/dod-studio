@@ -58,7 +58,18 @@ pub(super) fn group_highlights(highlights: &[CaptureStreak]) -> Vec<HighlightGro
             // the `start_tick` order unless `start_tick` is not the first
             // recorded kill, as after a Kill Range edit in the game's Review,
             // which leaves it at the whole highlight's first kill (#1395).
-            highlights.sort_by_key(|(_, s)| first_kill_frame(s));
+            //
+            // Highlights that share a first kill are told apart by their last
+            // recorded kill, then by their kill ticks, so the order (and the
+            // Event List numbers built from it) doesn't follow the order the
+            // batch was sent in (#1417).
+            highlights.sort_by_key(|(_, s)| {
+                (
+                    first_kill_frame(s),
+                    last_kill_frame(s),
+                    s.kills.iter().map(|k| k.0).collect::<Vec<_>>(),
+                )
+            });
             HighlightGroup {
                 source_demo,
                 target_player,

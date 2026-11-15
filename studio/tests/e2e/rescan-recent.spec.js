@@ -1,5 +1,5 @@
 // Rescan Recent Sessions (#938), driven against tests/e2e/rescan-recent.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const old = (path) => ({ path, name: path.split('/').pop(), file_key: '1-abc', streaks: [] });
 const project = (...demos) => JSON.stringify({ version: '0.12.0', demos });

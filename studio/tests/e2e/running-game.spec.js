@@ -1,6 +1,6 @@
 // running_game_guard.js — the ask before reusing a game started with other
 // launch settings (#666).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const PRE = 'C:\\Games\\Half-Life - PRE-Anniversary for Movies\\hl.exe';
 const POST = 'C:\\Games\\Half-Life - POST-Anniversary for Movies\\hl.exe';

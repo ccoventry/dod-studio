@@ -165,6 +165,7 @@ pub(super) fn recovered_config(
         custom_codec_args: session.target_custom_codec_args.clone(),
         // The Render tab's own range for this field.
         max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
+        clip_tag: None,
     })
 }
 

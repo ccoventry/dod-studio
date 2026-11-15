@@ -5,7 +5,7 @@
 // progress used to mix in (the % jumped around), and its result could land
 // after the later one's. Driven against analyzer-multimap.html, which has
 // everything the analyzer panel needs.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const A = 'C:/demos/slow.dem';
 const B = 'C:/demos/fast.dem';
