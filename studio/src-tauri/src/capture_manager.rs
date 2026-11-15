@@ -612,6 +612,9 @@ pub struct VerifiedBlock {
     /// How many gaps between kills the take recorded sped up (#831), for its
     /// label in the batch results panel.
     pub ramped_gaps: usize,
+    /// The batch ended before it got to this clip (#1434): no take, but
+    /// nothing went wrong with it, so it isn't missing.
+    pub not_reached: bool,
 }
 
 /// What ended a batch while a clip was recording: the Last Batch panel and
@@ -639,6 +642,16 @@ impl CutBy {
             CutBy::GameClosed => "was cut short when the game closed",
             CutBy::Stopped => "was cut short when the batch stopped",
             CutBy::StudioClosed => "was still recording in OBS when DoD Studio closed",
+        }
+    }
+
+    /// Why a batch that ended this way never reached its later clips (#1434).
+    pub(crate) fn not_reached_text(self) -> &'static str {
+        match self {
+            CutBy::Cancel => "the batch was cancelled",
+            CutBy::GameClosed => "the game closed",
+            CutBy::Stopped => "the batch stopped",
+            CutBy::StudioClosed => "DoD Studio closed",
         }
     }
 }
@@ -700,6 +713,22 @@ pub(crate) struct Records {
 }
 
 impl Records {
+    /// The demo playing, by `DEMO_START`'s 1-based index; `None` before the
+    /// first one, or without markers.
+    pub(crate) fn demo(&self) -> Option<u32> {
+        self.demo
+    }
+
+    /// The demo the last `START_RECORD` came from.
+    pub(crate) fn last_start_demo(&self) -> Option<u32> {
+        self.last_start_demo
+    }
+
+    /// The demo tick the last `START_RECORD` named.
+    pub(crate) fn last_start_tick(&self) -> Option<i64> {
+        self.last_start_tick
+    }
+
     /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
     /// playing mid-clip, and the hook's batch skipped on) is over, so a
     /// Cancel later in the batch can't count it as still recording.
@@ -762,6 +791,12 @@ impl<'a> BatchEnd<'a> {
             cut_by: CutBy::Cancel,
             clips: ClipEvidence::default(),
         }
+    }
+
+    /// What ended a batch that stopped early; `None` for a complete one,
+    /// whose `cut_by` is only a default.
+    fn ended_by(&self) -> Option<CutBy> {
+        (self.outcome != "complete").then_some(self.cut_by)
     }
 
     fn with_clips(self, clips: ClipEvidence) -> BatchEnd<'a> {
@@ -930,6 +965,7 @@ pub(crate) fn verify_capture_takes_settling(
                 started_late_ms: None,
                 clip_verdict: None,
                 ramped_gaps: block.ramped_gaps,
+                not_reached: false,
             }
         })
         .collect();
@@ -1065,6 +1101,19 @@ fn check_takes(
     });
     mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
     let short = crate::clip_verdicts::apply(&manifest, &mut blocks, &end.clips);
+    // Only a batch that ended early left clips behind; a complete one
+    // reached them all, and a take it lacks is missing.
+    if outcome != "complete" {
+        let not_reached =
+            crate::unreached_clips::mark_not_reached(&manifest, &mut blocks, &end.records);
+        if not_reached > 0 {
+            log_markdown(&crate::messages::capture::take_verify_not_reached(
+                not_reached,
+                blocks.len(),
+                end.cut_by.not_reached_text(),
+            ));
+        }
+    }
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
             Some(s) => {
@@ -1116,6 +1165,9 @@ fn check_takes(
             // only finishes a batch that ran to completion, and a frame
             // sequence has to be encoded at the rate it was captured at.
             "outcome": outcome,
+            // What ended a batch that stopped early, for its clips it never
+            // reached (#1434).
+            "ended_by": end.ended_by(),
             "capture_fps": manifest.capture_fps,
             // The project's record of each take (part of #1085).
             "capture_settings": manifest.settings,
@@ -2848,6 +2900,7 @@ mod tests {
                 started_late_ms: None,
                 clip_verdict: None,
                 ramped_gaps: 0,
+                not_reached: false,
             })
             .collect()
     }
@@ -2947,6 +3000,20 @@ mod tests {
         assert_eq!(stalled.cut_by, CutBy::Stopped);
         let cancelled = BatchEnd::cancelled(records);
         assert_eq!((cancelled.error, cancelled.cut_by), (false, CutBy::Cancel));
+    }
+
+    /// #1434: only a batch that stopped early says what ended it.
+    #[test]
+    fn a_complete_batch_names_nothing_as_what_ended_it() {
+        assert_eq!(BatchEnd::complete().ended_by(), None);
+        assert_eq!(
+            BatchEnd::cancelled(Records::default()).ended_by(),
+            Some(CutBy::Cancel)
+        );
+        assert_eq!(
+            BatchEnd::failed("x", Records::default(), true).ended_by(),
+            Some(CutBy::GameClosed)
+        );
     }
 
     /// A demo the hook's batch skipped sends no markers (#861), so the count

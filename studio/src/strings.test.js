@@ -79,24 +79,24 @@ describe('bannedCommandsWarning', () => {
 
 describe('takesFoundMissing (#1081)', () => {
   it('does not call a clip Cancel cut short missing', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1 })).toBe(
       '0/1 takes found on disk — 1 cut short by Cancel (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, cutShort: 1 })).toBe(
       '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2)).toBe('1/2 takes found on disk — 1 missing.');
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { missing: 1 })).toBe('1/2 takes found on disk — 1 missing.');
     // #1105: a take whose video stopped early is not blamed on Cancel.
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 0, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { stoppedEarly: 1 })).toBe(
       '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
     );
   });
 
   it('names the game closing or the batch stopping instead of Cancel', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 1, 0, 'game_closed')).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { cutShort: 1, cutBy: 'game_closed' })).toBe(
       '1/2 takes found on disk — 1 cut short when the game closed (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1, 0, 'stopped')).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1, cutBy: 'stopped' })).toBe(
       '0/1 takes found on disk — 1 cut short when the batch stopped (partial take, not captured).',
     );
     expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
@@ -105,15 +105,26 @@ describe('takesFoundMissing (#1081)', () => {
     expect(STRINGS.BATCH_RESULTS.cutShortBy('studio_closed')).toBe('Cut short: DoD Studio closed while OBS recorded it (not captured)');
   });
 
+  it('says a clip the batch ended before reaching is not reached, not missing (#1434)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(174, 340, { notReached: 165, cutShort: 1 })).toBe(
+      '174/340 takes found on disk — 165 not reached (batch cancelled), 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { notReached: 2, endedBy: 'game_closed' })).toBe(
+      '1/3 takes found on disk — 2 not reached (the game closed).',
+    );
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('cancel')).toBe('Not reached: the batch was cancelled first');
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('stopped')).toBe('Not reached: the batch stopped first');
+  });
+
   it('says a take OBS started late is missing its opening, not missing (#1109)', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, 0, 0, undefined, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, { startedLate: 1 })).toBe(
       "2/3 takes found on disk — 1 OBS started recording late (missing the clip's opening, not captured).",
     );
     expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
   });
 
   it('says a clip the game reported failed is failed, not missing (#1401)', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 0, 0, undefined, 0, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, failed: 1 })).toBe(
       '1/3 takes found on disk — 1 missing, 1 failed in the game (not captured).',
     );
     expect(STRINGS.BATCH_RESULTS.clipFailed('no_start')).toBe('Failed: the game never started recording it (not captured)');

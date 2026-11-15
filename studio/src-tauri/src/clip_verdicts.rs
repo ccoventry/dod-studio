@@ -172,6 +172,7 @@ mod tests {
                 started_late_ms: None,
                 clip_verdict: None,
                 ramped_gaps: 0,
+                not_reached: false,
             })
             .collect()
     }
