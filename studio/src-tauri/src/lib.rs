@@ -1068,6 +1068,7 @@ pub fn run() {
             capture_history_manager::take_capture_states,
             capture_history_manager::locate_rendered_videos,
             clip_relink_manager::relink_rendered_clips,
+            clip_relink_manager::cancel_relink_rendered_clips,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,

@@ -56,6 +56,21 @@ impl ClipTag {
         }
     }
 
+    /// The take the render was of (`session/take`).
+    pub fn take_key(&self) -> &str {
+        &self.take_key
+    }
+
+    /// When the render started.
+    pub fn started_unix_ms(&self) -> u64 {
+        self.started_unix_ms
+    }
+
+    /// The stream rendered (`all`, `hud:<folder>`, ...).
+    pub fn stream(&self) -> &str {
+        &self.stream
+    }
+
     /// Reads a tag back from a file, or `None` when `text` is not one this
     /// build writes (another program's comment, a later format, garbage).
     pub fn parse(text: &str) -> Option<Self> {
@@ -96,6 +111,34 @@ pub fn stamp_new_render(file: &std::path::Path, tag: &ClipTag) -> RenderStamp {
     RenderStamp {
         stream_error: stream_tag::write_stream_tag(file, &tag.to_string()).err(),
         content_hash: fingerprint::content_hash(file).ok(),
+    }
+}
+
+/// The drives a render batch could not write stream tags to, so the
+/// activity log names each once rather than once per clip (a FAT/exFAT
+/// export drive refuses every one).
+#[derive(Debug, Default)]
+pub struct StreamTagFailures {
+    drives: std::collections::HashSet<String>,
+}
+
+impl StreamTagFailures {
+    /// Notes a failed stream tag on `file`; returns its drive (`D:`, or the
+    /// share for a network path) the first time that drive fails, `None`
+    /// after.
+    pub fn first_on_drive(&mut self, file: &std::path::Path) -> Option<String> {
+        let drive = match file.components().next() {
+            Some(std::path::Component::Prefix(prefix)) => {
+                prefix.as_os_str().to_string_lossy().into_owned()
+            }
+            _ => String::new(),
+        };
+        self.drives.insert(drive.to_lowercase()).then_some(drive)
+    }
+
+    /// Forgets every drive, for the next batch.
+    pub fn clear(&mut self) {
+        self.drives.clear();
     }
 }
 
@@ -143,5 +186,22 @@ mod tests {
             ClipTag::parse(" v1/s/t/5/all\r\n"),
             Some(ClipTag::new("s/t", 5, "all"))
         );
+    }
+
+    #[test]
+    fn a_failing_drive_is_reported_once_per_batch() {
+        let mut failures = StreamTagFailures::default();
+        let path = |p: &str| std::path::PathBuf::from(p);
+        assert_eq!(
+            failures.first_on_drive(&path("E:/clips/a.mov")).as_deref(),
+            Some("E:")
+        );
+        assert_eq!(failures.first_on_drive(&path("e:/clips/b.mov")), None);
+        assert_eq!(
+            failures.first_on_drive(&path("F:/b.mov")).as_deref(),
+            Some("F:")
+        );
+        failures.clear();
+        assert!(failures.first_on_drive(&path("E:/clips/c.mov")).is_some());
     }
 }

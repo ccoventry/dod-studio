@@ -10,7 +10,7 @@
 // for the batch's duration.
 
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
-use native::hlcr::clip_id::{ClipTag, stamp_new_render};
+use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
@@ -175,10 +175,17 @@ fn last_finished_output(history: &[HistoryEntry], stream: &str) -> Option<(Strin
         })
 }
 
+/// The drives this batch's stream tags couldn't be written to (#1442),
+/// cleared when the batch ends.
+static STREAM_TAG_FAILURES: std::sync::LazyLock<Mutex<StreamTagFailures>> =
+    std::sync::LazyLock::new(|| Mutex::new(StreamTagFailures::default()));
+
 /// Tags the video a render just finished (#1442): its stream tag, beside the
 /// in-file tag FFmpeg wrote, and its fingerprint, returned for the project to
-/// keep. A stream that can't be written (a FAT/exFAT export drive) is logged;
-/// the in-file tag and the fingerprint still find the clip.
+/// keep. `attempt.output_path` is the final name (the one `OutputPath`
+/// reported). A stream that can't be written (a FAT/exFAT export drive) is
+/// logged once per drive per batch; the in-file tag and the fingerprint
+/// still find the clip.
 fn stamp_finished_render(attempt: &RenderAttempt, take_key: &str) -> Option<String> {
     let path = std::path::Path::new(&attempt.output_path);
     let stamp = stamp_new_render(
@@ -186,10 +193,17 @@ fn stamp_finished_render(attempt: &RenderAttempt, take_key: &str) -> Option<Stri
         &ClipTag::new(take_key, attempt.started_unix_ms, &attempt.stream),
     );
     if let Some(error) = &stamp.stream_error {
-        log_markdown(&crate::messages::clip_relink::stream_tag_not_written(
-            path.display(),
-            error,
-        ));
+        let first = STREAM_TAG_FAILURES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first_on_drive(path);
+        if let Some(drive) = first {
+            log_markdown(&crate::messages::clip_relink::stream_tag_not_written(
+                &drive,
+                path.display(),
+                error,
+            ));
+        }
     }
     stamp.content_hash
 }
@@ -1066,6 +1080,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     }
                     handles.global_cancel.store(false, Ordering::SeqCst);
                     handles.is_rendering.store(false, Ordering::SeqCst);
+                    STREAM_TAG_FAILURES
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clear();
                 }
                 !has_active_or_queued
             };

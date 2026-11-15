@@ -9,11 +9,16 @@
 //! with neither is matched by size and fingerprint. A file whose tag names a
 //! render this project does not have (another project's clip) is left alone,
 //! and so is a fingerprint two recorded clips share.
+//!
+//! A file whose data is only in the cloud (OneDrive and the like) is never
+//! read: reading its tag would download it. It is counted instead.
 
 use super::{ClipTag, METADATA_KEY, fingerprint, mov_tags, stream_tag};
+use crate::sys::cloud_file::CloudCheck;
 use crate::sys::folder_walk::{Kind, Step, Walker};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// How deep under a search folder videos are looked for: the folder and five
 /// levels of subfolders (a per-project, per-day, per-team folder tree).
@@ -49,17 +54,21 @@ pub enum FoundBy {
     StreamTag,
     /// Elsewhere, by size and fingerprint.
     Fingerprint,
+    /// A later render of the same take and stream was recorded at the same
+    /// path, so this render's file was replaced: not looked for, and not
+    /// counted as not found.
+    Superseded,
     Missing,
 }
 
 /// Where one recorded clip is now, in the order the clips were given.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RelinkedClip {
-    /// The file it is at now; `None` when it is missing.
+    /// The file it is at now; `None` when it is missing or superseded.
     pub path: Option<String>,
     pub found_by: FoundBy,
-    /// The file's size and fingerprint when found (taken now when the
-    /// project had none), else what the project had.
+    /// The file's size and fingerprint when found (taken again when the
+    /// project had none or the size changed), else what the project had.
     pub size_bytes: Option<u64>,
     pub content_hash: Option<String>,
 }
@@ -77,6 +86,10 @@ pub struct RelinkReport {
     /// Clips whose stream tag could not be written (a FAT/exFAT drive, a
     /// read-only or locked file). Their other tags still find them.
     pub stream_tags_failed: usize,
+    /// Files left unread because their data is only in the cloud.
+    pub cloud_files_skipped: usize,
+    /// The scan was cancelled; what it found before that still stands.
+    pub cancelled: bool,
 }
 
 /// Where a scan is, for the progress bar.
@@ -90,49 +103,62 @@ pub enum RelinkStep {
     Checking { done: usize, total: usize },
 }
 
+/// One scan's shared state: the clips, the cancel flag, the report it fills
+/// and the cloud check that keeps it from reading online-only files.
+struct Scan<'a> {
+    clips: &'a [RecordedClip],
+    cancel: &'a AtomicBool,
+    cloud: CloudCheck,
+    report: RelinkReport,
+}
+
 /// Finds every clip of `clips` under its recorded path or under `roots`,
 /// tagging the ones it places. Writes only stream tags (never a video's
-/// bytes); reads every video file under `roots` up to [`SEARCH_DEPTH`].
+/// bytes); reads every video file under `roots` up to [`SEARCH_DEPTH`],
+/// except online-only ones. Stops early, with `cancelled` set, once `cancel`
+/// is set.
 pub fn relink_clips(
     clips: &[RecordedClip],
     roots: &[PathBuf],
+    cancel: &AtomicBool,
     progress: &mut dyn FnMut(RelinkStep),
 ) -> RelinkReport {
-    let mut report = RelinkReport {
-        clips: clips.iter().map(missing).collect(),
-        files_checked: 0,
-        search_complete: true,
-        stream_tags_written: 0,
-        stream_tags_failed: 0,
+    let mut scan = Scan {
+        clips,
+        cancel,
+        cloud: CloudCheck::new(),
+        report: RelinkReport {
+            clips: clips.iter().map(missing).collect(),
+            files_checked: 0,
+            search_complete: true,
+            stream_tags_written: 0,
+            stream_tags_failed: 0,
+            cloud_files_skipped: 0,
+            cancelled: false,
+        },
     };
-    for (i, clip) in clips.iter().enumerate() {
-        progress(RelinkStep::Tagging {
-            done: i,
-            total: clips.len(),
-        });
-        let path = PathBuf::from(&clip.path);
-        if is_clip_at(clip, &path) {
-            report.clips[i] = place(clip, &path, FoundBy::InPlace, &mut report);
-        }
+    for i in superseded(clips) {
+        scan.report.clips[i].found_by = FoundBy::Superseded;
     }
+    scan.check_recorded_paths(progress);
     let wanted: Vec<usize> = (0..clips.len())
-        .filter(|&i| report.clips[i].found_by == FoundBy::Missing)
+        .filter(|&i| scan.report.clips[i].found_by == FoundBy::Missing)
         .collect();
-    if wanted.is_empty() {
-        return report;
+    if wanted.is_empty() || scan.stopped() {
+        return scan.report;
     }
-    let in_place: HashSet<String> = report
+    let in_place: HashSet<String> = scan
+        .report
         .clips
         .iter()
         .filter_map(|c| c.path.as_deref().map(str::to_lowercase))
         .collect();
-    let (candidates, complete) = list_videos(roots, &in_place, progress);
-    report.search_complete = complete;
-    for (index, path, found_by) in match_candidates(clips, &wanted, &candidates, progress) {
-        report.clips[index] = place(&clips[index], &path, found_by, &mut report);
+    let candidates = scan.list_videos(roots, &in_place, progress);
+    for (index, path, found_by) in scan.match_candidates(&wanted, &candidates, progress) {
+        scan.report.clips[index] = scan.place(&clips[index], &path, found_by);
     }
-    report.files_checked = candidates.len();
-    report
+    scan.report.files_checked = candidates.len();
+    scan.report
 }
 
 /// A clip's entry before it is found: missing, with what the project had.
@@ -143,6 +169,30 @@ fn missing(clip: &RecordedClip) -> RelinkedClip {
         size_bytes: clip.size_bytes,
         content_hash: clip.content_hash.clone(),
     }
+}
+
+/// The clips a later render of the same take and stream replaced: recorded
+/// at the same path (any case) with an earlier start. A re-render after the
+/// old video was deleted gets the old name, and only the newest render is
+/// that file.
+fn superseded(clips: &[RecordedClip]) -> Vec<usize> {
+    let key = |c: &RecordedClip| {
+        (
+            c.tag.take_key().to_string(),
+            c.tag.stream().to_string(),
+            c.path.to_lowercase(),
+        )
+    };
+    let mut newest: HashMap<(String, String, String), u64> = HashMap::new();
+    for clip in clips.iter().filter(|c| !c.path.is_empty()) {
+        let start = newest.entry(key(clip)).or_insert(0);
+        *start = (*start).max(clip.tag.started_unix_ms());
+    }
+    (0..clips.len())
+        .filter(|&i| {
+            !clips[i].path.is_empty() && newest[&key(&clips[i])] > clips[i].tag.started_unix_ms()
+        })
+        .collect()
 }
 
 /// The tag on `file`, and which of the two it was: inside the file first,
@@ -156,129 +206,198 @@ fn tag_on(file: &Path) -> Option<(ClipTag, FoundBy)> {
         .map(|tag| (tag, FoundBy::StreamTag))
 }
 
-/// Whether the file at `path` is `clip`: a file is there and it carries no
-/// tag, or `clip`'s. A file tagged as another render is a different video
+/// Whether the file at `path` is `clip`: it carries `clip`'s tag, or no tag
+/// and the size the project recorded (when it recorded one). A file tagged
+/// as another render, or untagged with another size, is a different video
 /// that took the name.
 fn is_clip_at(clip: &RecordedClip, path: &Path) -> bool {
-    !clip.path.is_empty() && path.is_file() && tag_on(path).is_none_or(|(tag, _)| tag == clip.tag)
-}
-
-/// `clip`'s entry once found at `path`: the stream tag written when the
-/// file lacks it, and the size and fingerprint filled in when the project
-/// has none.
-fn place(
-    clip: &RecordedClip,
-    path: &Path,
-    found_by: FoundBy,
-    report: &mut RelinkReport,
-) -> RelinkedClip {
-    let tag = clip.tag.to_string();
-    if stream_tag::read_stream_tag(path).as_deref() != Some(tag.as_str()) {
-        match stream_tag::write_stream_tag(path, &tag) {
-            Ok(()) => report.stream_tags_written += 1,
-            Err(_) => report.stream_tags_failed += 1,
-        }
-    }
-    let size_bytes = std::fs::metadata(path)
-        .ok()
-        .map(|m| m.len())
-        .or(clip.size_bytes);
-    let content_hash = clip
-        .content_hash
-        .clone()
-        .or_else(|| fingerprint::content_hash(path).ok());
-    RelinkedClip {
-        path: Some(path.display().to_string()),
-        found_by,
-        size_bytes,
-        content_hash,
+    match tag_on(path) {
+        Some((tag, _)) => tag == clip.tag,
+        None => clip
+            .size_bytes
+            .is_none_or(|size| std::fs::metadata(path).is_ok_and(|m| m.len() == size)),
     }
 }
 
-/// Every video file under `roots` that is not one of the `in_place` clips'
-/// own files (lowercase paths), and whether the listing finished.
-fn list_videos(
-    roots: &[PathBuf],
-    in_place: &HashSet<String>,
-    progress: &mut dyn FnMut(RelinkStep),
-) -> (Vec<PathBuf>, bool) {
-    let mut files = Vec::new();
-    let mut seen = HashSet::new();
-    let outcome = Walker::new()
-        .breadth_first()
-        .skip_system_folders()
-        .max_depth(SEARCH_DEPTH)
-        .max_entries(SEARCH_ENTRY_BUDGET)
-        .walk_roots(roots, &mut |entry| {
-            if entry.kind == Kind::File && is_video(&entry.path) {
-                let key = entry.path.to_string_lossy().to_lowercase();
-                // Two search folders where one holds the other list a file twice.
-                if !in_place.contains(&key) && seen.insert(key) {
-                    files.push(entry.path.clone());
-                    progress(RelinkStep::Listing { files: files.len() });
-                }
-            }
-            Step::Enter
-        });
-    (files, outcome.complete)
-}
+/// What a render still being written is named before it gets its real name
+/// (`<name>.partial<ext>`, #1439): never a finished clip, so never matched.
+const PARTIAL_SUFFIX: &str = ".partial";
 
+/// Whether `path` is a finished video a render could have made.
 fn is_video(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| {
-        VIDEO_EXTENSIONS
-            .iter()
-            .any(|known| ext.eq_ignore_ascii_case(known))
-    })
+    let is_partial = path.file_stem().is_some_and(|stem| {
+        stem.to_string_lossy()
+            .to_lowercase()
+            .ends_with(PARTIAL_SUFFIX)
+    });
+    !is_partial
+        && path.extension().is_some_and(|ext| {
+            VIDEO_EXTENSIONS
+                .iter()
+                .any(|known| ext.eq_ignore_ascii_case(known))
+        })
 }
 
-/// Which of `candidates` is which wanted clip: `(clip index, file, how)`.
-/// Tags win outright; a file with no tag matches by size and fingerprint
-/// only when exactly one wanted clip has that pair.
-fn match_candidates(
-    clips: &[RecordedClip],
-    wanted: &[usize],
-    candidates: &[PathBuf],
-    progress: &mut dyn FnMut(RelinkStep),
-) -> Vec<(usize, PathBuf, FoundBy)> {
-    let mut by_tag: HashMap<&ClipTag, usize> = wanted.iter().map(|&i| (&clips[i].tag, i)).collect();
-    let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
-    for &i in wanted {
-        if let (Some(size), Some(_)) = (clips[i].size_bytes, &clips[i].content_hash) {
-            by_size.entry(size).or_default().push(i);
+impl Scan<'_> {
+    /// Whether the scan was cancelled; records it in the report.
+    fn stopped(&mut self) -> bool {
+        if self.cancel.load(Ordering::Relaxed) {
+            self.report.cancelled = true;
+        }
+        self.report.cancelled
+    }
+
+    /// Looks at each wanted clip's recorded path and places the ones still
+    /// there. An online-only file there is taken as the clip, unread.
+    fn check_recorded_paths(&mut self, progress: &mut dyn FnMut(RelinkStep)) {
+        let clips = self.clips;
+        for (i, clip) in clips.iter().enumerate() {
+            if self.stopped() {
+                return;
+            }
+            progress(RelinkStep::Tagging {
+                done: i,
+                total: clips.len(),
+            });
+            let path = PathBuf::from(&clip.path);
+            if self.report.clips[i].found_by != FoundBy::Missing
+                || clip.path.is_empty()
+                || !path.is_file()
+            {
+                continue;
+            }
+            if self.cloud.is_online_only(&path) {
+                self.report.cloud_files_skipped += 1;
+                self.report.clips[i] = RelinkedClip {
+                    path: Some(path.display().to_string()),
+                    found_by: FoundBy::InPlace,
+                    ..missing(clip)
+                };
+            } else if is_clip_at(clip, &path) {
+                self.report.clips[i] = self.place(clip, &path, FoundBy::InPlace);
+            }
         }
     }
-    let mut found = Vec::new();
-    let mut fingerprinted: HashMap<usize, Vec<PathBuf>> = HashMap::new();
-    for (done, file) in candidates.iter().enumerate() {
-        progress(RelinkStep::Checking {
-            done,
-            total: candidates.len(),
-        });
-        if by_tag.is_empty() {
-            break;
+
+    /// `clip`'s entry once found at `path`: the stream tag written when the
+    /// file lacks it, and the size and fingerprint taken again when the
+    /// project has none or the file's size is not the recorded one.
+    fn place(&mut self, clip: &RecordedClip, path: &Path, found_by: FoundBy) -> RelinkedClip {
+        let tag = clip.tag.to_string();
+        if stream_tag::read_stream_tag(path).as_deref() != Some(tag.as_str()) {
+            match stream_tag::write_stream_tag(path, &tag) {
+                Ok(()) => self.report.stream_tags_written += 1,
+                Err(_) => self.report.stream_tags_failed += 1,
+            }
         }
-        match tag_on(file) {
-            Some((tag, how)) => {
-                if let Some(i) = by_tag.remove(&tag) {
-                    found.push((i, file.clone(), how));
+        let size_bytes = std::fs::metadata(path).ok().map(|m| m.len());
+        let same_size = size_bytes.is_some() && size_bytes == clip.size_bytes;
+        let content_hash = clip
+            .content_hash
+            .clone()
+            .filter(|_| same_size)
+            .or_else(|| fingerprint::content_hash(path).ok());
+        RelinkedClip {
+            path: Some(path.display().to_string()),
+            found_by,
+            size_bytes: size_bytes.or(clip.size_bytes),
+            content_hash,
+        }
+    }
+
+    /// Every video file under `roots` that is not one of the `in_place`
+    /// clips' own files (lowercase paths) nor online-only (counted instead).
+    /// Notes in the report whether the listing finished.
+    fn list_videos(
+        &mut self,
+        roots: &[PathBuf],
+        in_place: &HashSet<String>,
+        progress: &mut dyn FnMut(RelinkStep),
+    ) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut seen = HashSet::new();
+        let cancel = self.cancel;
+        let cloud = &mut self.cloud;
+        let mut cloud_skipped = 0;
+        let outcome = Walker::new()
+            .breadth_first()
+            .skip_system_folders()
+            .max_depth(SEARCH_DEPTH)
+            .max_entries(SEARCH_ENTRY_BUDGET)
+            .walk_roots(roots, &mut |entry| {
+                if cancel.load(Ordering::Relaxed) {
+                    return Step::Stop;
+                }
+                if entry.kind == Kind::File && is_video(&entry.path) {
+                    let key = entry.path.to_string_lossy().to_lowercase();
+                    // Two search folders where one holds the other list a file twice.
+                    if !in_place.contains(&key) && seen.insert(key) {
+                        if cloud.is_online_only(&entry.path) {
+                            cloud_skipped += 1;
+                        } else {
+                            files.push(entry.path.clone());
+                            progress(RelinkStep::Listing { files: files.len() });
+                        }
+                    }
+                }
+                Step::Enter
+            });
+        self.report.cloud_files_skipped += cloud_skipped;
+        self.report.search_complete = outcome.complete;
+        files
+    }
+
+    /// Which of `candidates` is which wanted clip: `(clip index, file, how)`.
+    /// Tags win outright; a file with no tag matches by size and fingerprint
+    /// only when exactly one wanted clip has that pair.
+    fn match_candidates(
+        &mut self,
+        wanted: &[usize],
+        candidates: &[PathBuf],
+        progress: &mut dyn FnMut(RelinkStep),
+    ) -> Vec<(usize, PathBuf, FoundBy)> {
+        let clips = self.clips;
+        let mut by_tag: HashMap<&ClipTag, usize> =
+            wanted.iter().map(|&i| (&clips[i].tag, i)).collect();
+        let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+        for &i in wanted {
+            if let (Some(size), Some(_)) = (clips[i].size_bytes, &clips[i].content_hash) {
+                by_size.entry(size).or_default().push(i);
+            }
+        }
+        let mut found = Vec::new();
+        let mut fingerprinted: HashMap<usize, Vec<PathBuf>> = HashMap::new();
+        for (done, file) in candidates.iter().enumerate() {
+            if by_tag.is_empty() || self.stopped() {
+                break;
+            }
+            progress(RelinkStep::Checking {
+                done,
+                total: candidates.len(),
+            });
+            match tag_on(file) {
+                Some((tag, how)) => {
+                    if let Some(i) = by_tag.remove(&tag) {
+                        found.push((i, file.clone(), how));
+                    }
+                }
+                None => {
+                    if let Some(i) = fingerprint_match(clips, &by_size, file) {
+                        fingerprinted.entry(i).or_default().push(file.clone());
+                    }
                 }
             }
-            None => {
-                if let Some(i) = fingerprint_match(clips, &by_size, file) {
-                    fingerprinted.entry(i).or_default().push(file.clone());
-                }
+        }
+        // A fingerprint is trusted for a clip no tag found, and only when one
+        // file has it (two copies of one clip cannot say which the project uses).
+        let tagged: HashSet<usize> = found.iter().map(|(i, _, _)| *i).collect();
+        for (i, mut files) in fingerprinted {
+            if !tagged.contains(&i) && files.len() == 1 {
+                found.push((i, files.remove(0), FoundBy::Fingerprint));
             }
         }
+        found
     }
-    // A fingerprint is trusted for a clip no tag found, and only when one
-    // file has it (two copies of one clip cannot say which the project uses).
-    let tagged: HashSet<usize> = found.iter().map(|(i, _, _)| *i).collect();
-    for (i, mut files) in fingerprinted {
-        if !tagged.contains(&i) && files.len() == 1 {
-            found.push((i, files.remove(0), FoundBy::Fingerprint));
-        }
-    }
-    found
 }
 
 /// The one wanted clip whose recorded size and fingerprint `file` has.
@@ -317,7 +436,7 @@ mod tests {
     }
 
     fn run(clips: &[RecordedClip], roots: &[PathBuf]) -> RelinkReport {
-        relink_clips(clips, roots, &mut |_| {})
+        relink_clips(clips, roots, &AtomicBool::new(false), &mut |_| {})
     }
 
     #[test]
@@ -435,7 +554,12 @@ mod tests {
         write(&dir.path().join("notes.txt"), b"not a video");
         let clips = [clip("s/t1", &dir.path().join("gone.mov"))];
         let mut steps = Vec::new();
-        relink_clips(&clips, &[dir.path().to_path_buf()], &mut |s| steps.push(s));
+        relink_clips(
+            &clips,
+            &[dir.path().to_path_buf()],
+            &AtomicBool::new(false),
+            &mut |s| steps.push(s),
+        );
         assert_eq!(
             steps,
             vec![
@@ -444,5 +568,123 @@ mod tests {
                 RelinkStep::Checking { done: 0, total: 1 },
             ]
         );
+    }
+
+    #[test]
+    fn an_untagged_file_two_renders_share_goes_to_the_newest_and_the_older_is_superseded() {
+        let dir = Scratch::new("relink_shared_path");
+        let video = dir.path().join("clip.mov");
+        write(&video, b"re-rendered video");
+        let older = clip("s/t1", &video);
+        let newer = RecordedClip {
+            tag: ClipTag::new("s/t1", 2_000, "all"),
+            ..clip("s/t1", &video)
+        };
+        let report = run(&[older, newer.clone()], &[dir.path().to_path_buf()]);
+        assert_eq!(report.clips[0].found_by, FoundBy::Superseded);
+        assert_eq!(report.clips[0].path, None);
+        assert_eq!(report.clips[1].found_by, FoundBy::InPlace);
+        assert_eq!(
+            stream_tag::read_stream_tag(&video),
+            Some(newer.tag.to_string())
+        );
+    }
+
+    #[test]
+    fn an_untagged_file_of_another_size_at_the_recorded_path_is_not_the_clip() {
+        let dir = Scratch::new("relink_other_size");
+        let video = dir.path().join("clip.mov");
+        write(&video, b"some other video");
+        let mut recorded = clip("s/t1", &video);
+        recorded.size_bytes = Some(3);
+        let report = run(&[recorded], &[]);
+        assert_eq!(report.clips[0].found_by, FoundBy::Missing);
+        assert_eq!(stream_tag::read_stream_tag(&video), None);
+    }
+
+    #[test]
+    fn a_tagged_clip_whose_size_changed_is_fingerprinted_again() {
+        let dir = Scratch::new("relink_size_changed");
+        let video = dir.path().join("clip.mov");
+        write(&video, b"video, trimmed");
+        let mut recorded = clip("s/t1", &video);
+        stream_tag::write_stream_tag(&video, &recorded.tag.to_string()).unwrap();
+        recorded.size_bytes = Some(99);
+        recorded.content_hash = Some("stale".into());
+        let report = run(&[recorded], &[]);
+        assert_eq!(report.clips[0].found_by, FoundBy::InPlace);
+        assert_eq!(report.clips[0].size_bytes, Some(14));
+        assert_eq!(
+            report.clips[0].content_hash,
+            fingerprint::content_hash(&video).ok()
+        );
+    }
+
+    #[test]
+    fn a_same_size_clip_keeps_its_recorded_fingerprint() {
+        let dir = Scratch::new("relink_same_size");
+        let video = dir.path().join("clip.mov");
+        write(&video, b"video");
+        let mut recorded = clip("s/t1", &video);
+        recorded.size_bytes = Some(5);
+        recorded.content_hash = Some("kept".into());
+        let report = run(&[recorded], &[]);
+        assert_eq!(report.clips[0].content_hash.as_deref(), Some("kept"));
+    }
+
+    /// Marks `path` offline, as a cloud drive does a file whose data isn't on
+    /// this PC, so the scan must not read it.
+    #[cfg(windows)]
+    fn mark_offline(path: &Path) {
+        use std::os::windows::ffi::OsStrExt;
+        unsafe extern "system" {
+            fn SetFileAttributesW(file_name: *const u16, attributes: u32) -> i32;
+        }
+        const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+        assert_ne!(
+            unsafe { SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_OFFLINE) },
+            0
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_online_only_file_is_counted_and_never_read() {
+        let dir = Scratch::new("relink_cloud");
+        let moved = dir.path().join("sorted").join("renamed.mov");
+        write(&moved, b"video");
+        let recorded = clip("s/t1", &dir.path().join("gone.mov"));
+        stream_tag::write_stream_tag(&moved, &recorded.tag.to_string()).unwrap();
+        mark_offline(&moved);
+        let report = run(&[recorded], &[dir.path().to_path_buf()]);
+        assert_eq!(report.clips[0].found_by, FoundBy::Missing);
+        assert_eq!(report.cloud_files_skipped, 1);
+        assert_eq!(report.files_checked, 0);
+    }
+
+    #[test]
+    fn a_cancelled_scan_stops_and_says_so() {
+        let dir = Scratch::new("relink_cancel");
+        write(&dir.path().join("x.mov"), b"x");
+        let clips = [clip("s/t1", &dir.path().join("gone.mov"))];
+        let report = relink_clips(
+            &clips,
+            &[dir.path().to_path_buf()],
+            &AtomicBool::new(true),
+            &mut |_| {},
+        );
+        assert!(report.cancelled);
+        assert_eq!(report.clips[0].found_by, FoundBy::Missing);
+        assert_eq!(report.files_checked, 0);
+    }
+
+    #[test]
+    fn a_render_still_being_written_is_never_a_candidate() {
+        assert!(is_video(Path::new("D:/exports/Kill.mov")));
+        assert!(!is_video(Path::new("D:/exports/Kill.partial.mov")));
+        assert!(!is_video(Path::new("D:/exports/Kill.PARTIAL.mp4")));
+        assert!(!is_video(Path::new("D:/exports/notes.txt")));
     }
 }

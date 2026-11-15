@@ -23,6 +23,7 @@ function setUp({ report, relinkError = null, folder = 'E:/sorted' } = {}) {
       return report;
     }),
     pickFolder: vi.fn(async () => folder),
+    cancel: vi.fn(async () => {}),
     log: vi.fn(),
     toast: vi.fn(),
     progress: { show: vi.fn(), hide: vi.fn() },
@@ -44,7 +45,7 @@ const ALL_FOUND = {
 describe('Find Moved Videos', () => {
   it('points the project at a moved video, marks it unsaved and logs the counts', async () => {
     const { index, io, markDirty, unlisten, relink } = setUp({ report: ALL_FOUND });
-    expect(await relink.run()).toEqual({ moved: 1, notFound: 0, changed: 2 });
+    expect(await relink.run()).toEqual({ moved: 1, notFound: 0, superseded: 0, changed: 2 });
     expect(io.relink).toHaveBeenCalledWith([
       expect.objectContaining({ take_key: KEY, started_unix_ms: 1, stream: 'all' }),
       expect.objectContaining({ take_key: KEY, started_unix_ms: 2, output_path: 'D:/exports/clip_2.mov' }),
@@ -114,5 +115,15 @@ describe('Find Moved Videos', () => {
     expect(await relink.run()).toBeNull();
     await first;
     expect(io.relink).toHaveBeenCalledTimes(1);
+  });
+
+  it('Cancel asks the backend to stop only while a scan runs, and the toast says it stopped', async () => {
+    const { io, relink } = setUp({ report: { ...ALL_FOUND, cancelled: true } });
+    relink.cancel();
+    expect(io.cancel).not.toHaveBeenCalled();
+    io.relink.mockImplementation(async () => { relink.cancel(); return { ...ALL_FOUND, cancelled: true }; });
+    await relink.run();
+    expect(io.cancel).toHaveBeenCalledTimes(1);
+    expect(io.toast.mock.calls[0]).toEqual(['Stopped. Found 1 moved video and pointed the project at it.', 'info']);
   });
 });

@@ -12,7 +12,7 @@ use native::hlcr::clip_id::relink::{
 use native::log_markdown;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -94,47 +94,59 @@ fn counts_of(report: &RelinkReport) -> crate::messages::clip_relink::ScanCounts 
         by_stream_tag: count(FoundBy::StreamTag),
         by_fingerprint: count(FoundBy::Fingerprint),
         missing: count(FoundBy::Missing),
+        superseded: count(FoundBy::Superseded),
         files_checked: report.files_checked,
         tags_written: report.stream_tags_written,
         tags_failed: report.stream_tags_failed,
         search_complete: report.search_complete,
+        cloud_skipped: report.cloud_files_skipped,
+        cancelled: report.cancelled,
     }
 }
+
+/// Set by Cancel; the running scan stops at its next clip or file. One scan
+/// runs at a time (the button is greyed out while one runs).
+static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Finds each of `clips` (the project's rendered videos) where it was
 /// rendered or under the export folders and `extra_folder`, tagging the ones
 /// it places, and reports where each is now, in order. Sends
 /// `clip_relink_progress` at most every ~33 ms. Fails only when the picked
-/// folder isn't there or the background task crashed. Writes only stream
-/// tags, never a video's bytes.
+/// folder isn't there or the background task crashed; a cancelled scan
+/// reports what it found so far. Writes only stream tags, never a video's
+/// bytes.
 #[tauri::command]
 pub async fn relink_rendered_clips(
     app: AppHandle,
     clips: Vec<ClipToFind>,
     extra_folder: Option<String>,
 ) -> Result<RelinkReport, String> {
-    if let Some(folder) = extra_folder.as_deref()
-        && !PathBuf::from(folder).is_dir()
-    {
-        return Err(crate::messages::clip_relink::folder_not_found(
-            PathBuf::from(folder).display(),
-        ));
-    }
     let export_dirs = {
         let settings = app.state::<SettingsManager>();
         let s = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
         s.render_export_dirs.clone()
     };
-    let folders = search_folders(&export_dirs, extra_folder.as_deref());
-    let recorded: Vec<RecordedClip> = clips.into_iter().map(ClipToFind::into_recorded).collect();
-    log_markdown(&crate::messages::clip_relink::scan_started(
-        recorded.len(),
-        folders.len(),
-    ));
+    CANCEL_REQUESTED.store(false, Ordering::Relaxed);
+    // Everything that touches the disk, the picked folder's check too, runs
+    // off the async runtime: a folder on a sleeping drive can take seconds.
     let handle = tokio::task::spawn_blocking(move || {
+        if let Some(folder) = extra_folder.as_deref()
+            && !PathBuf::from(folder).is_dir()
+        {
+            return Err(crate::messages::clip_relink::folder_not_found(
+                PathBuf::from(folder).display(),
+            ));
+        }
+        let folders = search_folders(&export_dirs, extra_folder.as_deref());
+        let recorded: Vec<RecordedClip> =
+            clips.into_iter().map(ClipToFind::into_recorded).collect();
+        log_markdown(&crate::messages::clip_relink::scan_started(
+            recorded.len(),
+            folders.len(),
+        ));
         let started = Instant::now();
         let last_emit = AtomicU32::new(u32::MAX);
-        let report = relink_clips(&recorded, &folders, &mut |step| {
+        let report = relink_clips(&recorded, &folders, &CANCEL_REQUESTED, &mut |step| {
             let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
             if crate::scan_manager::progress_emit_due(&last_emit, now_ms) {
                 let _ = app.emit("clip_relink_progress", RelinkProgress::from(step));
@@ -144,9 +156,16 @@ pub async fn relink_rendered_clips(
             &counts_of(&report),
             started.elapsed().as_millis(),
         ));
-        report
+        Ok(report)
     });
-    crate::messages::spawn_blocking_result(handle).await
+    crate::messages::flatten_spawn_blocking(handle).await
+}
+
+/// Cancel on Find Moved Videos: the running scan stops at its next clip or
+/// file and reports what it found.
+#[tauri::command]
+pub fn cancel_relink_rendered_clips() {
+    CANCEL_REQUESTED.store(true, Ordering::Relaxed);
 }
 
 #[cfg(test)]

@@ -9,13 +9,15 @@
 // and writes what it found into the project's record.
 
 import { listen } from '@tauri-apps/api/event';
-import { relinkRenderedClips, logFrontendEvent } from './ipc_bridge.js';
+import { relinkRenderedClips, cancelRelinkRenderedClips, logFrontendEvent } from './ipc_bridge.js';
 import { pickPath } from './pick_path.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { showBar, hideBar } from './progress_view.js';
 import { projectRenderedVideos } from './take_renders.js';
-import { clipsToFind, applyRelinkReport, relinkProgressView, relinkAppliedLine } from './clip_relink_logic.js';
+import {
+  clipsToFind, applyRelinkReport, relinkProgressView, relinkAppliedLine, relinkResultSummary,
+} from './clip_relink_logic.js';
 
 /** How long the result toast stays when it offers a folder to look in. */
 const PICK_TOAST_MS = 10000;
@@ -41,6 +43,7 @@ function createRelinkProgress(doc = globalThis.document) {
 const defaultIo = {
   listen,
   relink: relinkRenderedClips,
+  cancel: cancelRelinkRenderedClips,
   pickFolder: () => pickPath({
     field: 'render.find_moved_videos',
     directory: true,
@@ -100,7 +103,7 @@ export function createClipRelink({ getTakeIndex, markDirty, onBusy = () => {}, i
       const counts = applyRelinkReport(takeIndex, videos, report);
       io.log(relinkAppliedLine(counts, videos.length));
       if (counts.changed > 0) markDirty();
-      showResult(counts, videos.length, report.search_complete !== false);
+      showResult(relinkResultSummary(counts, videos.length, report));
       return counts;
     } finally {
       if (typeof unlisten === 'function') unlisten();
@@ -111,10 +114,10 @@ export function createClipRelink({ getTakeIndex, markDirty, onBusy = () => {}, i
   }
 
   /** The result toast; with videos still not found, it offers a folder. */
-  function showResult(counts, total, complete) {
-    const text = STRINGS.RENDER.findMovedDone(counts.moved, counts.notFound, total, complete);
-    if (counts.notFound === 0) {
-      io.toast(text, 'success');
+  function showResult(summary) {
+    const text = STRINGS.RENDER.findMovedDone(summary);
+    if (summary.cancelled || summary.notFound === 0) {
+      io.toast(text, summary.cancelled ? 'info' : 'success');
       return;
     }
     io.toast(text, 'info', PICK_TOAST_MS, {
@@ -129,16 +132,27 @@ export function createClipRelink({ getTakeIndex, markDirty, onBusy = () => {}, i
     return run(folder);
   }
 
-  return { run, pickAndRun };
+  /** Stops the running scan at its next clip or file; it still reports
+   *  what it found. */
+  function cancel() {
+    if (busy) Promise.resolve(io.cancel()).catch((err) => console.error('Cancel failed:', err));
+  }
+
+  return { run, pickAndRun, cancel };
 }
 
 /** Wires the button; the options are `createClipRelink`'s. */
 export function startClipRelink(options) {
   const button = document.querySelector('#find-moved-videos-btn');
+  const cancelButton = document.querySelector('#find-moved-cancel-btn');
   const relink = createClipRelink({
     ...options,
-    onBusy: (busy) => { if (button) button.disabled = busy; },
+    onBusy: (busy) => {
+      if (button) button.disabled = busy;
+      if (cancelButton) cancelButton.hidden = !busy;
+    },
   });
+  cancelButton?.addEventListener('click', () => relink.cancel());
   button?.addEventListener('click', () => {
     relink.run().catch((err) => {
       console.error('Find Moved Videos failed:', err);

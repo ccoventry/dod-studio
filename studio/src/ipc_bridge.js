@@ -925,6 +925,15 @@ export async function relinkRenderedClips(clips, extraFolder) {
     });
 }
 
+/** Find Moved Videos' Cancel (#1442): the running scan stops at its next
+ *  clip or file and resolves with what it found. */
+export async function cancelRelinkRenderedClips() {
+  return invoke("cancel_relink_rendered_clips")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_relink_rendered_clips):", err);
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */

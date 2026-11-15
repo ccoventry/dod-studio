@@ -908,14 +908,19 @@ export const STRINGS = {
     findMovedTagging: (n, total) => `Looking at video ${n} of ${total} where it was rendered…`,
     findMovedListing: (files) => `Listing the folders: ${files} video file${files === 1 ? '' : 's'} so far…`,
     findMovedChecking: (n, total) => `Reading the tag of file ${n} of ${total}…`,
-    findMovedDone: (moved, notFound, total, complete) => {
+    findMovedDone: ({ moved, notFound, total, complete = true, cloudSkipped = 0, cancelled = false }) => {
       const found = moved > 0
         ? `Found ${moved} moved video${moved === 1 ? '' : 's'} and pointed the project at ${moved === 1 ? 'it' : 'them'}.`
-        : `No moved videos found${notFound === 0 ? `: all ${total} are where they were rendered` : ''}.`;
-      if (notFound === 0) return found;
+        : `No moved videos found${notFound === 0 && !cancelled ? `: all ${total} are where they were rendered` : ''}.`;
+      const cloud = cloudSkipped > 0
+        ? ` ${cloudSkipped} file${cloudSkipped === 1 ? ' is' : 's are'} only in the cloud, so ${cloudSkipped === 1 ? 'it was' : 'they were'} left unread (reading would download ${cloudSkipped === 1 ? 'it' : 'them'}).`
+        : '';
+      if (cancelled) return `Stopped. ${found}${cloud}`;
+      if (notFound === 0) return `${found}${cloud}`;
       const stopped = complete ? '' : ' The search stopped at its limit, so look in a smaller folder.';
-      return `${found} ${notFound} of ${total} still not found.${stopped}`;
+      return `${found} ${notFound} of ${total} still not found.${stopped}${cloud}`;
     },
+    FIND_MOVED_CANCEL_BUTTON: 'Cancel',
     FIND_MOVED_PICK_ACTION: 'Look in a folder…',
     FIND_MOVED_PICK_TITLE: 'Folder to look for the videos in',
     findMovedFailed: (err) => `Couldn't look for the project's videos: ${err}`,

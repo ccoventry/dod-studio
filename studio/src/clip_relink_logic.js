@@ -26,14 +26,19 @@ export function clipsToFind(videos) {
 /**
  * Writes `report` (same order as `videos`) into the project's record: each
  * found video's path, size and fingerprint. Returns `{ moved, notFound,
- * changed }`: videos found somewhere new, videos not found anywhere, and
- * records that changed (a fingerprint taken in place counts, so the project
- * keeps it).
+ * superseded, changed }`: videos found somewhere new, videos not found
+ * anywhere, older renders whose file a later render of the same take
+ * replaced (left as they are, not counted as not found), and records that
+ * changed (a fingerprint taken in place counts, so the project keeps it).
  */
 export function applyRelinkReport(takeIndex, videos, report) {
-  const result = { moved: 0, notFound: 0, changed: 0 };
+  const result = { moved: 0, notFound: 0, superseded: 0, changed: 0 };
   (videos || []).forEach((video, i) => {
     const found = report?.clips?.[i];
+    if (found?.found_by === 'superseded') {
+      result.superseded += 1;
+      return;
+    }
     if (!found || found.found_by === 'missing' || !found.path) {
       result.notFound += 1;
       return;
@@ -65,6 +70,19 @@ export function relinkProgressView(event) {
 }
 
 /** The activity-log line for what the scan changed in the project. */
-export function relinkAppliedLine({ moved, notFound, changed }, total) {
-  return `[clip-relink] project updated: ${moved} of ${total} video(s) found in a new place, ${notFound} not found, ${changed} record(s) changed`;
+export function relinkAppliedLine({ moved, notFound, superseded = 0, changed }, total) {
+  return `[clip-relink] project updated: ${moved} of ${total} video(s) found in a new place, ${notFound} not found, ${superseded} replaced by a later render, ${changed} record(s) changed`;
+}
+
+/** The result toast's numbers (`findMovedDone`'s): videos a later render
+ *  replaced don't count toward the total. */
+export function relinkResultSummary(counts, total, report) {
+  return {
+    moved: counts.moved,
+    notFound: counts.notFound,
+    total: total - counts.superseded,
+    complete: report?.search_complete !== false,
+    cloudSkipped: Number(report?.cloud_files_skipped) || 0,
+    cancelled: !!report?.cancelled,
+  };
 }

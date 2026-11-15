@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { recordRender, rendersOf, projectRenderedVideos } from './take_renders.js';
-import { clipsToFind, applyRelinkReport, relinkProgressView, relinkAppliedLine } from './clip_relink_logic.js';
+import {
+  clipsToFind, applyRelinkReport, relinkProgressView, relinkAppliedLine, relinkResultSummary,
+} from './clip_relink_logic.js';
+import { STRINGS } from './strings.js';
 
 const KEY = 'session_b/chain_00_b0';
 const render = (started, extra = {}) => ({
@@ -37,7 +40,7 @@ describe('applyRelinkReport', () => {
         { path: null, found_by: 'missing', size_bytes: null, content_hash: null },
       ],
     });
-    expect(counts).toEqual({ moved: 1, notFound: 1, changed: 1 });
+    expect(counts).toEqual({ moved: 1, notFound: 1, superseded: 0, changed: 1 });
     const [first, second, third] = rendersOf(index, KEY);
     expect(first.output_path).toBe('D:/exports/clip_1.mov');
     expect(second).toMatchObject({ output_path: 'E:/sorted/best kill.mov', output_size_bytes: 20, content_hash: 'bb' });
@@ -50,14 +53,14 @@ describe('applyRelinkReport', () => {
     const counts = applyRelinkReport(index, videos, {
       clips: [{ path: 'D:/exports/clip_3.mov', found_by: 'in_place', size_bytes: 30, content_hash: 'cc' }],
     });
-    expect(counts).toEqual({ moved: 0, notFound: 0, changed: 1 });
+    expect(counts).toEqual({ moved: 0, notFound: 0, superseded: 0, changed: 1 });
     expect(rendersOf(index, KEY)[2].content_hash).toBe('cc');
   });
 
   it('treats a short report as not found rather than guessing', () => {
     const index = project();
     expect(applyRelinkReport(index, projectRenderedVideos(index), { clips: [] }))
-      .toEqual({ moved: 0, notFound: 3, changed: 0 });
+      .toEqual({ moved: 0, notFound: 3, superseded: 0, changed: 0 });
   });
 });
 
@@ -74,7 +77,39 @@ describe('relinkProgressView', () => {
 
 describe('relinkAppliedLine', () => {
   it('gives the counts, no paths', () => {
-    expect(relinkAppliedLine({ moved: 2, notFound: 1, changed: 3 }, 5))
-      .toBe('[clip-relink] project updated: 2 of 5 video(s) found in a new place, 1 not found, 3 record(s) changed');
+    expect(relinkAppliedLine({ moved: 2, notFound: 1, superseded: 1, changed: 3 }, 5))
+      .toBe('[clip-relink] project updated: 2 of 5 video(s) found in a new place, 1 not found, 1 replaced by a later render, 3 record(s) changed');
+  });
+});
+
+describe('a render a later render replaced (#1442 review)', () => {
+  it('is left as it is and not counted as not found', () => {
+    const index = project();
+    const videos = projectRenderedVideos(index);
+    const counts = applyRelinkReport(index, videos, {
+      clips: [
+        { path: null, found_by: 'superseded', size_bytes: 10, content_hash: 'aa' },
+        { path: 'D:/exports/clip_2.mov', found_by: 'in_place', size_bytes: 2, content_hash: 'bb' },
+        { path: 'D:/exports/clip_3.mov', found_by: 'in_place', size_bytes: 3, content_hash: 'cc' },
+      ],
+    });
+    expect(counts).toEqual({ moved: 0, notFound: 0, superseded: 1, changed: 2 });
+    expect(rendersOf(index, KEY)[0]).toMatchObject({ output_path: 'D:/exports/clip_1.mov', content_hash: 'aa' });
+    const summary = relinkResultSummary(counts, videos.length, { search_complete: true });
+    expect(STRINGS.RENDER.findMovedDone(summary)).toBe('No moved videos found: all 2 are where they were rendered.');
+  });
+});
+
+describe('the result toast', () => {
+  it('says how many online-only files were left unread', () => {
+    const summary = relinkResultSummary({ moved: 0, notFound: 1, superseded: 0 }, 2, { cloud_files_skipped: 3 });
+    expect(STRINGS.RENDER.findMovedDone(summary)).toBe(
+      'No moved videos found. 1 of 2 still not found. 3 files are only in the cloud, so they were left unread (reading would download them).',
+    );
+  });
+
+  it('says a cancelled scan stopped, with what it found', () => {
+    const summary = relinkResultSummary({ moved: 1, notFound: 4, superseded: 0 }, 5, { cancelled: true });
+    expect(STRINGS.RENDER.findMovedDone(summary)).toBe('Stopped. Found 1 moved video and pointed the project at it.');
   });
 });
