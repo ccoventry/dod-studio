@@ -8,6 +8,14 @@
 //! `valve` fallback's own folders. Studio and test copies put demos in
 //! `dod_addon`, so a reader that only looks in `dod` misses them.
 //!
+//! Without `-addons` on the command line the addon folder is still tried,
+//! after `<game>`'s other folders: the engine may switch it on from its own
+//! settings instead (not checked), and a demo found only there can only have
+//! been played from there.
+//!
+//! Not searched: `<game>_hd`, `<game>_<language>` and the `hl.exe` folder,
+//! which the engine also reads but which don't hold demos in practice.
+//!
 //! A name with a drive (`D:/folder/demo`) is a full path: the engine itself
 //! can't open one, `demo_other_drives` makes it, and it opens that file. A
 //! relative name with `..` (`../other/demo`) is joined to each search path
@@ -32,11 +40,13 @@ pub(crate) fn candidates(root: &Path, game: &str, addons: bool, name: &str) -> V
         }
         folders.push(g.to_string());
         folders.push(format!("{g}_downloads"));
+        if !addons {
+            folders.push(format!("{g}_addon"));
+        }
         if g.eq_ignore_ascii_case(FALLBACK_GAME) {
             break;
         }
     }
-    folders.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     folders.iter().map(|f| root.join(f).join(&file)).collect()
 }
 
@@ -103,15 +113,17 @@ mod tests {
     }
 
     #[test]
-    fn without_addons_the_addon_folder_is_not_searched() {
+    fn without_addons_the_addon_folder_comes_last() {
         let found = candidates(&root(), "dod", false, "match1.dem");
         assert_eq!(
             names(&found),
             [
                 "dod/match1.dem",
                 "dod_downloads/match1.dem",
+                "dod_addon/match1.dem",
                 "valve/match1.dem",
                 "valve_downloads/match1.dem",
+                "valve_addon/match1.dem",
             ]
         );
     }
@@ -119,7 +131,10 @@ mod tests {
     #[test]
     fn a_valve_game_is_searched_once() {
         let found = candidates(&root(), "valve", false, "a");
-        assert_eq!(names(&found), ["valve/a.dem", "valve_downloads/a.dem"]);
+        assert_eq!(
+            names(&found),
+            ["valve/a.dem", "valve_downloads/a.dem", "valve_addon/a.dem"]
+        );
     }
 
     #[test]
