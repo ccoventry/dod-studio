@@ -3,6 +3,7 @@
 //! a sprite for the tile picker, and tells running games the "Use in the
 //! game" box (`ds_player_overrides`).
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -102,10 +103,7 @@ pub fn set_player_overrides(on: bool) -> usize {
 /// yet (#1322). True once: this clears the notice and saves that.
 #[tauri::command(async)]
 pub fn take_pov_own_spray_notice(state: tauri::State<'_, SettingsManager>) -> Result<bool, String> {
-    let mut settings = state
-        .inner
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = lock_or_recover(&state.inner);
     if !std::mem::take(&mut settings.pov_own_spray_notice) {
         return Ok(false);
     }

@@ -26,6 +26,7 @@ class FakeGh:
             p.setdefault("head", f"{number:040d}")
         self.required = required
         self.calls = []
+        self.after_merge = None  # called with the PR number: what happens while the train runs
 
     def required_checks(self):
         return self.required
@@ -56,6 +57,8 @@ class FakeGh:
     def merge(self, pr, head_sha):
         self.calls.append(("merge", pr, head_sha))
         self.prs[pr]["state"] = "MERGED"
+        if self.after_merge:
+            self.after_merge(pr)
 
     def disable_auto(self, pr):
         self.calls.append(("disable-auto", pr))
@@ -204,7 +207,8 @@ class TrainTests(unittest.TestCase):
     def test_summary_names_the_stop(self):
         result = mt.Result(merged=[1], stopped_at=2, reason="red required check: Clippy", untouched=[3])
         self.assertEqual(mt.summary([1, 2, 3], result),
-                         ["Merged (1/3): #1", "Stopped at #2: red required check: Clippy", "Not touched: #3"])
+                         ["Merged (1/3): #1", "Stopped at #2: red required check: Clippy", "Not touched: #3",
+                          "The queue is kept: run merge_train.py with no PR numbers to continue; `status` shows it."])
 
 
 if __name__ == "__main__":

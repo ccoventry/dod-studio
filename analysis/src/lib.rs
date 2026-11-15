@@ -41,6 +41,8 @@ mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
 #[cfg(test)]
+mod tests_old_server_build;
+#[cfg(test)]
 mod tests_sounds;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
@@ -976,6 +978,7 @@ mod tests {
             map_file_name: format!("maps/{}.bsp\0", map).into_bytes(),
             map_cycle: Vec::new(),
             unknown: 0,
+            legacy_trailer: None,
         })
     }
 
