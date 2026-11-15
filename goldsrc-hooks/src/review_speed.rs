@@ -70,14 +70,38 @@ pub(crate) fn change(
     playing: bool,
     chosen: &mut Option<f32>,
 ) -> Result<String, String> {
+    let now = crate::demo_seek::clock().map_or(1.0, |c| c.time_scale);
+    change_from(
+        now,
+        faster,
+        playing,
+        chosen,
+        crate::demo_seek::set_time_scale,
+    )
+}
+
+/// [`change`] from the speed `now`, setting it with `set`. A press past the
+/// end of [`SPEEDS`] that way (Up inside a gap already fast-forwarded at 4x
+/// or more) changes nothing and chooses nothing: a chosen speed would stop
+/// the review dropping back to 1x at the gap's end (#665), and the kills
+/// after it would play fast.
+fn change_from(
+    now: f32,
+    faster: bool,
+    playing: bool,
+    chosen: &mut Option<f32>,
+    set: impl FnOnce(f32) -> Result<(), String>,
+) -> Result<String, String> {
     if !playing {
         return Err("the speed changes only while a highlight plays".into());
     }
-    let now = crate::demo_seek::clock().map_or(1.0, |c| c.time_scale);
-    let speed = step(now, faster);
-    crate::demo_seek::set_time_scale(speed).map_err(|why| format!("speed {speed}: {why}"))?;
-    *chosen = Some(speed);
     let how = if faster { "faster" } else { "slower" };
+    let speed = step(now, faster);
+    if speed == now {
+        return Ok(format!("speed {now}x kept ({how}: no step further)"));
+    }
+    set(speed).map_err(|why| format!("speed {speed}: {why}"))?;
+    *chosen = Some(speed);
     Ok(format!("speed {now}x -> {speed}x ({how})"))
 }
 
@@ -142,6 +166,42 @@ mod tests {
     fn the_speed_changes_only_while_a_highlight_plays() {
         let mut chosen = None;
         assert!(change(true, false, &mut chosen).is_err());
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn a_press_with_no_step_further_chooses_nothing() {
+        // Up inside a gap fast-forwarded at 4x, or at the queue's 8x: the
+        // gap must still end at 1x.
+        for now in [4.0, 8.0] {
+            let mut chosen = None;
+            let mut set_to = None;
+            let line = change_from(now, true, true, &mut chosen, |s| {
+                set_to = Some(s);
+                Ok(())
+            });
+            assert!(line.is_ok());
+            assert_eq!((chosen, set_to), (None, None), "at {now}x");
+        }
+        // Down at 0.25x likewise.
+        let mut chosen = None;
+        assert!(change_from(0.25, false, true, &mut chosen, |_| Ok(())).is_ok());
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn a_step_sets_and_chooses_the_new_speed() {
+        let mut chosen = None;
+        let mut set_to = None;
+        let line = change_from(4.0, false, true, &mut chosen, |s| {
+            set_to = Some(s);
+            Ok(())
+        });
+        assert_eq!(line.as_deref(), Ok("speed 4x -> 2x (slower)"));
+        assert_eq!((chosen, set_to), (Some(2.0), Some(2.0)));
+        // A failed set chooses nothing.
+        let mut chosen = None;
+        assert!(change_from(1.0, true, true, &mut chosen, |_| Err("no player".into())).is_err());
         assert_eq!(chosen, None);
     }
 

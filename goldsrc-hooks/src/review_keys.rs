@@ -22,7 +22,7 @@
 //! answer keys do nothing. X turns X-ray on and off ([`XRAY_KEY`]): back to
 //! the `ds_spec_xray_show` value it last had on, or `1`. Up and Down play
 //! the highlight one step faster or slower ([`SPEED_KEYS`], `review_speed`,
-//! #1437); arrows move nothing in demo playback. ESC brings up the
+//! #1437). ESC brings up the
 //! menu as always, and the review opens the DoD Studio window on its Review
 //! tab with it, whose boxes hold the same two: vgui2 takes ESC before any
 //! client hook sees it (seen live on PRE), so the review watches the menu
@@ -168,8 +168,10 @@ const KEY_UP_ARROW: i32 = 128;
 const KEY_DOWN_ARROW: i32 = 129;
 
 /// Up and Down: one step faster or slower (#1437). DoD's default config binds
-/// them to `+forward` and `+back`, which move nothing in demo playback, and
-/// HLAE binds neither. Rebinding: `ds_demo_review faster` and `slower` do the
+/// them to `+forward` and `+back`, which move an HLTV demo's free-roaming
+/// camera; a review highlight holds the camera in first person on its
+/// player, and the keys are swallowed only while one is on. HLAE binds
+/// neither. Rebinding: `ds_demo_review faster` and `slower` do the
 /// same from any bind.
 pub(crate) const SPEED_KEYS: [Key; 2] = [
     Key {
