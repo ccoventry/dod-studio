@@ -25,7 +25,7 @@ use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use native::hlcr::capture_room::{
     ClipSizeModel, OutputRatio, PendingTake, RoomDecision, RoomInputs, decide, hold_seconds,
-    may_resume,
+    may_resume, render_coming,
 };
 use native::hlcr::take_cleanup::{AfterFinish, CleanupPolicy, format_gb, volume_of};
 use native::log_markdown;
@@ -91,6 +91,9 @@ struct State {
     ratio: OutputRatio,
     /// Blocks recorded so far, with what they held once settled.
     recorded: Vec<(usize, u64)>,
+    /// When each recorded block's take was handed to the Render tab, for
+    /// whether its render is still coming (`render_coming`, #1438).
+    handed_over: std::collections::HashMap<usize, Instant>,
     /// Partial takes (#1105), with what they hold: kept for the user and
     /// never deleted from here, so a hold never counts on their space.
     partial: Vec<(usize, u64)>,
@@ -125,6 +128,7 @@ impl State {
             Some(bytes) => {
                 self.sizes.learn(bytes, ticks);
                 self.recorded.push((index, bytes));
+                self.handed_over.insert(index, Instant::now());
             }
             None => {}
         }
@@ -276,9 +280,9 @@ impl CaptureRoom {
     /// The batch ended, however it ended.
     pub(crate) fn finish(&self) {
         self.hold.store(false, Ordering::Relaxed);
-        self.app
-            .state::<RenderManager>()
-            .set_while_capturing(false, 1);
+        let render = self.app.state::<RenderManager>();
+        render.set_while_capturing(false, 1);
+        render.set_room_volume(None);
         let _ = self
             .app
             .emit("capture_room_status", serde_json::Value::Null);
@@ -314,6 +318,8 @@ impl CaptureRoom {
                     return None;
                 }
                 let renders = render.renders_under(&block.folder.to_string_lossy());
+                let statuses: Vec<&str> = renders.iter().map(|r| r.status.as_str()).collect();
+                let since = state.handed_over.get(&index).map(Instant::elapsed);
                 let finished: Vec<_> = renders.iter().filter(|r| r.status == "Finished").collect();
                 let output_bytes = (!renders.is_empty() && finished.len() == renders.len())
                     .then(|| finished.iter().filter_map(|r| r.output_size_bytes).sum());
@@ -329,6 +335,7 @@ impl CaptureRoom {
                     output_bytes,
                     output_on_same_drive,
                     deleted_after_render: deletes,
+                    render_coming: render_coming(&statuses, since),
                 })
             })
             .collect()
@@ -401,6 +408,14 @@ impl CaptureRoom {
             check.decision,
         ));
         self.hold.store(true, Ordering::Relaxed);
+        // Only renders of takes on that drive free its room: they go first.
+        let folder = &self.blocks[index + 1].folder;
+        self.app
+            .state::<RenderManager>()
+            .set_room_volume(Some(volume_of(folder)));
+        log_markdown(&crate::messages::capture::room_renders_first(&drive_label(
+            folder,
+        )));
         self.lock().watching = true;
         self.emit_status(&STRINGS_HOLDING, None);
         let room = Arc::clone(self);
@@ -569,19 +584,23 @@ impl CaptureRoom {
                 && (matches!(check.decision, RoomDecision::CannotFit { .. })
                     || idle_since.is_some_and(|t| t.elapsed() >= IDLE_HOLD_LIMIT));
             if stuck {
+                let drive = drive_label(&self.blocks[next].folder);
                 let why = match check.decision {
-                    RoomDecision::CannotFit { short_bytes } => format!(
-                        "clip {} needs {} more than the drive will have even after every recorded take is rendered and deleted",
+                    RoomDecision::CannotFit { short_bytes } => {
+                        crate::messages::capture::room_cannot_fit_reason(
+                            next + 1,
+                            &drive,
+                            format_gb(short_bytes),
+                        )
+                    }
+                    _ => crate::messages::capture::room_idle_reason(
                         next + 1,
-                        format_gb(short_bytes)
-                    ),
-                    _ => format!(
-                        "clip {} needs {} more, and no render has run for a minute to free it",
-                        next + 1,
-                        format_gb(short)
+                        &drive,
+                        format_gb(short),
                     ),
                 };
                 let why = why
+                    + crate::messages::capture::ROOM_REPLAN_HINT
                     + &self.partial_on_drive(next)
                     + &windows_drive_note(&self.blocks[next].folder);
                 log_markdown(&crate::messages::capture::room_stopping_batch(
@@ -606,6 +625,9 @@ impl CaptureRoom {
             );
             std::thread::sleep(HOLD_POLL);
         }
+        // Before `watching` clears, so a hold starting right after keeps its
+        // own drive.
+        self.app.state::<RenderManager>().set_room_volume(None);
         self.lock().watching = false;
         let _ = self
             .app
@@ -707,6 +729,17 @@ fn windows_drive_note(folder: &Path) -> String {
         )
     } else {
         String::new()
+    }
+}
+
+/// The drive a block records to, as the player knows it (`F:`), for a
+/// stopped batch's reason; the whole path when it has no drive letter.
+fn drive_label(folder: &Path) -> String {
+    match folder.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => {
+            prefix.as_os_str().to_string_lossy().into_owned()
+        }
+        _ => folder.display().to_string(),
     }
 }
 
@@ -863,6 +896,13 @@ mod tests {
             ..usual
         };
         assert!(matches!(decide(&windows), RoomDecision::CannotFit { .. }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_stopped_batch_names_the_drive_letter() {
+        assert_eq!(drive_label(Path::new(r"F:\DICE\session\clip_b0")), "F:");
+        assert_eq!(drive_label(Path::new("relative")), "relative");
     }
 
     #[test]

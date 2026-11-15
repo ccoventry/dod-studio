@@ -231,6 +231,34 @@ pub fn room_going_on(clip: usize, free: impl Display, waited_secs: f64) -> Strin
     )
 }
 
+/// A hold starts: renders of the takes on the clip's drive go first (#1438).
+pub fn room_renders_first(drive: &str) -> String {
+    format!(
+        "[render-while-capturing] Renders of takes on {drive} start first until the batch has room there again"
+    )
+}
+
+/// Why a held batch stops: renders still to come on the clip's drive can't
+/// free what it is short (#1438).
+pub fn room_cannot_fit_reason(clip: usize, drive: &str, short: impl Display) -> String {
+    format!(
+        "clip {clip} needs {short} more on {drive} than the drive will have even once every take there still to render is rendered and deleted"
+    )
+}
+
+/// Why a held batch stops: nothing has rendered for a minute.
+pub fn room_idle_reason(clip: usize, drive: &str, short: impl Display) -> String {
+    format!(
+        "clip {clip} needs {short} more on {drive}, and no render has run for a minute to free it"
+    )
+}
+
+/// Added to a stopped batch's reason: each clip's drive is fixed when the
+/// batch is planned, so the clips left only move by starting it again
+/// (#1438).
+pub const ROOM_REPLAN_HINT: &str =
+    "; starting the batch again plans the clips left onto drives that have room";
+
 /// The batch stops before a clip because there is no room.
 pub fn room_stopping_batch(clip: usize, why: impl Display) -> String {
     format!(

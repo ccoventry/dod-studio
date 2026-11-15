@@ -13,6 +13,8 @@
 //! takes, this decides. Sizes are bytes on the drive the next clip records
 //! to; takes and render output on other drives free or cost nothing there.
 
+use std::time::Duration;
+
 /// One take this batch recorded that is still on disk.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingTake {
@@ -26,6 +28,11 @@ pub struct PendingTake {
     /// Whether the take goes once its render verifies: "After a clip is
     /// finished" deletes it for good. Keep and the Recycle Bin free nothing.
     pub deleted_after_render: bool,
+    /// Whether a render of it is still coming or done ([`render_coming`]).
+    /// A take whose render failed, was cancelled or was never queued is never
+    /// deleted from here, so it frees nothing: counting on it held a batch
+    /// for space that never came (#1438).
+    pub render_coming: bool,
 }
 
 impl PendingTake {
@@ -33,7 +40,7 @@ impl PendingTake {
     /// `output_ratio` (clip bytes per take byte) standing in for a clip not
     /// written yet. `None` when that can't be known yet.
     fn frees(&self, output_ratio: Option<f64>) -> Option<u64> {
-        if !self.deleted_after_render {
+        if !self.deleted_after_render || !self.render_coming {
             return Some(0);
         }
         if !self.output_on_same_drive {
@@ -45,6 +52,25 @@ impl PendingTake {
         };
         Some(self.raw_bytes.saturating_sub(output))
     }
+}
+
+/// How long after a take is handed to the Render tab a render of it may
+/// still be missing from the list: the frontend queues it at once, retrying
+/// for about 10 s while a scan the user started holds the queue.
+pub const QUEUE_GRACE: Duration = Duration::from_secs(120);
+
+/// Whether a take's render will still free its space, from the statuses of
+/// its rows in the Render tab and how long ago it was handed over (`None`:
+/// never handed over). Queued or rendering: coming. All finished: its take
+/// goes now. No row past [`QUEUE_GRACE`], or every row ended without all
+/// finishing (an error, a cancel): nothing will ever delete it, until the
+/// user retries it, which queues it again (#1438).
+pub fn render_coming(statuses: &[&str], since_handover: Option<Duration>) -> bool {
+    if statuses.is_empty() {
+        return since_handover.is_some_and(|d| d < QUEUE_GRACE);
+    }
+    statuses.iter().any(|s| *s == "Queued" || *s == "Rendering")
+        || statuses.iter().all(|s| *s == "Finished")
 }
 
 /// Where the batch stands at a clip boundary.
@@ -226,6 +252,7 @@ mod tests {
             output_bytes: None,
             output_on_same_drive: false,
             deleted_after_render: true,
+            render_coming: true,
         }
     }
 
@@ -352,6 +379,53 @@ mod tests {
                 reclaimable_bytes: 0
             }
         );
+    }
+
+    /// #1438: a take whose render failed, was cancelled or never got queued
+    /// frees nothing. Counted on, it held the batch for good; now the clip
+    /// can't fit and the batch stops with the reason.
+    #[test]
+    fn a_take_no_render_will_delete_frees_nothing() {
+        let mut stuck = take(10 * GB);
+        stuck.render_coming = false;
+        assert_eq!(
+            decide(&inputs(16 * GB, 5 * GB, &[stuck.clone()])),
+            RoomDecision::CannotFit {
+                short_bytes: 4 * GB
+            }
+        );
+        // Not even as a take whose clip size can't be priced yet: that one
+        // is waited for only while its render can still teach the ratio.
+        stuck.output_on_same_drive = true;
+        assert_eq!(
+            decide(&inputs(16 * GB, 5 * GB, &[stuck])),
+            RoomDecision::CannotFit {
+                short_bytes: 4 * GB
+            }
+        );
+        // With nothing left that will free space, the next clip's room alone
+        // lets the batch go on.
+        let mut gone = take(10 * GB);
+        gone.render_coming = false;
+        assert!(may_resume(&inputs(20 * GB, 5 * GB, &[gone])));
+    }
+
+    #[test]
+    fn a_render_is_coming_while_queued_running_or_just_handed_over() {
+        let secs = |s| Some(Duration::from_secs(s));
+        assert!(render_coming(&["Queued"], None));
+        assert!(render_coming(&["Finished", "Rendering"], None));
+        assert!(render_coming(&["Error", "Queued"], None));
+        // All finished: the take goes now.
+        assert!(render_coming(&["Finished", "Finished"], None));
+        // Not in the list yet: coming for a while after the hand-over.
+        assert!(render_coming(&[], secs(5)));
+        assert!(!render_coming(&[], Some(QUEUE_GRACE)));
+        assert!(!render_coming(&[], None));
+        // Every row ended and not all finished: nothing will delete it.
+        assert!(!render_coming(&["Error"], None));
+        assert!(!render_coming(&["Cancelled"], secs(5)));
+        assert!(!render_coming(&["Finished", "Error"], None));
     }
 
     #[test]
