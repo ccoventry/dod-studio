@@ -4,18 +4,23 @@
 // OBS buttons and the HLAE FFmpeg link. Moved out of main.js (#683); main.js
 // calls initConfigWiring once the settings are in the form.
 
-import { open, confirm } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
-import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs } from './ipc_bridge.js';
-import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
+import { confirm } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
+import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs, obsCheckOrphan, obsRecoverOrphan } from './ipc_bridge.js';
+import { refreshLaunchGuard } from './capture_pane.js';
+import { runObsConnectionTest } from './obs_connection_ui.js';
 import { showToast } from './toast.js';
-import { numberField } from './number_field.js';
 // The Steam-install and program-name checks (#373) are shared with the
 // Setup window (#599).
-import { EXE_NAMES, isSteamPlayInstall, sameDriveFolders, wrongExeName } from './setup_checklist.js';
+import { EXE_NAMES, usesPlayFolder, sameDriveFolders, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
-import { createGameFolderUi } from './game_folder_ui.js';
+import { createGameFolderUi, getGameFolder } from './game_folder_ui.js';
 import { wireReviewSettings } from './review_settings.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
+import { initHookDllPicker, refreshHookDllPicker } from './hook_dll_picker.js';
+import { createInstallPicker } from './install_picker.js';
+import { createMenuScaleSetting } from './menu_scale_setting.js';
+import { startWindowsDriveKeepFree } from './windows_drive_setting.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -72,7 +77,7 @@ export async function refreshPathWarnings() {
     if (states[i] === 'not_found') message = STRINGS.CAPTURE_CONFIG.PATH_NOT_FOUND;
     else if (states[i] === 'not_a_file') message = STRINGS.CAPTURE_CONFIG.PATH_IS_A_FOLDER;
     else if (wrong) message = STRINGS.CAPTURE_CONFIG.wrongExe(wrong, expected);
-    else if (row.input.id === 'hl-path-input' && isSteamPlayInstall(row.input.value)) {
+    else if (row.input.id === 'hl-path-input' && usesPlayFolder(row.input.value, getGameFolder())) {
       message = STRINGS.CAPTURE_CONFIG.HL_PATH_PLAY_INSTALL;
     }
     // 'empty' says nothing on purpose: these are legitimately blank before they
@@ -109,7 +114,7 @@ function obsSettingsFromForm() {
 export async function checkObsOrphanOnStartup() {
   if (currentCaptureMode() !== 'obs') return;
 
-  const report = await invoke('obs_check_orphan', obsSettingsFromForm()).catch((err) => {
+  const report = await obsCheckOrphan(obsSettingsFromForm()).catch((err) => {
     console.error('OBS orphan check failed:', err);
     return null;
   });
@@ -123,7 +128,7 @@ export async function checkObsOrphanOnStartup() {
   }).catch(() => false);
   if (!stop) return;
 
-  await invoke('obs_recover_orphan', obsSettingsFromForm())
+  await obsRecoverOrphan(obsSettingsFromForm())
     .then((video) => {
       showToast(
         video
@@ -175,15 +180,14 @@ export function applyCaptureModeUI() {
   const captureFpsGroup = document.querySelector('#capture-fps-group');
   if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
 
-  // AGR mode records no video, so Capture FPS gives way to its own rate. An
-  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
-  // shows the number that will actually be used.
+  // AGR mode records no video, so Capture FPS gives way to its own rate, which
+  // is required there (refreshLaunchGuard blocks Start while it is empty). The
+  // placeholder is a hint ("e.g. 30"), not a value: the box stays empty and
+  // saves 0, so the settings never hold a number the user did not type.
   const agrFpsGroup = document.querySelector('#agr-fps-group');
   if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
   const agrFpsInput = document.querySelector('#config-agr-fps');
-  if (agrFpsInput) {
-    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
-  }
+  if (agrFpsInput) agrFpsInput.placeholder = STRINGS.CAPTURE_CONFIG.AGR_FPS_PLACEHOLDER;
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -241,6 +245,12 @@ export async function refreshHlaeFfmpegStatus() {
   // no video at all.
   if (document.querySelector('#config-ffmpeg-capture')?.checked && !result.usable) {
     statusEl.textContent = STRINGS.CAPTURE_CONFIG.FFMPEG_CAPTURE_UNAVAILABLE;
+    linkBtn.style.display = result?.can_link ? '' : 'none';
+    return;
+  }
+  // AGR mode's sound goes through HLAE's FFmpeg too (#450).
+  if (currentCaptureMode() === 'agr' && !result.usable) {
+    statusEl.textContent = STRINGS.CAPTURE_CONFIG.AGR_SOUND_UNAVAILABLE;
     linkBtn.style.display = result?.can_link ? '' : 'none';
     return;
   }
@@ -334,6 +344,10 @@ export async function linkHlaeToFfmpeg() {
  */
 export function initConfigWiring({ persistAppSettings }) {
   wireReviewSettings(persistAppSettings);
+  initHookDllPicker();
+  // Keep free on the Windows drive (#1430): the space check before a capture
+  // counts the Windows drive by it, so it is run again once saved.
+  startWindowsDriveKeepFree({ persist: persistAppSettings, onSaved: () => refreshLaunchGuard() });
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
   const gameFolderUi = createGameFolderUi({
@@ -343,12 +357,30 @@ export function initConfigWiring({ persistAppSettings }) {
   gameFolderUi.refresh();
   document.querySelector('#hl-path-input')
     ?.addEventListener('change', () => { gameFolderUi.refresh(); });
+  // The Half-Life Executable's install list (#931); it re-lists on the
+  // field's change event itself.
+  const installPicker = createInstallPicker({ persist: persistAppSettings });
+  installPicker.refresh();
+  // Menu size (#985): what's in this install's addon folder, so it is read
+  // again for another hl.exe or game folder.
+  const menuScale = createMenuScaleSetting({
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getGameFolder,
+  });
+  menuScale.refresh();
+  document.querySelector('#hl-path-input')
+    ?.addEventListener('change', () => { menuScale.refresh(); });
+  // The Half-Life Executable's movie-copy note depends on the game folder too.
+  document.querySelector('#config-game-folder')
+    ?.addEventListener('change', () => { refreshPathWarnings(); menuScale.refresh(); });
 
   const hlaeBrowseBtn = document.querySelector('#hlae-browse-btn');
   if (hlaeBrowseBtn) {
     hlaeBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hlae',
+          current: document.querySelector('#hlae-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_HLAE_EXE_TITLE
@@ -421,7 +453,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (obsBrowseBtn) {
     obsBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.obs',
+          current: document.querySelector('#config-obs-exe-path')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_OBS_EXE_TITLE
@@ -471,7 +505,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (hlBrowseBtn) {
     hlBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hl',
+          current: document.querySelector('#hl-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_HL_EXE_TITLE
@@ -483,6 +519,8 @@ export function initConfigWiring({ persistAppSettings }) {
           await persistAppSettings();
           await refreshPathWarnings();
           await gameFolderUi.refresh();
+          await installPicker.refresh();
+          await menuScale.refresh();
         }
       } catch (err) {
         console.error("Error selecting Half-Life executable:", err);
@@ -494,7 +532,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (ffmpegBrowseBtn) {
     ffmpegBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.ffmpeg',
+          current: document.querySelector('#ffmpeg-override-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE
@@ -520,7 +560,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (goldsrcHooksBrowseBtn) {
     goldsrcHooksBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hook_dll',
+          current: document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.DLL_FILTER_NAME, extensions: ['dll'] }],
           title: STRINGS.MAIN.SELECT_GOLDSRC_HOOKS_DLL_TITLE
@@ -530,10 +572,14 @@ export function initConfigWiring({ persistAppSettings }) {
           const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
           if (inputEl) inputEl.value = path;
           await persistAppSettings();
+          await refreshHookDllPicker();
         }
       } catch (err) {
         console.error("Error selecting dodstudio_goldsrc_hooks.dll:", err);
       }
     });
   }
+  // Clearing the field in a release build hides the row again.
+  document.querySelector('#goldsrc-hooks-dll-path-input')
+    ?.addEventListener('change', () => { refreshHookDllRow(); });
 }

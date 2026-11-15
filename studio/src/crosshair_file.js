@@ -4,6 +4,8 @@
 // native/src/crosshair_import.rs (sanitize_name), which has the last word;
 // this copy only prefills the name box and shows the file name as you type.
 
+import { fileNameOf } from './path_display.js';
+
 /** Vertex's crosshair creator, opened in the browser. */
 export const CREATOR_URL = 'https://vertexs-custom-crosshair-creator.replit.app/';
 export const PREFIX = 'customxhair-';
@@ -48,7 +50,7 @@ export function crosshairFileName(name) {
  *  and extension, or FALLBACK_NAME when that leaves nothing (the creator's
  *  own customxhair.spr). */
 export function defaultCrosshairName(path) {
-  const base = String(path ?? '').split(/[\\/]/).pop() || '';
+  const base = fileNameOf(path) || '';
   const stem = base.replace(/\.(spr|zip)$/i, '');
   return sanitizeCrosshairName(stem) || FALLBACK_NAME;
 }

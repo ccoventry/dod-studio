@@ -1,5 +1,5 @@
 // players_ui.js — Configuration > Players (#428).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const M00CAT = '76561197972576011';
 
@@ -48,6 +48,8 @@ test('adds a queue player, gives them a spray and a crosshair tile, and removes 
   const [list] = await calls(page, 'list_crosshair_sprites');
   expect(list.args).toEqual({ gamePath: 'C:/Games/Half-Life/hl.exe', gameFolder: 'dod' });
   await expect(page.locator('#players-players-status')).toHaveText("2 players in the queue's 2 demos");
+  // Its bar (#958) is gone once every demo is read.
+  await expect(page.locator('#players-players-bar')).toHaveJSProperty('hidden', true);
 
   const add = page.locator('#players-add-btn');
   await expect(add).toBeDisabled();
@@ -68,7 +70,7 @@ test('adds a queue player, gives them a spray and a crosshair tile, and removes 
   await cells.nth(6).click();
   await expect(page.locator('.players-picker')).toHaveCount(0);
   expect(await page.evaluate(() => window.__players().players)).toEqual([
-    { steam_id: M00CAT, name: 'dicE[: :]m00cat :D', png: 'chris_teamwork.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 7 },
+    { steam_id: M00CAT, name: 'dicE[: :]m00cat :D', png: 'chris_teamwork.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 7, use_as: '', nameplate: '' },
   ]);
   await expect(row.locator('.players-tile')).toContainText('Tile 7');
 
@@ -95,16 +97,19 @@ test('the Use in the game box saves and goes to a running game as the cvar', asy
   expect(await page.evaluate(() => window.__persisted)).toBe(2);
 });
 
-test('fallbacks: HLTV sprays default to one PNG, the crosshair to the game\'s own', async ({ page }) => {
+test('fallbacks: sprays default to one PNG, the crosshair to the game\'s own', async ({ page }) => {
   await loadHarness(page, { pngs: ['team_allies.png'], sprites: ['customXHair.spr'] });
   await expect(page.locator('#players-hltv-fallback')).toHaveValue('png');
   await expect(page.locator('#players-hltv-fallback option')).toHaveText(['One fallback spray', 'No spray']);
-  await expect(page.locator('#players-pov-fallback')).toHaveValue('own');
+  await expect(page.locator('#players-pov-fallback')).toHaveValue('png');
+  await expect(page.locator('#players-pov-fallback option')).toHaveText(['One fallback spray', 'No spray']);
   await expect(page.locator('#players-crosshair-fallback')).toHaveValue('game');
   await expect(page.locator('#players-crosshair-fallback-pick')).toBeHidden();
   await expect(page.locator('#players-warning')).toContainText('HLTV demos: pick the fallback spray');
+  await expect(page.locator('#players-warning')).toContainText('POV demos: pick the fallback spray');
 
   await page.locator('#players-hltv-fallback-png select').selectOption('team_allies.png');
+  await page.locator('#players-pov-fallback-png select').selectOption('team_allies.png');
   await page.locator('#players-crosshair-fallback').selectOption('sprite');
   await expect(page.locator('#players-crosshair-fallback-pick')).toBeVisible();
   await page.locator('#players-crosshair-fallback-pick .players-tile').click();
@@ -177,7 +182,7 @@ test('the spray size defaults to 64 and a row can keep the spray from the demo',
   await page.locator('#players-add-btn').click();
   const spray = page.locator('#players-list .players-spray');
   await expect(spray.locator('option[value="own"]')).toHaveText('From the demo');
-  await expect(spray.locator('option[value="own"]')).toHaveAttribute('title', /fallback for players not listed/);
+  await expect(spray.locator('option[value="own"]')).toHaveAttribute('title', /the fallback spray for that demo type/);
   await spray.selectOption('own');
   expect(await page.evaluate(() => window.__players().players[0].png)).toBe('own');
   // Not a file: no "not in logos" warning for it.

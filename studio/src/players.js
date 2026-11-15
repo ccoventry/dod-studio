@@ -12,11 +12,11 @@
 
 import { groupPlayers, steamIdText } from './player_filter.js';
 import { steamIdForms } from './steam_ids.js';
+import { cleanUseAs, cleanNameplate } from './player_alias.js';
 
-/** Spray fallbacks offered for POV demos, and HLTV's: an HLTV demo records
- *  that a player sprayed, never the image, so "their own" isn't one. */
-export const POV_FALLBACKS = ['own', 'png', 'none'];
-export const HLTV_FALLBACKS = ['png', 'none'];
+/** The fallback sprays offered, for POV and HLTV demos alike: one picture or
+ *  no spray (#1322). */
+export const SPRAY_FALLBACKS = ['png', 'none'];
 export const CROSSHAIR_FALLBACKS = ['game', 'sprite'];
 
 /** The sprite DoD ships, whose tile `cl_xhair_style` picks. */
@@ -37,7 +37,7 @@ export function defaultPlayers() {
   return {
     use_in_game: true,
     players: [],
-    pov_fallback: 'own',
+    pov_fallback: 'png',
     pov_fallback_png: '',
     hltv_fallback: 'png',
     hltv_fallback_png: '',
@@ -83,15 +83,16 @@ export function normalizePlayers(raw) {
       png: text(p?.png),
       crosshair_sprite: text(p?.crosshair_sprite),
       crosshair_tile: cleanTile(p?.crosshair_tile),
+      use_as: cleanUseAs(p?.use_as),
+      nameplate: cleanNameplate(p?.nameplate),
     }))
     .filter((p) => p.steam_id || p.name);
   return {
     use_in_game: raw.use_in_game !== false,
     players,
-    pov_fallback: POV_FALLBACKS.includes(raw.pov_fallback) ? raw.pov_fallback : d.pov_fallback,
+    pov_fallback: SPRAY_FALLBACKS.includes(raw.pov_fallback) ? raw.pov_fallback : d.pov_fallback,
     pov_fallback_png: text(raw.pov_fallback_png),
-    // `own` from a hand-edited file reads as the HLTV default.
-    hltv_fallback: HLTV_FALLBACKS.includes(raw.hltv_fallback) ? raw.hltv_fallback : d.hltv_fallback,
+    hltv_fallback: SPRAY_FALLBACKS.includes(raw.hltv_fallback) ? raw.hltv_fallback : d.hltv_fallback,
     hltv_fallback_png: text(raw.hltv_fallback_png),
     crosshair_fallback: CROSSHAIR_FALLBACKS.includes(raw.crosshair_fallback)
       ? raw.crosshair_fallback : d.crosshair_fallback,
@@ -161,7 +162,7 @@ export function addPlayer(table, player) {
     t.players[at] = { ...t.players[at], name: t.players[at].name || row.name };
     return { table: t, index: at };
   }
-  t.players.push({ ...row, png: '', crosshair_sprite: '', crosshair_tile: 0 });
+  t.players.push({ ...row, png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '', nameplate: '' });
   return { table: t, index: t.players.length - 1 };
 }
 
@@ -225,4 +226,12 @@ export function missingSprites(table, listed) {
     table.crosshair_fallback === 'sprite' ? table.crosshair_fallback_sprite : '',
   ].filter(Boolean);
   return [...new Set(named)].filter((n) => !have.has(n.toLowerCase()));
+}
+
+/** The bar under "Reading the queue's players… 12 of 40 demos" (#958), as
+ *  progress_view.js's `showBar` takes it: the block slides until the first
+ *  demo is read. */
+export function playersBarView(seen, wanted) {
+  if (!wanted || !seen) return { pct: 0, indeterminate: true };
+  return { pct: Math.min(100, (100 * seen) / wanted), indeterminate: false };
 }

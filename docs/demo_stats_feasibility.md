@@ -31,7 +31,9 @@ There's also a stale standalone copy in a local Downloads folder (`ktp-demo-stat
 
 - **9 of 13 HLStatsX scoreboard columns are demo-derivable**: player identity, kills,
   deaths, K/D, teamkills, suicides, objective points, flag-capture credits, flag-capture
-  breaks. **4 are not, ever**: assists, damage, headshots, headshot%. GoldSrc/DoD 1.3
+  breaks. **4 were not found at the time**: assists, damage, headshots, headshot%. Headshots are
+  in fact there (#1128): the `events/effects/helmet.sc` event fires on the kill's frame
+  (`analysis/src/headshot.rs`); the rest is still absent. GoldSrc/DoD 1.3
   never sends per-hit data to spectators — `DeathMsg` was exactly 3 bytes (killer,
   victim, weapon) in all 211,335 instances across the corpus. No hit group exists.
 - HLTV demos are strictly better than POV for scoreboard purposes — everything broadcasts
@@ -77,7 +79,9 @@ with 2 breaks and 0 captures.
 
 **What the demo can show.** Neither `StartProg` nor `CancelProg` names a player, so an
 attempt's cappers are never on the wire, and the capture areas are brush triggers the
-server never sends. `InitObj`'s flag origin is no help either: the attackers whose deaths
+server never sends. (A POV demo does know its own recorder's: `ClientAreas` says when the
+recorder stands in an area their team can capture, which `analysis::capture_area` keeps
+and tags kills with, #1132. Nobody else's are in any demo.) `InitObj`'s flag origin is no help either: the attackers whose deaths
 cancelled a capture died a median 7,148 units from it, so it is not a world position. So
 the analyzer attributes by timing, in `objective::cancel_cause`, for every cancelled
 attempt:

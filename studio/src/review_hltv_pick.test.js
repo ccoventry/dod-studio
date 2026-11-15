@@ -98,13 +98,13 @@ describe('the pick and the review list', () => {
   it('reviews only the picked players\' HLTV highlights, by SteamID or by name, and every POV one', () => {
     const players = hltvDemoPlayers(demos);
     const picked = addPickedPlayers([], players.filter((p) => [GORILLA, 'name:oldie'].includes(p.id)));
-    const rows = buildReviewQueue(demos, ['h1.dem', 'h2.dem', 'p.dem'], 1, REVIEW_COVERS.ALL,
+    const rows = buildReviewQueue(demos, ['h1.dem', 'h2.dem', 'p.dem'], REVIEW_COVERS.ALL,
       hltvPlayersFor(HLTV_PLAYERS.PICKED, [], { picked })).highlights;
     expect(rows.map((h) => h.player)).toEqual(['gorilla', 'oldie', 'dicE | gorilla', '']);
   });
 
   it('nobody picked: no HLTV highlight, each counted as left out', () => {
-    const result = buildReviewQueue(demos, ['h1.dem'], 1, REVIEW_COVERS.ALL,
+    const result = buildReviewQueue(demos, ['h1.dem'], REVIEW_COVERS.ALL,
       hltvPlayersFor(HLTV_PLAYERS.PICKED, [], { picked: [] }));
     expect(result.highlights).toEqual([]);
     expect(result.notChosen).toBe(4);

@@ -1,0 +1,305 @@
+//! The review's kill range and note form (#1139): while a review highlight
+//! plays or waits at its end, E (or `ds_demo_review form`) opens a small form
+//! over the demo, with the menu closed: the kill range's first and last kill
+//! and a one-line note, as Highlight Details has them. Tab moves between the
+//! boxes, Enter saves, Esc cancels (and the menu the engine brings up on that
+//! same Esc goes away again). The keyboard is enough: the form takes
+//! the keys while it shows, so typing a Y or an N in it never answers.
+//! Clicking it works where the build passes the mouse on (pre-Anniversary).
+//!
+//! This file holds what the form shows, what it saved and the rules for the
+//! typed range; `studio_panel`'s `review_form` builds and drives the vgui2
+//! window, and `review` applies a save to the highlight and sends it to
+//! DoD Studio.
+//!
+//! ## Threads
+//!
+//! Everything here runs on the engine's thread: the review's poll asks for
+//! the form, the panel's poll opens it, and vgui2 calls the form's key and
+//! button handlers from the engine's input. The atomics and the lock only
+//! hand values between those calls; what is asked every frame is an atomic
+//! load (CLAUDE.md's rule for per-frame code).
+
+// The window is 32-bit only; a host build compiles the rest for the tests.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock};
+use std::time::{Duration, Instant};
+
+/// What the form shows for one highlight.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FormView {
+    /// Studio's key for the highlight: a save for another one is dropped.
+    pub key: String,
+    /// "Highlight 3 of 12 | m00cat | 4 kills".
+    pub title: String,
+    /// The kill range, from 1.
+    pub from: usize,
+    pub to: usize,
+    /// How many kills the highlight has.
+    pub kills: usize,
+    pub note: String,
+}
+
+/// What Enter saved: the kill range (already checked against the kills) and
+/// the note, for the highlight `key`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Saved {
+    pub key: String,
+    pub from: usize,
+    pub to: usize,
+    pub note: String,
+}
+
+/// Set by the review when E is pressed; the panel's next poll opens the form.
+static OPEN_REQUESTED: AtomicBool = AtomicBool::new(false);
+/// Whether the form shows now, set by the panel as it shows and hides it.
+static SHOWN: AtomicBool = AtomicBool::new(false);
+/// A save waiting for the review's next poll, and whether there is one.
+static SAVED: RwLock<Option<Saved>> = RwLock::new(None);
+static HAS_SAVED: AtomicBool = AtomicBool::new(false);
+
+/// Asks for the form over the playing demo, on the next frame.
+pub(crate) fn request_open() {
+    OPEN_REQUESTED.store(true, Ordering::Release);
+}
+
+/// Whether the form was asked for since the last call.
+pub(crate) fn take_open_request() -> bool {
+    OPEN_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+/// Notes whether the form shows: while it does, the answer keys do nothing.
+pub(crate) fn set_shown(shown: bool) {
+    SHOWN.store(shown, Ordering::Release);
+}
+
+/// Whether the form shows now.
+pub(crate) fn is_shown() -> bool {
+    SHOWN.load(Ordering::Acquire)
+}
+
+/// Whether the demo was playing (in the player and read) at the last look
+/// while the form showed.
+static DEMO_WAS_PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// Notes whether the demo plays as the form opens.
+pub(crate) fn note_demo_at_open(playing: bool) {
+    DEMO_WAS_PLAYING.store(playing, Ordering::Release);
+}
+
+/// Whether a demo load ended the clip the form is for, with the demo
+/// playing now or not: it played at the last look and doesn't now. A demo
+/// loaded by hand mid-review (when the review's lock couldn't wrap
+/// `viewdemo`) keeps the review on the same highlight, so the highlight check
+/// alone leaves the form up over another demo. A form opened while its demo
+/// still loads stays up until it has played.
+pub(crate) fn demo_load_ended(playing_now: bool) -> bool {
+    load_ended(
+        DEMO_WAS_PLAYING.swap(playing_now, Ordering::AcqRel),
+        playing_now,
+    )
+}
+
+fn load_ended(was_playing: bool, playing_now: bool) -> bool {
+    was_playing && !playing_now
+}
+
+/// How long after the form's Esc a menu coming up is Esc's doing. The engine
+/// brings the menu up on the same Esc that cancels the form (seen live on
+/// PRE), within a frame or two.
+const ESC_MENU_WINDOW: Duration = Duration::from_millis(500);
+
+/// When Esc last closed the form, as milliseconds since [`EPOCH`] plus one;
+/// 0 for never. An atomic, since [`menu_is_from_esc`] is asked every frame
+/// (CLAUDE.md: no blocking locks per frame).
+static ESC_AT: AtomicU64 = AtomicU64::new(0);
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+fn millis_now() -> u64 {
+    let epoch = *EPOCH.get_or_init(Instant::now);
+    u64::try_from(epoch.elapsed().as_millis()).unwrap_or(u64::MAX - 1)
+}
+
+/// Notes that Esc closed the form: the menu the same Esc brings up is put
+/// away again, and doesn't open the Review tab.
+pub(crate) fn note_esc() {
+    ESC_AT.store(millis_now() + 1, Ordering::Release);
+}
+
+/// Whether Esc closed the form just now, so a menu coming up is its doing.
+pub(crate) fn menu_is_from_esc() -> bool {
+    match ESC_AT.load(Ordering::Acquire) {
+        0 => false,
+        at => millis_now().saturating_sub(at - 1) < ESC_MENU_WINDOW.as_millis() as u64,
+    }
+}
+
+/// Hands a save to the review's next poll; a second save before it replaces
+/// the first.
+pub(crate) fn save(saved: Saved) {
+    *SAVED.write().unwrap_or_else(|e| e.into_inner()) = Some(saved);
+    HAS_SAVED.store(true, Ordering::Release);
+}
+
+/// The save since the last call, if any. Asked every frame: an atomic load
+/// until there is one.
+pub(crate) fn take_saved() -> Option<Saved> {
+    if !HAS_SAVED.swap(false, Ordering::AcqRel) {
+        return None;
+    }
+    SAVED.write().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// The kill range typed in the From and To boxes, for a highlight with
+/// `kills` kills whose range is `current` now. An empty box keeps its end of
+/// the range; two ends typed the wrong way round are swapped. `Err` says what
+/// to type instead, for the form to show while it stays open.
+pub(crate) fn typed_range(
+    from: &str,
+    to: &str,
+    current: (usize, usize),
+    kills: usize,
+) -> Result<(usize, usize), String> {
+    let kill = |text: &str, keep: usize| -> Result<usize, String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(keep);
+        }
+        text.parse::<usize>()
+            .ok()
+            .filter(|n| (1..=kills).contains(n))
+            .ok_or_else(|| range_hint(kills))
+    };
+    let (a, b) = (kill(from, current.0)?, kill(to, current.1)?);
+    Ok((a.min(b), a.max(b)))
+}
+
+/// What a kill number must be, said when one isn't.
+fn range_hint(kills: usize) -> String {
+    match kills {
+        1 => "This highlight has one kill: type 1.".to_string(),
+        n => format!("Type a kill from 1 to {n}."),
+    }
+}
+
+/// The line under the boxes: how to use the form.
+pub(crate) const KEYS_HINT: &str = "Tab next box   Enter save   Esc cancel";
+
+/// "of 4 kills" beside the To box.
+pub(crate) fn kill_count_text(kills: usize) -> String {
+    match kills {
+        1 => "of 1 kill".to_string(),
+        n => format!("of {n} kills"),
+    }
+}
+
+/// The screen height the layout file's sizes are drawn for: the height at
+/// which a GameUI that scales its font with the screen draws it as the
+/// pre-Anniversary one does (22 px list rows there, 44 px at 1440, #781).
+const LAYOUT_SCREEN_TALL: i32 = 720;
+
+/// How much bigger to make the form than its layout file says, as a
+/// fraction: on a build whose font grows with the screen, by as much as the
+/// font, so the text fits its boxes (the form drew its text past them at
+/// 1440 lines); never smaller, and as laid out everywhere else.
+pub(crate) fn layout_scale(screen_tall: i32, font_scales: bool) -> (i32, i32) {
+    if font_scales && screen_tall > LAYOUT_SCREEN_TALL {
+        (screen_tall, LAYOUT_SCREEN_TALL)
+    } else {
+        (1, 1)
+    }
+}
+
+/// A panel's place and size, `(x, y, wide, tall)`, at `scale`.
+pub(crate) fn scaled_rect(
+    rect: (i32, i32, i32, i32),
+    (num, den): (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let s = |v: i32| v.saturating_mul(num) / den.max(1);
+    (s(rect.0), s(rect.1), s(rect.2), s(rect.3))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_boxes_keep_the_range() {
+        assert_eq!(typed_range("", " ", (2, 3), 4), Ok((2, 3)));
+        assert_eq!(typed_range("1", "", (2, 3), 4), Ok((1, 3)));
+    }
+
+    #[test]
+    fn a_range_typed_backwards_is_swapped() {
+        assert_eq!(typed_range("4", "2", (1, 4), 4), Ok((2, 4)));
+    }
+
+    #[test]
+    fn a_kill_outside_the_highlight_is_refused_with_what_to_type() {
+        // "12": a 2 typed after the 1 that was in the box.
+        assert_eq!(
+            typed_range("12", "4", (1, 4), 4),
+            Err("Type a kill from 1 to 4.".to_string())
+        );
+        assert!(typed_range("0", "", (1, 4), 4).is_err());
+        assert!(typed_range("x", "", (1, 4), 4).is_err());
+        assert_eq!(
+            typed_range("2", "", (1, 1), 1),
+            Err("This highlight has one kill: type 1.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_save_is_taken_once() {
+        save(Saved {
+            key: "k".into(),
+            from: 1,
+            to: 2,
+            note: "n".into(),
+        });
+        assert_eq!(take_saved().map(|s| s.to), Some(2));
+        assert_eq!(take_saved(), None);
+    }
+
+    #[test]
+    fn a_menu_just_after_the_forms_esc_is_the_escs() {
+        note_esc();
+        assert!(menu_is_from_esc());
+        ESC_AT.store(0, Ordering::Release);
+        assert!(!menu_is_from_esc(), "never pressed");
+    }
+
+    #[test]
+    fn a_demo_that_stops_playing_under_the_form_ends_its_clip() {
+        assert!(load_ended(true, false), "loading another demo");
+        assert!(!load_ended(true, true), "still playing");
+        assert!(!load_ended(false, false), "opened while the demo loads");
+        assert!(!load_ended(false, true), "the demo it opened over is read");
+        note_demo_at_open(true);
+        assert!(!demo_load_ended(true));
+        assert!(demo_load_ended(false));
+        assert!(!demo_load_ended(false), "said once");
+    }
+
+    #[test]
+    fn the_form_grows_with_a_font_that_grows_with_the_screen() {
+        let at_1440 = layout_scale(1440, true);
+        assert_eq!(scaled_rect((10, 34, 36, 24), at_1440), (20, 68, 72, 48));
+        assert_eq!(
+            scaled_rect((0, 0, 520, 130), layout_scale(1080, true)),
+            (0, 0, 780, 195)
+        );
+        // The pre-Anniversary font keeps its size: so does the form.
+        assert_eq!(layout_scale(1440, false), (1, 1));
+        // Never smaller than laid out.
+        assert_eq!(layout_scale(600, true), (1, 1));
+    }
+
+    #[test]
+    fn the_kill_count_reads_as_a_phrase() {
+        assert_eq!(kill_count_text(1), "of 1 kill");
+        assert_eq!(kill_count_text(4), "of 4 kills");
+    }
+}

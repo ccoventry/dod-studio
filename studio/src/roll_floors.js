@@ -68,8 +68,8 @@ export async function refreshRollFloors() {
 
   el.hidden = false;
   el.style.cssText =
-    'margin: 0 0 10px; padding: 10px 12px; border: 1px solid #b58900; ' +
-    'border-radius: 4px; background: #2a2410; color: #e8dcb0; font-size: 12px;';
+    'margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--warn-note-border); ' +
+    'border-radius: 4px; background: var(--warn-note-bg); color: var(--warn-note-text); font-size: 12px;';
   el.innerHTML = `
     <strong>${STRINGS.ROLLS.BANNER_TITLE}</strong>
     <ul style="margin:6px 0 6px 18px; padding:0;">

@@ -4,12 +4,9 @@
 // world position on a map's overview image, and summing engagement distances.
 // Pure, so it is tested without a DOM (kill_map.test.js).
 
-// World units to metres. GoldSrc's unit is conventionally an inch.
-export const METRES_PER_UNIT = 0.0254;
-
-export function unitsToMetres(units) {
-  return units * METRES_PER_UNIT;
-}
+// The unit conversion lives with the per-kill distance helpers, which the web
+// analyzer copies; the Kill Map keeps importing it from here.
+export { METRES_PER_UNIT, unitsToMetres } from './kill_distance.js';
 
 // DoD's client lays the overview out with a fixed 1.33 aspect, whatever the
 // screen (CHudDoDMap::DrawOverviewLayer); stock HL uses the screen's.

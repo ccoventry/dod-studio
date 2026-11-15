@@ -1000,23 +1000,12 @@ mod tests {
         let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         let mut demo = open_demo_from_bytes(&bytes).unwrap();
 
-        // Untouched, the output is the input — except each directory entry's
-        // frame count, which the writer always recomputes from the frames it
-        // actually wrote rather than trusting what the engine stored (the
-        // engine's LOADING entry claims 0).
-        let mut expected = bytes.clone();
-        let directory = i32::from_le_bytes(bytes[540..544].try_into().unwrap()) as usize;
-        for (k, entry) in demo.directory.entries.iter().enumerate() {
-            let at = directory + 4 + k * 92 + 80;
-            expected[at..at + 4].copy_from_slice(&(entry.frames.len() as i32).to_le_bytes());
-        }
+        // Untouched, the output is the input, directory and all: the writer
+        // writes the engine's own frame counts.
         let reused = demo
             .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
             .unwrap();
-        assert!(
-            reused == expected,
-            "an untouched real demo did not round-trip"
-        );
+        assert!(reused == bytes, "an untouched real demo did not round-trip");
 
         // Stripped everywhere, every frame the strip opened must be re-encoded
         // and every other copied, which together must equal re-encoding the

@@ -3,8 +3,11 @@
 //! place of patching each demo. `native::patch::runtime_batch` builds the
 //! file; goldsrc-hooks `batch.rs` runs it. Before the file: highlights with
 //! no demo-player times get them from a fresh read of their demo
-//! (`viewdemo_refresh`), and a demo on another drive than the game is copied
-//! into the game's folder for the batch (`source_copies`).
+//! (`viewdemo_refresh`). A demo on another drive than the game plays where it
+//! is, by its full path, when the hook DLL can open it that way (#779); for
+//! an older DLL it is copied into the game's folder for the batch
+//! (`source_copies`). A demo over the engine's entity limit plays from its
+//! trimmed copy (`trimmed_demos`, #207).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +44,7 @@ pub fn refresh_viewdemo_times(app: &tauri::AppHandle, streaks: &mut [CaptureStre
             "capture_status",
             serde_json::json!({
                 "running": true,
+                "stage": "reading_again",
                 "index": i as u32,
                 "total": total,
                 "status": crate::messages::reading_demo_again(&name, i as u32 + 1, total),
@@ -49,47 +53,77 @@ pub fn refresh_viewdemo_times(app: &tauri::AppHandle, streaks: &mut [CaptureStre
         match native::patch::scan_demo_for_highlights(Path::new(demo)) {
             Ok((_, fresh, ..)) => {
                 let filled = fill_times(streaks, demo, &fresh);
-                native::log_markdown(&format!(
-                    "🔎 **Read again** — `{name}` had no demo-player times for its kills (a project saved before they existed); {filled} highlight(s) have them now"
-                ));
+                native::log_markdown(&crate::messages::preview::read_again_filled(&name, filled));
             }
-            Err(e) => native::log_markdown(&format!(
-                "⚠️ **Read again** — `{name}` could not be read for its kills' demo-player times: {e}"
-            )),
+            Err(e) => native::log_markdown(&crate::messages::preview::read_again_failed(&name, e)),
         }
     }
 }
 
 /// Writes the hook's batch file for `jobs` and returns it with the copies it
 /// plays from, or says why this batch has to be patched instead. Nothing is
-/// copied for a batch that then can't run this way.
+/// copied for a batch that then can't run this way. A demo in `trimmed` (the
+/// original's path to its trimmed copy, #207) is played from the copy.
 pub fn prepare(
     jobs: &[PatchJob],
     streaks: &[CaptureStreak],
     config: &PatcherConfig,
+    trimmed: &HashMap<String, PathBuf>,
 ) -> Result<RuntimeBatch, String> {
-    if config.goldsrc_hooks_dll().is_none() {
-        return Err(
-            "the DoD Studio hook DLL isn't installed, and only it can run a batch this way".into(),
-        );
-    }
+    let Some(dll) = config.goldsrc_hooks_dll() else {
+        return Err(crate::messages::preview::HOOK_DLL_NOT_INSTALLED_FOR_BATCH.into());
+    };
+    let other_drives = native::preview_in_place::hook_plays_other_drives(&dll);
     let dod_dir = dod_dir(config)?;
-    let demos = jobs
+    // What the game opens for each demo: its trimmed copy, or itself.
+    let played = |demo: &str| -> String {
+        trimmed
+            .get(demo)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| demo.to_string())
+    };
+    let played_demos: Vec<String> = jobs
         .iter()
         .filter(|j| !j.blocks.is_empty())
-        .map(|j| j.source_demo.as_str());
+        .map(|j| played(&j.source_demo))
+        .collect();
+    let demos: Vec<&str> = played_demos.iter().map(String::as_str).collect();
     let swept = native::patch::source_copies::remove_stale(&dod_dir);
     if swept > 0 {
-        native::log_markdown(&format!(
-            "🧹 **Cleanup** — removed {swept} demo cop{} an earlier batch left in `{}`",
-            if swept == 1 { "y" } else { "ies" },
-            dod_dir.display()
+        native::log_markdown(&crate::messages::preview::stale_demo_copies_removed(
+            swept,
+            dod_dir.display(),
         ));
     }
-    let copies = native::patch::source_copies::plan(&dod_dir, demos)?;
-    let play_as: HashMap<String, PathBuf> = copies
+    let copies = native::patch::source_copies::plan(&dod_dir, demos.iter().copied(), other_drives)
+        .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
+    // Demos on another drive the hook opens by their full path.
+    let mut in_place: Vec<&str> = Vec::new();
+    if other_drives {
+        for &demo in &demos {
+            let path = Path::new(demo);
+            if !in_place.contains(&demo)
+                && !copies.iter().any(|c| c.source.as_path() == path)
+                && native::preview_in_place::viewdemo_arg(&dod_dir, path).is_none()
+            {
+                in_place.push(demo);
+            }
+        }
+    }
+    // Keyed by the original, as the batch file's jobs are: a copy beside
+    // the game of what it plays, else the trimmed copy itself.
+    let play_as: HashMap<String, PathBuf> = jobs
         .iter()
-        .map(|c| (c.source.to_string_lossy().into_owned(), c.copy.clone()))
+        .filter(|j| !j.blocks.is_empty())
+        .filter_map(|j| {
+            let plays = PathBuf::from(played(&j.source_demo));
+            let target = copies
+                .iter()
+                .find(|c| c.source == plays)
+                .map(|c| c.copy.clone())
+                .or_else(|| trimmed.get(&j.source_demo).cloned())?;
+            Some((j.source_demo.clone(), target))
+        })
         .collect();
     // The file first: a batch that can't run this way copies nothing.
     let text = native::patch::runtime_batch::batch_file_playing(
@@ -97,28 +131,38 @@ pub fn prepare(
         streaks,
         config.decal_flush,
         &play_as,
+        // OBS records in real time: each clip waits for it to start (#1109).
+        config.capture_mode == native::patch::CaptureMode::Obs,
     )?;
     if !copies.is_empty() {
         let needed: u64 = copies.iter().map(|c| c.bytes).sum();
         let free = native::sys::disk::get_available_bytes(&dod_dir);
-        native::patch::source_copies::space_check(free, needed)?;
-        native::patch::source_copies::copy_all(&copies)?;
+        native::patch::source_copies::space_check(free, needed)
+            .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
+        native::patch::source_copies::copy_all(&copies)
+            .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
     }
     let path = batch_file_path();
     if let Err(e) = std::fs::write(&path, text) {
         native::patch::source_copies::remove_all(copies.iter().map(|c| c.copy.as_path()));
-        return Err(format!(
-            "could not write the batch file {}: {e}",
-            path.display()
+        return Err(crate::messages::preview::could_not_write_batch_file(
+            path.display(),
+            e,
         ));
     }
-    native::log_markdown(&format!(
-        "⏩ **Seek Between Clips** — the hook DLL plays the original demos and seeks to each clip; \
-         nothing is patched. Batch file: `{}`",
-        path.display()
+    native::log_markdown(&crate::messages::preview::seek_between_clips_batch(
+        path.display(),
     ));
+    for demo in &in_place {
+        native::log_markdown(&crate::messages::preview::demo_played_in_place(
+            Path::new(demo).display(),
+        ));
+    }
     Ok(RuntimeBatch {
         file: path,
         source_copies: copies.into_iter().map(|c| c.copy).collect(),
+        other_drives_in_place: !in_place.is_empty(),
+        // Set by the caller for a batch in the open game (#725).
+        reuse_game: None,
     })
 }

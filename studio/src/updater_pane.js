@@ -3,7 +3,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild, localGitBranch } from './ipc_bridge.js';
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
-import { showUpdateChip, RECHECK_MS } from './update_chip.js';
+import { showUpdateChip, updateButtonsView, RECHECK_MS } from './update_chip.js';
+import { updateDownloadLine, showBytes, showSliding } from './download_progress.js';
+import { showPendingNotes } from './whats_new.js';
 
 function currentChannel() {
   return document.querySelector('#config-update-channel')?.value || 'stable';
@@ -17,8 +19,11 @@ function setStatus(text) {
 // The version a check found, and whether it has downloaded: shown on the menu
 // bar's update button (#868), and kept so a later check neither notifies
 // again for the same version nor undoes "Restart to update".
-const found = { version: null, ready: false };
+const found = { version: null, ready: false, batchRunning: false };
 let notifiedVersion = null;
+// True from Download & Install's click until it fails: that button stays
+// disabled through the download whatever a batch does.
+let installing = false;
 
 // Reflected on the Help menu's Check for Updates item (#update-check-btn,
 // moved from the footer into #help-menu-panel by #122) and on the update
@@ -31,8 +36,8 @@ function setFooterButtonState(updateAvailable, version = null) {
   if (updateAvailable) {
     btn.textContent = STRINGS.FOOTER.UPDATE_AVAILABLE_BUTTON;
     btn.title = STRINGS.FOOTER.UPDATE_AVAILABLE_TITLE;
-    btn.style.color = '#5fb85f';
-    btn.style.borderColor = '#5fb85f';
+    btn.style.color = 'var(--ok-update)';
+    btn.style.borderColor = 'var(--ok-update)';
   } else {
     btn.textContent = STRINGS.FOOTER.CHECK_UPDATES_BUTTON;
     btn.title = STRINGS.FOOTER.CHECK_UPDATES_TITLE;
@@ -111,6 +116,7 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
 
   if (info) {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_AVAILABLE(info.version));
+    showPendingNotes(info.notes);
     if (downloadBtn) downloadBtn.style.display = 'inline-block';
     setFooterButtonState(true, info.version);
     // Once per version: the check runs again every few hours (#868).
@@ -124,6 +130,7 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
     }
   } else {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_UP_TO_DATE);
+    showPendingNotes(null);
     if (downloadBtn) downloadBtn.style.display = 'none';
     setFooterButtonState(false);
   }
@@ -144,21 +151,51 @@ async function reportPublishedVersions() {
   setStatus(STRINGS.UPDATE_MODAL.statusLocalBuild(stable?.version, experimental?.version));
 }
 
+function showUpdateProgress() {
+  const container = document.querySelector('#update-progress-container');
+  if (container) container.style.display = 'block';
+}
+
+// Restart and Install wait out a running batch (#1085). Called each time a
+// batch starts or ends.
+function showBatchHold(batchRunning) {
+  found.batchRunning = batchRunning;
+  showUpdateChip(found);
+  const view = updateButtonsView(batchRunning);
+  const restartBtn = document.querySelector('#restart-to-apply-btn');
+  if (restartBtn) {
+    restartBtn.disabled = view.held;
+    restartBtn.textContent = view.restartText;
+    restartBtn.title = view.restartTitle;
+  }
+  const downloadBtn = document.querySelector('#download-install-update-btn');
+  if (downloadBtn) {
+    downloadBtn.disabled = view.held || installing;
+    downloadBtn.title = view.installTitle;
+  }
+}
+
 async function beginDownloadAndInstall() {
   // Belt and braces: the button is never shown on a local or debug build,
   // and the backend refuses too.
   if (await isLocalOrDebugBuild()) return;
+  installing = true;
   const downloadBtn = document.querySelector('#download-install-update-btn');
   const progressContainer = document.querySelector('#update-progress-container');
   setStatus(STRINGS.UPDATE_MODAL.STATUS_DOWNLOADING);
   if (downloadBtn) downloadBtn.disabled = true;
   if (progressContainer) progressContainer.style.display = 'block';
+  // Sliding until the first byte count arrives.
+  showSliding(document.querySelector('#update-progress-bar'));
   try {
     await downloadAndInstallUpdate();
-  } catch {
+  } catch (err) {
     // ipc_bridge.js already toasted; leave the button re-enabled so the user
     // can retry rather than getting stuck on a dead "Download & Install".
-    if (downloadBtn) downloadBtn.disabled = false;
+    installing = false;
+    if (downloadBtn) downloadBtn.disabled = found.batchRunning;
+    if (progressContainer) progressContainer.style.display = 'none';
+    setStatus(STRINGS.IPC.updateInstallFailed(err));
   }
 }
 
@@ -173,10 +210,13 @@ async function beginDownloadAndInstall() {
  *  control in the app calls it on change (it's also what refreshes
  *  os_notifications.js's live enabledFlags, per its own comment), but these
  *  three never had a listener wired, so toggling them did nothing until
- *  whatever next unrelated action happened to trigger a save. */
-export async function initUpdater(settings, persistSettings) {
+ *  whatever next unrelated action happened to trigger a save.
+ *
+ *  `batchGuard` (batch_guard.js) holds Restart and Install during a batch. */
+export async function initUpdater(settings, persistSettings, batchGuard) {
   const modal = document.querySelector('#update-modal');
   displayCurrentVersion();
+  batchGuard?.onChange(showBatchHold);
 
   for (const id of ['#update-check-btn', '#update-chip']) {
     document.querySelector(id)?.addEventListener('click', () => {
@@ -196,7 +236,9 @@ export async function initUpdater(settings, persistSettings) {
     ?.addEventListener('click', () => checkForUpdatesNow());
 
   document.querySelector('#download-install-update-btn')
-    ?.addEventListener('click', () => beginDownloadAndInstall());
+    ?.addEventListener('click', () => {
+      if (!batchGuard?.refuseDuringBatch()) beginDownloadAndInstall();
+    });
 
   document.querySelector('#restart-to-apply-btn')?.addEventListener('click', async () => {
     // app.restart() is a hard process restart — it never goes through the
@@ -204,21 +246,30 @@ export async function initUpdater(settings, persistSettings) {
     // place settings get saved. Without this, anything changed since the
     // last real save (not just in this modal) is silently lost the moment
     // the app relaunches.
+    if (batchGuard?.refuseDuringBatch()) return;
     await persistSettings?.();
     restartApp();
   });
 
+  // Throttled to ~33 ms in Rust (download_progress.rs), the last count
+  // always sent; then the install, which can't be measured (#957).
   listen('update_download_progress', (event) => {
     const { downloaded, total } = event.payload || {};
-    const bar = document.querySelector('#update-progress-bar');
-    if (bar && total) {
-      bar.max = total;
-      bar.value = downloaded;
-    }
+    showUpdateProgress();
+    showBytes(document.querySelector('#update-progress-bar'), downloaded, total);
+    setStatus(updateDownloadLine(event.payload));
+  });
+
+  listen('update_installing', () => {
+    showUpdateProgress();
+    showSliding(document.querySelector('#update-progress-bar'));
+    setStatus(STRINGS.UPDATE_MODAL.STATUS_INSTALLING);
   });
 
   listen('update_ready', () => {
     found.ready = true;
+    const container = document.querySelector('#update-progress-container');
+    if (container) container.style.display = 'none';
     showUpdateChip(found);
     setStatus(STRINGS.UPDATE_MODAL.STATUS_READY);
     const downloadBtn = document.querySelector('#download-install-update-btn');

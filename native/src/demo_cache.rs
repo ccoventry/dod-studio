@@ -9,6 +9,7 @@
 //! what is left: after a schema bump, most of a folder is cached again in
 //! seconds instead of a parse per demo.
 
+use crate::shared::lock::lock_or_recover;
 use analysis::cache::{NotUpgraded, WorkPlan};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -71,7 +72,8 @@ pub struct CacheProgress {
     /// done: the page's time left goes by bytes (#687).
     pub bytes_to_parse: u64,
     pub bytes_parsed: u64,
-    /// The demo just finished.
+    /// The demo just finished, its full path as given: the Analyzer's player
+    /// read matches it against the folder's demos (#992).
     pub last: Option<String>,
     /// The run is over: every demo done, or stopped.
     pub finished: bool,
@@ -122,15 +124,15 @@ pub fn cache_demos(
             .iter()
             .map(|(why, n)| format!("{n}: {why}"))
             .collect();
-        crate::log_markdown(&format!(
-            "Cache demos: upgraded {} of {} older cache entries{}",
+        let parsing_rest = if reasons.is_empty() {
+            String::new()
+        } else {
+            crate::messages::cache_parsing_the_rest(&reasons)
+        };
+        crate::log_markdown(&crate::messages::cache_entries_upgraded(
             upgrade.upgraded,
             upgrade.total,
-            if reasons.is_empty() {
-                String::new()
-            } else {
-                format!("; parsing the rest ({})", reasons.join(", "))
-            }
+            &parsing_rest,
         ));
     }
     let plan = WorkPlan::new(&root, &paths);
@@ -164,7 +166,7 @@ fn upgrade_entries_with(
         total: paths.len(),
         ..UpgradeProgress::default()
     });
-    on_progress(&progress.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    on_progress(&lock_or_recover(&progress).clone());
     let started = Instant::now();
     // Milliseconds since `started` of the last report, shared by the workers.
     let last_report = AtomicU32::new(0);
@@ -178,7 +180,7 @@ fn upgrade_entries_with(
                     };
                     let result = upgrade(path);
                     let snapshot = {
-                        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut p = lock_or_recover(&progress);
                         p.done += 1;
                         match result {
                             Ok(()) => p.upgraded += 1,
@@ -233,7 +235,7 @@ fn cache_demos_with(
     }));
     // The cache check is done: the page leaves "Checking the analyzer
     // cache…" now rather than after the first demo, which may be a parse.
-    on_progress(&progress.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    on_progress(&lock_or_recover(&progress).clone());
     let next = Arc::new(AtomicUsize::new(0));
     let paths = Arc::new(paths);
     let plan = Arc::new(plan);
@@ -261,7 +263,7 @@ fn cache_demos_with(
                     let Some(path) = paths.get(index) else { break };
                     let result = analyse(path);
                     let snapshot = {
-                        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut p = lock_or_recover(&progress);
                         p.done += 1;
                         if !plan.fresh.get(index).copied().unwrap_or(false) {
                             p.parsed += 1;
@@ -272,13 +274,13 @@ fn cache_demos_with(
                             Ok(false) => {}
                             Err(why) => {
                                 p.failed += 1;
-                                crate::log_markdown(&format!(
-                                    "Cache demos: could not analyse {}: {why}",
-                                    path.display()
+                                crate::log_markdown(&crate::messages::cache_could_not_analyse(
+                                    path.display(),
+                                    why,
                                 ));
                             }
                         }
-                        p.last = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                        p.last = Some(path.to_string_lossy().into_owned());
                         p.clone()
                     };
                     on_progress(&snapshot);
@@ -289,7 +291,7 @@ fn cache_demos_with(
     for worker in workers {
         let _ = worker.join();
     }
-    let mut last = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut last = lock_or_recover(&progress).clone();
     last.finished = true;
     last.cancelled = cancel.load(Ordering::Acquire) && last.done < last.total;
     on_progress(&last);
@@ -340,6 +342,27 @@ mod tests {
         assert_eq!(seen.len(), 9);
         assert_eq!(seen[0].done, 0);
         assert!(seen.last().unwrap().finished);
+    }
+
+    #[test]
+    fn last_is_the_full_path_given() {
+        // The Analyzer's player read matches it against the folder's paths
+        // (#992), so a bare file name would never match.
+        let path = PathBuf::from(r"D:\demos\sub folder\a.dem");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_progress = seen.clone();
+        cache_demos_with(
+            vec![path.clone()],
+            uncached(1),
+            1,
+            Arc::new(AtomicBool::new(false)),
+            UpgradeProgress::default(),
+            move |p| seen_by_progress.lock().unwrap().push(p.clone()),
+            |_| Ok(false),
+        );
+        let seen = seen.lock().unwrap();
+        let expected = path.to_string_lossy().into_owned();
+        assert_eq!(seen[1].last.as_deref(), Some(expected.as_str()));
     }
 
     #[test]

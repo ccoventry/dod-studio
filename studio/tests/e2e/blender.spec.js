@@ -4,7 +4,7 @@
 // the maps and HD styles to pick), that nothing can run until a take and the
 // Crowbar folder are chosen, the requests each step sends, render progress,
 // and cancel.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** blender_manager::BlenderPageStatus, as serde sends it (snake_case). */
 const STATUS = {
@@ -84,7 +84,7 @@ test('each step sends its own request, for the chosen take, map and style', asyn
   await page.evaluate(() => window.__finishRun.resolve({
     saved: ['D:/takes/streak_blender/imported.blend'], images: [], elapsed_secs: 12, work_dir: 'D:/takes/streak_blender',
   }));
-  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12s.');
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
   await expect(page.locator('#blender-results li')).toHaveText(['D:/takes/streak_blender/imported.blend']);
 
   await page.selectOption('#blender-map-select', 'dod_anzio');
@@ -112,11 +112,20 @@ test('render progress, then cancel', async ({ page }) => {
   await page.click('#blender-refresh-btn');
   await page.click('#blender-pick-agr-btn');
   await page.click('#blender-render-btn');
+  // #956: the step's line and the sliding block until frames are counted.
+  await expect(page.locator('#blender-progress')).toHaveText(/^Rendering…/);
+  await expect(page.locator('#blender-bar')).toHaveClass(/indeterminate/);
 
   await page.evaluate(() => window.__mockEmit('blender_progress', {
     line: 'frame 181 (2/977) 1.9s', done: 2, total: 977, frame_secs: 1.9, elapsed_secs: 65,
   }));
-  await expect(page.locator('#blender-progress')).toHaveText('Frame 2 of 977 (1.9 s each), 1m 05s so far');
+  await expect(page.locator('#blender-progress')).toHaveText('Frame 2 of 977 (1.9 s each), 1 min 5 s so far');
+  // Then the bar fills by frames.
+  await expect(page.locator('#blender-bar')).not.toHaveClass(/indeterminate/);
+  await page.evaluate(() => window.__mockEmit('blender_progress', {
+    line: null, done: 489, total: 977, frame_secs: 1.9, elapsed_secs: 990,
+  }));
+  await expect(page.locator('#blender-bar .progress-bar-fill')).toHaveAttribute('style', /width: 50%/);
   await expect(page.locator('#blender-line')).toHaveText('frame 181 (2/977) 1.9s');
 
   await page.click('#blender-cancel-btn');
@@ -125,6 +134,7 @@ test('render progress, then cancel', async ({ page }) => {
   await page.evaluate(() => window.__finishRun.reject('cancelled'));
   await expect(page.locator('#blender-progress')).toContainText('Stopped');
   await expect(page.locator('#blender-render-btn')).toBeEnabled();
+  await expect(page.locator('#blender-bar')).toHaveJSProperty('hidden', true);
 });
 
 test('no game path says so instead of asking the backend', async ({ page }) => {
@@ -134,4 +144,24 @@ test('no game path says so instead of asking the backend', async ({ page }) => {
   await expect(page.locator('#blender-status-text')).toContainText('Set the Half-Life Executable');
   const asked = await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'blender_status'));
   expect(asked).toBe(false);
+});
+
+test('Import names itself with the sliding block, and its clock moves (#956)', async ({ page }) => {
+  await page.clock.install();
+  await loadHarness(page, { status: STATUS, picks: ['D:/takes/streak.agr', 'D:/crowbar'] });
+  await page.click('#blender-refresh-btn');
+  await page.click('#blender-pick-agr-btn');
+  await page.click('#blender-pick-assets-btn');
+  await page.click('#blender-import-btn');
+  await expect(page.locator('#blender-progress')).toHaveText('Importing the demo into Blender…');
+  await expect(page.locator('#blender-bar')).toHaveJSProperty('hidden', false);
+  await expect(page.locator('#blender-bar')).toHaveClass(/indeterminate/);
+  await page.clock.runFor(12_000);
+  await expect(page.locator('#blender-progress')).toHaveText('Importing the demo into Blender… (12.0 s so far)');
+
+  await page.evaluate(() => window.__finishRun.resolve({ saved: [], images: [], elapsed_secs: 12, work_dir: '' }));
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
+  await expect(page.locator('#blender-bar')).toHaveJSProperty('hidden', true);
+  await page.clock.runFor(3_000);
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
 });

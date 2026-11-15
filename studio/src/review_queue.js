@@ -8,6 +8,8 @@
 //    a second review picks up where the first left off.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
+// The game's kill range and note form (#1139) sends those two on their own,
+// before any answer; they change only the Kill Range and Notes.
 //  - Ticked for capture: only when the user turned on "tick Yes" (people who
 //    only time demos don't want rows ticked), and never for Maybe. Skip always
 //    unticks.
@@ -15,6 +17,7 @@
 
 import { listedStreaks } from './queue_filters.js';
 import { streakUid, setCuration, CURATION } from './take_index.js';
+import { updateStreakVisuals } from './streak_visuals.js';
 
 /** The game speaks yes/maybe/no; the row keeps Keep/Maybe/Skip. */
 const ANSWER_FOR_MARK = { [CURATION.KEEP]: 'yes', [CURATION.MAYBE]: 'maybe', [CURATION.SKIP]: 'no' };
@@ -27,6 +30,8 @@ export const REVIEW_COVERS = {
   KEEP: 'keep',
   MAYBE: 'maybe',
   SKIP: 'skip',
+  // The highlights ticked for capture: a last look before a batch.
+  TICKED: 'ticked',
 };
 
 const MARK_FOR_COVERS = {
@@ -44,6 +49,7 @@ export function reviewDemoPaths(checkedPaths, shownPaths) {
 /** True when a review covering `covers` includes this highlight. */
 export function coveredByReview(streak, covers = REVIEW_COVERS.ALL) {
   if (covers === REVIEW_COVERS.UNMARKED) return !streak.curation;
+  if (covers === REVIEW_COVERS.TICKED) return !!streak.selected;
   const mark = MARK_FOR_COVERS[covers];
   return mark ? streak.curation === mark : true;
 }
@@ -124,16 +130,25 @@ export function sortReviewRows(rows, order = REVIEW_ORDER.TIME) {
     : (a, b) => byTime(a, b) || byName(a, b));
 }
 
+/** Each kill's victim and weapon, as Highlight Details lists them, for the
+ *  game's list while the highlight plays (#1140). A scan's `kills[i]` is
+ *  `[tick, seconds, weapon]`; `victims[i]` names who died. */
+export function reviewKills(streak) {
+  return (streak.kills || []).map((kill, i) => ({
+    victim: String(streak.victims?.[i] ?? ''),
+    weapon: String(kill?.[2] ?? ''),
+  }));
+}
+
 /**
  * The highlights to review, in queue order: each ticked demo's highlights
- * with at least `minKills` kills and a Review mark `covers` takes in, in
- * `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
+ * with a Review mark `covers` takes in, in `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
  * list, a function of the demo giving one, or null = everyone's), each with
  * the player the game's camera goes on. A highlight with no demo-player
  * times (a project saved before they existed) can't be found in the demo,
  * so it is counted in `skipped` instead.
  */
-export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null, order = REVIEW_ORDER.TIME) {
+export function buildReviewQueue(demos, checkedPaths, covers = REVIEW_COVERS.ALL, hltvPlayers = null, order = REVIEW_ORDER.TIME) {
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
@@ -143,7 +158,6 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
     if (!checked.has(demo.path)) continue;
     const players = typeof hltvPlayers === 'function' ? hltvPlayers(demo) : hltvPlayers;
     const streaks = listedStreaks(demo)
-      .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
       .filter((s) => coveredByReview(s, covers))
       .filter((s) => {
         const keep = !isHltvHighlight(demo, s) || hltvPlayerChosen(s, players);
@@ -173,6 +187,8 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
         note: streak.notes || '',
         // The game numbers players from 1; the scan from 0 (as capture does).
         spectate: hltv && Number.isInteger(streak.player_index) ? streak.player_index + 1 : null,
+        // Listed on the game screen while the highlight plays (#1140).
+        kills: reviewKills(streak),
       });
     }
     highlights.push(...sortReviewRows(rows, order));
@@ -181,21 +197,38 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
 }
 
 /**
+ * Puts a kill range and note from the game on its row (`{ demo, key, from,
+ * to, note }`, kills from 1, held to the highlight's): what the game's form
+ * saves without an answer (#1139), and the first half of every answer. The
+ * Review mark and the tick are left alone. Returns the streak changed, or
+ * null when the demo or highlight is no longer in the queue.
+ */
+export function applyReviewEdit(demos, edit) {
+  const demo = (demos || []).find((d) => d.path === edit.demo);
+  if (!demo) return null;
+  const streak = (demo.streaks || []).find((s) => streakUid(demo.path, s) === edit.key);
+  if (!streak) return null;
+  const last = Math.max((streak.kills || []).length - 1, 0);
+  const start = Math.min(Math.max((edit.from || 1) - 1, 0), last);
+  const end = Math.min(Math.max((edit.to || 1) - 1, start), last);
+  const moved = streak.start_index !== start || streak.end_index !== end;
+  streak.start_index = start;
+  streak.end_index = end;
+  // The derived fields (ticks, count, duration, timeline) follow the range,
+  // as for every other range edit (#1396).
+  if (moved) updateStreakVisuals(streak);
+  streak.notes = edit.note || '';
+  return streak;
+}
+
+/**
  * Puts one answer on its row; `tickYes` also ticks a Yes row for capture.
  * Returns the streak changed, or null when the demo or highlight is no longer
  * in the queue.
  */
 export function applyReviewAnswer(demos, answer, { tickYes = false } = {}) {
-  const demo = (demos || []).find((d) => d.path === answer.demo);
-  if (!demo) return null;
-  const streak = (demo.streaks || []).find((s) => streakUid(demo.path, s) === answer.key);
+  const streak = applyReviewEdit(demos, answer);
   if (!streak) return null;
-  const last = Math.max((streak.kills || []).length - 1, 0);
-  const start = Math.min(Math.max((answer.from || 1) - 1, 0), last);
-  const end = Math.min(Math.max((answer.to || 1) - 1, start), last);
-  streak.start_index = start;
-  streak.end_index = end;
-  streak.notes = answer.note || '';
   const mark = MARK_FOR_ANSWER[answer.verdict] ?? CURATION.SKIP;
   setCuration(streak, mark);
   if (mark === CURATION.KEEP && tickYes) streak.selected = true;

@@ -107,8 +107,8 @@ KNOWN_FUNCTIONS = {
     0x22330: "CHud::AddHudElem",
     # bool(int section) -- the shared per-section visibility predicate.
     0x2CA80: "CHud::ShouldDraw",
-    # Returns _cl_minimap's value, but only while a spectator predicate holds
-    # and gHUD's FOV field is still 90.
+    # Returns _cl_minimap's value, but only while the renderer is hardware
+    # (engine_studio_api_t.IsHardware) and gHUD's FOV field is still 90.
     0x228E0: "CHud::OverviewMapMode",
     # void(int* x, int* y, int* w, int* h) -- the overview map's rect for the
     # mode above; zeroes all four when the map is down.
@@ -120,8 +120,8 @@ KNOWN_FUNCTIONS = {
     0x30620: "CObjectiveIcons::DrawDigit",
     # (int mode, ...) -- the only writer of the spectator-interface-mode global
     # at +0xe88d4 (modes 1-4). See docs/goldsrc_client_dll_survey.md #11.
-    0x38850: "CHudSpectator::SetMode",
-    # Cycles the interface mode 1->2->4->3->1 and calls SetMode with the
+    0x38850: "CHudSpectator::SetModes",
+    # Cycles the interface mode 1->2->4->3->1 and calls SetModes with the
     # result; the per-frame input handler for whatever key is bound to it.
     0x386A0: "CHudSpectator::HandleButtonsDown",
 }
@@ -133,7 +133,7 @@ KNOWN_FUNCTIONS = {
 # after it with no padding, so a linear scan reads straight through into the
 # next function and keeps going until *that* one hits padding -- 879 bytes,
 # for a function that is actually 45. Found by disassembly while chasing
-# #296 (`ds_hud_hide_element`) and confirmed again here for #269.
+# #296 (`ds_hud_hide_element`, retired in #342) and confirmed again here for #269.
 # `elements()` consults this before trusting the heuristic.
 KNOWN_FUNCTION_ENDS = {
     0x38000: 0x3802D,  # CHudSpectator::Draw

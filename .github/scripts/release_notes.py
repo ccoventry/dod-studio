@@ -21,7 +21,11 @@ What it does:
    Fixed / Changed. An explicit `New:` / `Fixed:` / `Changed:` prefix wins;
    otherwise a `bug` label means Fixed, `enhancement` means New, and anything
    else is Changed.
-4. Prints Markdown: an optional hand-written summary, the grouped notes, a
+4. Drops the PRs a later PR in the same range supersedes: a body line
+   `Supersedes release note: #710, #731` says that PR's own note replaces the
+   notes of the PRs it renames or changes, so the release never names a
+   feature that no longer exists. Every drop is logged to stderr.
+5. Prints Markdown: an optional hand-written summary, the grouped notes, a
    collapsed list of every merged PR, and a compare link.
 
 Hand-written summary: when `.github/release_notes/<version>.md` exists for the
@@ -58,6 +62,13 @@ _NOTE_RE = re.compile(
     r"(?:[ \t]*:[ \t]*(?:\*\*|__)?|(?:\*\*|__)[ \t]*:)[ \t]*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
+# `Supersedes release note: #710, #731` / `**Supersedes release notes:** 710 731`
+_SUPERSEDES_RE = re.compile(
+    r"^[ \t]*(?:[-*][ \t]+)?(?:\*\*|__)?supersedes[ \t]+release[ \t]+notes?"
+    r"(?:[ \t]*:[ \t]*(?:\*\*|__)?|(?:\*\*|__)[ \t]*:)[ \t]*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PR_TOKEN_RE = re.compile(r"^#?(\d+)$")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _PREFIX_RE = re.compile(
     r"^(new|added|fixed|fix|changed|change)[ \t]*:[ \t]*(.*)$", re.IGNORECASE | re.DOTALL
@@ -136,6 +147,105 @@ def group_notes(prs: list[PullRequest]) -> dict[str, list[tuple[str, int]]]:
         if text:
             groups[group].append((text, pr.number))
     return groups
+
+
+def extract_superseded(body: str | None) -> list[int]:
+    """PR numbers on every `Supersedes release note:` line, in order, unique.
+
+    Numbers may carry a `#` and be separated by commas or spaces; other words
+    on the line ("and") are ignored. HTML comments are stripped first, like
+    the `Release note:` line, so the template's hint never counts.
+    """
+    if not body:
+        return []
+    text = _HTML_COMMENT_RE.sub("", body.replace("\r\n", "\n"))
+    numbers: list[int] = []
+    for match in _SUPERSEDES_RE.finditer(text):
+        for token in re.split(r"[,\s]+", match.group(1)):
+            token_match = _PR_TOKEN_RE.match(token.strip("`*_.;"))
+            if token_match:
+                number = int(token_match.group(1))
+                if number not in numbers:
+                    numbers.append(number)
+    return numbers
+
+
+def _list(numbers: list[int]) -> str:
+    return ", ".join(f"#{n}" for n in numbers)
+
+
+def apply_supersedes(prs: list[PullRequest]) -> tuple[list[PullRequest], list[str]]:
+    """(the PRs that stay, log lines) after dropping superseded PRs.
+
+    A PR named on a `Supersedes release note:` line of another PR in the same
+    range is dropped from the notes and from the full list; the superseding
+    PR's own note stands for it. Chains collapse (A supersedes B supersedes C
+    leaves A). A number outside the range shipped in an earlier release, so
+    its note is already out: that gets a notice and nothing else. A cycle
+    keeps its highest-numbered PR, the latest one.
+    """
+    by_number = {pr.number: pr for pr in prs}
+    log: list[str] = []
+    superseded_by: dict[int, int] = {}
+    for pr in sorted(prs, key=lambda p: p.number):
+        for number in extract_superseded(pr.body):
+            if number == pr.number:
+                continue
+            if number not in by_number:
+                log.append(
+                    f"notice: #{pr.number} supersedes #{number}, which is not in this release "
+                    f"(shipped earlier?); its note is already out and cannot be dropped"
+                )
+                continue
+            # Two PRs superseding the same one: the later PR wins.
+            superseded_by[number] = max(superseded_by.get(number, 0), pr.number)
+
+    while True:
+        cycle = _find_cycle(superseded_by)
+        if not cycle:
+            break
+        keep = max(cycle)
+        del superseded_by[keep]
+        log.append(
+            f"warning: {_list(sorted(cycle))} supersede each other; #{keep} (the latest) is kept"
+        )
+
+    def head(number: int) -> int:
+        while number in superseded_by:
+            number = superseded_by[number]
+        return number
+
+    lost: dict[int, list[int]] = {}
+    for number in sorted(superseded_by):
+        by, top = superseded_by[number], head(number)
+        log.append(
+            f"#{number} dropped: superseded by #{by}"
+            + (f" (in turn superseded by #{top})" if top != by else "")
+        )
+        if extract_release_note(by_number[number].body) is not None:
+            lost.setdefault(top, []).append(number)
+    for top, numbers in sorted(lost.items()):
+        if extract_release_note(by_number[top].body) is None:
+            log.append(
+                f"warning: #{top} supersedes {_list(numbers)} but has no release note of its own; "
+                f"their notes are dropped with nothing in their place"
+            )
+
+    kept = [pr for pr in prs if pr.number not in superseded_by]
+    return kept, log
+
+
+def _find_cycle(edges: dict[int, int]) -> list[int] | None:
+    """The PR numbers of one cycle in `edges` (dropped -> superseder), or None."""
+    for start in sorted(edges):
+        path: list[int] = []
+        number = start
+        while number in edges and number not in path:
+            path.append(number)
+            number = edges[number]
+        if number in path:
+            return path[path.index(number):]
+    return None
 
 
 def summary_version(version: str | None) -> str | None:
@@ -343,7 +453,9 @@ def main(argv: list[str] | None = None) -> int:
     repo = args.repo or default_repo(args.remote)
 
     merges, first_parent = range_subjects(previous, target_sha)
-    prs = fetch_prs(repo, find_pr_numbers(merges, first_parent))
+    prs, supersede_log = apply_supersedes(fetch_prs(repo, find_pr_numbers(merges, first_parent)))
+    for line in supersede_log:
+        print(f"release notes: {line}", file=sys.stderr)
 
     summary = None
     version = summary_version(args.version)
@@ -354,9 +466,11 @@ def main(argv: list[str] | None = None) -> int:
 
     text = render(prs, repo, previous, target_sha, summary=summary, header=args.header)
     noted = sum(len(v) for v in group_notes(prs).values())
+    dropped = sum(" dropped: " in line for line in supersede_log)
     print(
         f"release notes: {previous}..{target_sha[:10]}: {len(prs)} PRs, {noted} with a release note"
-        + (f", summary {version}.md" if summary else ""),
+        + (f", summary {version}.md" if summary else "")
+        + (f", {dropped} superseded" if dropped else ""),
         file=sys.stderr,
     )
     if args.output:

@@ -1,9 +1,9 @@
 //! Directory junctions (#376): create one, read where it points, and unlink
 //! it without touching what it points at.
 //!
-//! A junction is how a demo folder on another drive gets a path under the
-//! game's `dod/` folder, which is the only kind of path `viewdemo` takes
-//! (`demo_links`). It is made through the Win32 reparse-point call rather
+//! Studio no longer makes one for a user (the Link Folder to Game button went
+//! in #779); what is left is the folder-walk tests, which need a real link to
+//! prove a walk skips it. It is made through the Win32 reparse-point call rather
 //! than `cmd /c mklink /J`: `cmd` misreads `&`, `^` and `%` in a folder name,
 //! and the call needs no admin rights on NTFS.
 //!

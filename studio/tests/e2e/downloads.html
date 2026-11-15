@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  Harness for the update and map downloads' progress (#957): the update
+  window's status line and bar from index.html (updater_pane.js), and the Maps
+  needed banner (map_warnings.js), with Tauri's IPC mocked (vite.config.e2e.js).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>downloads test harness</title>
+</head>
+<body>
+  <div id="update-modal" class="modal">
+    <span id="update-status-text">Up to date.</span>
+    <div id="update-progress-container" style="display: none;">
+      <progress id="update-progress-bar" max="100" value="0"></progress>
+    </div>
+    <button id="download-install-update-btn">Download & Install</button>
+    <button id="restart-to-apply-btn" style="display: none;">Restart to Apply</button>
+  </div>
+
+  <div id="map-warning-banner" hidden></div>
+
+  <script type="module">
+    import { initUpdater } from '/src/updater_pane.js';
+    import { initMapWarnings, refreshMapWarnings } from '/src/map_warnings.js';
+
+    // A download the test finishes by hand: `window.__finishMap()`.
+    window.__mockInvokeHandlers.check_demo_maps = () => [
+      { state: 'missing', mapName: 'dod_x', demoName: 'a.dem', expectedChecksum: 1 },
+      { state: 'missing', mapName: 'dod_y', demoName: 'b.dem', expectedChecksum: 2 },
+    ];
+    window.__mockInvokeHandlers.download_map = () =>
+      new Promise((resolve) => {
+        window.__finishMap = () => resolve({ alreadyCorrect: false, replacedPath: null });
+      });
+
+    await initUpdater({ auto_check_updates: false }, null);
+    initMapWarnings(() => 'C:/Games/Half-Life/hl.exe');
+    await refreshMapWarnings(['a.dem', 'b.dem'], 'C:/Games/Half-Life/hl.exe');
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

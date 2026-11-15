@@ -49,8 +49,11 @@ function resolveAndClose(result) {
  * and a hover text). `footer`: an optional line after the list.
  * `focusConfirm`: the confirm button takes focus, so Enter picks it; only for
  * a question whose yes loses nothing.
+ * `destructive`: the confirm button is red, for a yes that deletes, recycles,
+ * overwrites or throws work away; every other confirm uses the accent colour
+ * (#880).
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, focusConfirm = false } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, hideConfirm = false, focusConfirm = false, destructive = false } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -65,7 +68,7 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
       if (item.secondary) {
         const secondary = document.createElement('div');
         secondary.textContent = item.secondary;
-        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted, #999); word-break: break-word;';
+        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted); word-break: break-word;';
         entry.append(secondary);
       }
       return entry;
@@ -76,7 +79,13 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
     footerEl.textContent = footer || '';
     footerEl.style.display = footer ? '' : 'none';
   }
-  if (okBtn) okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
+  if (okBtn) {
+    okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
+    // `hideConfirm`: a wait the code ends (dismissThemedConfirm), not a question.
+    okBtn.style.display = hideConfirm ? 'none' : '';
+    okBtn.classList.toggle('danger-btn', !!destructive);
+    okBtn.classList.toggle('primary-btn', !destructive);
+  }
   if (cancelBtn) {
     cancelBtn.textContent = cancelLabel || STRINGS.THEMED_CONFIRM_MODAL.CANCEL_BUTTON;
     // `hideCancel`: a notice with one button, not a question.
@@ -85,4 +94,38 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
   if (modal) modal.style.display = 'flex';
   if (focusConfirm) okBtn?.focus();
   return new Promise((resolve) => { pendingResolve = resolve; });
+}
+
+/** Rewrites the open dialog's message, for a line worked out after it
+ *  opened (#937's rescan time) or a wait that counts down. Does nothing
+ *  once it has closed. */
+export function setThemedConfirmMessage(message) {
+  if (pendingResolve && messageEl) messageEl.textContent = message;
+}
+
+/** Closes the open dialog from code, answering it with `result`: for a
+ *  wait that ends on its own. Does nothing when no dialog is open. */
+export function dismissThemedConfirm(result) {
+  if (pendingResolve) resolveAndClose(result);
+}
+
+/** Whether a dialog is open now. A second `themedConfirm` replaces the open
+ *  one and its caller never hears back, so a prompt nobody clicked for
+ *  (batch_resume.js) waits for this to clear. */
+export function isThemedConfirmOpen() {
+  return pendingResolve !== null;
+}
+
+/** Whether any dialog is on screen: this one, or one of the app's own
+ *  `.modal` windows (Render Batch Interrupted shows its own, not through
+ *  themedConfirm). Prompts that open by themselves at start-up wait for this
+ *  to clear, so they come one at a time instead of on top of each other.
+ *  `doc` and `view` are for tests. */
+export function isAnyDialogOpen(doc = globalThis.document, view = globalThis) {
+  if (isThemedConfirmOpen()) return true;
+  if (!doc?.querySelectorAll) return false;
+  return [...doc.querySelectorAll('.modal')].some((el) => {
+    const display = view?.getComputedStyle ? view.getComputedStyle(el).display : el.style?.display;
+    return display !== 'none';
+  });
 }

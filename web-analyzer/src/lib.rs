@@ -1,6 +1,15 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 use analysis::Analysis;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+mod heap;
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOC: heap::GrowInSteps = heap::GrowInSteps;
 
 #[wasm_bindgen(start)]
 fn init() {

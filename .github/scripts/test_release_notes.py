@@ -11,8 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_notes import (  # noqa: E402
     PullRequest,
+    apply_supersedes,
     classify,
     extract_release_note,
+    extract_superseded,
     find_pr_numbers,
     group_notes,
     pick_previous_tag,
@@ -130,6 +132,123 @@ class Grouping(unittest.TestCase):
         text = render([PullRequest(1, "x")], "o/r", "v0.1.4", "abc")
         self.assertIn("No release notes were written", text)
         self.assertNotIn("What's new", text)
+
+
+class ExtractSuperseded(unittest.TestCase):
+    def test_forms(self):
+        cases = {
+            "Supersedes release note: #710, #731": [710, 731],
+            "Supersedes release notes: 710 731": [710, 731],
+            "supersedes RELEASE NOTE:#710,731": [710, 731],
+            "**Supersedes release note:** #710 and #731": [710, 731],
+            "**Supersedes release notes**: #710": [710],
+            "- Supersedes release note: `#710`, #731.": [710, 731],
+            "Supersedes release note: #710, #710": [710],
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(extract_superseded(f"Release note: x\n{line}\r\nmore"), expected)
+
+    def test_several_lines_add_up(self):
+        body = "Supersedes release note: #1\nSupersedes release note: #2, #1"
+        self.assertEqual(extract_superseded(body), [1, 2])
+
+    def test_absent_comment_and_mid_line(self):
+        self.assertEqual(extract_superseded(None), [])
+        self.assertEqual(extract_superseded("Release note: Supersedes release note: #5"), [])
+        self.assertEqual(extract_superseded("<!--\nSupersedes release note: #5\n-->"), [])
+        self.assertEqual(extract_superseded("This supersedes release note: #5"), [])
+
+    def test_does_not_count_as_the_release_note(self):
+        body = "Supersedes release note: #5\nRelease note: New: Ds names"
+        self.assertEqual(extract_release_note(body), "New: Ds names")
+
+    def test_repo_pr_template_hint_is_not_a_line(self):
+        template = Path(__file__).resolve().parent.parent / "pull_request_template.md"
+        self.assertEqual(extract_superseded(template.read_text(encoding="utf-8")), [])
+
+
+class Supersedes(unittest.TestCase):
+    def numbers(self, prs):
+        return [pr.number for pr in prs]
+
+    def test_drops_superseded_in_range_and_logs_it(self):
+        prs = [
+            PullRequest(710, "old", "Release note: New: dodstudio_spec_x"),
+            PullRequest(731, "older", "Release note: New: dodstudio_hud_y"),
+            PullRequest(800, "other", "Release note: Fixed: Z"),
+            PullRequest(1013, "rename", "Release note: Changed: Commands are ds_*\nSupersedes release note: #710, #731"),
+        ]
+        kept, log = apply_supersedes(prs)
+        self.assertEqual(self.numbers(kept), [800, 1013])
+        self.assertIn("#710 dropped: superseded by #1013", log)
+        self.assertIn("#731 dropped: superseded by #1013", log)
+        groups = group_notes(kept)
+        self.assertEqual(groups["Changed"], [("Commands are ds_*", 1013)])
+        self.assertEqual(groups["New"], [])
+        text = render(kept, "o/r", "v0.1.4", "abc")
+        self.assertNotIn("dodstudio_", text)
+        self.assertIn("All 2 pull requests", text)
+
+    def test_out_of_range_is_ignored_with_a_notice(self):
+        prs = [PullRequest(1013, "rename", "Release note: X\nSupersedes release note: #600, #710"),
+               PullRequest(710, "old", "Release note: Y")]
+        kept, log = apply_supersedes(prs)
+        self.assertEqual(self.numbers(kept), [1013])
+        notices = [line for line in log if line.startswith("notice:")]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("#600", notices[0])
+        self.assertIn("cannot be dropped", notices[0])
+
+    def test_chain_keeps_only_the_head(self):
+        prs = [
+            PullRequest(1, "c", "Release note: C"),
+            PullRequest(2, "b", "Release note: B\nSupersedes release note: #1"),
+            PullRequest(3, "a", "Release note: A\nSupersedes release note: #2"),
+        ]
+        kept, log = apply_supersedes(prs)
+        self.assertEqual(self.numbers(kept), [3])
+        self.assertEqual(group_notes(kept)["Changed"], [("A", 3)])
+        self.assertIn("#1 dropped: superseded by #2 (in turn superseded by #3)", log)
+        self.assertIn("#2 dropped: superseded by #3", log)
+        self.assertFalse(any(line.startswith("warning:") for line in log))
+
+    def test_superseder_without_a_note_warns_and_still_drops(self):
+        for own in ("Release note: none", "no note line at all"):
+            with self.subTest(own=own):
+                prs = [
+                    PullRequest(5, "old", "Release note: New: Old thing"),
+                    PullRequest(6, "internal", "Release note: none"),
+                    PullRequest(9, "remove", f"{own}\nSupersedes release note: #5 #6"),
+                ]
+                kept, log = apply_supersedes(prs)
+                self.assertEqual(self.numbers(kept), [9])
+                warnings = [line for line in log if line.startswith("warning:")]
+                self.assertEqual(len(warnings), 1)
+                # Only #5 had a note to lose.
+                self.assertIn("#9 supersedes #5 but has no release note", warnings[0])
+
+    def test_superseded_pr_leaves_the_full_list_too(self):
+        prs = [PullRequest(5, "Old title"), PullRequest(9, "New title", "Supersedes release note: #5")]
+        kept, _ = apply_supersedes(prs)
+        text = render(kept, "o/r", "v0.1.4", "abc")
+        self.assertNotIn("Old title", text)
+        self.assertIn("New title (#9)", text)
+
+    def test_cycle_keeps_the_latest(self):
+        prs = [
+            PullRequest(4, "a", "Release note: A\nSupersedes release note: #8"),
+            PullRequest(8, "b", "Release note: B\nSupersedes release note: #4"),
+        ]
+        kept, log = apply_supersedes(prs)
+        self.assertEqual(self.numbers(kept), [8])
+        self.assertTrue(any("supersede each other" in line for line in log))
+
+    def test_self_reference_and_no_lines_change_nothing(self):
+        prs = [PullRequest(3, "a", "Release note: A\nSupersedes release note: #3"), PullRequest(4, "b")]
+        kept, log = apply_supersedes(prs)
+        self.assertEqual(self.numbers(kept), [3, 4])
+        self.assertEqual(log, [])
 
 
 class Ranges(unittest.TestCase):

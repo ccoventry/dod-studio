@@ -1,3 +1,6 @@
+// Fixed-width slices of the demo bytes; error paths for these are tracked on #1179.
+#![allow(clippy::unwrap_used)]
+
 // patch/scanner.rs
 // Life-bounded highlight scanner, HLTV detection, and the check that a
 // scanned demo is still the same file when a batch starts.
@@ -104,10 +107,7 @@ fn leading_frame_times(
                             .unwrap(),
                     ) as usize;
                     if len > MAX_PAYLOAD_LIMIT_BYTES {
-                        return Err(format!(
-                            "Scanner alignment lost! Read impossible packet size: {} bytes at pos {}",
-                            len, pos
-                        ));
+                        return Err(crate::messages::scanner_alignment_lost(len, pos));
                     }
                     pos += total_fixed_size + len;
                 }
@@ -141,13 +141,13 @@ fn leading_frame_times(
     Ok((frame_times, stopped || !truncated))
 }
 
-/// The Capture page's rows: one per highlight, as `analysis::highlights`
+/// The Highlights page's rows: one per highlight, as `analysis::highlights`
 /// defines them, each built on `demo` (the fields every row of the demo
 /// shares). Whose rows exist is decided here and nowhere later (#573):
 /// `Highlights::shown`, the same rule the in-game Highlights tab applies
 /// (D18: a POV demo's recorder, an HLTV demo's everyone), so the two list
-/// the same highlights; the frontend only narrows them by Min Kills and its
-/// Player filter. Saved projects index these rows in this order. The slot is
+/// the same highlights; the frontend only narrows them by its Player
+/// filter. Saved projects index these rows in this order. The slot is
 /// the one the kills were scored from, which capture spectates (#706), so a
 /// player who left before the demo ended keeps theirs; only a highlight
 /// whose slot is unknown is skipped, as capture needs one to anchor the
@@ -240,20 +240,21 @@ pub fn scan_demo_for_highlights_with_analysis(
 
     // The analysis comes from the analyzer cache when the Demo Analyzer (or an
     // earlier scan) already parsed this exact file: ~15 ms instead of a full
-    // parse of up to several seconds. A miss parses and fills the cache.
+    // parse of up to several seconds. A miss parses and fills the cache,
+    // without decoding the demo's sounds, which no analyzer reads (#37).
     let (_, analysis, _) = crate::run_analyzer_cached(&path.to_path_buf(), |_, _| {})
-        .map_err(|e| format!("Failed to parse demo: {}", e))?;
+        .map_err(crate::messages::scan_failed_to_parse_demo)?;
 
     // `frame_times` only covers the demo's opening segment (the walk stops at
     // the first section boundary), so it only needs the start of the file.
     let file_len = std::fs::metadata(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?
+        .map_err(crate::messages::scan_failed_to_read_file)?
         .len() as usize;
     let prefix = read_prefix(path, LEADING_FRAMES_PREFIX_BYTES)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+        .map_err(crate::messages::scan_failed_to_read_file)?;
     let (mut frame_times, complete) = leading_frame_times(&prefix, file_len, &analysis)?;
     if !complete {
-        let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
+        let bytes = std::fs::read(path).map_err(crate::messages::scan_failed_to_read_file)?;
         frame_times = leading_frame_times(&bytes, file_len, &analysis)?.0;
     }
 
@@ -627,7 +628,7 @@ mod tests {
         }
     }
 
-    /// How many rows the Capture page showed before #573: every highlight
+    /// How many rows the Highlights page showed before #573: every highlight
     /// with a known slot was scanned, and the frontend kept the recorder's
     /// slot's (`local_player_index`) when the demo had one.
     fn rows_before_573(analysis: &analysis::Analysis) -> usize {

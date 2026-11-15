@@ -10,6 +10,7 @@
 
 import { parseTemplate, buildName, halfWord } from './clip_name.js';
 import { nameWithoutTag, sideTag, sideTeams } from './project_teams.js';
+import { useAsName } from './player_alias.js';
 import { placeholderGroups, placeholderNames, WITH_FALLBACK } from './placeholder_catalogue.js';
 import { fromCacheText, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
@@ -71,6 +72,37 @@ export function listProgressView(p = {}, parseMs = 0) {
   return { pct, text };
 }
 
+/**
+ * Rename (`kind` 'apply', `count` pairs) or Undo ('undo') on its way, from a
+ * `demo_rename_apply_progress` event `{ done, total }` (none yet: `null`),
+ * as `{ text, pct, indeterminate }` for progress_view.js's `showBar` (#958).
+ * The block slides until the first file is done.
+ */
+export function renameProgressView(kind, p, count = 0) {
+  const undo = kind === 'undo';
+  if (!p?.total) {
+    return {
+      text: undo ? STRINGS.DEMO_RENAME.UNDO_STARTING : STRINGS.DEMO_RENAME.renamingStart(count),
+      pct: 0,
+      indeterminate: true,
+    };
+  }
+  const done = Math.min(p.done ?? 0, p.total);
+  return {
+    text: undo ? STRINGS.DEMO_RENAME.puttingBack(done, p.total) : STRINGS.DEMO_RENAME.renaming(done, p.total),
+    pct: (100 * done) / p.total,
+    indeterminate: false,
+  };
+}
+
+/** The line Rename or Undo ends on: how many, how long, and what failed. */
+export function renameDoneLine(kind, outcome, secs) {
+  const count = outcome?.renamed?.length ?? 0;
+  const failed = outcome?.failed?.length ?? 0;
+  const line = kind === 'undo' ? STRINGS.DEMO_RENAME.putBackIn(count, secs) : STRINGS.DEMO_RENAME.renamedIn(count, secs);
+  return failed ? line + STRINGS.DEMO_RENAME.notRenamed(failed) : line;
+}
+
 /** A file name made plain: letters, digits, `-` and `_` only. Anything
  *  else (spaces, brackets, `#`, emoji) becomes `_`, accents are dropped,
  *  runs of `_` collapse, and none is left at either end. */
@@ -93,7 +125,7 @@ function localDate(unixSecs) {
 const isAxis = (side) => side === 'Axis';
 
 /** Every placeholder's value for one demo. `null` means missing. */
-export function demoValues(facts, projectTeams) {
+export function demoValues(facts, projectTeams, useAsFor = useAsName) {
   const { allies, axis, team1, team2 } = sideTeams(facts, projectTeams);
   const known = facts?.side === 'Allies' || facts?.side === 'British' || isAxis(facts?.side);
   const number = (n) => (n === null || n === undefined ? null : String(n));
@@ -102,9 +134,11 @@ export function demoValues(facts, projectTeams) {
     : isAxis(facts.side)
       ? ((facts.teams || []).find((t) => t.side === 'British') ? 'British' : 'Allies')
       : 'Axis';
+  // The Players tab's Use as name (#686), for the recording player.
+  const useAs = useAsFor(facts?.steam_id);
   return {
-    name: nameWithoutTag(facts?.name || null, sideTag(facts, facts?.side)),
-    full_name: facts?.name || null,
+    name: useAs || nameWithoutTag(facts?.name || null, sideTag(facts, facts?.side)),
+    full_name: useAs || facts?.name || null,
     kills: number(facts?.kills),
     deaths: number(facts?.deaths),
     faction: known ? facts.side : null,

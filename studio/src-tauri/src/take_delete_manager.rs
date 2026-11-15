@@ -73,7 +73,7 @@ fn unique(take_folders: Vec<String>) -> Vec<String> {
 
 /// The configured Destinations folders: the only places a take is ever
 /// deleted from.
-fn capture_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
+pub(crate) fn capture_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
     settings
         .inner
         .lock()
@@ -200,15 +200,14 @@ pub async fn delete_take_folders(
             progress.report(i);
             match recycle_take(plan) {
                 Ok(()) => {
-                    log_markdown(&format!(
-                        "[take-delete] moved {} ({} bytes) to the Recycle Bin",
+                    log_markdown(&crate::messages::take_delete::moved_to_recycle_bin(
                         plan.take_folder.display(),
-                        plan.size_bytes
+                        plan.size_bytes,
                     ));
                     result.deleted.push(TakeSize::of(folder, plan));
                 }
                 Err(error) => {
-                    log_markdown(&format!("[take-delete] {}", error));
+                    log_markdown(&crate::messages::take_delete::delete_failed(&error));
                     result.failed.push(TakeDeleteFailure {
                         take_folder: folder.clone(),
                         error,

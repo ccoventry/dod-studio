@@ -15,9 +15,15 @@ import {
   crosshairSpriteImage,
   setPlayerOverrides,
   indexDemoPlayers,
+  filesExist,
+  takePovOwnSprayNotice,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { showToast } from './toast.js';
+import { showBar, hideBar } from './progress_view.js';
 import { createCrosshairImport } from './crosshair_import_ui.js';
+import { setUseAsTable } from './player_alias.js';
+import { createNameplateCheck, nameplateCell } from './nameplate_cell.js';
 import {
   normalizePlayers,
   playerOptions as groupOptions,
@@ -28,6 +34,7 @@ import {
   playerLabel,
   tileRect,
   missingPngs,
+  playersBarView,
   missingSprites,
   canPreviewSprites,
   OWN_SPRAY,
@@ -35,6 +42,9 @@ import {
   GRID,
   TILES,
 } from './players.js';
+
+// A one-time notice worth reading: longer than a status toast.
+const POV_OWN_SPRAY_TOAST_MS = 15000;
 
 // The setting as last edited or loaded.
 let current = normalizePlayers(null);
@@ -52,6 +62,9 @@ let openPicker = null;
 const spriteImages = new Map();
 let imagesFor = '';
 
+// Which nameplate files are gone, asked once per set of paths (#429).
+const nameplates = createNameplateCheck({ exists: (paths) => filesExist(paths), onChange: () => renderRows() });
+
 const $ = (sel) => document.querySelector(sel);
 const S = () => STRINGS.PLAYERS;
 
@@ -63,11 +76,13 @@ export function getPlayers() {
 /** Sets the tab from saved settings. */
 export function setPlayers(raw) {
   current = normalizePlayers(raw);
+  setUseAsTable(current);
   render();
 }
 
 function edit(next) {
   current = next;
+  setUseAsTable(current);
   render();
   onEdit();
 }
@@ -216,9 +231,14 @@ function renderRows() {
   }
   const head = document.createElement('div');
   head.className = 'players-row players-head';
-  for (const text of [S().COLUMN_PLAYER, S().COLUMN_SPRAY, S().COLUMN_CROSSHAIR, '']) {
+  const columns = [
+    [S().COLUMN_PLAYER], [S().COLUMN_USE_AS, S().USE_AS_TITLE], [S().COLUMN_NAMEPLATE, S().NAMEPLATE_TITLE],
+    [S().COLUMN_SPRAY], [S().COLUMN_CROSSHAIR], [''],
+  ];
+  for (const [text, title] of columns) {
     const cell = document.createElement('span');
     cell.textContent = text;
+    if (title) cell.title = title;
     head.append(cell);
   }
   const rows = [head];
@@ -229,6 +249,23 @@ function renderRows() {
     who.className = 'players-name';
     who.textContent = playerLabel(row);
     who.title = row.steam_id ? S().MATCHED_BY_STEAMID : S().MATCHED_BY_NAME;
+    const useAs = document.createElement('input');
+    useAs.type = 'text';
+    useAs.className = 'players-use-as';
+    useAs.value = row.use_as || '';
+    useAs.placeholder = S().USE_AS_PLACEHOLDER;
+    useAs.title = row.steam_id ? S().USE_AS_TITLE : S().USE_AS_NEEDS_STEAMID;
+    useAs.disabled = !row.steam_id;
+    useAs.setAttribute('aria-label', S().useAsAria(playerLabel(row)));
+    // On change, not on every key: an edit redraws the table.
+    useAs.addEventListener('change', () => {
+      edit(updatePlayer(current, i, { use_as: useAs.value }));
+    });
+    const nameplate = nameplateCell(
+      { nameplate: row.nameplate, steam_id: row.steam_id, who: playerLabel(row) },
+      { missing: nameplates.isMissing(row.nameplate) },
+      (path) => edit(updatePlayer(current, i, { nameplate: path })),
+    );
     const spray = fileSelect(pngs, row.png, S().FALLBACK_SPRAY_OPTION, S().pngMissingOption, (png) => {
       edit(updatePlayer(current, i, { png }));
     }, [{ value: OWN_SPRAY, label: S().FROM_DEMO_OPTION, title: S().FROM_DEMO_TITLE }]);
@@ -246,7 +283,7 @@ function renderRows() {
       openPicker = null;
       edit(removePlayer(current, i));
     });
-    item.append(who, spray, crosshair, remove);
+    item.append(who, useAs, nameplate, spray, crosshair, remove);
     rows.push(item);
     if (openPicker === i && row.crosshair_sprite) {
       rows.push(tilePicker(row.crosshair_sprite, row.crosshair_tile, (t) => {
@@ -256,6 +293,7 @@ function renderRows() {
     }
   });
   list.replaceChildren(...rows);
+  nameplates.watch(current.players.map((p) => p.nameplate));
 }
 
 function renderSprayFallback(kind) {
@@ -368,6 +406,10 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     const refreshBtn = $('#players-refresh-btn');
     const busy = playersSeen < playersWanted;
     if (refreshBtn) refreshBtn.disabled = busy;
+    // #958: a bar for the count, the block sliding until the first demo.
+    const bar = $('#players-players-bar');
+    if (busy) showBar(bar, playersBarView(playersSeen, playersWanted));
+    else hideBar(bar);
     if (!status) return;
     status.textContent = busy
       ? S().readingPlayers(playersSeen, playersWanted)
@@ -395,6 +437,7 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     pngs = Array.isArray(listed[0]) ? listed[0] : [];
     sprites = Array.isArray(listed[1]) ? listed[1] : [];
     spriteImages.clear();
+    nameplates.reset();
     render();
     crosshairImport.refresh();
   }
@@ -461,6 +504,10 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
   // files dropped in and demos added since show up.
   document.querySelector('.config-tab-btn[data-tab="tab-players"]')
     ?.addEventListener('click', () => { refresh(); });
+
+  takePovOwnSprayNotice().then((changed) => {
+    if (changed) showToast(S().POV_OWN_SPRAY_RETIRED, 'info', POV_OWN_SPRAY_TOAST_MS);
+  });
 
   render();
   return { refresh };

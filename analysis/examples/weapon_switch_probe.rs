@@ -31,7 +31,7 @@ use std::collections::HashMap;
 /// Delta field names arrive NUL-padded off the wire, so a plain
 /// `get("weaponmodel")` silently misses every one of them -- the map really
 /// holds `"weaponmodel\0"`. Trim before comparing.
-fn delta_u32(delta: &HashMap<String, Vec<u8>>, key: &str) -> Option<u32> {
+fn delta_u32(delta: &dem::types::Delta, key: &str) -> Option<u32> {
     delta
         .iter()
         .find(|(k, _)| k.trim_matches(|c: char| c == '\0' || c.is_whitespace()) == key)

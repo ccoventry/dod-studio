@@ -67,6 +67,67 @@ describe('the running-game message (#666)', () => {
   });
 });
 
+const HOOK_A = 'C:\\Repos\\dod-studio\\local\\test-660\\dodstudio_goldsrc_hooks.dll';
+const HOOK_B = 'C:\\Repos\\dod-studio\\local\\test-660b\\dodstudio_goldsrc_hooks.dll';
+
+function hookMismatch(differs, running = {}, wanted = {}) {
+  return mismatch(
+    differs,
+    { hook_dll: HOOK_A, hook_label: 'test-660', hook_build: '0.10.0+aaa', ...running },
+    { hook_dll: HOOK_B, hook_label: 'test-660b', hook_build: '0.10.0+bbb', ...wanted },
+  );
+}
+
+describe('the running-game message for the hook DLL (#1143)', () => {
+  it('names both hook DLL folders when the path differs', () => {
+    expect(STRINGS.RUNNING_GAME.message(hookMismatch(['hook_dll']))).toBe(
+      'Day of Defeat is running with the hook DLL from "test-660"; '
+      + 'DoD Studio is set to the hook DLL from "test-660b". '
+      + 'The game only takes these when it starts. Close it and start again?',
+    );
+  });
+
+  it('names both builds when the same path holds another build', () => {
+    const check = hookMismatch(['hook_build'], { hook_dll: HOOK_B, hook_label: 'test-660b' });
+    expect(STRINGS.RUNNING_GAME.message(check)).toContain(
+      'running with hook build 0.10.0+aaa; DoD Studio is set to hook build 0.10.0+bbb.',
+    );
+  });
+
+  it('calls a build without an id an older one', () => {
+    const check = hookMismatch(['hook_build'], { hook_build: null });
+    expect(STRINGS.RUNNING_GAME.message(check)).toContain(
+      'running with an older hook build with no build id; DoD Studio is set to hook build 0.10.0+bbb.',
+    );
+  });
+
+  it('follows the resolution with "with" when both differ', () => {
+    expect(STRINGS.RUNNING_GAME.message(hookMismatch(['resolution', 'hook_dll']))).toContain(
+      'running at 1920×1080 with the hook DLL from "test-660"; DoD Studio is set to 3440×1440 with the hook DLL from "test-660b".',
+    );
+  });
+
+  it('says so when the hook DLL could not be read', () => {
+    expect(STRINGS.RUNNING_GAME.message(hookMismatch(['hook_unreadable']))).toBe(
+      "DoD Studio could not read which hook DLL the running Day of Defeat has, so it can't tell whether it is the one DoD Studio is set to. Close it and start again?",
+    );
+    const withResolution = STRINGS.RUNNING_GAME.message(hookMismatch(['resolution', 'hook_unreadable']));
+    expect(withResolution).toContain('running at 1920×1080; DoD Studio is set to 3440×1440. DoD Studio could not read');
+  });
+
+  it('lists both hook DLL paths with their builds', () => {
+    expect(runningGameDetails(hookMismatch(['hook_dll']))).toEqual([
+      { primary: STRINGS.RUNNING_GAME.RUNNING_HOOK, secondary: `${HOOK_A} (build 0.10.0+aaa)` },
+      { primary: STRINGS.RUNNING_GAME.STUDIO_HOOK, secondary: `${HOOK_B} (build 0.10.0+bbb)` },
+    ]);
+    expect(runningGameDetails(hookMismatch(['hook_build'], { hook_build: null }))[0].secondary)
+      .toBe(`${HOOK_A} (no build id)`);
+    expect(runningGameDetails(hookMismatch(['hook_unreadable']))).toEqual([
+      { primary: STRINGS.RUNNING_GAME.STUDIO_HOOK, secondary: `${HOOK_B} (build 0.10.0+bbb)` },
+    ]);
+  });
+});
+
 describe('closeGameWithOtherSettings (#666)', () => {
   beforeEach(() => vi.clearAllMocks());
 

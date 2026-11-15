@@ -9,6 +9,7 @@
 import { GAME_NAMES, HLAE_NAMES, DODSTUDIO_NAMES } from './console_commands_data.js';
 import { STRINGS } from './strings.js';
 import { OLD_NAMES, OLD_PREFIX } from './console_renames.js';
+import { stockMovieHint } from './stock_movie_cvars.js';
 
 /** At most this many suggestions show at once. */
 export const MAX_SUGGESTIONS = 12;
@@ -18,7 +19,8 @@ export const MAX_SUGGESTIONS = 12;
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
   'r_norefresh', 'ds_capture_batch', 'ds_capture_schedule', 'ds_player_spray'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
-export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
+export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr',
+  'dem_speed'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
   'mirv_agr'];
@@ -40,7 +42,7 @@ export const DEMO_FILTER_WORD_STARTS_WITH = ['connect ', 'motd_write', 'motdfile
  *  `alias` always starts an alias line, and a name with `exec` in it puts
  *  `exec` on the line. The word rule needs arguments to add anything to the
  *  name rules, so it is not checked here. Initial and Scheduled Commands
- *  alike, since both reach the game as demo frames. */
+ *  alike, since a patched batch puts both in the demo. */
 export function droppedFromDemo(name) {
   const n = String(name).toLowerCase();
   return DEMO_FILTER_NAME_CONTAINS.find((p) => n.includes(p))
@@ -56,18 +58,20 @@ const ALL = (() => {
   const add = (entry) => { if (!byName.has(entry.name)) byName.set(entry.name, entry); };
   DODSTUDIO_NAMES.forEach(([name, hint]) => add({ name, source: 'dodstudio', kind: null, builds: 'both', hint }));
   HLAE_NAMES.forEach((name) => add({ name, source: 'hlae', kind: 'cmd', builds: 'both', hint: '' }));
-  GAME_NAMES.forEach(([name, kind, builds]) => add({ name, source: 'game', kind, builds, hint: '' }));
+  GAME_NAMES.forEach(([name, kind, builds]) => add({ name, source: 'game', kind, builds, hint: stockMovieHint(name) }));
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 })();
 
 /** What Studio does with `name` typed in this list, or null when nothing:
- *  `{ level: 'refused' | 'warned' | 'noop', text }`. */
-export function tierNote(name, { scheduled }) {
+ *  `{ level: 'refused' | 'warned' | 'noop', text }`. `seeks` is Seek Between
+ *  Clips: on, the hook runs both lists past the demo filter, so the filter's
+ *  tier applies only when it is off (a patched batch). */
+export function tierNote(name, { scheduled, seeks = true }) {
   const S = STRINGS.COMMAND_SUGGEST;
   if (OWNED_BY_STUDIO.includes(name)) return { level: 'refused', text: S.OWNED_BY_STUDIO };
   if (GAME_QUITS_OVER.includes(name)) return { level: 'refused', text: S.GAME_QUITS_OVER };
   if (scheduled && SCHEDULED_BANNED.includes(name)) return { level: 'refused', text: S.SCHEDULED_BANNED };
-  const dropped = droppedFromDemo(name);
+  const dropped = seeks ? null : droppedFromDemo(name);
   if (dropped) return { level: 'noop', text: S.droppedFromDemo(dropped) };
   if (!scheduled && NOOP_IN_INIT.includes(name)) return { level: 'noop', text: S.NOOP_IN_INIT };
   if (scheduled && FAST_FORWARD_CVARS.includes(name)) return { level: 'warned', text: S.FAST_FORWARD_RESTORED };
@@ -98,7 +102,7 @@ function renamedFrom(typed) {
  * (`dodstudio_…`) lists the names that replaced it. Each carries its `note`
  * for Initial (`scheduled: false`) or Scheduled Commands.
  */
-export function suggestions(prefix, { scheduled = false, limit = MAX_SUGGESTIONS } = {}) {
+export function suggestions(prefix, { scheduled = false, seeks = true, limit = MAX_SUGGESTIONS } = {}) {
   const p = String(prefix || '').toLowerCase();
   if (!p) return [];
   let hits;
@@ -108,7 +112,7 @@ export function suggestions(prefix, { scheduled = false, limit = MAX_SUGGESTIONS
     hits = ALL.filter((e) => e.name.startsWith(p));
     hits.sort((a, b) => (b.name === p) - (a.name === p));
   }
-  return hits.slice(0, limit).map((e) => ({ ...e, note: tierNote(e.name, { scheduled }) }));
+  return hits.slice(0, limit).map((e) => ({ ...e, note: tierNote(e.name, { scheduled, seeks }) }));
 }
 
 /** `value` with its first word replaced by `name`, and a space after it so
@@ -119,11 +123,12 @@ export function acceptSuggestion(value, name) {
 }
 
 /**
- * Adds type-ahead to a text input. `scheduled` says which list it is in.
+ * Adds type-ahead to a text input. `scheduled` says which list it is in;
+ * `seeks()` reads Seek Between Clips each time the list is drawn.
  * Up and Down move through the list, Enter or Tab takes the highlighted
  * name, Escape closes it; a click takes one too.
  */
-export function attachCommandSuggest(input, { scheduled = false } = {}) {
+export function attachCommandSuggest(input, { scheduled = false, seeks = () => true } = {}) {
   let list = null;
   let items = [];
   let active = 0;
@@ -144,7 +149,7 @@ export function attachCommandSuggest(input, { scheduled = false } = {}) {
 
   function render() {
     const name = typedName(input.value, input.selectionStart ?? input.value.length);
-    items = name ? suggestions(name, { scheduled }) : [];
+    items = name ? suggestions(name, { scheduled, seeks: seeks() }) : [];
     // Nothing more to say when the name is already typed in full.
     if (!items.length || (items.length === 1 && items[0].name === name && !items[0].note)) {
       close();

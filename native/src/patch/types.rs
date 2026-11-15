@@ -1,7 +1,6 @@
 // patch/types.rs
 // Pure data layer: structs, enums, and their direct impl blocks.
-// No file I/O, no thread spawning. All types except PatchEvent and
-// CaptureWorker are WASM-safe.
+// No file I/O, no thread spawning.
 
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -191,6 +190,11 @@ impl CaptureStreak {
         self.end_tick = slice[slice.len() - 1].0;
         self.kill_count = slice.len();
 
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "the slice has at least one kill"
+        )]
         let total_secs = (slice.last().unwrap().1 - slice[0].1).max(0.0).round() as i32;
         self.duration_string = format!("{}:{:02}", total_secs / 60, total_secs % 60);
 
@@ -245,6 +249,17 @@ pub struct CaptureBlock {
     /// any end-of-demo clamp.
     #[serde(default)]
     pub record_stop_tick: i32,
+    /// How many gaps between kills this take records sped up (#831,
+    /// `builder::kill_gaps`): its frames are fewer than its record window's.
+    /// 0 for a take recorded at real time throughout, which is every take of
+    /// a patched batch.
+    #[serde(default)]
+    pub ramped_gaps: usize,
+    /// What this recording is planned to hold, in seconds on the `viewdemo` clock (#1084):
+    /// written beside the take so its length and kills can be checked.
+    /// `None` when the highlight's kills have no `viewdemo` times to plan from.
+    #[serde(default)]
+    pub plan: Option<crate::hlcr::take_plan::TakePlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -339,6 +354,67 @@ impl CaptureMode {
     }
 }
 
+/// What a capture does with a long gap between two kills inside one clip
+/// (#831): Configuration's "Gaps between kills over N s".
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KillGapMode {
+    /// Recorded at real time, like the rest of the clip.
+    #[default]
+    Keep,
+    /// Recorded at `KillGaps::speed` (`dem_speed`), so the clip plays the
+    /// gap sped up. Seek Between Clips only: a patched demo has no demo
+    /// player clock to speed up (`builder::kill_gaps`).
+    FastForward,
+}
+
+/// Configuration's "Gaps between kills over [N] s: Keep / Fast-forward [4]x"
+/// (#831). Off (`Keep`) unless the user picks Fast-forward.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct KillGaps {
+    pub mode: KillGapMode,
+    /// A gap counts when two kills are more than this far apart.
+    pub over_seconds: f32,
+    /// How many times real time a fast-forwarded gap plays at.
+    pub speed: f32,
+}
+
+/// Review's own "Fast-forward gaps over 8 s" default (#665,
+/// `review_settings.js`), so the two settings start from the same idea of a
+/// long gap.
+pub const DEFAULT_KILL_GAP_SECONDS: f32 = 8.0;
+/// Review's default fast-forward speed (`review.rs`), the speed #831's
+/// capture probe measured.
+pub const DEFAULT_KILL_GAP_SPEED: f32 = 4.0;
+/// The fastest a gap may play: Review's own clamp (`review.rs` options).
+pub const MAX_KILL_GAP_SPEED: f32 = 16.0;
+
+impl Default for KillGaps {
+    fn default() -> Self {
+        Self {
+            mode: KillGapMode::Keep,
+            over_seconds: DEFAULT_KILL_GAP_SECONDS,
+            speed: DEFAULT_KILL_GAP_SPEED,
+        }
+    }
+}
+
+impl KillGaps {
+    /// The speed gaps are recorded at, or `None` when gaps are kept: mode
+    /// Keep, or a gap length or speed that can't fast-forward anything
+    /// (not a positive number, or a speed of 1x or less). Clamped to
+    /// [`MAX_KILL_GAP_SPEED`].
+    pub fn ramp_speed(&self) -> Option<f32> {
+        let usable = self.mode == KillGapMode::FastForward
+            && self.over_seconds.is_finite()
+            && self.over_seconds > 0.0
+            && self.speed.is_finite()
+            && self.speed > 1.0;
+        usable.then(|| self.speed.min(MAX_KILL_GAP_SPEED))
+    }
+}
+
 /// Minimum gap between one take's stop and the next one's start, for OBS.
 ///
 /// `builder::MIN_TAKE_SEPARATION_SECONDS` is HLAE's, 0.5 s from HLAE's
@@ -350,9 +426,16 @@ impl CaptureMode {
 /// container, the cost of being wrong is a lost take, and the cost of being
 /// generous is a second of connective footage inside a merged clip.
 ///
-/// Lives here rather than beside the client so the patcher can read it on every
-/// target — `patch` compiles for wasm32, `obs` does not.
+/// Lives here rather than beside the client so the patcher can read it without
+/// depending on the `obs` module.
 pub const OBS_TAKE_SEPARATION_SECONDS: f32 = 2.0;
+
+/// The rate AGR mode records at when `PatcherConfig::agr_fps` is 0 or absent.
+/// AGR's own rate rather than Capture FPS: an AGR take is rebuilt in Blender,
+/// and a high recorded rate makes those renders far slower, so following a
+/// 300 fps Capture FPS was the wrong default for it. Studio's
+/// `DEFAULT_AGR_FPS` in `studio/src/agr_rate.js` mirrors it (a test checks).
+pub const DEFAULT_AGR_FPS: i32 = 30;
 
 /// Where OBS is and how to talk to it.
 ///
@@ -365,6 +448,9 @@ pub struct ObsConfig {
     pub port: u16,
     /// Empty when OBS has authentication switched off.
     pub password: String,
+    /// How DoD Studio's OBS profile encodes (`obs::encoder`).
+    #[serde(default)]
+    pub recording_quality: ObsRecordingQuality,
 }
 
 impl Default for ObsConfig {
@@ -373,6 +459,44 @@ impl Default for ObsConfig {
             host: "127.0.0.1".to_string(),
             port: 4455,
             password: String::new(),
+            recording_quality: ObsRecordingQuality::default(),
+        }
+    }
+}
+
+/// The recording quality a user picks for OBS mode (#1060). Every NVENC
+/// choice is single-pass with no lookahead and no B-frames, which is what
+/// holds 120 fps at 1440p on an RTX 3070 Ti; they differ in codec and
+/// quantiser. Any other encoder records with OBS's own Simple-mode
+/// settings whatever is picked here (see `obs::encoder`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObsRecordingQuality {
+    /// H.264 at QP 16: what Simple mode's "Indistinguishable" asks for, at a
+    /// speed that holds 120 fps.
+    /// H.264 at QP 20: about half Standard's size.
+    Small,
+    #[default]
+    Standard,
+    /// H.264 at QP 12: about 1.7x Standard's size.
+    High,
+    /// H.264 4:4:4 at QP 12: full colour resolution.
+    Max,
+    /// OBS's own Simple-mode "Indistinguishable" setup, as before #1060:
+    /// smaller files, but at 1440p it can't keep up with 120 fps on an RTX
+    /// 3070 Ti.
+    ObsSimple,
+}
+
+impl ObsRecordingQuality {
+    /// From the settings file's id; anything unknown is the default.
+    pub fn from_str_id(id: &str) -> Self {
+        match id {
+            "small" => Self::Small,
+            "high" => Self::High,
+            "max" => Self::Max,
+            "obs_simple" => Self::ObsSimple,
+            _ => Self::Standard,
         }
     }
 }
@@ -418,7 +542,7 @@ pub struct PatcherConfig {
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
     /// AGR mode's recorded rate, in frames per game second. `0` (the default)
-    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// means `DEFAULT_AGR_FPS` — see `effective_agr_fps`. Its own
     /// setting because the cost is different: an AGR frame is a few KB, so a
     /// preview can drop to 30 while a slow-motion take wants 300.
     #[serde(default)]
@@ -471,6 +595,15 @@ pub struct PatcherConfig {
     /// (`ds_capture_run_in_background`).
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
+    /// Render While Capturing (#861): takes render and go while the batch
+    /// runs, and the batch holds between clips until they have freed the
+    /// room. So the planner may route more blocks to a drive than it holds
+    /// now, rather than refusing the batch.
+    #[serde(default)]
+    pub render_while_capturing: bool,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    #[serde(default)]
+    pub kill_gaps: KillGaps,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
     /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
@@ -535,23 +668,39 @@ fn default_capture_fov() -> f32 {
     90.0
 }
 
-/// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it: Tauri's Windows
-/// bundler places `bundle.resources` entries under a `resources` folder
-/// beside the installed app's own executable, and
-/// `studio/src-tauri/tauri.conf.json` maps this crate's release
-/// build to `resources/goldsrc-hooks/dodstudio_goldsrc_hooks.dll` there. In a dev
-/// build (`npm run tauri dev`) that folder won't exist -- Studio ->
-/// Configuration -> Paths' override field is the way to point at
-/// `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` directly while
-/// developing. Either way, `build_hlae_process` treats a missing file here
-/// as "not installed" and simply doesn't inject it, same as any other
-/// optional path.
+/// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it:
+/// `studio/src-tauri/tauri.conf.json` maps this crate's release build to
+/// `goldsrc-hooks/dodstudio_goldsrc_hooks.dll` among `bundle.resources`, and
+/// Tauri v2's NSIS installer puts those beside the app's own executable
+/// (Tauri's `resource_dir`). Installs made before that kept them under a
+/// `resources` folder there, so that spot is checked second. Looking only
+/// in `resources` found no DLL in a current install, which went unnoticed
+/// while the override was set; once installed releases ignored the override
+/// (#912) the game launched without the hook. In a dev build
+/// (`npm run tauri dev`) neither exists -- Studio -> Configuration -> Paths'
+/// override points at `target/i686-pc-windows-msvc/release/` there. Either
+/// way, `build_hlae_process` treats a missing file as "not installed" and
+/// doesn't inject it, same as any other optional path.
 pub fn default_goldsrc_hooks_dll_path() -> Option<std::path::PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|dir| {
-        dir.join("resources")
-            .join("goldsrc-hooks")
-            .join("dodstudio_goldsrc_hooks.dll")
-    })
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    Some(bundled_hooks_dll_in(&dir))
+}
+
+/// The bundled DLL under an install folder: the first spot that has it, else
+/// the current layout's (so a message names where it should be).
+fn bundled_hooks_dll_in(install_dir: &std::path::Path) -> std::path::PathBuf {
+    let current = install_dir
+        .join("goldsrc-hooks")
+        .join("dodstudio_goldsrc_hooks.dll");
+    let older = install_dir
+        .join("resources")
+        .join("goldsrc-hooks")
+        .join("dodstudio_goldsrc_hooks.dll");
+    if !current.exists() && older.exists() {
+        older
+    } else {
+        current
+    }
 }
 
 impl PatcherConfig {
@@ -594,13 +743,14 @@ impl PatcherConfig {
             })
     }
 
-    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
-    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise
+    /// `DEFAULT_AGR_FPS`. Never `capture_fps`: AGR's rate is its own, and
+    /// following a 300 fps Capture FPS made Blender renders far slower.
     pub fn effective_agr_fps(&self) -> i32 {
         if self.agr_fps > 0 {
             self.agr_fps
         } else {
-            self.capture_fps.max(1)
+            DEFAULT_AGR_FPS
         }
     }
 
@@ -636,6 +786,15 @@ impl PatcherConfig {
             goldsrc_hooks_dll,
         } = self.launch_settings();
 
+        // The demo bar's layout with the loading progress controls goes into
+        // `<game folder>_addon` here, rather than in any one caller, so every
+        // way the app starts the game (a batch, Launch Preview, Launch Game)
+        // ships it, and from the user's own layout as it is now (#465).
+        crate::demo_bar_res::prepare(&hl_exe, &game_folder);
+        // The same for the louder headshot sounds, from the install's own
+        // (#1353).
+        crate::headshot_louder::prepare(&hl_exe, &game_folder);
+
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
         // `-hookDllPath` is repeatable on HLAE's `-customLoader` command line
@@ -649,9 +808,13 @@ impl PatcherConfig {
         // env vars (GOLDSRC_HOOKS_*) are set, which nothing here sets yet --
         // see the crate's README for what it needs to do anything.
         //
-        // Resolution order: see `goldsrc_hooks_dll`.
-        let goldsrc_hooks_dll_str =
-            goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
+        // Resolution order: see `goldsrc_hooks_dll`. The game loads a copy
+        // of that file, never the file itself (#1146).
+        let goldsrc_hooks_dll_str = goldsrc_hooks_dll.map(|p| {
+            crate::sys::hook_copy::for_launch(&p)
+                .to_string_lossy()
+                .replace("/", "\\\\")
+        });
 
         let program_path_str = hl_exe.replace("/", "\\\\");
 
@@ -725,15 +888,44 @@ impl PatcherConfig {
         // The engine names the addon folder after `-game`'s, so another game
         // folder gets its own `<folder>_addon`.
         //
+        // `-dodstudio_pipe` names this Studio's own game pipe, so with two
+        // Studios open the game asks the one that started it (#1235). The
+        // engine skips a flag it doesn't know, and its value, which starts
+        // with neither `-` nor `+`.
+        //
         // `-demoedit` turns on the demo player's edit row (Master, Events,
         // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
         // GameUI, which otherwise sizes the bar so that row is cut off. It
         // was on the command line once and fell off when the launchers were
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
+        //
+        // `-noborder` only on the pre-Anniversary build, and only when the
+        // window wouldn't fit the screen with its title bar: its client area
+        // then loses the caption's rows and every frame gets a black band on
+        // top (#1337). The Anniversary build's window isn't capped, and this
+        // line also serves Launch Game, Review and Launch Preview, where a
+        // borderless window would only lose its title bar.
+        let window_args =
+            if !crate::sys::packet_limit::is_anniversary(std::path::Path::new(&hl_exe))
+                && crate::sys::screen::needs_borderless_window(
+                    (width, height),
+                    crate::sys::screen::primary_screen_size(),
+                )
+            {
+                crate::log_markdown(&crate::messages::game_window_borderless(width, height));
+                "-windowed -noborder"
+            } else {
+                "-windowed"
+            };
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {}",
-            game_folder, width, height, extra_engine_args
+            "-game {} -insecure -addons -demoedit {} -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
+            game_folder,
+            window_args,
+            width,
+            height,
+            crate::sys::studio_pipe::launch_arg(),
+            extra_engine_args
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);
@@ -752,18 +944,23 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                log::info!("goldsrc-hooks: injecting {extra_dll}");
+                crate::log_markdown(&crate::messages::hooks_injecting(extra_dll));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
-            None => log::warn!(
-                "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 ds_* console commands will be absent this session. Tried: override={:?}, \
-                 bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
-                 override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
-                self.goldsrc_hooks_dll_path,
-                default_goldsrc_hooks_dll_path(),
-                hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")),
-            ),
+            None => {
+                let shown = |p: Option<std::path::PathBuf>| {
+                    p.map_or_else(|| "none".to_string(), |p| p.display().to_string())
+                };
+                crate::log_markdown(&crate::messages::hook_dll::not_found(
+                    shown(
+                        self.goldsrc_hooks_dll_path
+                            .as_ref()
+                            .map(std::path::PathBuf::from),
+                    ),
+                    shown(default_goldsrc_hooks_dll_path()),
+                    shown(hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))),
+                ));
+            }
         }
         cmd.args(["-programPath", &program_path_str, "-cmdLine", &cmd_line_str]);
         cmd.env("SteamAppId", "30");
@@ -810,6 +1007,8 @@ impl Default for PatcherConfig {
             save_local_patched_copy: false,
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
+            render_while_capturing: false,
+            kill_gaps: KillGaps::default(),
             player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
@@ -835,7 +1034,6 @@ pub struct HighlightRules {
 
 // ── Worker event channel types (native-only: require std threading) ───────────
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub enum PatchEvent {
     Starting(usize),
@@ -845,7 +1043,6 @@ pub enum PatchEvent {
     Error(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct CaptureWorker {
     pub receiver: std::sync::mpsc::Receiver<PatchEvent>,
     pub is_running: bool,
@@ -929,6 +1126,56 @@ mod capture_codec_tests {
 }
 
 #[cfg(test)]
+mod bundled_hooks_dll_tests {
+    use super::bundled_hooks_dll_in;
+
+    fn install(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dodstudio_bundled_dll_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("install dir");
+        dir
+    }
+
+    fn put(dir: &std::path::Path, rel: &[&str]) -> std::path::PathBuf {
+        let path = rel.iter().fold(dir.to_path_buf(), |p, part| p.join(part));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("folders");
+        std::fs::write(&path, b"").expect("dll");
+        path
+    }
+
+    #[test]
+    fn a_current_install_finds_the_dll_beside_the_exe() {
+        // Tauri v2's installer: resources beside the exe, no `resources` folder.
+        let dir = install("current");
+        let dll = put(&dir, &["goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"]);
+        assert_eq!(bundled_hooks_dll_in(&dir), dll);
+    }
+
+    #[test]
+    fn an_older_install_finds_it_under_resources() {
+        let dir = install("older");
+        let dll = put(
+            &dir,
+            &["resources", "goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"],
+        );
+        assert_eq!(bundled_hooks_dll_in(&dir), dll);
+    }
+
+    #[test]
+    fn with_neither_it_names_the_current_spot() {
+        let dir = install("neither");
+        assert_eq!(
+            bundled_hooks_dll_in(&dir),
+            dir.join("goldsrc-hooks")
+                .join("dodstudio_goldsrc_hooks.dll")
+        );
+    }
+}
+
+#[cfg(test)]
 mod launch_args_tests {
     use super::PatcherConfig;
 
@@ -947,6 +1194,52 @@ mod launch_args_tests {
             .position(|a| a == "-cmdLine")
             .expect("build_hlae_process must pass -cmdLine");
         args[at + 1].clone()
+    }
+
+    /// A config whose `hl.exe` sits beside a `hw.dll` holding `hw_dll`, at
+    /// `width`x`height`.
+    fn config_in(
+        dir: &crate::test_support::Scratch,
+        hw_dll: &[u8],
+        width: i32,
+        height: i32,
+    ) -> PatcherConfig {
+        std::fs::write(dir.join("hw.dll"), hw_dll).unwrap();
+        PatcherConfig {
+            game_path: dir.join("hl.exe").display().to_string(),
+            resolution_width: width,
+            resolution_height: height,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_pre_anniversary_window_goes_borderless_only_when_it_would_not_fit_the_screen() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_pre");
+        let screen = crate::sys::screen::primary_screen_size();
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let line = cmd_line_of(&config_in(&dir, b"MAX_PACKET_ENTITIES", width, height), "");
+            assert!(line.contains("-windowed"), "{line}");
+            assert_eq!(
+                line.contains("-noborder"),
+                crate::sys::screen::needs_borderless_window((width, height), screen),
+                "{width}x{height} on {screen:?}: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_anniversary_window_keeps_its_title_bar_at_any_size() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_post");
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let cfg = config_in(&dir, b"MAX_PACKET_ENTITIES sv_allow_shaders", width, height);
+            let line = cmd_line_of(&cfg, "");
+            assert!(
+                line.contains(&format!("-windowed -w {width} -h {height}")),
+                "{line}"
+            );
+            assert!(!line.contains("-noborder"), "{line}");
+        }
     }
 
     #[test]
@@ -1055,5 +1348,19 @@ mod launch_args_tests {
             condebug < playdemo,
             "-condebug must come before the caller's own args, got: {line}"
         );
+    }
+
+    #[test]
+    fn every_launch_names_this_studios_pipe_ahead_of_any_command() {
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let at = line
+                .find(&crate::sys::studio_pipe::launch_arg())
+                .unwrap_or_else(|| panic!("no -dodstudio_pipe in {line}"));
+            assert!(
+                line.find('+').is_none_or(|plus| at < plus),
+                "-dodstudio_pipe must precede any +command: {line}"
+            );
+        }
     }
 }

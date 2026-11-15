@@ -13,7 +13,8 @@
 <body>
   <div id="batch-results" class="batch-results" hidden></div>
   <script type="module">
-    import { batchStarted, batchEnded, batchVerified } from '/src/batch_results.js';
+    import { batchStarted, batchEnded, batchVerified, batchObsClip } from '/src/batch_results.js';
+    window.__obsClip = batchObsClip;
     window.__started = batchStarted;
     window.__ended = batchEnded;
     window.__verified = batchVerified;

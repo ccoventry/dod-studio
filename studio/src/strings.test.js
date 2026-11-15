@@ -17,6 +17,20 @@ describe('scanCompleteToast', () => {
   });
 });
 
+describe('review refusedToast (#880)', () => {
+  it('says a review is running and to end it first', () => {
+    expect(STRINGS.REVIEW.refusedToast('viewdemo')).toBe(
+      "A review is running in the game, so it didn't load the preview. End the review first (Stop), then try again."
+    );
+  });
+
+  it('names a seek as a jump, and anything else plainly', () => {
+    expect(STRINGS.REVIEW.refusedToast('ds_demo_seek_to')).toContain("didn't jump to that time");
+    expect(STRINGS.REVIEW.refusedToast('spec_mode')).toContain("didn't do that");
+    expect(STRINGS.REVIEW.refusedToast(undefined)).toContain('A review is running in the game');
+  });
+});
+
 describe('scanCancelledToast', () => {
   it('says nothing was added when Cancel came while listing folders (#843)', () => {
     expect(STRINGS.MAIN.scanCancelledToast(0)).toBe('Scan cancelled, nothing added');
@@ -63,6 +77,62 @@ describe('bannedCommandsWarning', () => {
   });
 });
 
+describe('takesFoundMissing (#1081)', () => {
+  it('does not call a clip Cancel cut short missing', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1 })).toBe(
+      '0/1 takes found on disk — 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, cutShort: 1 })).toBe(
+      '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { missing: 1 })).toBe('1/2 takes found on disk — 1 missing.');
+    // #1105: a take whose video stopped early is not blamed on Cancel.
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { stoppedEarly: 1 })).toBe(
+      '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
+    );
+  });
+
+  it('names the game closing or the batch stopping instead of Cancel', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { cutShort: 1, cutBy: 'game_closed' })).toBe(
+      '1/2 takes found on disk — 1 cut short when the game closed (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1, cutBy: 'stopped' })).toBe(
+      '0/1 takes found on disk — 1 cut short when the batch stopped (partial take, not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
+    expect(STRINGS.BATCH_RESULTS.cutShortBy(null)).toBe(STRINGS.BATCH_RESULTS.STATUS.cut_short);
+    // An OBS recording nobody stopped, found by the catch-up after a restart (#20).
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('studio_closed')).toBe('Cut short: DoD Studio closed while OBS recorded it (not captured)');
+  });
+
+  it('says a clip the batch ended before reaching is not reached, not missing (#1434)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(174, 340, { notReached: 165, cutShort: 1 })).toBe(
+      '174/340 takes found on disk — 165 not reached (batch cancelled), 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { notReached: 2, endedBy: 'game_closed' })).toBe(
+      '1/3 takes found on disk — 2 not reached (the game closed).',
+    );
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('cancel')).toBe('Not reached: the batch was cancelled first');
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('stopped')).toBe('Not reached: the batch stopped first');
+  });
+
+  it('says a take OBS started late is missing its opening, not missing (#1109)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, { startedLate: 1 })).toBe(
+      "2/3 takes found on disk — 1 OBS started recording late (missing the clip's opening, not captured).",
+    );
+    expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
+  });
+
+  it('says a clip the game reported failed is failed, not missing (#1401)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, failed: 1 })).toBe(
+      '1/3 takes found on disk — 1 missing, 1 failed in the game (not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.clipFailed('no_start')).toBe('Failed: the game never started recording it (not captured)');
+    expect(STRINGS.BATCH_RESULTS.clipShort(16.75, 16.76, 1)).toBe('Captured, but missing 1 kill: 16.75 s of 16.76 s planned');
+    expect(STRINGS.BATCH_RESULTS.clipShort(10, 19.88, 0)).toBe('Captured, but short: 10.00 s of 19.88 s planned');
+  });
+});
+
 describe('finish step (#440)', () => {
   it('mentions clips in progress only when there are some', () => {
     expect(STRINGS.FINISH.progressStatus(3, 12, 2)).toBe('Finishing clips: 3 of 12, 2 in progress');
@@ -73,5 +143,27 @@ describe('finish step (#440)', () => {
     expect(STRINGS.FINISH.doneSummary(12, 0, 0)).toBe('12 clips ready.');
     expect(STRINGS.FINISH.doneSummary(1, 0, 0)).toBe('1 clip ready.');
     expect(STRINGS.FINISH.doneSummary(10, 1, 1)).toBe('10 clips ready, 1 failed, 1 cancelled — see the Render tab.');
+  });
+});
+
+describe('scanCapToast (#531)', () => {
+  it('names the bound that stopped the walk', () => {
+    expect(STRINGS.MAIN.scanCapToast({ depth: true, entries: false, max_depth: 6, max_entries: 50000 })).toBe(
+      'Some demos may be missing: folders more than 6 levels down were not read. Add a folder further down to scan the rest.'
+    );
+    expect(STRINGS.MAIN.scanCapToast({ depth: true, entries: true, max_depth: 6, max_entries: 50000 })).toContain(
+      'not read, and the walk stopped after 50,000 files and folders.'
+    );
+  });
+});
+
+describe('AUDITOR.doneStatus', () => {
+  it('counts demos inside archives apart from the loose ones (#929)', () => {
+    expect(STRINGS.AUDITOR.doneStatus(3, 0, '0.0 s', 82))
+      .toBe('Done in 0.0 s: 3 demos checked and 82 inside archives, 0 with copies.');
+  });
+
+  it('leaves archives out when none were looked inside', () => {
+    expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4 s')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
   });
 });

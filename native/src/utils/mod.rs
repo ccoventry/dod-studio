@@ -1,3 +1,3 @@
 pub mod demo_hasher;
-#[cfg(not(target_arch = "wasm32"))]
+pub mod duration_text;
 pub mod http;

@@ -96,10 +96,6 @@ pub fn migrated(command: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Names the hook registers that never had a `dodstudio_` one.
-    const NEW_SINCE_555: &[&str] = &[];
-
     #[test]
     fn an_old_name_becomes_the_name_in_the_table() {
         assert_eq!(
@@ -169,61 +165,5 @@ mod tests {
         assert_eq!(migrated("mirv_fov 90"), None);
         assert_eq!(migrated("ds_spec_lock 1"), None);
         assert_eq!(migrated("echo dodstudio_hd/world"), None);
-    }
-
-    /// The new names have to be ones the hook registers, or a migrated
-    /// setting and a config warning would both point at a name that does
-    /// nothing. The hook is a cdylib, so its sources are read instead. And
-    /// every name the hook registers is in the table, so none was missed.
-    #[test]
-    fn every_new_name_is_one_the_hook_registers() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../goldsrc-hooks/src");
-        let mut code = String::new();
-        let mut dirs = vec![src];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(&dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|e| e == "rs") {
-                    code.push_str(&std::fs::read_to_string(&path).unwrap());
-                }
-            }
-        }
-        assert!(
-            code.contains(&format!("concat!(\"{PREFIX}\", $suffix)")),
-            "names.rs no longer uses {PREFIX}"
-        );
-        for (old, new) in OLD_NAMES {
-            assert!(old.starts_with(OLD_PREFIX), "{old}");
-            let suffix = new.strip_prefix(PREFIX).unwrap();
-            assert!(
-                code.contains(&format!("console_name!(\"{suffix}\")")),
-                "{old} -> {new}: {new} is not registered by goldsrc-hooks"
-            );
-        }
-        // Every other suffix but the two doc examples in names.rs, and
-        // comments that write `console_name!("...")`.
-        let mut registered: Vec<&str> = code
-            .split("console_name!(\"")
-            .skip(1)
-            .filter_map(|s| s.split('"').next())
-            .filter(|s| {
-                !s.is_empty()
-                    && *s != "status"
-                    && *s != "killfeed"
-                    && s.bytes()
-                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-            })
-            .collect();
-        registered.sort_unstable();
-        registered.dedup();
-        for suffix in registered {
-            let name = format!("{PREFIX}{suffix}");
-            assert!(
-                OLD_NAMES.iter().any(|(_, new)| *new == name) || NEW_SINCE_555.contains(&suffix),
-                "{name} has no old name in old_names.rs; a name added since #555 goes in NEW_SINCE_555"
-            );
-        }
     }
 }

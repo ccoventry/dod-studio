@@ -15,13 +15,13 @@ import { splitProgressBar } from './split_progress.js';
 import { STRINGS } from './strings.js';
 import { clockLong } from './time_format.js';
 import { setAuditorFooter } from './auditor_footer.js';
+import { fileNameOf } from './path_display.js';
 
 /** A map shorter than this is ticked off by default: almost always the next
  *  map loading as the recording stopped. */
 export const SHORT_MAP_SECONDS = 60;
 
-export const fileName = (path) => path.split(/[\\/]/).pop();
-const folderOf = (path) => path.slice(0, path.length - fileName(path).length).replace(/[\\/]$/, '');
+const folderOf = (path) => path.slice(0, path.length - fileNameOf(path).length).replace(/[\\/]$/, '');
 const mb = (bytes) => (bytes / 1e6).toFixed(1);
 
 export function initSplitPane() {
@@ -115,7 +115,7 @@ export function initSplitPane() {
     for (let i = 0; i < demos.length; i++) {
       if (stopReading) return i;
       showProgress(50 + (i / demos.length) * 50,
-        STRINGS.SPLIT.readingLengths(i + 1, demos.length, fileName(demos[i].path)));
+        STRINGS.SPLIT.readingLengths(i + 1, demos.length, fileNameOf(demos[i].path)));
       let segs = null;
       let failed = null;
       try {
@@ -140,7 +140,7 @@ export function initSplitPane() {
     box.dataset.demo = String(i);
     box.innerHTML = `
         <div class="split-demo-head">
-          <strong class="split-demo-name" title="${escapeHtml(d.path)}">${escapeHtml(fileName(d.path))}</strong>
+          <strong class="split-demo-name" title="${escapeHtml(d.path)}">${escapeHtml(fileNameOf(d.path))}</strong>
           <span class="split-demo-meta" title="${escapeHtml(STRINGS.SPLIT.SOURCE_TITLE[d.source] || '')}">${mb(d.size_bytes)} MB · ${escapeHtml(STRINGS.SPLIT.mapsCount(d.maps.length))} · ${escapeHtml(folderOf(d.path))}</span>
           ${(d.split_files || []).some(Boolean) ? `<span class="split-done-chip" title="${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_TITLE)}">${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_CHIP)}</span>` : ''}
         </div>
@@ -228,7 +228,7 @@ export function initSplitPane() {
       const written = outcome?.written ?? [];
       const heading = outcome?.cancelled ? STRINGS.SPLIT.cancelledSplit(written.length) : STRINGS.SPLIT.wrote(written.length);
       result.innerHTML = `${escapeHtml(heading)}<ul class="split-written">${
-        written.map((w, k) => `<li>${escapeHtml(STRINGS.SPLIT.writtenLine(fileName(w.path), clockLong(w.seconds), mb(w.size_bytes)))}
+        written.map((w, k) => `<li>${escapeHtml(STRINGS.SPLIT.writtenLine(fileNameOf(w.path), clockLong(w.seconds), mb(w.size_bytes)))}
           <button type="button" class="split-reveal" data-k="${k}">${escapeHtml(STRINGS.SPLIT.SHOW_IN_FOLDER)}</button></li>`).join('')
       }</ul>`;
       result.querySelectorAll('.split-reveal').forEach((b) => {
@@ -236,9 +236,9 @@ export function initSplitPane() {
       });
       demo.split_files = demo.split_files || demo.maps.map(() => null);
       for (const w of written.filter((x) => Number.isInteger(x.index))) {
-        demo.split_files[w.index] = fileName(w.path);
+        demo.split_files[w.index] = fileNameOf(w.path);
         const cell = box.querySelector(`tr[data-map="${w.index}"] .split-map-done`);
-        if (cell) cell.textContent = fileName(w.path);
+        if (cell) cell.textContent = fileNameOf(w.path);
       }
       updateFooter();
     } catch (err) {

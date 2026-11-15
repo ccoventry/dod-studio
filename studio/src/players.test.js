@@ -21,23 +21,63 @@ import {
 
 const M00CAT = '76561197972576011';
 
+describe('Use as (#686)', () => {
+  const id = '76561197961831029';
+
+  it('is trimmed, empty when unset, and absent from an old row', () => {
+    const t = normalizePlayers({ players: [
+      { steam_id: id, name: 'm00cat', use_as: '  Chris  ' },
+      { steam_id: '76561197960265729', name: 'old' },
+    ] });
+    expect(t.players.map((p) => p.use_as)).toEqual(['Chris', '']);
+  });
+
+  it('is set and cleared through updatePlayer, and a new row starts without one', () => {
+    let { table, index } = addPlayer(defaultPlayers(), { steam_id: id, name: 'm00cat' });
+    expect(table.players[index].use_as).toBe('');
+    table = updatePlayer(table, index, { use_as: ' Chris ' });
+    expect(table.players[index].use_as).toBe('Chris');
+    table = updatePlayer(table, index, { use_as: '   ' });
+    expect(table.players[index].use_as).toBe('');
+  });
+});
+
+describe('Nameplate (#429)', () => {
+  it('is trimmed, empty when unset, and absent from an old row', () => {
+    const t = normalizePlayers({ players: [
+      { steam_id: M00CAT, name: 'm00cat', nameplate: '  D:/np/m00cat.png ' },
+      { steam_id: '76561197960265729', name: 'old', use_as: 'Old' },
+    ] });
+    expect(t.players.map((p) => p.nameplate)).toEqual(['D:/np/m00cat.png', '']);
+  });
+
+  it('is set and cleared through updatePlayer, and a new row starts without one', () => {
+    let { table, index } = addPlayer(defaultPlayers(), { steam_id: M00CAT, name: 'm00cat' });
+    expect(table.players[index].nameplate).toBe('');
+    table = updatePlayer(table, index, { nameplate: 'D:/np/m00cat.png' });
+    expect(table.players[index].nameplate).toBe('D:/np/m00cat.png');
+    table = updatePlayer(table, index, { nameplate: '' });
+    expect(table.players[index].nameplate).toBe('');
+  });
+});
+
 describe('normalizePlayers', () => {
   it('gives the defaults for a settings file without a table', () => {
     const d = defaultPlayers();
     expect(normalizePlayers(undefined)).toEqual(d);
     expect(d.use_in_game).toBe(true);
-    expect(d.pov_fallback).toBe('own');
+    expect(d.pov_fallback).toBe('png');
     expect(d.hltv_fallback).toBe('png');
     expect(d.crosshair_fallback).toBe('game');
     expect(d.crosshair_fallback_sprite).toBe('customXHair.spr');
     expect(d.crosshair_fallback_tile).toBe(1);
   });
 
-  it('never offers "their own" for HLTV, and drops rows with nobody', () => {
+  it('reads "their own" as the default in either fallback, and drops rows with nobody', () => {
     const t = normalizePlayers({
       use_in_game: false,
       hltv_fallback: 'own',
-      pov_fallback: 'sometimes',
+      pov_fallback: 'own',
       crosshair_fallback: 'other',
       crosshair_fallback_tile: 40,
       players: [
@@ -47,10 +87,10 @@ describe('normalizePlayers', () => {
     });
     expect(t.use_in_game).toBe(false);
     expect(t.hltv_fallback).toBe('png');
-    expect(t.pov_fallback).toBe('own');
+    expect(t.pov_fallback).toBe('png');
     expect(t.crosshair_fallback).toBe('game');
     expect(t.crosshair_fallback_tile).toBe(1);
-    expect(t.players).toEqual([{ steam_id: '', name: 'Bot', png: 'b.png', crosshair_sprite: 'x.spr', crosshair_tile: 3 }]);
+    expect(t.players).toEqual([{ steam_id: '', name: 'Bot', png: 'b.png', crosshair_sprite: 'x.spr', crosshair_tile: 3, use_as: '', nameplate: '' }]);
   });
 });
 
@@ -102,9 +142,9 @@ describe('rows', () => {
     ({ table: t, index: at } = addPlayer(t, { steam_id: '', name: 'm00cat' }));
     expect(at).toBe(2);
     expect(t.players).toEqual([
-      { steam_id: M00CAT, name: 'm00cat', png: 'a.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 3 },
-      { steam_id: '', name: 'Bot', png: '', crosshair_sprite: '', crosshair_tile: 0 },
-      { steam_id: '', name: 'm00cat', png: '', crosshair_sprite: '', crosshair_tile: 0 },
+      { steam_id: M00CAT, name: 'm00cat', png: 'a.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 3, use_as: '', nameplate: '' },
+      { steam_id: '', name: 'Bot', png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '', nameplate: '' },
+      { steam_id: '', name: 'm00cat', png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '', nameplate: '' },
     ]);
     expect(updatePlayer(t, 1, { crosshair_tile: 99 }).players[1].crosshair_tile).toBe(0);
     expect(removePlayer(t, 1).players.map((p) => p.name)).toEqual(['m00cat', 'm00cat']);
@@ -125,6 +165,7 @@ describe('rows', () => {
         { steam_id: '', name: 'b', png: 'gone.png', crosshair_sprite: 'unused.spr', crosshair_tile: 0 },
       ],
       hltv_fallback_png: 'team.png',
+      pov_fallback: 'none',
       pov_fallback_png: 'unused.png',
       crosshair_fallback: 'sprite',
       crosshair_fallback_sprite: 'gone.spr',

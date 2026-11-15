@@ -14,15 +14,22 @@
 </head>
 <body>
   <select id="command-profile-select"></select>
+  <span id="command-profile-builtin-chip" hidden>Built-in</span>
   <button id="command-profile-save-changes">Save Changes</button>
   <input type="text" id="command-profile-name" />
   <button id="command-profile-save">Save Profile</button>
+  <button id="command-profile-duplicate">Duplicate</button>
   <button id="command-profile-rename">Rename</button>
   <button id="command-profile-delete">Delete</button>
+  <div id="command-profile-notice" hidden>
+    <span data-notice-text></span>
+    <button data-notice-ok>OK</button>
+  </div>
 
   <script type="module">
     import {
       initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile, syncCommandProfileRow,
+      getBuiltinProfileNotice,
     } from '/src/command_profiles_ui.js';
 
     let lists = { init_commands: [], custom_commands: [] };
@@ -37,6 +44,7 @@
     window.__setProfiles = setCommandProfiles;
     window.__getProfiles = getCommandProfiles;
     window.__getActive = getActiveCommandProfile;
+    window.__getNotice = getBuiltinProfileNotice;
     window.__harnessReady = true;
   </script>
 </body>

@@ -26,9 +26,9 @@ let toastCount = 0;
 
 function describeError(err) {
   if (err instanceof Error) {
-    return { message: err.message, stack: err.stack || '(no stack)' };
+    return { message: err.message, stack: err.stack || STRINGS.ERROR_REPORTER.NO_STACK };
   }
-  return { message: String(err), stack: '(not an Error object)' };
+  return { message: String(err), stack: STRINGS.ERROR_REPORTER.NOT_AN_ERROR_OBJECT };
 }
 
 function reportUncaught(source, err) {
@@ -39,7 +39,7 @@ function reportUncaught(source, err) {
   // purpose, since the whole point is not blending into the raw trace.
   console.error(`[dod-studio] Uncaught ${source}:`, err);
 
-  logFrontendEvent(`[error] Uncaught ${source}: ${message}\n${stack}`);
+  logFrontendEvent(STRINGS.ERROR_REPORTER.uncaughtLog(source, message, stack));
 
   toastCount += 1;
   if (toastCount <= MAX_TOASTS_PER_SESSION) {

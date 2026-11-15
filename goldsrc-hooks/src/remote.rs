@@ -271,6 +271,11 @@ pub fn poll() {
         let Ok(command) = receiver.try_recv() else {
             return;
         };
+        // Launch Preview or a seek during a review (#880): refused here, so
+        // Studio hears about it, not only the console.
+        if crate::review_lock::refuse_from_studio(&command) {
+            continue;
+        }
         #[cfg(target_arch = "x86")]
         server::run(&command);
         #[cfg(not(target_arch = "x86"))]

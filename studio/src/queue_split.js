@@ -1,11 +1,12 @@
 // queue_split.js
 // Splitting a Master Demo Queue demo that recorded more than one map (#217).
-// The game's viewdemo stops at a demo's first map change, so nothing past it
-// can be captured and its highlights cover one map only. Its row's Split
-// button writes every map of a minute or more as a demo of its own (the Demo
-// Auditor's Split Maps) and scans them into the queue in its place; Start
-// Capture Batch refuses picks in such a demo and offers the same split.
-// The highlights' work moves to the pieces (split_carry.js).
+// Until it's split, such a demo is used for its first map only: its
+// highlights come from that map and a capture plays it like any other demo.
+// Its row's Split button writes every map of a minute or more as a demo of
+// its own (the Demo Auditor's Split Maps) and scans them into the queue in
+// its place, so the later maps can be used too. The highlights' work moves to
+// the pieces (split_carry.js). Start Capture Batch never refuses such a demo;
+// it only says in the activity log that the first map is used.
 // Which demos and which maps: queue_multimap.js and analyzer_multimap.js.
 
 import { listen } from '@tauri-apps/api/event';
@@ -13,10 +14,11 @@ import { logFrontendEvent, splitDemoAuto } from './ipc_bridge.js';
 import { pickedMultiMapDemos } from './queue_multimap.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { splitProgressView } from './split_progress.js';
+import { SPLIT_SHARE, nest, placed, queueProgress } from './queue_progress.js';
+import { durationTextMs } from './time_format.js';
 import { applyCarriedWork, carryReport, matchSplitHighlights } from './split_carry.js';
 import { renameUidsInTakeIndex } from './take_index.js';
 import { updateStreakVisuals } from './detail_pane.js';
-import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { STRINGS } from './strings.js';
@@ -30,15 +32,10 @@ import { STRINGS } from './strings.js';
  *   project_demos.js's missing/changed check.
  */
 export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, refreshQueue, pickedDemosPresent }) {
-  // The queue's status line (beside the scan spinner) says how the split is
-  // going whatever started it; `update(SplitProgress)`, when given, also
-  // feeds the row's own bar.
-  function showStatus(name, progress) {
-    const status = document.querySelector('#scan-status');
-    const spinner = document.querySelector('#scan-spinner');
-    if (status) status.textContent = progress ? STRINGS.MAIN.queueSplitStatus(name, splitProgressView(progress).text) : '';
-    if (spinner) spinner.style.display = progress ? 'inline-block' : 'none';
-  }
+  // The queue's line and bar (queue_progress.js) say how the split is going,
+  // the scan of the maps it writes included (#951); `update(SplitProgress)`,
+  // when given, also feeds the row's own bar.
+  const progress = queueProgress();
 
   // The pieces are in the queue now: put the original's highlight work on
   // them, and say what didn't carry, in the activity log.
@@ -63,8 +60,13 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
   // pieces. Resolves whether it split.
   async function splitQueuedDemo(demo, { update } = {}) {
     const name = fileNameOf(demo.path);
+    const line = STRINGS.MAIN.queueSplitHead(name);
+    const job = progress.begin({ text: line });
+    const place = { job, range: [0, 100] };
+    const splitPlace = nest(place, [0, SPLIT_SHARE]);
     const report = (p) => {
-      showStatus(name, p);
+      const view = splitProgressView(p);
+      progress.show(job, placed(splitPlace, { pct: view.pct, text: `${line}: ${view.text}`, indeterminate: false }));
       update?.(p);
     };
     report({ fraction: 0, stage: 'reading' });
@@ -76,37 +78,50 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
       written = await splitDemoAuto(demo.path, SHORT_MAP_SECONDS);
     } catch (err) {
       showToast(STRINGS.MAIN.queueSplitFailed(name, err), 'error', 8000);
+      progress.end(job, STRINGS.MAIN.queueSplitFailed(name, err));
       return false;
     } finally {
       unlisten();
-      showStatus(name, null);
     }
     removeDemo(demo);
     showToast(STRINGS.MAIN.queueSplitDone(name, written.map((w) => fileNameOf(w.path))), 'success', 6000);
-    await scan(written.map((w) => w.path), { pickedFiles: true });
-    carryWork(demo, written);
+    try {
+      await scan(written.map((w) => w.path), {
+        pickedFiles: true,
+        within: nest(place, [SPLIT_SHARE, 100], `${line}: ${STRINGS.MAIN.QUEUE_SPLIT_ADDING}`),
+      });
+      carryWork(demo, written);
+    } finally {
+      progress.end(job, STRINGS.MAIN.queueSplitDoneLine(durationTextMs(progress.ms(job))));
+    }
     return true;
   }
 
-  // Start Capture Batch's demo checks: picks in a demo with more than one map
-  // first, then missing or changed demos (#21). Resolves true to go ahead,
-  // false when a demo is missing (capture_pane.js says so), or 'handled' when
-  // this already told the user why not.
-  async function captureDemosReady() {
-    const multi = pickedMultiMapDemos(getDemos());
-    if (multi.length === 0) return pickedDemosPresent();
-    const split = await themedConfirm(STRINGS.MAIN.MULTI_MAP_PICKED_MESSAGE, {
-      title: STRINGS.MAIN.MULTI_MAP_PICKED_TITLE,
-      confirmLabel: STRINGS.MAIN.MULTI_MAP_PICKED_SPLIT,
-      cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL_PLAIN,
-      details: multi.map((d) => ({ primary: fileNameOf(d.path), secondary: d.signon_maps.join(', '), title: d.path })),
-      footer: STRINGS.MAIN.MULTI_MAP_PICKED_QUESTION,
-    });
-    if (split) {
-      for (const d of multi) await splitQueuedDemo(d);
-    }
-    return 'handled';
+  // Start Capture Batch's demo check: missing or changed demos (#21), as
+  // project_demos.js answers it. A picked demo with more than one map goes
+  // ahead like any other, on its first map; once the batch is cleared to
+  // start, the activity log names each such demo with the map captured and
+  // the maps left out, or counts them when there are many.
+  // `options.onProgress` counts the changed-demo check (#953).
+  async function captureDemosReady(options = {}) {
+    const ready = await pickedDemosPresent(options);
+    if (ready === true) logFirstMapOnly(pickedMultiMapDemos(getDemos()));
+    return ready;
   }
 
   return { splitQueuedDemo, captureDemosReady };
+}
+
+/** Past this many multi-map demos in one batch, the log counts them in one
+ *  line instead of a line each. */
+export const FIRST_MAP_LINES_MAX = 5;
+
+function logFirstMapOnly(multi) {
+  if (multi.length > FIRST_MAP_LINES_MAX) {
+    logFrontendEvent(STRINGS.MAIN.captureFirstMapOnly(multi.length));
+    return;
+  }
+  for (const demo of multi) {
+    logFrontendEvent(STRINGS.MAIN.captureFirstMapOnlyDemo(demo.name || fileNameOf(demo.path), demo.signon_maps));
+  }
 }

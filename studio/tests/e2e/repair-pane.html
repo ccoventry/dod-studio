@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Demo Auditor's Damaged Demos tab (#15): the folder box and
+  the tab's own controls. A test sets `find_damaged_demos_cmd` and
+  `repair_demo_cmd` on window.__mockInvokeHandlers and emits
+  `repair_scan_progress` / `repair_progress` with window.__mockEmit.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>repair_pane.js harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input type="text" id="audit-target-folder-input" />
+  <input type="checkbox" id="repair-recursive" checked />
+  <button id="repair-find-btn" disabled>Find Damaged Demos</button>
+  <button id="repair-cancel-btn" disabled>Cancel</button>
+  <button id="repair-checked-btn" disabled>Repair Checked</button>
+  <div id="repair-progress" class="progress-bar-container" hidden><div class="progress-bar-fill"></div></div>
+  <p id="repair-status"></p>
+  <table id="repair-table">
+    <thead><tr><th><input type="checkbox" id="repair-select-all" checked /></th><th></th><th></th><th></th><th></th></tr></thead>
+    <tbody id="repair-body"></tbody>
+  </table>
+  <div id="footer-audit-summary"></div>
+
+  <script type="module">
+    import { createRepairPane } from '/src/repair_pane.js';
+    import { showAuditorFooterFor } from '/src/auditor_footer.js';
+    createRepairPane();
+    showAuditorFooterFor('repair');
+    // A repair the test finishes with window.__finishRepair(result).
+    window.__holdRepair = () => {
+      window.__mockInvokeHandlers.repair_demo_cmd = ({ path }) => new Promise((resolve) => {
+        window.__finishRepair = (result) => resolve({ ...result, written: result.written && path.replace('.dem', '_repaired.dem') });
+      });
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

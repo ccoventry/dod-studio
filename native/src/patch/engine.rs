@@ -1,3 +1,6 @@
+// Fixed-width header slices and queues just peeked; error paths for these are tracked on #1179.
+#![allow(clippy::unwrap_used)]
+
 // patch/engine.rs
 // Binary stream manipulation against the GoldSrc .dem wire format.
 // Reads/writes to disk — native-only.
@@ -25,7 +28,6 @@ fn check_console_cmd_len(cmd: &str) -> std::io::Result<()> {
         cmd,
         cmd.len()
     );
-    log::error!("{}", msg);
     Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg))
 }
 
@@ -36,7 +38,6 @@ fn write_console_cmd(
     cmd: &str,
 ) -> std::io::Result<i32> {
     use std::io::Write;
-    log::debug!("Injecting Command: {} at tick: {}", cmd, tick);
     check_console_cmd_len(cmd)?;
     writer.write_all(&[3_u8])?;
     writer.write_all(&time.to_le_bytes())?;
@@ -221,9 +222,10 @@ impl StreamPatcher {
                 Ok(()) => Ok(()),
                 Err(e) => {
                     if !(e.kind() == std::io::ErrorKind::UnexpectedEof && label == "Frame Header") {
-                        crate::log_markdown(&format!(
-                            "Buffer Error [{}]: Expected {} bytes at offset {}, but hit EOF.",
-                            label, expected_size, file_cursor_position
+                        crate::log_markdown(&crate::messages::demo_buffer_eof(
+                            label,
+                            expected_size,
+                            file_cursor_position,
                         ));
                     }
                     Err(e)
@@ -432,10 +434,9 @@ impl StreamPatcher {
                         u32::from_le_bytes(prefix[4..8].try_into().unwrap()) as usize;
 
                     if sample_length > MAX_PAYLOAD_LIMIT_BYTES {
-                        crate::log_markdown(&format!(
-                            "Alignment lost! Read impossible size: {} at offset {}",
+                        crate::log_markdown(&crate::messages::demo_alignment_lost(
                             sample_length,
-                            reader.stream_position().unwrap_or(0)
+                            reader.stream_position().unwrap_or(0),
                         ));
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -457,10 +458,9 @@ impl StreamPatcher {
                     let buffer_length = u32::from_le_bytes(prefix) as usize;
 
                     if buffer_length > MAX_PAYLOAD_LIMIT_BYTES {
-                        crate::log_markdown(&format!(
-                            "Alignment lost! Read impossible size: {} at offset {}",
+                        crate::log_markdown(&crate::messages::demo_alignment_lost(
                             buffer_length,
-                            reader.stream_position().unwrap_or(0)
+                            reader.stream_position().unwrap_or(0),
                         ));
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -502,10 +502,9 @@ impl StreamPatcher {
                     let msg_len = u32::from_le_bytes(len_buf) as usize;
 
                     if msg_len > MAX_PAYLOAD_LIMIT_BYTES {
-                        crate::log_markdown(&format!(
-                            "Alignment lost! Read impossible size: {} at offset {}",
+                        crate::log_markdown(&crate::messages::demo_alignment_lost(
                             msg_len,
-                            reader.stream_position().unwrap_or(0)
+                            reader.stream_position().unwrap_or(0),
                         ));
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -549,14 +548,12 @@ impl StreamPatcher {
             .filter(|(_, cmd)| !cmd.contains("BREADCRUMB"))
             .collect();
         if let Some((first_tick, first_cmd)) = unwritten.first() {
-            crate::log_markdown(&format!(
-                "⚠️ **{} scheduled command(s) fell past the end of** `{}` ({} frames) **and were not written.** \
-                 The highlights don't match this file. First: frame {} `{}`.",
+            crate::log_markdown(&crate::messages::demo_commands_past_end(
                 unwritten.len(),
                 source_demo.display(),
                 frame_counter,
                 first_tick,
-                first_cmd
+                first_cmd,
             ));
         }
 

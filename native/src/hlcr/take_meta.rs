@@ -27,6 +27,7 @@
 //! and the walk stops two folders up, so it describes the frames beside it,
 //! and a fixed 300 made every take captured at another rate the wrong speed.
 
+use crate::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
@@ -56,9 +57,11 @@ const OLDEST_FORMAT: u32 = 1;
 pub const TAKE_FILE: &str = "dodstudio_take.json";
 
 /// Whether a directory entry is one of ours, and so must not be mistaken for
-/// captured output. `take_folder_has_content` asks this.
+/// captured output. `take_folder_has_content` asks this. OBS mode's take
+/// state (`obs::take_state`) sits beside this file and is ours too.
 pub fn is_metadata(file_name: &std::ffi::OsStr) -> bool {
     file_name.eq_ignore_ascii_case(TAKE_FILE)
+        || file_name.eq_ignore_ascii_case(crate::obs::take_state::FILE)
 }
 
 /// How far up from a take folder to look. HLAE nests its own `take0000` inside
@@ -88,6 +91,19 @@ pub struct SessionMeta {
     /// Absent unless `capture_mode` is `"agr"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agr_fps: Option<i32>,
+    /// What the batch planned this take to hold (#1084), so its length and
+    /// kills can be checked against it later. Absent for a take captured
+    /// before it was recorded, or whose demo had no frame times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<super::take_plan::TakePlan>,
+    /// Everything else the capture used, with its hash (part of #1085).
+    /// Absent for a take captured before it was recorded: "not recorded",
+    /// never a difference. Not a `FORMAT` bump: an older build ignores a
+    /// file with a newer format, and would then render a frame sequence at
+    /// Source FPS (#14); it reads this file and drops only this field when
+    /// it rewrites it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<super::take_settings::CaptureSettings>,
 }
 
 impl SessionMeta {
@@ -99,6 +115,8 @@ impl SessionMeta {
             renders: Vec::new(),
             capture_mode: None,
             agr_fps: None,
+            plan: None,
+            settings: None,
         }
     }
 
@@ -227,7 +245,7 @@ fn update_history(
     take_folder: &Path,
     change: impl FnOnce(&mut Vec<RenderAttempt>),
 ) -> std::io::Result<()> {
-    let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = lock_or_recover(&HISTORY_WRITE);
     let Some((path, mut meta)) = history_file(take_folder) else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -616,7 +634,43 @@ mod tests {
         // report a capture that never happened.
         assert!(is_metadata(std::ffi::OsStr::new(TAKE_FILE)));
         assert!(is_metadata(std::ffi::OsStr::new("DODSTUDIO_TAKE.JSON")));
+        assert!(is_metadata(std::ffi::OsStr::new(
+            crate::obs::take_state::FILE
+        )));
         assert!(!is_metadata(std::ffi::OsStr::new("00000.bmp")));
         assert!(!is_metadata(std::ffi::OsStr::new("sound.wav")));
+    }
+
+    #[test]
+    fn a_takes_capture_settings_survive_a_render_writing_its_history() {
+        let (_root, block, take) =
+            block_with_take("settings", "session_x", "dodstudio_chain_01_b0");
+        let settings = super::super::take_settings::CaptureSettings {
+            width: 1920,
+            lines: vec!["mirv_fov 90".into()],
+            hash: "v1-0123456789abcdef".into(),
+            ..Default::default()
+        };
+        let meta = SessionMeta {
+            settings: Some(settings.clone()),
+            ..SessionMeta::new("session_x", 120)
+        };
+        write(&block, &meta).expect("write");
+        record_render_start(&take, &attempt_at(10, "all")).expect("start");
+        let read = read_for_take(&take).expect("meta");
+        assert_eq!(read.settings, Some(settings));
+        assert_eq!(read.format, FORMAT);
+    }
+
+    #[test]
+    fn a_take_file_without_settings_reads_as_not_recorded() {
+        let (_root, block, take) =
+            block_with_take("no_settings", "session_x", "dodstudio_chain_01_b0");
+        std::fs::write(
+            block.join(TAKE_FILE),
+            r#"{"format":2,"session_id":"s","capture_fps":120}"#,
+        )
+        .unwrap();
+        assert_eq!(read_for_take(&take).expect("meta").settings, None);
     }
 }

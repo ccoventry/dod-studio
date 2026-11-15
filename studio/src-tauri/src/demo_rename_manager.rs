@@ -134,20 +134,82 @@ pub fn demo_rename_cancel(state: tauri::State<'_, DemoRenameManager>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
 
+/// Whether a rename count is worth an event: the first and the last always,
+/// the rest at most every `PROGRESS_INTERVAL_MS`.
+fn count_due(
+    last: Option<std::time::Instant>,
+    now: std::time::Instant,
+    done: usize,
+    total: usize,
+) -> bool {
+    done <= 1
+        || done >= total
+        || last
+            .is_none_or(|t| now.duration_since(t).as_millis() >= u128::from(PROGRESS_INTERVAL_MS))
+}
+
+/// Sends `demo_rename_apply_progress` (`{ done, total }`) for Apply and Undo,
+/// throttled by [`count_due`] (#958).
+fn rename_counter(app: &AppHandle) -> impl FnMut(usize, usize) + '_ {
+    let mut last = None;
+    move |done, total| {
+        let now = std::time::Instant::now();
+        if count_due(last, now, done, total) {
+            last = Some(now);
+            let _ = app.emit(
+                "demo_rename_apply_progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        }
+    }
+}
+
 /// Renames each pair in place and logs the batch for Undo.
 #[tauri::command]
-pub async fn demo_rename_apply(renames: Vec<RenamePair>) -> Result<RenameOutcome, String> {
+pub async fn demo_rename_apply(
+    app_handle: AppHandle,
+    renames: Vec<RenamePair>,
+) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::apply(&renames, &log_dir()))
+        let outcome =
+            demo_rename::apply_reporting(&renames, &log_dir(), &mut rename_counter(&app_handle));
+        native::log_markdown(&outcome_log("renamed", renames.len(), &outcome));
+        Ok(outcome)
     }))
     .await
 }
 
+/// The activity log's line for a rename batch or its undo: how many were
+/// asked for, how many went through, and where the undo log is.
+fn outcome_log(what: &str, asked: usize, outcome: &RenameOutcome) -> String {
+    let mut line = format!(
+        "[rename] {what} {} of {asked} demo(s)",
+        outcome.renamed.len()
+    );
+    if !outcome.failed.is_empty() {
+        line.push_str(&format!(", {} failed", outcome.failed.len()));
+    }
+    if let Some(log) = &outcome.log {
+        line.push_str(&format!(
+            ", undo log {}",
+            std::path::Path::new(log).display()
+        ));
+    }
+    line
+}
+
 /// Puts the newest batch back.
 #[tauri::command]
-pub async fn demo_rename_undo() -> Result<RenameOutcome, String> {
+pub async fn demo_rename_undo(app_handle: AppHandle) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::undo_last(&log_dir()))
+        let outcome =
+            demo_rename::undo_last_reporting(&log_dir(), &mut rename_counter(&app_handle));
+        native::log_markdown(&outcome_log(
+            "undid the rename of",
+            outcome.renamed.len() + outcome.failed.len(),
+            &outcome,
+        ));
+        Ok(outcome)
     }))
     .await
 }
@@ -160,4 +222,38 @@ pub async fn demo_rename_undoable() -> Result<Option<UndoableBatch>, String> {
         demo_rename::undoable(&log_dir())
     }))
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn the_rename_line_counts_what_went_through() {
+        let outcome = RenameOutcome {
+            renamed: vec![],
+            failed: vec![],
+            log: Some("logs/1.json".into()),
+        };
+        assert_eq!(
+            outcome_log("renamed", 0, &outcome),
+            "[rename] renamed 0 of 0 demo(s), undo log logs/1.json"
+        );
+    }
+
+    #[test]
+    fn rename_counts_are_throttled_but_the_first_and_last_always_go() {
+        let t = Instant::now();
+        let soon = t + Duration::from_millis(5);
+        let later = t + Duration::from_millis(40);
+        assert!(count_due(None, t, 1, 40), "the first count");
+        assert!(count_due(Some(t), soon, 40, 40), "the last count");
+        assert!(
+            !count_due(Some(t), soon, 12, 40),
+            "too soon after the last event"
+        );
+        assert!(count_due(Some(t), later, 12, 40), "33 ms on");
+        assert!(count_due(None, t, 12, 40), "no event yet");
+    }
 }

@@ -17,14 +17,16 @@
 //!   (`#Clan_awaiting_ready` would come the same way). Dropped whole when the
 //!   key starts `#clan_`, in any case.
 //! - **`ClanTimer`**, one byte of seconds: `client.dll` stores
-//!   `seconds + time` (`+0x2cce0`) and `CHudDoDCrossHair::DrawClanTimer` then
-//!   draws `#Clan_time_remaining` every frame until the last two seconds, and
+//!   `seconds + time` (`CHudDoDCrossHair::MsgFunc_ClanTimer`, `+0x2cce0`) and
+//!   `CHudDoDCrossHair::DrawClanTimer` then draws `#Clan_time_remaining` every
+//!   frame until the last two seconds, and
 //!   `#Clan_match_live` for those. So both the countdown and "MATCH IS LIVE!"
 //!   are this one message, and it is swallowed.
 //! - **`GameRules`**, two bytes of flags: bit 4 of the second is warm-up mode
-//!   (`+0x2c650` stores it at `+0x108eb0`), which makes the objective icons'
-//!   `Draw` put `clan_warmup_mode` on the left of the screen. Forwarded with
-//!   that bit cleared; every other flag (paratroopers, infinite lives,
+//!   (`CHudDoDCommon::MsgFunc_GameRules`, `+0x2c650`, stores it at
+//!   `+0x108eb0`), which makes the objective icons' `Draw` put
+//!   `clan_warmup_mode` on the left of the screen. Forwarded with that bit
+//!   cleared; every other flag (paratroopers, infinite lives,
 //!   British) still reaches the game.
 //!
 //! `#Clan_axis_ready` and `#Clan_allies_ready` arrive on `HudText`, which the
@@ -51,14 +53,16 @@
 //! through `msglog`'s thunk table, nothing is patched. While
 //! `ds_debug_msglog` watches one of these messages its record sits in
 //! front and asks [`filter`] instead, so the two don't take turns at the head
-//! of the engine's list.
+//! of the engine's list. `center_text` (#677) rides on the same `TextMsg`
+//! handler for the same reason: [`filter`] asks it too.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_clan_text");
 
@@ -82,7 +86,7 @@ const POST_OBJECT_AT: usize = 16;
 /// The object's hold: the client time its line stops showing, an `f32`.
 const HOLD_UNTIL: usize = 0x14;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what the message handler reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Messages hidden or changed this session.
@@ -102,11 +106,6 @@ struct Last {
     /// Seconds, and the client time it arrived at.
     clan_timer: Option<(u8, f64)>,
     game_rules: Option<Vec<u8>>,
-}
-
-/// Called by `commands.rs` once `ds_hud_hide_clan_text` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 // ── Pure decisions ───────────────────────────────────────────────────────────
@@ -178,7 +177,18 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
             note_hidden(&format!("TextMsg \"{}\"", String::from_utf8_lossy(key)));
             return Some(1);
         }
-        return None;
+        // ds_hud_hide_center_text shares this handler rather than taking
+        // turns with it at the head of the engine's list (#677).
+        if crate::center_text::hide(payload) {
+            return Some(1);
+        }
+        // And ds_spec_hide_text, for the server's own copy of
+        // the camera mode name.
+        if crate::spectator_text::hide_text_msg(payload) {
+            return Some(1);
+        }
+        // ds_player_change_name: a renamed player's join and team lines.
+        return crate::player_names::text_msg(payload);
     }
     if name.eq_ignore_ascii_case(CLAN_TIMER) {
         let seconds = payload.first().copied().unwrap_or(0);
@@ -213,10 +223,11 @@ fn remember(update: impl FnOnce(&mut Last)) {
     }
 }
 
-/// Ends the hold on the countdown's last line, so it goes the moment the
-/// countdown stops instead of 4 s later. Only called while the countdown is
-/// running, when that line is the one the object shows.
-fn end_countdown_line() -> Result<(), String> {
+/// Ends the hold on the centre-print object's line, so it goes now instead of
+/// 4 s after its post. Called here only while the countdown is running, when
+/// that line is the one the object shows; `center_text` calls it as its cvar
+/// turns on, when any centre line showing is one to end (#677).
+pub(crate) fn end_center_line() -> Result<(), String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     // Safety: `client_module_base` only returns a base for a mapped module,
     // and it stays mapped for the session.
@@ -251,7 +262,7 @@ fn redeliver(hide: bool) {
                 let sent = if hide { 0 } else { left };
                 let result = deliver(CLAN_TIMER, &mut [sent]);
                 let line = if hide {
-                    match end_countdown_line() {
+                    match end_center_line() {
                         Ok(()) => ", its last line cleared".to_string(),
                         Err(why) => format!(", its last line stays up to 4 s: {why}"),
                     }
@@ -317,11 +328,9 @@ fn install_hook(message: &str) {
 /// was playing (through `ds_debug_msglog`) saw every one -- the same
 /// timing `map_text`, `deathmsg` and `msglog` use.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
@@ -347,11 +356,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let hidden = HIDDEN.load(Ordering::Relaxed);
     if !wanted && hidden == 0 {
         return None;

@@ -23,6 +23,9 @@ pub struct ClipInfo {
     pub path: String,
     pub duration_secs: f64,
     pub video_codec: String,
+    /// The codec tag FFmpeg prints beside the codec ("apch" for ProRes HQ,
+    /// "apcn" for 422, "apcs" for LT), when it prints one.
+    pub video_tag: Option<String>,
     pub pix_fmt: String,
     pub width: u32,
     pub height: u32,
@@ -76,6 +79,7 @@ pub fn parse_report(path: &str, report: &str) -> Option<ClipInfo> {
         } else if let Some(at) = line.find(": Video: ").filter(|_| !have_video) {
             let fields: Vec<&str> = split_fields(&line[at + 9..]);
             info.video_codec = first_word(fields.first()?);
+            info.video_tag = codec_tag(fields.first()?);
             info.pix_fmt = first_word(fields.get(1).copied().unwrap_or(""))
                 .trim_end_matches('(')
                 .to_string();
@@ -139,6 +143,12 @@ fn first_word(field: &str) -> String {
         .to_string()
 }
 
+/// "apch" out of `prores (HQ) (apch / 0x68637061)`.
+fn codec_tag(field: &str) -> Option<String> {
+    let (before, _) = field.split_once(" / 0x")?;
+    Some(before.rsplit('(').next()?.trim().to_string())
+}
+
 fn size_of(field: &str) -> Option<(u32, u32)> {
     let word = field.split_whitespace().next()?;
     let (w, h) = word.split_once('x')?;
@@ -155,8 +165,10 @@ fn parse_clock(text: &str) -> Option<f64> {
 }
 
 /// Whether `clips` can be joined without re-encoding: same container,
-/// video codec, size, frame rate and pixel format, and the same audio (or
-/// none on all of them).
+/// video codec and tag, size, frame rate and pixel format, and the same
+/// audio (or none on all of them). The tag keeps ProRes HQ and 422 clips,
+/// which share a codec and pixel format, out of one copied stream that the
+/// file would label with only the first clip's profile.
 pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
     let Some(first) = clips.first() else {
         return false;
@@ -169,6 +181,7 @@ pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
     clips.iter().all(|c| {
         ext(c) == ext(first)
             && c.video_codec == first.video_codec
+            && c.video_tag == first.video_tag
             && (c.width, c.height) == (first.width, first.height)
             && c.fps == first.fps
             && c.pix_fmt == first.pix_fmt
@@ -180,15 +193,47 @@ pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
 
 /// Probes every clip and says how they would be joined.
 pub async fn plan(ffmpeg: &Path, clips: &[PathBuf]) -> Result<CombinePlan, String> {
+    plan_with_progress(ffmpeg, clips, |_, _| {}).await
+}
+
+/// `plan`, calling `checked(done, total)` before the first clip is read and
+/// after each one, so the window can say "Checking the clips (3 of 8)" (#955).
+/// One call per clip: each is an FFmpeg run, far longer than 33 ms.
+pub async fn plan_with_progress(
+    ffmpeg: &Path,
+    clips: &[PathBuf],
+    mut checked: impl FnMut(usize, usize),
+) -> Result<CombinePlan, String> {
     let mut infos = Vec::with_capacity(clips.len());
+    checked(0, clips.len());
     for clip in clips {
         infos.push(probe(ffmpeg, clip).await?);
+        checked(infos.len(), clips.len());
     }
     Ok(CombinePlan {
         stream_copy: can_stream_copy(&infos),
         total_secs: infos.iter().map(|c| c.duration_secs).sum(),
         clips: infos,
     })
+}
+
+/// One `combine_progress` event: the clips being re-read, then FFmpeg
+/// joining them (`fraction` of the total length written, 0..1).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum CombineProgress {
+    Checking { done: usize, total: usize },
+    Joining { fraction: f64 },
+}
+
+/// Whether `err` is what `combine` returns when it was cancelled.
+pub fn is_cancelled(err: &str) -> bool {
+    err == crate::messages::COMBINE_CANCELLED
+}
+
+/// The error `combine` returns when it was cancelled.
+pub fn cancelled_error() -> String {
+    crate::messages::COMBINE_CANCELLED.to_string()
 }
 
 /// The concat demuxer's list file. Forward slashes, single quotes escaped
@@ -323,7 +368,7 @@ pub async fn combine(
             let _ = child.kill().await;
             let _ = std::fs::remove_file(output);
             let _ = std::fs::remove_file(&list);
-            return Err(crate::messages::COMBINE_CANCELLED.to_string());
+            return Err(cancelled_error());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -362,6 +407,35 @@ mod tests {
 ";
 
     #[test]
+    fn progress_events_name_their_step() {
+        let checking =
+            serde_json::to_value(CombineProgress::Checking { done: 3, total: 8 }).unwrap();
+        assert_eq!(
+            checking,
+            serde_json::json!({ "step": "checking", "done": 3, "total": 8 })
+        );
+        let joining = serde_json::to_value(CombineProgress::Joining { fraction: 0.5 }).unwrap();
+        assert_eq!(
+            joining,
+            serde_json::json!({ "step": "joining", "fraction": 0.5 })
+        );
+    }
+
+    #[tokio::test]
+    async fn checking_counts_from_zero_and_stops_at_a_bad_clip() {
+        // No FFmpeg at this path: the first clip fails, after the 0-of-N call.
+        let mut seen = Vec::new();
+        let result = plan_with_progress(
+            Path::new("Z:/no/such/ffmpeg.exe"),
+            &[PathBuf::from("a.mp4"), PathBuf::from("b.mp4")],
+            |done, total| seen.push((done, total)),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(seen, vec![(0, 2)]);
+    }
+
+    #[test]
     fn reads_an_ffmpeg_report() {
         let a = parse_report("a.mp4", H264).unwrap();
         assert_eq!(
@@ -370,6 +444,7 @@ mod tests {
                 path: "a.mp4".into(),
                 duration_secs: 5.03,
                 video_codec: "h264".into(),
+                video_tag: Some("avc1".into()),
                 pix_fmt: "yuv420p".into(),
                 width: 1920,
                 height: 1080,
@@ -384,6 +459,7 @@ mod tests {
             (b.video_codec.as_str(), b.pix_fmt.as_str()),
             ("prores", "yuv422p10le")
         );
+        assert_eq!(b.video_tag.as_deref(), Some("apch"));
         assert_eq!((b.width, b.height, b.fps.as_str()), (1280, 720, "29.97"));
         assert_eq!(b.duration_secs, 62.5);
         assert_eq!(b.audio_codec, None);
@@ -409,8 +485,24 @@ mod tests {
         };
         assert!(!can_stream_copy(&[a.clone(), other_box]));
         let b = parse_report("b.mov", PRORES_SILENT).unwrap();
-        assert!(!can_stream_copy(&[a, b]));
+        assert!(!can_stream_copy(&[a, b.clone()]));
         assert!(!can_stream_copy(&[]));
+        // ProRes HQ and 422: same codec and pixel format, different profile.
+        let standard = parse_report(
+            "c.mov",
+            &PRORES_SILENT.replace(
+                "prores (HQ) (apch / 0x68637061)",
+                "prores (Standard) (apcn / 0x6E637061)",
+            ),
+        )
+        .unwrap();
+        assert_eq!(standard.video_tag.as_deref(), Some("apcn"));
+        assert!(!can_stream_copy(&[b.clone(), standard]));
+        let b2 = ClipInfo {
+            path: "d.mov".into(),
+            ..b.clone()
+        };
+        assert!(can_stream_copy(&[b, b2]));
     }
 
     #[test]

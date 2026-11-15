@@ -18,13 +18,6 @@ describe('playersOf', () => {
       { name: 'c', count: 1 },
     ]);
   });
-
-  it('counts only highlights Min Kills keeps', () => {
-    expect(playersOf(demo, 2)).toEqual([
-      { name: 'a', count: 1 },
-      { name: 'b', count: 1 },
-    ]);
-  });
 });
 
 describe('matchesPlayer', () => {

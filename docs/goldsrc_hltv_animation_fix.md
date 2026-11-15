@@ -4,7 +4,8 @@
 > Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
 > [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
 > Defaults **on** (0.2.0). It is one of the things `ds_spec_match_pov` turns
-> on (with the lost gunshots and the POV crosshair): `ds_spec_match_pov 1` in
+> on (with the POV crosshair; the lost gunshots are `ds_sound_restore_gunshots`
+> since #1036): `ds_spec_match_pov 1` in
 > the console, `+ds_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,
 > `dodstudio_hltv_show_viewmodel_animations`, until 2026-10-01.
@@ -254,7 +255,8 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ## 11. How to check it is working
 
-1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
+1. Build for `i686-pc-windows-msvc` and load it through DoD Studio or HLAE's
+   custom loader (`goldsrc-hooks/README.md`) into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
 2. `ds_spec_match_pov 1`, `ds_debug_log_weapon_model 1`.

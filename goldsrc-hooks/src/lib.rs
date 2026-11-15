@@ -12,30 +12,40 @@
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
-//! others and each safe to inject without them:
-//! - `ds_spec_match_pov`, one cvar over five modules, for making a
-//!   spectated first-person view look and sound like the player's own
-//!   recording:
+//! others and each safe to install without them:
+//! - `ds_spec_match_pov`, one cvar over four modules, for making a
+//!   spectated first-person view look like the player's own recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
 //!     reload, draw, idle, grenades -- which the engine otherwise leaves
 //!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
-//!   - `missing_shots`: an HLTV demo carries the fire event for well under
-//!     half the rounds fired; the rest are found from the shooter's body
-//!     animation restarting and get the weapon's own event handler called for
-//!     them (sound, flash, impact).
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
-//!     are drawn by different code paths and do not otherwise share a look.
+//!     are drawn by different code paths and do not otherwise share a look;
+//!     for style 0, POV's red crosshair, with `spectator_crosshair_gap`
+//!     giving it the spectated player's gap through `crosshair_gap`.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
+//! - `missing_shots` and `pov_recorder_shots`: `ds_sound_restore_gunshots`,
+//!   the gunshots a demo lost (#1036). An HLTV demo carries the fire event
+//!   for well under half the rounds fired, a POV demo for about six in seven
+//!   of the other players'; the rest are found from the shooter's body
+//!   animation restarting and get the weapon's own event handler called for
+//!   them (sound, flash, impact). A POV recorder's own unpredicted shots are
+//!   found from his clip count instead (#1029).
+//! - `strafe_twitch`: `ds_player_fix_model_flicker`, player models hold
+//!   still for the frame an HLTV demo's clock steps back, which would turn a
+//!   strafing model round (#927). Its own switch, on by default: a bug in how
+//!   the game draws, not a difference in what HLTV records.
 //! - `spectator_deathcam`: `ds_spec_deathcam`, the game's own death cam
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
 //!   shoutcast does not.
-//! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
-//!   gunshots through. It changes no sound.
+//! - `fire_sounds`: the `EV_PlaySound` hook `anim_fix` and the gunshot
+//!   modules hear gunshots through. It changes no sound but the headshot's.
+//! - `headshot_sound`: `ds_sound_headshot_farther`, the headshot sound
+//!   (`player/helmet_hit.wav`) carries twice as far, through that hook.
 //! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
@@ -47,6 +57,10 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `player_names`: the `ds_player_change_name add|list|remove|clear`
+//!   command -- rename a player everywhere their name shows during playback,
+//!   by SteamID, slot or `self`, for one demo or all, through a detour of
+//!   client.dll's `pfnGetPlayerInfo` (#1021).
 //! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -54,7 +68,10 @@
 //!   icon on the overview map -- the game's own team, everyone, the other
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `ds_hud_overview_team_marker`, which marks the
-//!   player being watched in HLTV with his team's camera icon (#304).
+//!   player being watched in HLTV with his team's camera icon (#304), or
+//!   leaves the camera icon off the map (`2`, #677).
+//! - `overview_speaker`: `ds_hud_overview_hide_speaker`, which leaves the
+//!   speaker icon off the players' overview map icons (#677).
 //! - `pov_overview`: `ds_debug_pov_overview`, an R&D prototype that lets
 //!   the overview map draw in POV demo playback (#897).
 //! - `demo_scope`: `ds_hud_show_scope`, which draws the sniper scope
@@ -71,10 +88,29 @@
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
-//!   demo's player opened.
+//!   demo's player opened; and the menu half of `ds_hud_hide_plugin_text`,
+//!   every other `ShowMenu` menu (#342).
+//! - `hint_panel`: the `ds_hud_hide_hints` cvar (on by default) -- keep
+//!   DoD's auto-help hint panel shut, which a POV demo recorded with `_ah 1`
+//!   opens and the viewer's own `_ah` can't stop (#286).
+//! - `mg_reload_hint`: the machine gun's "Deploy your machine gun to
+//!   Reload!" prompt, under the same `ds_hud_hide_hints` (#342).
+//! - `teammate_info`: the `ds_hud_hide_teammate_info` cvar -- hide the
+//!   teammate name and health line under a POV demo's crosshair, through
+//!   `hudelement`'s vftable stub (#342).
+//! - `nameplates`: the `ds_spec_show_player_info` cvar -- a name, a
+//!   health bar or both over each player drawn, in demo playback, from `player_info`'s read of
+//!   `client.dll`'s `g_PlayerExtraInfo` (#1130).
+//! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
+//!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
+//! - `crosshair_outline`: `ds_hud_crosshair_outline_size` and `_color` -- a drawn
+//!   border around any crosshair, in the frame's own pixels (§5 of
+//!   `docs/goldsrc_crosshair.md`).
+//! - `crosshair_scale`: the `ds_hud_crosshair_scale` cvar -- draw the crosshair
+//!   S times bigger, for movies at high resolutions (#1335).
 //! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
 //!   different y while spectating than it does in a POV demo, and scale
@@ -86,6 +122,10 @@
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
+//! - `lightmap_rebuild`: a `brightness`, `gamma` or `lightgamma` change
+//!   relights the map on the pre-Anniversary engine too, as the Anniversary
+//!   engine does (#662). On by default; `GOLDSRC_HOOKS_LIGHTMAP_REBUILD=0`
+//!   turns it off.
 //! - `hud_sprites`: `ds_map_hide_asset` for the HUD's own 2D sprites, by
 //!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
 //!   function pointers (#808). Installed when client.dll initialises.
@@ -99,6 +139,13 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
+//!   through its event dictionary's lookup cache, the 25th Anniversary crash
+//!   on a second `viewdemo` of an HLTV demo (#1392). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` turns it off.
+//! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
+//!   models around them, which the engine culled from the map's origin
+//!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
 //! - `demo_list_folders`: the `ds_ui_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
@@ -134,6 +181,11 @@
 //!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
 //!   One pointer write at start-up, both builds. On by default;
 //!   `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
+//! - `env_models`: a POV demo played as HLTV (`dem_forcehltv 1`) draws the
+//!   map's own models (sandbags, banisters) again: the game's
+//!   `CClientEnvModel::Think`, which that session never calls, is called once
+//!   the models are loaded. On by default; `GOLDSRC_HOOKS_ENV_MODELS=0` turns
+//!   it off.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -142,6 +194,21 @@
 //!   folder (`-game dod_movies`), which the engine otherwise refuses with
 //!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
 //!   check, both builds; only when the game folder is not `dod`.
+//! - `pov_crosshair_gap`: a POV demo's red crosshair (`cl_xhair_style 0`)
+//!   opens while its recorder runs, as it did live, where the game, which
+//!   reads the velocity only prediction writes, would keep it at rest. The
+//!   red crosshair's gap call (`crosshair_gap`) gets the recorded velocity
+//!   for the game's own gap function, only while a POV demo plays. No
+//!   setting of its own: the stock `cl_dynamic_xhair` still decides.
+//! - `demo_console_keys`: in a POV demo only the console key opens the
+//!   console; the engine otherwise opens it for Alt (so Alt+Tab), Tab and
+//!   every printable key, as it never does in an HLTV demo (#894). One byte in
+//!   `Key_Event`, both builds. On by default;
+//!   `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
+//! - `pov_map_keys`: `+map` and `+mapzoom` do nothing while a POV demo
+//!   plays, so the recorder's presses can't leave `_cl_minimap` on the full
+//!   map, which hides the crosshair and the flag row and never draws there
+//!   (#1441). On by default; `GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -153,12 +220,38 @@
 //! - `world_shaders`: the `ds_map_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
+//!   or none, by pointing the weather updater's type read at our own value
+//!   (#1129).
+//! - `map_wind`: the `ds_map_wind` cvar -- the wind that blows rain, snow
+//!   and smoke, by pointing the particles' wind reads at our own vector.
+//! - `map_cfgs`: the `ds_map_run_cfgs` cvar -- run
+//!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
+//!   demo's map loads, for per-map brightness and gamma, which a server's map
+//!   cfgs would set but demo playback never runs.
+//! - `map_light`: the `ds_map_apply_lighting` cvar -- multiply a map's baked
+//!   lighting inside the boxes `dodstudio_maps/<map>_light.txt` lists, in
+//!   the engine's copy, as the map loads (#1312).
 //! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
 //! - `clan_text`: the `ds_hud_hide_clan_text` cvar -- hide all of DoD's
 //!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
 //!   countdown and "MATCH IS LIVE!" (issue #608).
+//! - `center_text`: the `ds_hud_hide_center_text` cvar -- drop every
+//!   `TextMsg` the server sends to the middle of the screen (#677).
+//! - `spectator_text`: the `ds_spec_hide_text` cvar -- hide the
+//!   camera mode's name and the green "Press DUCK for Spectator Menu" when
+//!   the view becomes a spectator camera (#677).
+//! - `engine_center_print`: the `hw.dll` half of `ds_hud_hide_center_text`
+//!   -- the engine's own `svc_centerprint`, per engine build (#677).
+//! - `plugin_text`: the `ds_hud_hide_plugin_text` cvar -- hide
+//!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
+//!   `hw.dll` call at a filter, per engine build (#677); `voice_menus` hides
+//!   their menus under the same cvar (#342).
+//! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
+//!   rewritten while a setting is on (`engine_center_print`,
+//!   `plugin_text`).
 //! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -178,7 +271,7 @@
 //! The settings are `ds_*` **cvars**, so they behave like any other
 //! engine setting: `ds_spec_match_pov 1` from the console,
 //! `+ds_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
-//! user execs. `commands.rs` copies them into the runtime flags once per
+//! user execs. `commands/poll.rs` copies them into the runtime flags once per
 //! frame, and `ds_debug_status` reports what each part is actually
 //! doing rather than only what it is set to.
 //!
@@ -190,15 +283,25 @@ mod anim_fix;
 mod batch;
 mod batch_end;
 mod behind_imports;
+mod build_id;
+mod center_text;
 mod clan_text;
+mod clip_log;
 mod cmd_list;
 mod commands;
 mod connect_guard;
+mod console_tokens;
 mod crash;
 mod crosshair;
+mod crosshair_gap;
+mod crosshair_outline;
+mod crosshair_scale;
 mod deathmsg;
 mod debug;
+mod debug_texture;
 mod decals;
+mod demo_bar_progress;
+mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
 mod demo_other_drives;
@@ -206,10 +309,13 @@ mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
 mod demo_seek;
+mod demoplayer_dict_cache;
 mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
+mod engine_center_print;
+mod env_models;
 mod events;
 mod ex_interp;
 mod fast_load;
@@ -217,21 +323,40 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod frame_times;
 mod game_dir_check;
 mod game_folder;
 mod gl_zoom;
+mod gun_log;
 mod hand_signals;
+mod hang;
+mod headshot_sound;
 mod hide_asset;
+mod hint_panel;
 mod hlae_window;
+mod hltv_fov;
 mod hltv_messages;
+mod hud_sprite_edges;
+mod hud_sprite_lod;
 mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
+mod hw_call_site;
 mod lightmap_gamma;
+mod lightmap_rebuild;
 mod list_panel;
+mod lookahead;
+mod map_cfgs;
+mod map_file_leak;
+mod map_light;
+mod map_sounds;
 mod map_text;
+mod map_weather;
+mod map_wind;
+mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
+mod nameplates;
 mod names;
 mod objicons;
 mod old_names;
@@ -239,44 +364,70 @@ mod overview_hd;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
+mod overview_speaker;
+mod own_blood;
 mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_info;
+mod player_names;
 mod player_overrides;
 mod player_table;
+mod plugin_text;
 mod pmove_guard;
 mod position;
+mod pov_crosshair_gap;
 mod pov_live_bob;
+mod pov_map_keys;
 mod pov_overview;
+mod pov_recorder_shots;
 mod remote;
 mod review;
+mod review_ask;
+mod review_form;
+mod review_header;
+mod review_keys;
 mod review_lock;
+mod review_speed;
 mod run_in_background;
 mod scan;
 mod schedule;
 mod scoreboard;
 mod screen_effects;
 mod server_query;
+mod setting;
+mod settings_tab;
+mod spec_xray;
 mod spectator_bars;
 mod spectator_buttons;
+mod spectator_chase_pvs;
 mod spectator_crosshair;
+mod spectator_crosshair_gap;
 mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
+mod spectator_input_gate;
 mod spectator_target;
+mod spectator_text;
 mod spray;
 mod spray_hltv;
+mod spray_lambda;
 mod sprite_blend;
+mod steam_id;
+mod strafe_twitch;
 mod streaks;
 mod studio_panel;
+mod studio_pipe;
+mod teammate_info;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
 mod voice_menus;
+mod weapon_list;
 mod window_layout;
 mod world_shaders;
 
@@ -313,7 +464,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// player's own recording is a clear win
 /// for everyone. `ds_spec_match_pov 0` turns it off, and
 /// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
-/// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
+/// `anim_fix::LEVEL`, which `commands/install.rs` hands the engine as the cvar's
 /// default, and the cvar then drives every part.
 const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
 
@@ -339,15 +490,34 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_LIGHTMAP_GAMMA", true),
         Ordering::Relaxed,
     );
+    // Makes the pre-Anniversary engine do what the Anniversary one does on a
+    // gamma change, so on unless asked not to.
+    lightmap_rebuild::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_LIGHTMAP_REBUILD", true),
+        Ordering::Relaxed,
+    );
     // A crash fix rather than a capture setting, so on unless asked not to.
     tempent_fix::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Only frees memory the game never uses again, so on unless asked not to.
+    map_file_leak::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX", true),
         Ordering::Relaxed,
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only empties a cache the demo player rebuilds, so on unless asked not to.
+    demoplayer_dict_cache::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Only restores what a chase camera can see, so on unless asked not to.
+    spectator_chase_pvs::ENABLED
+        .store(env_flag("GOLDSRC_HOOKS_CHASE_PVS", true), Ordering::Relaxed);
     // Restores the pre-Anniversary behaviour on the Anniversary build and
     // does nothing on the pre-Anniversary one, so on unless asked not to.
     frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
@@ -355,6 +525,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     engine_buttons::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
+    // Only makes the call the game makes in every other session, so on unless
+    // asked not to.
+    env_models::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENV_MODELS", true),
         Ordering::Relaxed,
     );
     // A crash fix, so on unless asked not to.
@@ -366,6 +542,18 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     sprite_blend::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Makes a POV demo's keys behave as an HLTV demo's already do, so on
+    // unless asked not to.
+    demo_console_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS", true),
+        Ordering::Relaxed,
+    );
+    // The map can't draw in POV playback, so its keys there only break the
+    // HUD (#1441): on unless asked not to.
+    pov_map_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_POV_MAP_KEYS", true),
         Ordering::Relaxed,
     );
     // Only this user's own processes can reach the pipe, and only a game
@@ -389,6 +577,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
+    unsafe { debug::report(&format!("goldsrc-hooks build {}", build_id::ID)) };
 
     // Matching POV defaults to OFF, so a session where the hooks all install
     // correctly but nothing visibly changes is the expected outcome of simply
@@ -457,6 +646,9 @@ fn install_fixes() {
     // flag the env var above set as its starting value.
     commands::install();
 
+    // hw.dll, once; before lightmap_gamma, whose detour overwrites the start
+    // of the function this one's signature finds.
+    lightmap_rebuild::install();
     // hw.dll, once; before the first map loads, which is the one it's for.
     lightmap_gamma::install();
 
@@ -478,6 +670,8 @@ fn install_fixes() {
     sprite_blend::install();
     // Before the first demo's svc_serverinfo; does nothing in `dod`.
     game_dir_check::install();
+    // Before any demo plays; the console commands are registered by now.
+    demo_console_keys::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

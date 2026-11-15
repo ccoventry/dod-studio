@@ -24,6 +24,7 @@ pub mod map_list;
 pub mod map_textures;
 pub mod misses;
 pub mod my_styles;
+pub mod outdated;
 pub mod preview;
 pub mod python;
 pub mod setup;
@@ -173,6 +174,10 @@ pub struct HdStatus {
     /// Studio's Initial Commands. Filled in by the caller, which knows both:
     /// [`gl_max_size::effective`].
     pub gl_max_size: Option<gl_max_size::GlMaxSize>,
+    /// Styles whose built output is older than this app's scripts would
+    /// build (#1155). Filled in by the caller, which knows the scripts'
+    /// folder: [`outdated::check`].
+    pub outdated: Vec<outdated::Outdated>,
 }
 
 /// Where the HD files are, from the `hl.exe` path the app launches:
@@ -231,6 +236,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         map_list: None,
         large_address_aware: None,
         gl_max_size: None,
+        outdated: Vec::new(),
     }
 }
 

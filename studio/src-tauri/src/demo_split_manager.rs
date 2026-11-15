@@ -3,6 +3,7 @@
 //! maps out as demos of their own. The work is `native::demo_split` and
 //! `native::demo_maps_scan`; this is the IPC around it.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -11,6 +12,7 @@ use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
 use native::demo_split::{
     Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_cancellable,
 };
+use native::demo_split_status::{SplitStatus, split_status};
 use tauri::{AppHandle, Emitter};
 
 use crate::settings_manager::SettingsManager;
@@ -90,6 +92,21 @@ pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> 
     .await
 }
 
+/// Whether the multi-map demo at `path` was already split next to it, for the
+/// queue row and the Demo Analyzer's notice. Asked each time they are shown,
+/// so a split made, or pieces deleted, since the scan count.
+#[tauri::command]
+pub async fn demo_split_status(
+    path: String,
+    maps: Vec<String>,
+    min_seconds: f32,
+) -> Result<SplitStatus, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        split_status(Path::new(&path), &maps, min_seconds)
+    }))
+    .await
+}
+
 /// Writes the ticked maps (`keep`) of the demo at `path` as demos of their
 /// own; [`cancel_demo_split`] stops it (the maps already saved stay).
 #[tauri::command]
@@ -102,11 +119,7 @@ pub async fn split_demo_maps(
 ) -> Result<SplitOutcome, String> {
     let map_dirs = game_map_dirs(&settings);
     let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .splits
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(path.clone(), Arc::clone(&cancel));
+    lock_or_recover(&state.splits).insert(path.clone(), Arc::clone(&cancel));
     let key = path.clone();
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let stop = || cancel.load(Ordering::Relaxed);
@@ -114,11 +127,7 @@ pub async fn split_demo_maps(
             .map(|(written, cancelled)| SplitOutcome { written, cancelled })
     }))
     .await;
-    state
-        .splits
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&key);
+    lock_or_recover(&state.splits).remove(&key);
     result
 }
 
@@ -128,12 +137,7 @@ pub fn cancel_demo_split(
     state: tauri::State<'_, DemoSplitManager>,
     path: String,
 ) -> Result<(), String> {
-    if let Some(flag) = state
-        .splits
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(&path)
-    {
+    if let Some(flag) = lock_or_recover(&state.splits).get(&path) {
         flag.store(true, Ordering::SeqCst);
     }
     Ok(())
@@ -157,12 +161,7 @@ pub async fn split_demo_auto(
 
 /// The game's own maps folders, for a map whose BSP the demo's folder lacks.
 fn game_map_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
-    let hl_path = settings
-        .inner
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .hl_path
-        .clone();
+    let hl_path = lock_or_recover(&settings.inner).hl_path.clone();
     Path::new(&hl_path)
         .parent()
         .map(|game| {

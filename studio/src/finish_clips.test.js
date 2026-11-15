@@ -33,6 +33,11 @@ describe('finishCodecFor', () => {
     expect(finishCodecFor('obs', { ...c, obs: 'h264' })).toEqual({ codec: 'h264', customArgs: '' });
   });
 
+  it('falls back to ProRes 422 when the Render tab has no codec', () => {
+    expect(finishCodecFor('frame_sequence', codecs({ renderCodec: '' })).codec).toBe('prores_422');
+    expect(finishCodecFor('frame_sequence', codecs({ renderCodec: 'prores' })).codec).toBe('prores');
+  });
+
   it('picks each mode its own codec', () => {
     const c = codecs({ obs: 'h264_nvenc', video: 'prores', frames: 'h264' });
     expect(finishCodecFor('obs', c).codec).toBe('h264_nvenc');
@@ -118,6 +123,11 @@ describe('finishSkipReason', () => {
     expect(finishSkipReason({ ...ok, folders: [] })).toBe('nothing');
     expect(finishSkipReason({ ...ok, exportDirs: [] })).toBe('no_export_dir');
   });
+
+  it('stays out of a batch that rendered while capturing, cancelled or not', () => {
+    expect(finishSkipReason({ ...ok, renderedWhileCapturing: true })).toBe('rendered_while_capturing');
+    expect(finishSkipReason({ ...ok, outcome: 'cancelled', renderedWhileCapturing: true })).toBe('rendered_while_capturing');
+  });
 });
 
 // ── The controller ───────────────────────────────────────────────────────────
@@ -128,6 +138,7 @@ function harness({ queueResult = 2 } = {}) {
     queue: vi.fn(async (payload) => { calls.push(['queue', payload]); return queueResult; }),
     start: vi.fn(async () => { calls.push(['start']); }),
     onWaiting: vi.fn(),
+    onScanning: vi.fn(),
     onStarted: vi.fn(),
     onProgress: vi.fn(),
     onDone: vi.fn(),
@@ -149,6 +160,17 @@ describe('createFinishController', () => {
     await flush();
     expect(calls.map((c) => c[0])).toEqual(['queue', 'start']);
     expect(deps.onStarted).toHaveBeenCalledWith(2);
+  });
+
+  it('says it is looking for the takes before the scan and not while it waits (#954)', async () => {
+    const { deps, controller } = harness();
+    controller.onJobsSnapshot([job('0', 'D:\mine', 'Rendering')]);
+    controller.request(request(['D:\a']));
+    await flush();
+    expect(deps.onScanning).not.toHaveBeenCalled();
+    controller.onJobsSnapshot([job('0', 'D:\mine', 'Finished')]);
+    expect(deps.onScanning).toHaveBeenCalledTimes(1);
+    await flush();
   });
 
   it('reports progress and then the end, once', async () => {

@@ -6,6 +6,7 @@ import {
   resetRenderJob,
   removeRenderJob,
   cancelRenderJobs,
+  cancelQueuedRenderJobs,
   resetRenderJobs,
   removeRenderJobs,
   clearRenderQueue,
@@ -20,26 +21,48 @@ import {
   writeTextFile,
   measureTakeFolders,
   deleteTakeFolders,
+  logFrontendEvent,
+  takePreviewThumb,
+  takePreviewSheet,
+  cancelTakePreviews,
+  takeChecks as takeChecksIpc,
+  cancelTakeChecks,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
+import { setFieldError, clearFieldError } from './field_error.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
 import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { scanMergeMessage } from './render_scan_summary.js';
+import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRenderBatch } from './render_batch_progress.js';
+import { createClock, hideBar, showBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
+import { startVegasEdlExport } from './vegas_edl_export.js';
+import { startProjectVegasExport } from './project_vegas_export.js';
+import { startClipRelink } from './clip_relink.js';
+import { startVegasScriptInstall } from './vegas_script_install.js';
 import { save } from '@tauri-apps/plugin-dialog';
+import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
+import { startCodecHint } from './codec_hint.js';
+import { startTakePreview } from './take_preview.js';
+import { startTakeChecks } from './take_checks.js';
+import { renderSizeText } from './byte_size.js';
+
+/** How often the crash-recovery prompt looks again while another dialog is open. */
+const STARTUP_PROMPT_POLL_MS = 500;
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -50,18 +73,24 @@ let selection = null;
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
 // The rows this batch rendered or tried to (#70): every row seen Rendering
-// or Queued while it runs. The finish toast counts only these, so a take
-// that scanned in as Finished, or was cancelled before Start, isn't
-// reported as rendered by this batch. Emptied when the batch finishes.
-const batchJobIds = new Set();
+// or Queued while it runs. The finish toast, the batch bar and its line
+// count only these (#954), so a take that scanned in as Finished, or one
+// an earlier batch rendered, isn't counted as this batch's. The batch's
+// clock redraws the line every second (`redrawBatchLine`, set by
+// initRenderUI).
+let redrawBatchLine = () => {};
+const renderBatch = createRenderBatch({ redraw: () => redrawBatchLine(), log: logFrontendEvent });
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
+// Each take's picture (#1069), set up by initRenderUI.
+let takePreview = null;
+let takeChecks = null;
 // initRenderUI's getExportDirs, for the Start button's check.
 let exportDirsSource = null;
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
-  return document.querySelector('#render-codec-select')?.value || 'prores';
+  return document.querySelector('#render-codec-select')?.value || 'prores_422';
 }
 
 /** The batch panel's current Custom-codec FFmpeg args text, if any. */
@@ -73,15 +102,16 @@ function getCustomCodecArgs() {
 function syncCustomCodecVisibility() {
   const group = document.querySelector('#render-custom-codec-group');
   if (group) group.style.display = getSelectedCodec() === 'custom' ? '' : 'none';
+  if (getSelectedCodec() !== 'custom') clearFieldError(document.querySelector('#render-custom-codec-input'));
 }
 
 function statusColor(status) {
   switch (status) {
-    case JOB_STATUS.FINISHED: return '#4caf50';
-    case JOB_STATUS.ERROR: return '#f44336';
-    case JOB_STATUS.CANCELLED: return '#ffeb3b';
-    case JOB_STATUS.RENDERING: return '#7ec8e3';
-    default: return '#ffffff';
+    case JOB_STATUS.FINISHED: return 'var(--ok)';
+    case JOB_STATUS.ERROR: return 'var(--danger)';
+    case JOB_STATUS.CANCELLED: return 'var(--warn-cancelled)';
+    case JOB_STATUS.RENDERING: return 'var(--sky)';
+    default: return 'var(--text-strong)';
   }
 }
 
@@ -123,11 +153,12 @@ function setRenderStatus(el, text, status = null) {
   el.style.color = status ? statusColor(status) : '';
 }
 
-/** The footer's whole-batch bar (#40): hidden until there's a batch. */
+/** The footer's whole-batch bar (#40): hidden until there's a batch, then
+ *  this batch's rows only, and the last batch's once it ended (#954). */
 function updateBatchProgress() {
   const wrap = document.querySelector('#render-batch-progress');
   if (!wrap) return;
-  const pct = batchProgress(jobs);
+  const pct = batchProgress(rowsOf(jobs, renderBatch.shownIds()));
   wrap.style.display = pct === null ? 'none' : 'flex';
   if (pct === null) return;
   const fill = wrap.querySelector('.progress-bar-fill');
@@ -278,10 +309,7 @@ function wireSettingsCell(cell) {
  *  estimate: see TABLE_HEADER_FILE_SIZE_TITLE for why. */
 function formatFileSize(bytes) {
   if (bytes == null) return STRINGS.RENDER.FILE_SIZE_UNKNOWN;
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(2))
-    : STRINGS.RENDER.fileSizeMb((bytes / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 2);
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */
@@ -290,6 +318,7 @@ function createJobRow(j, rowState) {
   row.dataset.jobId = j.id;
   row.innerHTML = `
     <td class="rj-select col-center"><input type="checkbox" class="render-job-select-cb" title="${STRINGS.RENDER.SELECT_ROW_TITLE}" /></td>
+    <td class="rj-thumb-cell col-center"><div class="rj-thumb-pic"></div><div class="rj-check"></div></td>
     <td class="rj-name"></td>
     <td class="rj-stream"></td>
     <td class="rj-frames"></td>
@@ -329,6 +358,10 @@ function updateJobRow(row, j, rowState = {}) {
   // rows (queued, finished) haven't changed; skip those outright. The row
   // state rides along: a HUD pair's other half can change this row's Delete
   // Take (#644) without this row changing.
+  // The picture changes without the job changing; it skips itself when
+  // nothing did.
+  takePreview?.fillCell(row.querySelector('.rj-thumb-pic'), j);
+  takeChecks?.fillChip(row.querySelector('.rj-check'), j);
   const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
@@ -424,7 +457,9 @@ function renderJobsTable() {
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    takePreview?.sync(jobs);
+    takeChecks?.sync(jobs);
     syncSelectionControls();
     return;
   }
@@ -462,6 +497,8 @@ function renderJobsTable() {
   // stale row would be worse than the cost of checking.
   existingRows.forEach((row) => row.remove());
   syncSelectionControls();
+  takePreview?.sync(jobs);
+  takeChecks?.sync(jobs);
 }
 
 /**
@@ -497,6 +534,10 @@ function syncSelectionControls() {
   if (countEl) countEl.textContent = STRINGS.RENDER.selectedCount(ticked, total);
   const unrenderedBtn = document.querySelector('#render-select-unrendered-btn');
   if (unrenderedBtn) unrenderedBtn.disabled = total === 0;
+  for (const id of ['#render-select-finished-btn', '#render-finished-age-select']) {
+    const el = document.querySelector(id);
+    if (el) el.disabled = total === 0;
+  }
 
   const setButton = (id, count, label, title, disabled = count === 0) => {
     const btn = document.querySelector(id);
@@ -510,11 +551,16 @@ function syncSelectionControls() {
   const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
   // No export folder: the renderer refuses, so Start says where to add one.
   const noExportDir = !hasExportDir();
+  // The field itself says why Start is off; it clears when a folder is added.
+  setFieldError(document.querySelector('#render-export-dir-input'),
+    noExportDir && queued > 0 ? R.EXPORT_DIR_FIELD_EMPTY : '',
+    { autoClear: false });
   setButton('#start-render-btn', queued, R.startRenderBatch,
     noExportDir ? R.START_RENDER_NO_EXPORT_DIR_TITLE
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
     queued === 0 || rendering > 0 || noExportDir);
   setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
+  setButton('#cancel-queued-render-btn', queued, R.cancelQueued, R.CANCEL_QUEUED_TITLE);
   setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
   setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
   setButton('#delete-takes-render-btn', targets.deleteFolders.length, R.deleteTakesSelected,
@@ -579,6 +625,9 @@ export async function checkRenderRecoveryOnStartup(showRenderTab) {
 
   const modal = document.querySelector('#render-recovery-modal');
   if (!modal) return;
+  // One start-up prompt at a time: a dialog already on screen is answered
+  // first, or this one opens on top of it.
+  while (isAnyDialogOpen()) await new Promise((resolve) => { setTimeout(resolve, STARTUP_PROMPT_POLL_MS); });
   document.querySelector('#render-recovery-source').textContent = summary.source_folder || STRINGS.RENDER.UNKNOWN_SOURCE_FOLDER;
   document.querySelector('#render-recovery-completed').textContent = String(summary.completed_count);
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
@@ -631,10 +680,10 @@ async function exportMarkerList(getTakeIndex, getAllDemos) {
     showToast(STRINGS.RENDER.EXPORT_MARKERS_NONE, 'info');
     return;
   }
-  const path = await save({
+  const path = await whileDialogOpens(() => save({
     defaultPath: 'dod_markers.csv',
     filters: [{ name: 'CSV', extensions: ['csv'] }],
-  }).catch((err) => {
+  })).catch((err) => {
     console.error('Save dialog failed:', err);
     return null;
   });
@@ -653,6 +702,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
   const cancelRenderBtn = document.querySelector('#cancel-render-btn');
+  const cancelQueuedBtn = document.querySelector('#cancel-queued-render-btn');
   const retryRenderBtn = document.querySelector('#retry-render-btn');
   const removeRenderBtn = document.querySelector('#remove-render-btn');
   const deleteTakesRenderBtn = document.querySelector('#delete-takes-render-btn');
@@ -666,12 +716,33 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (e.target.checked) selection.selectAll(); else selection.selectNone();
   });
   document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
+  // #644: tick the finished takes, of any age or older than the age picked.
+  document.querySelector('#render-select-finished-btn')?.addEventListener('click', () => {
+    const minAgeMs = Number(document.querySelector('#render-finished-age-select')?.value) || 0;
+    selection.selectFinished({ minAgeMs });
+  });
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
   const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
+  startVegasScriptInstall();
+  startProjectVegasExport({
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
+  startClipRelink({
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    markDirty: () => takeTracking?.markDirty?.(),
+  });
+  startVegasEdlExport({
+    getJobs: () => jobs,
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
+  });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
@@ -682,9 +753,43 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     showToast,
     formatSize: formatFileSize,
     showProgress: showTakeDeleteProgress,
-    onBusyChange: () => renderJobsTable(),
+    // FFmpeg reading a take's frames would keep it from moving.
+    onBusyChange: (busy) => {
+      if (busy) {
+        takePreview?.pause();
+        takeChecks?.pause();
+      } else {
+        takePreview?.resume();
+        takeChecks?.resume();
+      }
+      renderJobsTable();
+    },
     listen,
     getJobs: () => jobs,
+  });
+  takePreview = startTakePreview({
+    thumb: takePreviewThumb,
+    sheet: takePreviewSheet,
+    cancel: cancelTakePreviews,
+    listen,
+    getJobs: () => jobs,
+    // A frame sequence's rate, for the sheet's times: the Source FPS the
+    // take renders at.
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    afterChange: () => takeChecks?.run(),
+  });
+  // Take checks (#1084) read every frame of a take, so they wait for the
+  // pictures, and stop for any render, which reads the same disks, and for
+  // any capture batch (they watch `capture_status` themselves).
+  const rendering = () => jobs.some((j) => j.status === JOB_STATUS.RENDERING);
+  takeChecks = startTakeChecks({
+    check: takeChecksIpc,
+    cancel: cancelTakeChecks,
+    listen,
+    getJobs: () => jobs,
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    isBlocked: () => !!takePreview?.isRunning() || rendering(),
+    mustStop: rendering,
   });
 
   // A take finishing renders — advances every highlight the take index says
@@ -754,20 +859,26 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   function paintQueueStatus() {
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
-    const activeOrQueued = queuedCount + renderingCount;
     if (renderingCount > 0) {
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length), JOB_STATUS.RENDERING);
+      const rows = rowsOf(jobs, renderBatch.ids());
+      const left = secondsLeft(batchFrames(rows), renderBatch.ms());
+      setRenderStatus(renderStatusEl, renderingLine(rows, left) + renderBatch.suffix(), JOB_STATUS.RENDERING);
     } else {
       setRenderStatus(renderStatusEl, queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
   }
 
+  // The clock and the time left move between snapshots.
+  redrawBatchLine = () => {
+    if (!scanRunning && jobs.some((j) => j.status === JOB_STATUS.RENDERING)) paintQueueStatus();
+  };
+
   function applyJobsSnapshot(list) {
     jobs = list;
     if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
-      for (const j of jobs) {
-        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
-      }
+      renderBatch.add(jobs
+        .filter((j) => j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED)
+        .map((j) => j.id));
     }
     renderJobsTable();
     if (!scanRunning) paintQueueStatus();
@@ -797,11 +908,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // size reported the whole batch as cancelled — including the common case
     // of cancelling the takes you did not want and letting the rest run, where
     // it read as though nothing had rendered at all.
-    const batch = jobs.filter((j) => batchJobIds.has(j.id));
-    batchJobIds.clear();
-    const finished = batch.filter((j) => j.status === JOB_STATUS.FINISHED).length;
-    const failed = batch.filter((j) => j.status === JOB_STATUS.ERROR).length;
-    const cancelled = batch.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
+    const ended = renderBatch.finish(jobs);
+    const { rows: batch, finished, failed, cancelled } = ended;
+    updateBatchProgress();
 
     // A batch the finish step (#440) queued has already said how it ended, in
     // its own words ("12 clips ready") — a second toast would repeat it.
@@ -818,23 +927,33 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    const end = batchEndStatus(finished, failed, cancelled);
+    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationTextMs(ended.ms) : null);
     if (!scanRunning) setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
   if (scanRenderBtn) {
+    // #954: the line counts the takes found so far, with a clock, and a
+    // block slides on the scan's bar, since how many there are to find isn't
+    // known until the walk ends.
+    const scanBar = document.querySelector('#render-scan-progress');
     let scanFoundCount = 0;
-    listen('render_scan_status', () => {
-      // Payload is just "Found take: <name>" per take — the count is what
-      // the status line needs, not the name, so this stays a cheap counter
-      // rather than parsing/echoing every take's name into the DOM.
-      scanFoundCount += 1;
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.scanFoundSoFar(scanFoundCount));
-    });
+    const paintScan = () => {
+      if (scanRunning) setRenderStatus(renderStatusEl, STRINGS.RENDER.lookingForTakes(scanFoundCount) + scanClock.suffix());
+    };
+    const scanClock = createClock({ redraw: paintScan });
+    // The backend counts the takes, at most one event every ~33 ms.
+    listen('render_scan_status', (event) => {
+      scanFoundCount = Math.max(scanFoundCount, Number(event.payload?.found) || 0);
+      paintScan();
+    }).catch((err) => console.error('Failed to register render_scan_status listener:', err));
 
     scanRenderBtn.addEventListener('click', () => {
       const captureLocations = getCaptureLocations ? getCaptureLocations() : [];
       if (!captureLocations || captureLocations.length === 0) {
+        // The folder list is on Configuration, off screen here: mark its field
+        // for when the user goes there, and say so in a toast now.
+        setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.RENDER_DIR_FIELD_EMPTY,
+          { list: document.querySelector('#target-drive-list') });
         showToast(STRINGS.RENDER.ADD_RENDER_DIR_REQUIRED, 'error');
         return;
       }
@@ -842,6 +961,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const codecVal = getSelectedCodec();
       const customCodecArgsVal = getCustomCodecArgs();
       if (codecVal === 'custom' && !customCodecArgsVal) {
+        setFieldError(document.querySelector('#render-custom-codec-input'), STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED);
         showToast(STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED, 'error');
         return;
       }
@@ -866,10 +986,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const ffmpegPathVal = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
 
       scanFoundCount = 0;
-      showToast(STRINGS.RENDER.SCANNING_TOAST, 'info');
       scanRunning = true;
       scanRenderBtn.disabled = true;
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCANNING);
+      scanClock.start();
+      showBar(scanBar, { indeterminate: true });
+      paintScan();
 
       const renderPayload = {
         render_directories: captureLocations,
@@ -891,15 +1012,22 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         .then((summary) => {
           scanRunning = false;
           scanRenderBtn.disabled = false;
+          const ms = scanClock.stop();
+          hideBar(scanBar);
           const message = scanMergeMessage(summary);
           showToast(message.toast, message.level);
           // While a batch renders, its own progress line takes over again.
           if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) paintQueueStatus();
-          else setRenderStatus(renderStatusEl, message.status);
+          else setRenderStatus(renderStatusEl, scanEndLine(summary, ms));
         })
         .catch((err) => {
           scanRunning = false;
           scanRenderBtn.disabled = false;
+          scanClock.stop();
+          hideBar(scanBar);
+          // The error is about the folders: show it at the folder field too.
+          setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.scanDirError(err),
+            { list: document.querySelector('#target-drive-list') });
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
         });
@@ -913,12 +1041,13 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
       if (!hasExportDir()) {
+        // syncSelectionControls marks the export folder field.
         showToast(STRINGS.RENDER.START_RENDER_NO_EXPORT_DIR_TITLE, 'error');
         syncSelectionControls();
         return;
       }
       // A batch of Skip copies can end before any snapshot shows Rendering.
-      for (const j of jobs) if (j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
+      renderBatch.add(jobs.filter((j) => j.status === JOB_STATUS.QUEUED).map((j) => j.id));
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
       startRenderBtn.disabled = true;
       if (cancelRenderBtn) cancelRenderBtn.disabled = false;
@@ -929,6 +1058,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         })
         .catch((err) => {
           showToast(STRINGS.RENDER.renderBatchError(err), 'error');
+          if (!jobs.some((j) => j.status === JOB_STATUS.RENDERING)) renderBatch.discard();
           syncSelectionControls();
         });
     });
@@ -944,6 +1074,22 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         console.error('IPC Execution Error (cancelRenderJobs):', err);
         syncSelectionControls();
       });
+    });
+  }
+
+  if (cancelQueuedBtn) {
+    cancelQueuedBtn.addEventListener('click', () => {
+      const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+      if (!queued) return;
+      cancelQueuedBtn.disabled = true;
+      logFrontendEvent(`[render] Cancel Queued clicked with ${queued} queued row(s)`);
+      cancelQueuedRenderJobs()
+        .then((n) => logFrontendEvent(`[render] Cancel Queued: ${n} row(s) cancelled`))
+        .catch((err) => {
+          console.error('IPC Execution Error (cancelQueuedRenderJobs):', err);
+          logFrontendEvent(`[render] Cancel Queued failed: ${err}`);
+          syncSelectionControls();
+        });
     });
   }
 
@@ -987,6 +1133,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
           title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
           confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+          destructive: true,
         });
         if (!ok) return;
       }
@@ -1031,6 +1178,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // this runs, and the args input needs to be visible from the first paint.
   if (codecEl) codecEl.addEventListener('change', syncCustomCodecVisibility);
   syncCustomCodecVisibility();
+  startCodecHint(codecEl, document.querySelector('#render-codec-hint'));
 
   // Paints once at startup (before any snapshot has arrived, so before
   // anything could have changed) — the `render_jobs_snapshot` listener above

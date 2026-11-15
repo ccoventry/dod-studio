@@ -1,8 +1,11 @@
 // setup_checklist.js
 // What DoD Studio needs before it can capture, and how much of it is set
-// (#599). Pure: the Setup window (setup_window.js) and the Capture page's
+// (#599). Pure: the Setup window (setup_window.js) and the Highlights page's
 // checklist card (setup_card.js) both read one answer from here, so they
 // never disagree about what is done. No DOM, no IPC.
+
+import { fileNameOf } from './path_display.js';
+import { BYTES_PER_MB, BYTES_PER_GB, BYTES_PER_TB } from './byte_size.js';
 
 /** The steps in the order the Setup window walks them. */
 export const SETUP_STEPS = ['hl', 'hlae', 'ffmpeg', 'captures', 'renders', 'demos'];
@@ -21,6 +24,16 @@ export function isSteamPlayInstall(hlPath) {
   return normalised.endsWith('/steamapps/common/half-life/hl.exe');
 }
 
+/**
+ * Whether Studio would launch Steam's own Half-Life with its own `dod`
+ * folder, the pair people play online with. A copy of the dod folder beside
+ * it (`dod_movies`, picked as the Game Folder) keeps movie files out of that
+ * game, so only this pair gets the "highly recommended" note.
+ */
+export function usesPlayFolder(hlPath, gameFolder) {
+  return isSteamPlayInstall(hlPath) && (gameFolder || 'dod').trim().toLowerCase() === 'dod';
+}
+
 /** The program each path must name: any other .exe (hlds.exe sits beside
  *  hl.exe in every install) passes the picker's filter but can't run. */
 export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };
@@ -28,7 +41,7 @@ export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };
 /** The file name of `path` when it is not `expected` (case doesn't matter),
  *  else ''. A blank path is not wrong, only unset. */
 export function wrongExeName(path, expected) {
-  const name = (path || '').trim().split(/[\\/]/).pop();
+  const name = fileNameOf((path || '').trim());
   return name && name.toLowerCase() !== expected.toLowerCase() ? name : '';
 }
 
@@ -57,6 +70,8 @@ function foldersAreSet(folders) {
  *   hlPath, hlaePath: the two executables as typed.
  *   hlState, hlaeState: 'ok' | 'empty' | 'not_found' | 'not_a_file' | undefined.
  *   ffmpegUsable: whether HLAE can run FFmpeg (null while unknown).
+ *   appFfmpeg: the ffmpeg.exe DoD Studio itself renders with, '' when it
+ *     finds none (undefined while unknown).
  *   targetDrives, renderExportDirs: [{ path, freeBytes }].
  *   demoCount: demos in the Master Queue.
  *   pinnedFolders: the remembered demo folders.
@@ -68,7 +83,9 @@ export function setupChecklist(state = {}) {
   const done = {
     hl: pathIsSet(state.hlPath, state.hlState, EXE_NAMES.hl),
     hlae: pathIsSet(state.hlaePath, state.hlaeState, EXE_NAMES.hlae),
-    ffmpeg: state.ffmpegUsable === true,
+    // Both halves: HLAE for Video capture, DoD Studio for Render and Finish
+    // clips. HLAE's own bundled copy leaves Studio without one.
+    ffmpeg: state.ffmpegUsable === true && state.appFfmpeg !== '',
     captures: foldersAreSet(state.targetDrives),
     renders: foldersAreSet(state.renderExportDirs),
     demos: (state.demoCount || 0) > 0 || (state.pinnedFolders || []).length > 0,
@@ -123,11 +140,11 @@ export function driveLabel(path) {
 /** Bytes as "412 GB" or "1.6 TB"; under a gigabyte in MB. */
 export function formatBytes(bytes) {
   if (typeof bytes !== 'number' || !(bytes >= 0)) return '';
-  const tb = bytes / 1024 ** 4;
+  const tb = bytes / BYTES_PER_TB;
   if (tb >= 1) return `${tb < 10 ? tb.toFixed(1) : Math.round(tb)} TB`;
-  const gb = bytes / 1024 ** 3;
+  const gb = bytes / BYTES_PER_GB;
   if (gb >= 1) return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`;
-  return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.round(bytes / BYTES_PER_MB)} MB`;
 }
 
 /** The movie install's demo folder: `dod` beside hl.exe. '' with no path. */

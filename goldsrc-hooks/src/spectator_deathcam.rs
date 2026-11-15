@@ -58,9 +58,10 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEntityS, CvarSPartial, RefParamsPartial, Vec3};
+use crate::engine::{self, ClEntityS, RefParamsPartial, Vec3};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The cvar: 1 shows the death cam when the watched player dies.
 pub const NAME: &str = console_name!("spec_deathcam");
@@ -120,8 +121,7 @@ type GetDeathCamFn = unsafe extern "C" fn(
     origin: *mut [f32; 3],
 );
 
-static CVAR: std::sync::atomic::AtomicPtr<CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// Where the function and its two globals were found, or 0 before the scan.
 static FUNCTION: AtomicUsize = AtomicUsize::new(0);
 static RESET_CAMERA: AtomicUsize = AtomicUsize::new(0);
@@ -159,16 +159,9 @@ static LAST_KILLER: [AtomicI32; MAX_PLAYERS + 1] = [const { AtomicI32::new(0) };
 /// Death cams shown this session, for `ds_debug_status`.
 static DEATHS: AtomicU64 = AtomicU64::new(0);
 
-/// Called once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 /// Whether the switch is on.
 pub fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    // Safety: the engine's own cvar record, which lives for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    CVAR.on()
 }
 
 /// Whether the death cam has run its time since `died_at` (or the clock has

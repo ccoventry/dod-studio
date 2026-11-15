@@ -11,9 +11,10 @@
 //!
 //! The same one `deathmsg`'s `block`/`fake` already rely on:
 //! `pfnHookUserMsg` **prepends** a fresh record rather than overwriting the
-//! existing one, so the engine's by-name dispatcher stops at the newest
-//! entry and the game's own handler stays reachable by calling its thunk
-//! directly. **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
+//! existing one, so the engine's by-number dispatcher -- the one every
+//! message from the server goes through -- stops at the newest entry and the
+//! game's own handler stays reachable by calling its thunk directly.
+//! **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
 //!
 //! One handler, [`hooked_msg`], is registered for every message DoD's
 //! `client.dll` hooks -- the full 71-entry name/thunk table below, derived
@@ -161,7 +162,7 @@ static WANTED: Mutex<Wanted> = Mutex::new(Wanted::None);
 
 /// True whenever [`WANTED`] is not [`Wanted::None`] -- lets [`poll`] skip the
 /// lock on the overwhelmingly common case (logging off) without changing
-/// behaviour, the same shape `commands.rs`' other `poll_*` helpers use.
+/// behaviour, the same shape `commands/poll.rs`' other `poll_*` helpers use.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The last payload logged per message name, for the identical-repeat
@@ -260,10 +261,44 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
-    // Same for ds_hud_hide_clan_text's three messages.
+    // ds_hud_deathmsg clear_on restart watches RoundState, and stands aside
+    // while this does.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("RoundState"))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::deathmsg::on_round_state(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
+    // ds_sound_restore_gunshots reads CurWeapon's clip the same way, for a
+    // POV recorder's own rounds (pov_recorder_shots).
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::pov_recorder_shots::MESSAGE))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::pov_recorder_shots::on_cur_weapon(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
+    // Same for ds_hud_hide_clan_text's three messages, and
+    // ds_hud_hide_center_text's TextMsg, which clan_text's filter asks.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::clan_text::filter(n, size, buf))
+    {
+        return result;
+    }
+    // And ds_player_change_name's SayText, whose handler stands aside while
+    // this one watches it.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("SayText"))
+        && let Some(result) = crate::player_names::say_text(size, buf)
     {
         return result;
     }
@@ -333,7 +368,7 @@ fn status() -> String {
 
 /// Folded into `ds_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `ds_spec_match_pov`) can treat this the same way -- see `commands.rs`.
+/// `ds_spec_match_pov`) can treat this the same way -- see `commands/status.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;
@@ -479,7 +514,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // ds_hud_hide_element's own fix (commit 3e44cd7) applied.
+        // the since-retired ds_hud_hide_element's fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }

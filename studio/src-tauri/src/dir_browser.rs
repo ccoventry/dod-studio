@@ -28,6 +28,17 @@ pub struct DemoFileEntry {
     pub path: String,
     pub size_bytes: u64,
     pub modified_unix_secs: f64,
+    /// `None` in a listing: the map is in the file, which `read_demo_heads`
+    /// reads afterwards.
+    pub map_name: Option<String>,
+    /// The file name's guess in a listing; `read_demo_heads` has the real one.
+    pub demo_type: String,
+}
+
+/// What the start of one demo says (`read_demo_heads`).
+#[derive(Serialize)]
+pub struct DemoHead {
+    pub path: String,
     pub map_name: String,
     pub demo_type: String,
 }
@@ -81,9 +92,44 @@ fn demo_map_and_type(path: &Path, name: &str) -> (String, String) {
     let hltv = if read && head.len() >= 2048 {
         native::patch::is_hltv_head(&head)
     } else {
-        name.to_lowercase().contains("hltv")
+        name_says_hltv(name)
     };
-    (map, if hltv { "HLTV" } else { "POV" }.to_string())
+    (map, demo_type_label(hltv))
+}
+
+fn name_says_hltv(name: &str) -> bool {
+    name.to_lowercase().contains("hltv")
+}
+
+fn demo_type_label(hltv: bool) -> String {
+    if hltv { "HLTV" } else { "POV" }.to_string()
+}
+
+/// The map and type of each demo in `paths`, from the first 4 KB of each.
+///
+/// Apart from `browse_directory` because on a cloud drive each read can
+/// fetch the file over the network: the Demos list shows a folder from its
+/// file names at once and fills these in as they arrive.
+#[tauri::command]
+pub async fn read_demo_heads(paths: Vec<String>) -> Result<Vec<DemoHead>, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        paths.into_iter().map(demo_head).collect()
+    }))
+    .await
+}
+
+fn demo_head(path: String) -> DemoHead {
+    let p = PathBuf::from(&path);
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (map_name, demo_type) = demo_map_and_type(&p, &name);
+    DemoHead {
+        path,
+        map_name,
+        demo_type,
+    }
 }
 
 fn native_roots() -> Vec<DirEntryLite> {
@@ -120,6 +166,7 @@ fn native_roots() -> Vec<DirEntryLite> {
 
 /// Lists the immediate subfolders and `.dem` files of `path`. `path: None`
 /// returns the drive roots (Windows) or `/` (elsewhere) as the top of the tree.
+/// Reads names and metadata only, never a demo's contents (`read_demo_heads`).
 ///
 /// Runs on a blocking thread: on a cloud drive each subfolder's demo count
 /// can be a network round trip, and on the main thread that froze the whole
@@ -174,13 +221,15 @@ fn list_directory(path: Option<String>) -> Result<DirListing, String> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs_f64())
                 .unwrap_or(0.0);
-            let (map_name, demo_type) = demo_map_and_type(&entry_path, &name);
+            // No file is opened here: on a cloud drive that fetched every
+            // demo before the folder could show (read_demo_heads does it).
+            let demo_type = demo_type_label(name_says_hltv(&name));
             demos.push(DemoFileEntry {
                 name,
                 path: entry_path.to_string_lossy().into_owned(),
                 size_bytes,
                 modified_unix_secs,
-                map_name,
+                map_name: None,
                 demo_type,
             });
         }
@@ -239,6 +288,24 @@ mod tests {
         let short = dir.join("short_hltv.dem");
         std::fs::write(&short, b"HLDEMO").unwrap();
         assert_eq!(demo_map_and_type(&short, "short_hltv.dem").1, "HLTV");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A listing is names only, so a cloud folder shows without fetching
+    // every demo; the heads come after.
+    #[test]
+    fn a_listing_leaves_the_map_to_read_demo_heads() {
+        let dir = std::env::temp_dir().join(format!("dir_browser_heads_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hltv = demo(&dir, "scrim_1790730448.dem", b"Spawn count 19 (HLTV)\n");
+        let listing = list_directory(Some(dir.to_string_lossy().into_owned())).unwrap();
+        assert_eq!(listing.demos.len(), 1);
+        assert_eq!(listing.demos[0].map_name, None);
+        assert_eq!(listing.demos[0].demo_type, "POV");
+        let head = demo_head(hltv.to_string_lossy().into_owned());
+        assert_eq!(head.map_name, "dod_anzio");
+        assert_eq!(head.demo_type, "HLTV");
+        assert_eq!(head.path, listing.demos[0].path);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

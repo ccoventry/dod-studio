@@ -38,7 +38,7 @@ static BOXED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new()
 const SEEK_KEY: &CStr = c"seek";
 const TARGET_KEY: &CStr = c"target";
 /// The columns past the row number (which is the window's own `demoname`
-/// column, retitled), as the Capture page's Highlights table names them:
+/// column, retitled), as the Highlights page's Highlight Details table names them:
 /// key, heading, width. The Player column is hidden for a POV demo.
 const COLUMNS: [(&CStr, &CStr, i32); 5] = [
     (c"player", c"Player", 140),
@@ -98,16 +98,8 @@ pub(super) unsafe fn build(
         // Columns change only while the list is empty (see add_demo_columns).
         let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
         delete_all(list);
-        let add: AddColumnFn = slot(list, LIST_SLOT_ADD_COLUMN_HEADER);
         for (index, (key, heading, width)) in COLUMNS.iter().enumerate() {
-            add(
-                list,
-                index as i32 + 1,
-                key.as_ptr(),
-                heading.as_ptr(),
-                *width,
-                0,
-            );
+            add_column(list, index as i32 + 1, key, heading, *width, 0);
         }
         let sortable: ListIntBoolFn = slot(list, LIST_SLOT_SET_COLUMN_SORTABLE);
         for index in 0..=COLUMNS.len() as i32 {

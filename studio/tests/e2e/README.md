@@ -1,9 +1,10 @@
 # Frontend e2e tests
 
 Playwright, run in headless Chromium against minimal test harnesses — not the
-real app shell. Each `*.spec.js` loads its own `*.html` harness
-(`analyzer-tree`, `cfg-warnings`, `command-suggest`, `detail-notes`,
-`hd-textures`, `info-tooltip`, `master-pane`, `render-studio`, `setup`, `themed-confirm`).
+real app shell. Each `*.spec.js` loads its own `*.html` harness, usually the
+one of the same name beside it (`render-studio.html`, `setup.html`, ...).
+The one exception is `app-boot.spec.js`, which boots the real `index.html` and
+`main.js` to check main.js's startup wiring (#683).
 Tauri's IPC (`invoke`/`listen`) is mocked (`mocks/`, wired in via
 `../vite.config.e2e.js`), so the pane modules under test and `ipc_bridge.js`
 run completely unmodified with no Rust backend at all. Pure-logic unit tests
@@ -17,6 +18,16 @@ npm run test:e2e
 
 Playwright starts `npm run dev:e2e` (Vite on port 5183, using
 `vite.config.e2e.js`'s IPC aliasing) itself and tears it down after.
+
+## Page errors fail the test
+
+Specs import `test`/`expect` from `./fixtures.js`, not `@playwright/test`. Its
+auto fixture fails any test whose page throws or leaves a promise rejection
+unhandled, except what `ALLOWED_PAGE_ERRORS` lists (each entry says why).
+The IPC mock answers an unstubbed command with `undefined`; `DEFAULT_HANDLERS`
+in `mocks/tauri-core.js` gives the boot-time commands an empty answer instead.
+A test that boots `index.html` and is not about the first-run Setup window
+saves `setup_dismissed: true`, or that window covers the page.
 
 ## What this covers
 

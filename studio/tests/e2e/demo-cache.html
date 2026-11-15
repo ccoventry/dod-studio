@@ -22,7 +22,7 @@
     import { initDemoCache } from '/src/demo_cache.js';
 
     window.__demoPaths = ['C:\demos\a.dem', 'C:\demos\b.dem', 'C:\demos\c.dem'];
-    initDemoCache({ getDemoPaths: () => window.__demoPaths });
+    window.__demoCache = initDemoCache({ getDemoPaths: () => window.__demoPaths });
     window.__harnessReady = true;
   </script>
 </body>

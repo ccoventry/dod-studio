@@ -43,10 +43,11 @@ macro_rules! console_name {
 pub(crate) use console_name;
 
 /// The one switch for everything whose job is making a spectated first-person
-/// view look and sound like the player's own recording: the viewmodel's
-/// animations (`anim_fix`), the gunshots an HLTV demo lost (`missing_shots`)
-/// and the crosshair (`spectator_crosshair`). It lives here because all three
-/// modules name it in their own messages.
+/// view look like the player's own recording: the viewmodel's animations
+/// (`anim_fix`), the crosshair (`spectator_crosshair`), the eye height and
+/// the gun lowering. It lives here because several modules name it in their
+/// own messages. The gunshots a demo lost are `ds_sound_restore_gunshots`
+/// (`missing_shots`, #1036).
 ///
 /// Like every name (#555), the word after the prefix is the area a command
 /// belongs to, as HLAE's `mirv_movie_*` and `mirv_fx_*` are, and the action

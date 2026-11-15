@@ -31,6 +31,9 @@ pub struct DemoFacts {
     pub demo_type: String,
     /// The recording player, in a POV demo whose recorder was found.
     pub name: Option<String>,
+    /// The recording player's SteamID64, for the Players tab's Use as name
+    /// (#686). `None` when the demo carries none (a bot, a LAN server).
+    pub steam_id: Option<String>,
     pub kills: Option<i32>,
     pub deaths: Option<i32>,
     /// The recording player's side: "Allies", "British" or "Axis".
@@ -97,6 +100,7 @@ pub fn apply_grouping(facts: &mut [DemoFacts], analyses: &[Option<Analysis>]) {
 struct PlayerFacts<'a> {
     client_id: Option<u8>,
     name: &'a str,
+    steam_id: Option<String>,
     team: Option<Team>,
     kills: i32,
     deaths: i32,
@@ -134,6 +138,7 @@ pub fn facts_from(path: &Path, analysis: &Analysis) -> DemoFacts {
                 analysis::Connection::Disconnected => None,
             },
             name: &p.name,
+            steam_id: analysis::steam_id_of(&p.id.to_string()),
             team: p.team.clone(),
             kills: p.stats.1,
             deaths: p.stats.2,
@@ -153,6 +158,7 @@ pub fn facts_from(path: &Path, analysis: &Analysis) -> DemoFacts {
         modified_unix_secs: modified_unix_secs(path),
         demo_type: if hltv { "hltv" } else { "pov" }.to_string(),
         name: own.map(|p| p.name.to_string()).filter(|n| !n.is_empty()),
+        steam_id: own.and_then(|p| p.steam_id.clone()),
         kills: own.map(|p| p.kills),
         deaths: own.map(|p| p.deaths),
         side: own
@@ -300,16 +306,28 @@ fn rename_one(pair: &RenamePair) -> Result<(), String> {
 /// another folder. A failure is reported and the rest carry on. What was
 /// renamed is logged in `log_dir`, newest batch last.
 pub fn apply(pairs: &[RenamePair], log_dir: &Path) -> RenameOutcome {
+    apply_reporting(pairs, log_dir, &mut |_, _| {})
+}
+
+/// [`apply`], calling `on_done(done, total)` after each file, renamed or
+/// not, for the page's count (#958): a cloud or USB folder can take a while.
+pub fn apply_reporting(
+    pairs: &[RenamePair],
+    log_dir: &Path,
+    on_done: &mut dyn FnMut(usize, usize),
+) -> RenameOutcome {
     let mut outcome = RenameOutcome::default();
-    for pair in pairs.iter().filter(|p| p.from != p.to) {
+    let todo: Vec<&RenamePair> = pairs.iter().filter(|p| p.from != p.to).collect();
+    for (i, pair) in todo.iter().enumerate() {
         match rename_one(pair) {
-            Ok(()) => outcome.renamed.push(pair.clone()),
+            Ok(()) => outcome.renamed.push((*pair).clone()),
             Err(error) => outcome.failed.push(RenameFailure {
                 from: pair.from.clone(),
                 to: pair.to.clone(),
                 error,
             }),
         }
+        on_done(i + 1, todo.len());
     }
     if !outcome.renamed.is_empty() {
         let log = RenameLog {
@@ -386,11 +404,17 @@ pub fn undoable(log_dir: &Path) -> Option<UndoableBatch> {
 /// has since moved or been renamed again is reported and left alone. The log
 /// is then marked undone, so the next Undo reaches the batch before it.
 pub fn undo_last(log_dir: &Path) -> RenameOutcome {
+    undo_last_reporting(log_dir, &mut |_, _| {})
+}
+
+/// [`undo_last`], calling `on_done(done, total)` after each file (#958).
+pub fn undo_last_reporting(log_dir: &Path, on_done: &mut dyn FnMut(usize, usize)) -> RenameOutcome {
     let Some((path, mut log)) = logs(log_dir).into_iter().find(|(_, log)| !log.undone) else {
         return RenameOutcome::default();
     };
     let mut outcome = RenameOutcome::default();
-    for pair in log.renames.iter().rev() {
+    let total = log.renames.len();
+    for (i, pair) in log.renames.iter().rev().enumerate() {
         let back = RenamePair {
             from: pair.to.clone(),
             to: pair.from.clone(),
@@ -403,6 +427,7 @@ pub fn undo_last(log_dir: &Path) -> RenameOutcome {
                 error,
             }),
         }
+        on_done(i + 1, total);
     }
     log.undone = true;
     if let Ok(json) = serde_json::to_vec_pretty(&log) {
@@ -421,6 +446,7 @@ mod tests {
         PlayerFacts {
             client_id,
             name,
+            steam_id: None,
             team,
             kills: 7,
             deaths: 3,
@@ -463,6 +489,18 @@ mod tests {
         // A slot nobody connected holds, and an HLTV demo's missing slot.
         assert_eq!(recorder(Some(9), &players), None);
         assert_eq!(recorder(None, &players), None);
+    }
+
+    #[test]
+    fn the_recorders_steam_id_is_kept_when_the_demo_has_one() {
+        let mut me = player(Some(4), "me", Some(Team::Allies));
+        me.steam_id = analysis::steam_id_of("76561197961831029");
+        assert_eq!(
+            recorder(Some(4), &[me]).unwrap().steam_id.as_deref(),
+            Some("76561197961831029")
+        );
+        // A bot's or a LAN server's id names nobody.
+        assert_eq!(analysis::steam_id_of("PLAYER_3"), None);
     }
 
     #[test]
@@ -509,6 +547,35 @@ mod tests {
         assert_eq!(undoable(&logs), None);
         // Nothing left to undo is not an error.
         assert_eq!(undo_last(&logs), RenameOutcome::default());
+    }
+
+    #[test]
+    fn apply_and_undo_count_every_file_they_try() {
+        let dir = Scratch::new("demo_rename_counts");
+        let logs = dir.join("logs");
+        std::fs::write(dir.join("a.dem"), b"a").unwrap();
+        std::fs::write(dir.join("b.dem"), b"b").unwrap();
+        std::fs::write(dir.join("taken.dem"), b"t").unwrap();
+        let mut counts = Vec::new();
+        let outcome = apply_reporting(
+            &[
+                pair(&dir, "a.dem", "x.dem"),
+                // Left alone: not a rename, so not counted.
+                pair(&dir, "b.dem", "b.dem"),
+                // Refused (never replaces a file), but still counted.
+                pair(&dir, "b.dem", "taken.dem"),
+            ],
+            &logs,
+            &mut |done, total| counts.push((done, total)),
+        );
+        assert_eq!(outcome.renamed.len(), 1);
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(counts, vec![(1, 2), (2, 2)]);
+
+        let mut counts = Vec::new();
+        undo_last_reporting(&logs, &mut |done, total| counts.push((done, total)));
+        assert_eq!(counts, vec![(1, 1)]);
+        assert!(dir.join("a.dem").exists());
     }
 
     #[test]
