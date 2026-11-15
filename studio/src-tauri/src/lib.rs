@@ -54,6 +54,7 @@ mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
 mod trimmed_demos;
+mod unreached_clips;
 mod updater_manager;
 mod vegas_manager;
 
