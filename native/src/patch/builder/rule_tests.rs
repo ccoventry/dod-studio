@@ -795,7 +795,6 @@ fn the_same_highlights_in_any_order_make_the_same_batch() {
 
 /// The same highlights in any order label the same director events (#1222).
 #[test]
-#[ignore = "#1417: highlights of one player that share a first kill are numbered in the order they were sent"]
 fn the_same_highlights_in_any_order_make_the_same_director_events() {
     check_any_order("order_director", director_view);
 }
