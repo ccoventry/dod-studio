@@ -32,7 +32,8 @@ import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_settin
 import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind, completedToast } from './capture_progress.js';
-import { clipVerdictToasts, failedClipCount, shortClipCount } from './clip_verdict_toasts.js';
+import { clipVerdictToasts, shortClipCount } from './clip_verdict_toasts.js';
+import { takesShortfallToast } from './takes_shortfall_toast.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -1098,13 +1099,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       const marked = advanced > 0 ? STRINGS.CAPTURE.highlightsMarkedCaptured(advanced) : '';
       if (captured < total) {
-        // A take whose video stopped early (#1105) is cut_short too, but the
-        // batch's end isn't why. The end cuts one clip at most: its `cut_by`.
-        const stoppedEarly = blocks.filter((b) => b.short_take).length;
-        const cut = blocks.filter((b) => b.cut_short && !b.short_take);
-        // OBS started recording after the clip did (#1109).
-        const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate, failedClipCount(payload))}${marked}`, 'error');
+        // An info toast when a Cancel is all that left clips without a take (#1434).
+        const toast = takesShortfallToast(payload, captured, total);
+        showToast(`${toast.text}${marked}`, toast.type);
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else if (shortClipCount(payload) === 0) {
