@@ -77,7 +77,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
-use crate::review_keys::{KeyMode, KillClock, kill_lines, now_text};
+use crate::review_keys::{KeyMode, KillClock, kill_lines};
 
 pub const NAME: &str = console_name!("demo_review");
 
@@ -113,7 +113,7 @@ pub(crate) enum Verdict {
 }
 
 impl Verdict {
-    fn word(self) -> &'static str {
+    pub(crate) fn word(self) -> &'static str {
         match self {
             Verdict::Yes => "yes",
             Verdict::Maybe => "maybe",
@@ -508,6 +508,10 @@ struct Review {
     /// Whether the sound left over from before the highlight's seek has been
     /// stopped ([`hush_once_landed`]).
     hushed: bool,
+    /// The speed the speed keys chose for the highlight playing (#1437), which
+    /// wins over the fast-forward over gaps until it ends; `None` plays at the
+    /// review's own speeds.
+    speed: Option<f32>,
 }
 
 static REVIEW: Mutex<Option<Review>> = Mutex::new(None);
@@ -865,6 +869,7 @@ fn play(review: &mut Review) {
             };
             review.keys_from = Instant::now() + LOCKOUT;
             review.hushed = false;
+            review.speed = None;
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -916,6 +921,12 @@ fn go_to(review: &mut Review, at: usize) {
     }
 }
 
+/// Whether a playing highlight is at another speed than normal: in a
+/// fast-forwarded gap (#665) or at the speed keys' speed (#1437).
+fn sped(review: &Review) -> bool {
+    matches!(review.phase, Phase::Playing { fast: true, .. }) || review.speed.is_some()
+}
+
 /// Moves on from the current highlight, or ends the review after the last.
 fn advance(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
@@ -929,7 +940,7 @@ fn advance(guard: &mut Option<Review>) {
             "that was the last highlight -- {answered} of {total} answered"
         ));
         // Answered mid-highlight (#1141): the demo plays on at normal speed.
-        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+        if sped(review) {
             let _ = crate::demo_seek::set_time_scale(1.0);
         }
         crate::events::send("REVIEW_END\tdone");
@@ -955,13 +966,15 @@ pub fn poll() {
     let mut guard = lock();
     step(&mut guard);
     let (panel, mode) = match guard.as_ref() {
-        Some(review) => panel_view(
-            review,
-            Instant::now(),
-            crate::demo_seek::clock()
-                .filter(|c| c.active)
-                .map(|c| c.now),
-        ),
+        Some(review) => {
+            let clock = crate::demo_seek::clock().filter(|c| c.active);
+            panel_view(
+                review,
+                Instant::now(),
+                clock.map(|c| c.now),
+                clock.map_or(1.0, |c| c.time_scale),
+            )
+        }
         None => (None, KeyMode::Off),
     };
     drop(guard);
@@ -1013,12 +1026,37 @@ fn under_form(mode: KeyMode, form_shown: bool) -> KeyMode {
     }
 }
 
+/// The box's header (`review_header`, #1437) for the highlight the review is
+/// on: which one, whose, the kill range, the note, and the clock and speed
+/// when `clock` has one.
+fn panel_header(
+    review: &Review,
+    clock: Option<f64>,
+    speed: f32,
+) -> Vec<crate::review_header::Line> {
+    use crate::review_header::{note_lines, now_line, player_line, range_line, title_line};
+    let h = &review.queue[review.at];
+    let mut header = vec![title_line(
+        review.at,
+        review.queue.len(),
+        h.kills.len(),
+        h.verdict,
+    )];
+    header.extend(player_line(&h.player));
+    header.push(range_line(h.from, h.to, h.kills.len()));
+    header.extend(note_lines(&h.note));
+    header.extend(clock.map(|c| now_line(c, speed)));
+    header
+}
+
 /// What the on-screen panel shows for the review as it stands at `now`,
-/// with the demo player's clock at `clock`, and what the answer keys do.
+/// with the demo player's clock at `clock` and its speed at `speed`, and
+/// what the answer keys do.
 fn panel_view(
     review: &Review,
     now: Instant,
     clock: Option<f64>,
+    speed: f32,
 ) -> (Option<crate::review_keys::Panel>, KeyMode) {
     let keys = crate::review_keys::KEYS.on();
     let info = crate::review_keys::INFO.on();
@@ -1026,33 +1064,31 @@ fn panel_view(
         return (None, KeyMode::Off);
     };
     let mode = under_form(key_mode(review, keys, now), crate::review_form::is_shown());
-    let title = panel_title(&review.queue, review.at);
     let h = &review.queue[review.at];
-    let panel = |status: &str| crate::review_keys::Panel {
-        title: title.clone(),
-        range: crate::review_keys::range_line(h.from, h.to, h.kills.len()),
-        note: crate::review_keys::note_shown(&h.note),
+    // The clock beside the kills' times, so the next kill's says how soon;
+    // none while the demo loads.
+    let panel = |clock: Option<f64>, status: &str| crate::review_keys::Panel {
+        header: panel_header(review, clock, speed),
         status: status.to_string(),
         keys,
         live: mode == KeyMode::Live,
         can_go_back: review.at > 0,
         kills: Vec::new(),
         xray: crate::spec_xray::XRAY.on(),
+        playing: matches!(review.phase, Phase::Playing { .. }),
     };
-    // The clock beside the kills' times, so the next kill's says how soon.
-    let now = clock.map_or_else(String::new, now_text);
     let shown = match review.phase {
         // With the keys off, the Review tab is open for the answer.
         Phase::Waiting => keys.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, KillClock::Ended),
-            ..panel(&now)
+            ..panel(clock, "")
         }),
         // The Review tab is open for why this one failed.
         Phase::Failed(_) => None,
-        Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
+        Phase::Loading { .. } => info.then(|| panel(None, "Loading the demo...")),
         Phase::Playing { .. } => info.then(|| crate::review_keys::Panel {
             kills: kill_lines(h, clock.map_or(KillClock::Unknown, KillClock::At)),
-            ..panel(&now)
+            ..panel(clock, "")
         }),
     };
     (shown, mode)
@@ -1084,6 +1120,40 @@ fn key_action(action: crate::review_keys::Action) {
                 trace("X-ray: the engine's command buffer is not available");
             }
         }
+        Action::Faster => change_speed(true),
+        Action::Slower => change_speed(false),
+    }
+}
+
+/// Up or Down (#1437), or `faster` / `slower`: plays the highlight one step
+/// faster or slower (`review_speed`), from the speed it plays at now, until
+/// it ends. Only while it plays: at its end it is paused, and the next one
+/// starts at normal speed.
+fn change_speed(faster: bool) {
+    let mut guard = lock();
+    let Some(review) = guard.as_mut() else {
+        say("no review running");
+        return;
+    };
+    if !matches!(review.phase, Phase::Playing { .. }) {
+        say("the speed changes only while a highlight plays");
+        return;
+    }
+    let now = crate::demo_seek::clock().map_or(1.0, |c| c.time_scale);
+    let speed = crate::review_speed::step(now, faster);
+    match crate::demo_seek::set_time_scale(speed) {
+        Ok(()) => {
+            review.speed = Some(speed);
+            trace(&format!(
+                "highlight {}: speed {now}x -> {speed}x ({})",
+                review.at + 1,
+                if faster { "faster" } else { "slower" }
+            ));
+        }
+        Err(why) => trace(&format!(
+            "highlight {}: speed {speed}: {why}",
+            review.at + 1
+        )),
     }
 }
 
@@ -1184,9 +1254,10 @@ fn step(guard: &mut Option<Review>) {
             fast,
         } => match crate::demo_seek::clock() {
             Some(c) if c.active && c.now < until => {
-                // Into or out of a gap between kills (#665).
+                // Into or out of a gap between kills (#665), unless the speed
+                // keys chose a speed for this highlight (#1437).
                 let want_fast = spans.iter().any(|&(s, e)| c.now >= s && c.now < e);
-                let fast = if want_fast != fast {
+                let fast = if review.speed.is_none() && want_fast != fast {
                     let speed = if want_fast { review.options.speed } else { 1.0 };
                     match crate::demo_seek::set_time_scale(speed) {
                         Ok(()) => {
@@ -1242,9 +1313,10 @@ fn step(guard: &mut Option<Review>) {
                     review.at + 1,
                     c.now
                 ));
-                if fast {
+                if fast || review.speed.is_some() {
                     let _ = crate::demo_seek::set_time_scale(1.0);
                 }
+                review.speed = None;
                 let _ = crate::demo_seek::set_paused(true);
                 review.phase = Phase::Waiting;
                 // With the answer keys on, the panel on screen asks instead
@@ -1356,8 +1428,9 @@ fn next() {
 /// Ends the review; every answer so far is already in Studio.
 fn stop() {
     if let Some(review) = lock().take() {
-        // Stopped inside a gap: the demo plays on at normal speed.
-        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+        // Stopped inside a gap or at a chosen speed: the demo plays on at
+        // normal speed.
+        if sped(&review) {
             let _ = crate::demo_seek::set_time_scale(1.0);
         }
         crate::events::send("REVIEW_END\tstopped");
@@ -1369,7 +1442,7 @@ fn stop() {
     }
 }
 
-const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | form | range <from> <to> | note <text> | stop";
+const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | form | faster | slower | range <from> <to> | note <text> | stop";
 
 /// `form`: the kill range and note form, as E opens it (#1139), for a bind
 /// or a test that can't press keys.
@@ -1403,6 +1476,8 @@ pub unsafe extern "C" fn command() {
         "next" => next(),
         "back" => back(),
         "form" => open_form(),
+        "faster" => change_speed(true),
+        "slower" => change_speed(false),
         "range" => {
             let mut guard = lock();
             let Some(review) = guard.as_mut() else {
@@ -1481,6 +1556,7 @@ fn start(path: &str) {
         loaded: None,
         keys_from: Instant::now(),
         hushed: false,
+        speed: None,
     });
     go_to(review, at);
 }
@@ -1588,7 +1664,7 @@ mod tests {
         use crate::review_keys::KillState::{Next, Past};
         let mut review = review_of(vec![highlight("a", None)], playing());
         let now = review.keys_from;
-        let kills = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").kills;
+        let kills = |r: &Review, clock| panel_view(r, now, clock, 1.0).0.expect("a panel").kills;
         assert_eq!(kills(&review, Some(8.0))[0].state, Next);
         review.phase = Phase::Waiting;
         assert_eq!(kills(&review, Some(8.0))[0].state, Past);
@@ -1600,43 +1676,106 @@ mod tests {
         assert!(kills(&review, None).is_empty());
     }
 
-    #[test]
-    fn the_box_shows_the_clock_beside_the_kills() {
-        let mut review = review_of(vec![highlight("a", None)], playing());
+    /// The box's header, one string per line.
+    fn header_text(review: &Review, clock: Option<f64>, speed: f32) -> Vec<String> {
         let now = review.keys_from;
-        let status = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").status;
-        assert_eq!(status(&review, Some(341.6)), "Now 5:41");
-        assert_eq!(status(&review, None), "");
-        review.phase = Phase::Waiting;
-        assert_eq!(status(&review, Some(370.0)), "Now 6:10");
+        panel_view(review, now, clock, speed)
+            .0
+            .expect("a panel")
+            .header
+            .iter()
+            .map(|l| l.text())
+            .collect()
     }
 
     #[test]
-    fn the_box_shows_the_range_and_note_in_every_phase() {
-        let mut h = highlight("a", None);
+    fn the_box_shows_the_clock_beside_the_kills() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let last = |r: &Review, clock, speed| header_text(r, clock, speed).pop();
+        assert_eq!(last(&review, Some(341.6), 1.0).as_deref(), Some("Now 5:41"));
+        assert_eq!(last(&review, None, 1.0).as_deref(), Some("Kill 1"));
+        review.phase = Phase::Waiting;
+        assert_eq!(last(&review, Some(370.0), 1.0).as_deref(), Some("Now 6:10"));
+    }
+
+    #[test]
+    fn the_box_shows_the_speed_when_it_isnt_normal() {
+        let review = review_of(vec![highlight("a", None)], playing());
+        assert_eq!(
+            header_text(&review, Some(341.6), 2.0).pop().as_deref(),
+            Some("Now 5:41 | Speed 2x")
+        );
+    }
+
+    #[test]
+    fn the_box_shows_the_header_in_every_phase() {
+        let mut h = highlight("a", Some(Verdict::Yes));
+        h.player = "m00cat".to_string();
         h.kills = vec![10.0, 12.0, 14.0, 16.0];
         (h.from, h.to) = (2, 3);
         h.note = "nice flick".to_string();
-        let mut review = review_of(vec![h], playing());
-        let now = review.keys_from;
-        let shown = |r: &Review| {
-            let panel = panel_view(r, now, Some(11.0)).0.expect("a panel");
-            (panel.range.now, panel.range.was, panel.note)
-        };
-        let expected = (
-            "Kills 2-3".to_string(),
-            " (was 1-4)".to_string(),
-            "nice flick".to_string(),
-        );
-        assert_eq!(shown(&review), expected);
+        let mut review = review_of(vec![h, highlight("a", None)], playing());
+        let expected = vec![
+            "Highlight 1 of 2 | 4 kills | answered yes",
+            "Player m00cat",
+            "Kills 2-3 (was 1-4)",
+            "Note: nice flick",
+        ];
+        let with_clock = |r: &Review| header_text(r, Some(11.0), 1.0);
+        let mut playing_header = expected.clone();
+        playing_header.push("Now 0:11");
+        assert_eq!(with_clock(&review), playing_header);
         review.phase = Phase::Waiting;
-        assert_eq!(shown(&review), expected);
+        assert_eq!(with_clock(&review), playing_header);
+        // Loading: no clock yet.
         review.phase = Phase::Loading {
             since: Instant::now(),
             frames: 0,
             seen_loading: false,
         };
-        assert_eq!(shown(&review), expected);
+        assert_eq!(with_clock(&review), expected);
+    }
+
+    #[test]
+    fn a_long_note_takes_more_lines_in_the_header() {
+        let mut h = highlight("a", None);
+        h.note = "word ".repeat(30);
+        let review = review_of(vec![h], playing());
+        let header = header_text(&review, None, 1.0);
+        // Title, range and three note lines; no player in the queue.
+        assert_eq!(header.len(), 5);
+        assert!(header[2].starts_with("Note: word"));
+    }
+
+    #[test]
+    fn the_speed_keys_work_only_while_a_highlight_plays() {
+        use crate::review_keys::Action;
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let panel = |r: &Review| panel_view(r, now, None, 1.0).0.expect("a panel");
+        assert!(panel(&review).key_live(Action::Faster));
+        assert!(panel(&review).key_live(Action::Slower));
+        // Paused at the end: nothing to speed up.
+        review.phase = Phase::Waiting;
+        assert!(!panel(&review).key_live(Action::Faster));
+        assert!(panel(&review).key_live(Action::Yes));
+    }
+
+    #[test]
+    fn a_chosen_speed_counts_as_sped_up() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        assert!(!sped(&review));
+        review.speed = Some(0.5);
+        assert!(sped(&review));
+        review.speed = None;
+        review.phase = Phase::Playing {
+            until: 20.0,
+            last: 6.0,
+            beat: Instant::now(),
+            spans: Vec::new(),
+            fast: true,
+        };
+        assert!(sped(&review));
     }
 
     #[test]
@@ -2008,6 +2147,7 @@ mod tests {
             loaded: Some("a".to_string()),
             keys_from: Instant::now(),
             hushed: true,
+            speed: None,
         }
     }
 
@@ -2026,11 +2166,11 @@ mod tests {
         // The settings' defaults (both on): no cvar in a host build.
         let mut review = review_of(vec![highlight("a", None)], Phase::Waiting);
         let now = review.keys_from;
-        let (panel, mode) = panel_view(&review, now, None);
+        let (panel, mode) = panel_view(&review, now, None, 1.0);
         assert_eq!(mode, KeyMode::Live);
         assert!(panel.is_some_and(|p| p.keys && p.live));
         review.phase = playing();
-        let (panel, mode) = panel_view(&review, now, None);
+        let (panel, mode) = panel_view(&review, now, None, 1.0);
         assert_eq!(mode, KeyMode::Live);
         assert!(panel.is_some_and(|p| p.keys && p.live && p.status.is_empty()));
     }
@@ -2068,14 +2208,14 @@ mod tests {
             },
         );
         let now = review.keys_from;
-        let (panel, mode) = panel_view(&review, now, None);
+        let (panel, mode) = panel_view(&review, now, None, 1.0);
         assert_eq!(mode, KeyMode::Locked);
         let panel = panel.expect("a panel");
         assert_eq!(panel.status, "Loading the demo...");
         assert!(panel.keys && !panel.live);
         // A failed highlight has the Review tab open instead.
         review.phase = Phase::Failed("gone".into());
-        assert_eq!(panel_view(&review, now, None), (None, KeyMode::Off));
+        assert_eq!(panel_view(&review, now, None, 1.0), (None, KeyMode::Off));
     }
 
     #[test]
@@ -2083,7 +2223,7 @@ mod tests {
         let mut review = review_of(vec![highlight("a", None)], playing());
         let started = Instant::now();
         review.keys_from = started + LOCKOUT;
-        let (panel, mode) = panel_view(&review, started, None);
+        let (panel, mode) = panel_view(&review, started, None, 1.0);
         assert_eq!(mode, KeyMode::Locked);
         assert!(panel.is_some_and(|p| p.keys && !p.live));
         let half = started + LOCKOUT / 2;
@@ -2108,11 +2248,11 @@ mod tests {
             Phase::Waiting,
         );
         let now = review.keys_from;
-        let first = panel_view(&review, now, None).0.expect("a panel");
+        let first = panel_view(&review, now, None, 1.0).0.expect("a panel");
         assert!(!first.key_live(Action::Back));
         assert!(first.key_live(Action::Next));
         review.at = 1;
-        let second = panel_view(&review, now, None).0.expect("a panel");
+        let second = panel_view(&review, now, None, 1.0).0.expect("a panel");
         assert!(second.key_live(Action::Back));
     }
 
