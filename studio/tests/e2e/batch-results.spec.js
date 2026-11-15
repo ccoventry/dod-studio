@@ -1,5 +1,5 @@
 // batch_results.js — the Last Batch panel (#172).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const streak = (player, kills, at) => ({ target_player: player, kill_count: kills, viewdemo_times: [at], kills: [[0, at, 'garand']], start_index: 0, end_index: 0 });
 const DISPATCH = { streaks: [streak('krod', 4, 754), streak('krod', 2, 800), streak('milo', 3, 65)] };

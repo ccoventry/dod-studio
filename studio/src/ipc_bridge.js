@@ -736,6 +736,16 @@ export async function calculateExportPoolSpace(paths) {
     });
 }
 
+/** The capture folders' `{ free_bytes, usable_bytes }`: usable leaves out
+ *  what "Keep free on the Windows drive" keeps there (#1430). */
+export async function capturePoolRoom(paths) {
+  return invoke("capture_pool_room", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (capture_pool_room):", err);
+      throw err;
+    });
+}
+
 /** Per-path reason a Capture Output entry isn't usable — "ok" | "not_absolute"
  *  | "malformed" | "not_found" | "not_a_directory". Only worth calling once
  *  the aggregate space check has already found a problem; a per-path OS stat
@@ -778,6 +788,17 @@ export async function cancelRenderJobs(jobIds) {
   return invoke("cancel_render_jobs", { jobIds })
     .catch((err) => {
       console.error("IPC Execution Error (cancel_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Cancels every Queued row; a Rendering one keeps going. The backend picks
+ *  the rows under its lock, so a row that just started is never caught.
+ *  Resolves to how many were cancelled. */
+export async function cancelQueuedRenderJobs() {
+  return invoke("cancel_queued_render_jobs")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_queued_render_jobs):", err);
       throw err;
     });
 }

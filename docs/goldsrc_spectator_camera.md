@@ -402,7 +402,7 @@ In an HLTV demo both engine builds drop every entity outside the PVS of
 - `CL_EmitEntities` marks the leaves visible from `cl.simorg` before it links
   the frame's entities, and re-marks the camera's leaves after (POST
   `hw+0x19d764` and `hw+0x19d82f`).
-- `CL_AddVisibleEntity` (PRE `hw+0xbae0`, POST `hw+0x1969b0`) asks
+- `ClientDLL_AddEntity` (PRE `hw+0xbae0`, POST `hw+0x1969b0`) asks
   `HUD_AddEntity` first, then drops an entity whose box is in no marked leaf.
   Measured on POST: the watched player reaches `HUD_AddEntity` every frame and
   `StudioDrawPlayer` never.

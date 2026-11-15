@@ -180,27 +180,70 @@ fn ledger_key(dir: &Path) -> PathBuf {
         .unwrap_or_else(|| dir.to_path_buf())
 }
 
+/// What [`try_reserve`] found: the directory it reserved on, if any, and the
+/// ones it passed over before it.
+#[derive(Debug, PartialEq)]
+struct Reserved {
+    /// The directory, what was already reserved on its volume, and its live
+    /// free space (`None` when unreadable, which counts as having room).
+    picked: Option<(PathBuf, u64, Option<u64>)>,
+    /// Each directory passed over, with its room: live free space less what
+    /// is reserved on its volume.
+    passed_over: Vec<(PathBuf, u64)>,
+}
+
 /// Reserves `amount` on the first of `dirs` whose volume has more than
-/// `amount + margin` free once the ledger's reservations there are taken off.
-/// Returns that directory, what was already reserved on its volume, and its
-/// live free space (`None` when unreadable, which counts as having room).
+/// `amount + margin_of(dir)` free once the ledger's reservations there are
+/// taken off. `margin_of` is per directory: the Windows drive keeps more
+/// (#1430).
 fn try_reserve(
     ledger: &mut HashMap<PathBuf, u64>,
     dirs: &[PathBuf],
     amount: u64,
-    margin: u64,
+    mut margin_of: impl FnMut(&Path) -> u64,
     mut free_of: impl FnMut(&Path) -> Option<u64>,
-) -> Option<(PathBuf, u64, Option<u64>)> {
+) -> Reserved {
+    let mut passed_over = Vec::new();
     for dir in dirs {
         let key = ledger_key(dir);
         let live_free = free_of(dir);
         let already_reserved = *ledger.get(&key).unwrap_or(&0);
-        if live_free.is_none_or(|free| free.saturating_sub(already_reserved) > amount + margin) {
+        let Some(free) = live_free else {
             *ledger.entry(key).or_insert(0) += amount;
-            return Some((dir.clone(), already_reserved, live_free));
+            return Reserved {
+                picked: Some((dir.clone(), already_reserved, None)),
+                passed_over,
+            };
+        };
+        let room = free.saturating_sub(already_reserved);
+        if room > amount.saturating_add(margin_of(dir)) {
+            *ledger.entry(key).or_insert(0) += amount;
+            return Reserved {
+                picked: Some((dir.clone(), already_reserved, live_free)),
+                passed_over,
+            };
         }
+        passed_over.push((dir.clone(), room));
     }
-    None
+    Reserved {
+        picked: None,
+        passed_over,
+    }
+}
+
+/// The first directory in `passed_over` that had room for `amount` past the
+/// usual [`EXPORT_SAFETY_MARGIN_BYTES`] and was passed over only for
+/// "Keep free on the Windows drive" (#1430), with its room. `margin_of` is the
+/// margin the choice used.
+fn held_back_for_windows_drive(
+    passed_over: &[(PathBuf, u64)],
+    amount: u64,
+    mut margin_of: impl FnMut(&Path) -> u64,
+) -> Option<&(PathBuf, u64)> {
+    passed_over.iter().find(|(dir, room)| {
+        *room > amount.saturating_add(EXPORT_SAFETY_MARGIN_BYTES)
+            && margin_of(dir) > EXPORT_SAFETY_MARGIN_BYTES
+    })
 }
 
 /// RAII release for a JIT export-drive reservation claimed by
@@ -504,18 +547,49 @@ fn reserve_export_dir(
     if config.export_directories.is_empty() {
         return Err(NO_EXPORT_FOLDER.to_string());
     }
+    // Read per job, not per batch: a change to "Keep free on the Windows
+    // drive" reaches the next render of a running batch (#1430).
+    let margins: HashMap<PathBuf, u64> = config
+        .export_directories
+        .iter()
+        .map(|dir| {
+            let margin = crate::sys::windows_drive::headroom_for(dir, EXPORT_SAFETY_MARGIN_BYTES);
+            (dir.clone(), margin)
+        })
+        .collect();
+    let margin_of = |dir: &Path| {
+        margins
+            .get(dir)
+            .copied()
+            .unwrap_or(EXPORT_SAFETY_MARGIN_BYTES)
+    };
     let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
-    let Some((dir, already_reserved, live_free)) = try_reserve(
+    let reserved = try_reserve(
         &mut ledger,
         &config.export_directories,
         reservation_estimate,
-        EXPORT_SAFETY_MARGIN_BYTES,
+        margin_of,
         crate::sys::disk::get_available_bytes,
-    ) else {
-        return Err(format!(
-            "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
+    );
+    let held_back =
+        held_back_for_windows_drive(&reserved.passed_over, reservation_estimate, margin_of);
+    let keep_free = crate::sys::windows_drive::keep_free_bytes();
+    if let Some((dir, room)) = held_back {
+        crate::log_markdown(&crate::messages::windows_drive::render_folder_skipped(
+            &job.job_id,
+            dir.display(),
+            *room,
+            keep_free,
+        ));
+    }
+    let Some((dir, already_reserved, live_free)) = reserved.picked else {
+        let note = held_back
+            .map(|_| crate::messages::windows_drive::kept_free_note(keep_free))
+            .unwrap_or_default();
+        return Err(crate::messages::render::no_export_folder_with_room(
             config.export_directories.len(),
-            (reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
+            reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES,
+            note,
         ));
     };
     // Shows this job's own estimate against what else was already
@@ -810,12 +884,19 @@ mod tests {
             PathBuf::from(r"D:\x"),
         ];
 
-        let first = try_reserve(&mut ledger, &c_only, 10, 0, free);
-        assert_eq!(first.map(|r| r.0), Some(PathBuf::from(r"C:\a")));
-        assert_eq!(try_reserve(&mut ledger, &c_only, 10, 0, free), None);
-        let second = try_reserve(&mut ledger, &with_d, 10, 0, free);
-        assert_eq!(second.map(|r| r.0), Some(PathBuf::from(r"D:\x")));
-        assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
+        let picked = |r: Reserved| r.picked.map(|p| p.0);
+        let first = try_reserve(&mut ledger, &c_only, 10, |_| 0, free);
+        assert_eq!(picked(first), Some(PathBuf::from(r"C:\a")));
+        assert_eq!(
+            picked(try_reserve(&mut ledger, &c_only, 10, |_| 0, free)),
+            None
+        );
+        let second = try_reserve(&mut ledger, &with_d, 10, |_| 0, free);
+        assert_eq!(picked(second), Some(PathBuf::from(r"D:\x")));
+        assert_eq!(
+            picked(try_reserve(&mut ledger, &with_d, 10, |_| 0, free)),
+            None
+        );
         assert_eq!(ledger.get(&ledger_key(Path::new(r"C:\a"))), Some(&10));
         assert_eq!(ledger.get(&ledger_key(Path::new(r"D:\x"))), Some(&10));
     }
@@ -826,14 +907,88 @@ mod tests {
     fn an_unreadable_export_folder_still_takes_a_reservation() {
         let mut ledger = HashMap::new();
         let dirs = [PathBuf::from("no-drive-a")];
-        let hit = try_reserve(&mut ledger, &dirs, 10, 5, |_| None);
-        assert_eq!(hit, Some((PathBuf::from("no-drive-a"), 0, None)));
+        let hit = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| None);
+        assert_eq!(hit.picked, Some((PathBuf::from("no-drive-a"), 0, None)));
         assert_eq!(ledger.get(&ledger_key(&dirs[0])), Some(&10));
         // Reservations never make an unreadable folder refuse.
-        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| None).is_some());
+        let again = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| None);
+        assert!(again.picked.is_some());
         let mut ledger = HashMap::new();
-        assert_eq!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(15)), None);
-        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(16)).is_some());
+        let short = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| Some(15));
+        assert_eq!(short.picked, None);
+        assert_eq!(short.passed_over, vec![(PathBuf::from("no-drive-a"), 15)]);
+        let fits = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| Some(16));
+        assert!(fits.picked.is_some());
+    }
+
+    /// #1430: the Windows drive (here C:) keeps its larger margin, so a job
+    /// that fits there by the usual margin goes on to D: instead.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_folder_below_its_keep_free_margin_is_passed_over() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut ledger = HashMap::new();
+        let dirs = [PathBuf::from(r"C:\Exports"), PathBuf::from(r"D:\Exports")];
+        let margin_of = |p: &Path| {
+            if p.starts_with(r"C:\") {
+                50 * GB
+            } else {
+                EXPORT_SAFETY_MARGIN_BYTES
+            }
+        };
+        let free = |p: &Path| {
+            Some(if p.starts_with(r"C:\") {
+                40 * GB
+            } else {
+                100 * GB
+            })
+        };
+
+        let reserved = try_reserve(&mut ledger, &dirs, 10 * GB, margin_of, free);
+        assert_eq!(reserved.picked.map(|p| p.0), Some(dirs[1].clone()));
+        assert_eq!(reserved.passed_over, vec![(dirs[0].clone(), 40 * GB)]);
+        // It had room by the usual margin, so the skip is the setting's.
+        assert_eq!(
+            held_back_for_windows_drive(&reserved.passed_over, 10 * GB, margin_of),
+            Some(&(dirs[0].clone(), 40 * GB))
+        );
+    }
+
+    /// With the Windows drive above its margin, it is used first as before.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_folder_with_room_past_its_margin_is_still_used_first() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut ledger = HashMap::new();
+        let dirs = [PathBuf::from(r"C:\Exports"), PathBuf::from(r"D:\Exports")];
+        let margin_of = |p: &Path| {
+            if p.starts_with(r"C:\") {
+                50 * GB
+            } else {
+                EXPORT_SAFETY_MARGIN_BYTES
+            }
+        };
+        let reserved = try_reserve(&mut ledger, &dirs, 10 * GB, margin_of, |_| Some(61 * GB));
+        assert_eq!(reserved.picked.map(|p| p.0), Some(dirs[0].clone()));
+        assert!(reserved.passed_over.is_empty());
+    }
+
+    /// A folder passed over because it was full by the usual margin too is
+    /// not blamed on the setting.
+    #[test]
+    fn a_folder_full_by_the_usual_margin_is_not_held_back_by_the_setting() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let passed = [(PathBuf::from("windows"), 5 * GB)];
+        assert_eq!(
+            held_back_for_windows_drive(&passed, 10 * GB, |_| 50 * GB),
+            None
+        );
+        // Room by the usual margin, but the folder keeps only that margin.
+        let passed = [(PathBuf::from("other"), 20 * GB)];
+        assert_eq!(
+            held_back_for_windows_drive(&passed, 10 * GB, |_| EXPORT_SAFETY_MARGIN_BYTES),
+            None
+        );
     }
 
     /// #120: the first clip of a kind reserves the raw estimate; once one

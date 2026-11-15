@@ -29,7 +29,7 @@
 //!
 //! That bleed is what lets filtered and blended sprite edges fade out
 //! cleanly; without it the invisible texels stay black and every edge pulls
-//! black in. `GL_LoadTexture` (pre-Anniversary `+0x3ec60`) returns the cached
+//! black in. `GL_LoadTexture2` (pre-Anniversary `+0x3ec60`) returns the cached
 //! texture by name and size without uploading again, so whatever
 //! `gl_spriteblend` was at that first upload is baked in until the process
 //! exits.

@@ -1,6 +1,6 @@
 // "After a clip is finished" (#644), driven against
 // tests/e2e/take-cleanup.html — see that file and tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page, query = '') {
   await page.goto(`/tests/e2e/take-cleanup.html${query}`);

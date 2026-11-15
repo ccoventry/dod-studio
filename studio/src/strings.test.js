@@ -111,6 +111,15 @@ describe('takesFoundMissing (#1081)', () => {
     );
     expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
   });
+
+  it('says a clip the game reported failed is failed, not missing (#1401)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 0, 0, undefined, 0, 1)).toBe(
+      '1/3 takes found on disk — 1 missing, 1 failed in the game (not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.clipFailed('no_start')).toBe('Failed: the game never started recording it (not captured)');
+    expect(STRINGS.BATCH_RESULTS.clipShort(16.75, 16.76, 1)).toBe('Captured, but missing 1 kill: 16.75 s of 16.76 s planned');
+    expect(STRINGS.BATCH_RESULTS.clipShort(10, 19.88, 0)).toBe('Captured, but short: 10.00 s of 19.88 s planned');
+  });
 });
 
 describe('finish step (#440)', () => {

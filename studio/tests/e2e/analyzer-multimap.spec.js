@@ -6,7 +6,7 @@
 // tested there), the notice shows its progress, and the first demo written
 // opens. Once the maps were split next to it (demo_split_status), the notice
 // is a quiet line instead.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const DEMO = 'C:/demos/wsod25_grp3_h1_dyelife.dem';
 const FIRST = 'C:/demos/wsod25_grp3_h1_dyelife_dod_lennon2_1.dem';

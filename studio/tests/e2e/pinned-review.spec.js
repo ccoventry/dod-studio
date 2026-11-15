@@ -1,5 +1,5 @@
 // pinned_review.js (#533), driven against tests/e2e/pinned-review.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/pinned-review.html');

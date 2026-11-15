@@ -216,3 +216,5 @@ DEBUG
       While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.
   ds_debug_record_frame_times 0/1
       Time every frame while 1; at 0, print the average fps, 1% and 0.1% lows and the longest frame, and save the times to %APPDATA%\dod-studio\frame_times.txt (the OBS capture test reads it).
+  ds_debug_hang_report_seconds <seconds>
+      When the game draws no frame for this long (20 by default), log where it is stuck and save a dump to %APPDATA%\dod-studio\logs\dumps; 0 turns it off.

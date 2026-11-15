@@ -1,7 +1,40 @@
 //! Assigning capture blocks to output drives.
 
-/// The free space every drive keeps beside a block routed to it.
+/// The free space every drive keeps beside a block routed to it. The Windows
+/// drive keeps "Keep free on the Windows drive" when that is more (#1430):
+/// [`plannable_free_bytes`] takes the difference off its budget.
 pub(super) const FAILOVER_THRESHOLD: u64 = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
+
+/// A capture directory's free bytes as the plan counts them: on the Windows
+/// drive, less what "Keep free on the Windows drive" keeps back beyond
+/// [`FAILOVER_THRESHOLD`] (#1430), so first-fit routes a block there only
+/// while the drive keeps the setting free beside it. `None` when unknown.
+/// Reads the setting now, at planning.
+pub(super) fn plannable_free_bytes(dir: &std::path::Path) -> Option<u64> {
+    crate::sys::disk::get_available_bytes(dir)
+        .map(|free| crate::sys::windows_drive::free_for(dir, FAILOVER_THRESHOLD, free))
+}
+
+/// Logs each of `capture_directories` on the Windows drive, with its free
+/// space and the `keep_free` it keeps there (#1430): one line per folder per
+/// batch, so a batch that records nothing there says why.
+pub(super) fn log_windows_drive_folders(
+    capture_directories: &[std::path::PathBuf],
+    keep_free: u64,
+) {
+    for dir in capture_directories {
+        if crate::sys::windows_drive::is_on_windows_drive(dir) {
+            let free = crate::sys::disk::get_available_bytes(dir).unwrap_or(0);
+            crate::log_markdown(
+                &crate::messages::windows_drive::capture_folder_on_windows_drive(
+                    dir.display(),
+                    free,
+                    keep_free,
+                ),
+            );
+        }
+    }
+}
 
 /// A batch's capture drives and the room left on their volumes as its blocks
 /// are routed, demo by demo (the AOT disk-space simulation). Directories on
@@ -16,6 +49,9 @@ pub(super) struct DriveBudget {
     capacity: Vec<u64>,
     /// The drive the last block went to, where the next search starts.
     active_drive: usize,
+    /// What "Keep free on the Windows drive" keeps there, when it raised a
+    /// capture directory's headroom (#1430): the refusal says so.
+    windows_drive_keep_free: Option<u64>,
 }
 
 impl DriveBudget {
@@ -42,7 +78,15 @@ impl DriveBudget {
             free,
             capacity,
             active_drive: 0,
+            windows_drive_keep_free: None,
         }
+    }
+
+    /// Notes what "Keep free on the Windows drive" keeps there, when it raised
+    /// a capture directory's headroom (#1430), so a refusal explains why that
+    /// folder counts less than its drive has free.
+    pub fn note_windows_drive(&mut self, keep_free: Option<u64>) {
+        self.windows_drive_keep_free = keep_free;
     }
 
     /// Routes one chain job's blocks, `estimates` bytes each, to drives:
@@ -83,6 +127,7 @@ impl DriveBudget {
                     std::io::Error::other(no_room_message(
                         estimates[block_index] + FAILOVER_THRESHOLD,
                         self.capacity.iter().copied().max().unwrap_or(0),
+                        self.windows_drive_keep_free,
                     ))
                 })?;
                 for (free, left) in self.free.iter_mut().zip(left) {
@@ -95,6 +140,7 @@ impl DriveBudget {
             Err(block_index) => Err(std::io::Error::other(no_room_message(
                 estimates[block_index] + FAILOVER_THRESHOLD,
                 self.free.iter().copied().max().unwrap_or(0),
+                self.windows_drive_keep_free,
             ))),
         }
     }
@@ -128,11 +174,20 @@ impl DriveBudget {
 
 /// The refusal when a capture block fits on no drive, in the player's words:
 /// shown as the batch's error toast (#1097). `needed` includes the headroom
-/// each drive keeps; `best` is the most free on any one drive.
-pub(super) fn no_room_message(needed: u64, best: u64) -> String {
+/// each drive keeps; `best` is the most free on any one drive, the Windows
+/// drive counted only above what `windows_drive_keep_free` keeps there, which
+/// the message then names (#1430).
+pub(super) fn no_room_message(
+    needed: u64,
+    best: u64,
+    windows_drive_keep_free: Option<u64>,
+) -> String {
     use crate::hlcr::take_cleanup::format_gb;
+    let note = windows_drive_keep_free
+        .map(crate::messages::windows_drive::kept_free_note)
+        .unwrap_or_default();
     format!(
-        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.",
+        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.{note}",
         format_gb(needed),
         format_gb(best)
     )

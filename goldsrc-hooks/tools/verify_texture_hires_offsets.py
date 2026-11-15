@@ -7,47 +7,47 @@ Checks:
   - The tail's `call GL_Upload32` lands on UPLOAD32's match.
   - Every byte span the hook overwrites is what the Rust constants say.
   - GL_Upload32's five scratch-buffer pushes agree, and the next static buffer
-    (GL_Upload8's) starts exactly 2 MB later -- the proof of its size.
-  - GL_Upload8's gamma-table and gl_dither operands sit where expected, and the
+    (GL_Upload16's) starts exactly 2 MB later -- the proof of its size.
+  - GL_Upload16's gamma-table and gl_dither operands sit where expected, and the
     gl_dither operand really is that cvar's value field.
-  - The detail-texture loader matches once, its two `push 0x100000`s (buffer
+  - The detail-texture loader (`loadTextureFile`) matches once, its two `push 0x100000`s (buffer
     size and the size LoadTGA is told) sit where raise_detail_limit patches,
     and it uploads through the same GL_LoadTexture2.
   - R_LoadSkys's face-buffer malloc, its hardcoded 256x256 glTexImage2D size
     and the hooked instruction are where install_sky expects, nothing branches
-    into the hook span, and it shares GL_Upload8's texgamma table.
+    into the hook span, and it shares GL_Upload16's texgamma table.
   - No branch anywhere in either function lands inside a detoured span (other
     than on its first byte).
   - GL_LoadTexture2's cache lookup (LOAD_TEXTURE2_HEAD) matches once, at the
-    function's entry; its name-matched span and servercount operand are where
+    function's entry; its name-matched span and gHostSpawnCount operand are where
     install_stale_fix expects.
   - The studio API's GetModelByIndex calls CL_GetModelByIndex, whose
     `mov esi, [edi*4 + model_precache]` is where find_precache_table reads
     the per-map model list from.
 
 With `--anniversary`, checks the 25th Anniversary port (`mod anniversary`)
-against the stock Anniversary hw.dll instead, reading its constants out of
+against the POST-Anniversary movies install's hw.dll instead, reading its constants out of
 the Rust rather than restating them:
   - TAIL and HEAD each match exactly once, in the same function.
   - The swap's span is two whole instructions (`cmp [ebp+0xc], 5` and
     `mov eax, [ebp+0x20]`), followed by the `jne` the stub resumes at.
   - The tail's call lands on UPLOAD32_ENTRY; the `jne` lands on the
-    GL_Upload8 argument setup, whose call lands on UPLOAD8_ENTRY and whose
+    GL_Upload16 argument setup, whose call lands on UPLOAD16_ENTRY and whose
     `add esp, 0x1c` falls into the exit the GL_Upload32 path jumps to.
   - Every caller of GL_Upload32 pops six arguments, as the stub does, and
     its ceiling is still the stock `cmp eax, 0x80000`.
-  - GL_Upload8's gamma-table and gl_dither operands are where the Rust says,
+  - GL_Upload16's gamma-table and gl_dither operands are where the Rust says,
     and the dither operand is that cvar's value field.
   - `ebx` holds the cache record at the tail: the lookup saves it to a frame
     slot, and the one loop that reuses `ebx` reloads it from that slot.
   - The leftover-texture fix's span is two whole instructions ending at the
     width compare's `jne`, the lookup's next-record path is where the stub
-    jumps, and the hit path reads the servercount the record is stamped with.
+    jumps, and the hit path reads the gHostSpawnCount the record is stamped with.
   - No branch in GL_LoadTexture2 lands inside either span except on its
     first byte.
   - The ceiling (CEILING): the size check is `cmp eax, 0x80000; jbe` onto
     SIZE_OK past the "too big" Sys_Error push; every relocated reference into
-    GL_Upload32's 2 MB scratch buffer is one of the listed five; GL_Upload8's
+    GL_Upload32's 2 MB scratch buffer is one of the listed five; GL_Upload16's
     buffer starts exactly 2 MB later; both resample helpers have the same
     stack frames as the pre-Anniversary ones (so the same 1024 width bound);
     esi is the scaled width at the check; nothing branches into the span.
@@ -60,7 +60,7 @@ the Rust rather than restating them:
     is `push 0x40000`; the dims are `push 0x100`s; the hooked instruction is
     `mov eax, [esi*4 + ...]`, reached by the gl_dither skip on its first byte
     and nothing else; the path buffer is `[ebp-0x44]` (64 bytes); the gamma
-    loop uses GL_Upload8's texgamma table and gl_dither.
+    loop uses GL_Upload16's texgamma table and gl_dither.
 
 Run after touching the patterns or offsets in texture_hires.rs. Not part of
 `cargo test`: it needs the real DLL, which CI does not have. Requires pefile
@@ -83,7 +83,7 @@ HW_DLL = (
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_DLL = r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll"
+ANNIVERSARY_DLL = r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll"
 SRC = Path(__file__).resolve().parent.parent / "src" / "texture_hires.rs"
 
 # Kept in sync with texture_hires.rs by hand.
@@ -93,7 +93,7 @@ LOAD_TEXTURE2_TAIL = (
     "E8 ?? ?? ?? ?? 83 C4 18 EB 1E 8B 45 28 8B 4D 24 8B 55 20 50 8B 45 1C 51 8B 4D 14 52 50 51 53 "
     "57 E8 ?? ?? ?? ?? 83 C4 1C"
 )
-TAIL_BRANCH, TAIL_RESUME, TAIL_CALL32, TAIL_UPLOAD8_ARGS, TAIL_CALL8, TAIL_AFTER = 24, 30, 52, 62, 84, 92
+TAIL_BRANCH, TAIL_RESUME, TAIL_CALL32, TAIL_UPLOAD16_ARGS, TAIL_CALL16, TAIL_AFTER = 24, 30, 52, 62, 84, 92
 LOAD_TEXTURE2_HEAD = (
     "55 8B EC B8 0C 40 00 00 E8 ?? ?? ?? ?? 8B 45 08 53 33 DB 56 8A 08 57 84 C9 "
     "89 5D F4 74 61 33 F6 BF ?? ?? ?? ?? 3B 35 ?? ?? ?? ?? 7D 5F 66 83 7F 04 00 7D 0C 85 DB 75 1C 8B DF 46 "
@@ -139,7 +139,7 @@ SKY_UPLOAD = (
     "68 00 01 00 00 75 07 68 58 80 00 00 EB 05 68 57 80 00 00 6A 00 68 E1 0D 00 00 FF 15 ?? ?? ?? ??"
 )
 SKY_MALLOC_AT, SKY_HOOK_AT, SKY_HEIGHT, SKY_WIDTH = 0x67, 0x0F, 0x5A, 0x5F
-U8_GAMMA, U8_DITHER, U8_EXPANSION = (0x53, b"\x8a\x91"), (0x94, b"\xd9\x05"), (0x276, b"\x68")
+U16_GAMMA, U16_DITHER, U16_EXPANSION = (0x53, b"\x8a\x91"), (0x94, b"\xd9\x05"), (0x276, b"\x68")
 
 
 def parse(text):
@@ -178,8 +178,8 @@ def main():
 
     call = lambda rva: (rva + 5 + struct.unpack_from("<i", img, rva + 1)[0]) & 0xFFFFFFFF
     check(img[tail + TAIL_CALL32] == 0xE8 and call(tail + TAIL_CALL32) == up32, "tail calls GL_Upload32")
-    check(img[tail + TAIL_CALL8] == 0xE8, "tail calls GL_Upload8")
-    up8 = call(tail + TAIL_CALL8)
+    check(img[tail + TAIL_CALL16] == 0xE8, "tail calls GL_Upload16")
+    up16 = call(tail + TAIL_CALL16)
     check(img[tail + TAIL_BRANCH: tail + TAIL_BRANCH + 6] == BRANCH_STOLEN, "branch span bytes")
     check(img[up32 + SIZE_CHECK: up32 + SIZE_CHECK + 10] == SIZE_CHECK_STOLEN, "size-check span bytes")
 
@@ -214,11 +214,11 @@ def main():
 
     pushes = [u32(up32 + off + 1) for off in BUFFER_PUSHES if img[up32 + off] == 0x68]
     check(len(pushes) == 5 and len(set(pushes)) == 1, f"5 identical buffer pushes ({[hex(p) for p in pushes]})")
-    for name, (off, op) in (("gamma", U8_GAMMA), ("dither", U8_DITHER), ("expansion", U8_EXPANSION)):
-        check(img[up8 + off: up8 + off + len(op)] == op, f"GL_Upload8 {name} opcode at +{off:#x}")
-    expansion = u32(up8 + U8_EXPANSION[0] + 1)
+    for name, (off, op) in (("gamma", U16_GAMMA), ("dither", U16_DITHER), ("expansion", U16_EXPANSION)):
+        check(img[up16 + off: up16 + off + len(op)] == op, f"GL_Upload16 {name} opcode at +{off:#x}")
+    expansion = u32(up16 + U16_EXPANSION[0] + 1)
     check(pushes and expansion == pushes[0] + 0x80000 * 4, f"scratch buffer is 2 MB ({pushes[0]:#x} -> {expansion:#x})")
-    dither = u32(up8 + U8_DITHER[0] + 2)
+    dither = u32(up16 + U16_DITHER[0] + 2)
     name_ptr = u32(dither - 0xC - base)
     cvar_name = img[name_ptr - base: name_ptr - base + 16].split(b"\0")[0]
     check(cvar_name == b"gl_dither", f"dither operand is gl_dither.value ({cvar_name!r})")
@@ -258,9 +258,9 @@ def main():
                 t = int(ins.op_str, 16)
                 if hook < t < hook + 7:
                     check(False, f"{ins.address:#x} branches into the sky hook span")
-        # R_LoadSkys's face gamma uses the same texgamma table GL_Upload8 does.
-        check(img.find((u32(up8 + U8_GAMMA[0] + 2)).to_bytes(4, "little"), sl, su) != -1,
-              "R_LoadSkys uses the same texgamma table as GL_Upload8")
+        # R_LoadSkys's face gamma uses the same texgamma table GL_Upload16 does.
+        check(img.find((u32(up16 + U16_GAMMA[0] + 2)).to_bytes(4, "little"), sl, su) != -1,
+              "R_LoadSkys uses the same texgamma table as GL_Upload16")
 
     # Every direct branch in both functions: none may land inside a span
     # except on its first byte.
@@ -269,7 +269,7 @@ def main():
 
     # The leftover-texture fix (install_stale_fix): the cache lookup at the
     # function's start, the span it detours once a name matched, and the
-    # servercount global it reads.
+    # gHostSpawnCount global it reads.
     heads = find_all(img, parse(LOAD_TEXTURE2_HEAD))
     check(heads == [lt2_start], f"LOAD_TEXTURE2_HEAD matches once, at GL_LoadTexture2's entry ({[hex(base + h) for h in heads]})")
     check(img[lt2_start + HEAD_NAME_MATCHED: lt2_start + HEAD_NAME_MATCHED + 6] == NAME_MATCHED_STOLEN,
@@ -277,12 +277,12 @@ def main():
     check(img[lt2_start + HEAD_NAME_MATCHED - 8: lt2_start + HEAD_NAME_MATCHED - 6] == bytes([0x74, 0x06]),
           "the je after the name compare targets the span's first byte")
     sc_at = lt2_start + HEAD_SERVERCOUNT
-    servercount = u32(sc_at + 3) if img[sc_at: sc_at + 3] == bytes([0x66, 0x8B, 0x15]) else None
-    # The record's servercount is written from the same global when a world
-    # texture is created (`mov cx, word ptr [servercount]`).
-    check(servercount is not None and struct.pack("<I", servercount) in img[lt2_start: tail]
-          and img.find(bytes([0x66, 0x8B, 0x0D]) + struct.pack("<I", servercount), lt2_start, tail) > 0,
-          f"servercount operand is the global new world records are stamped with ({servercount and hex(servercount)})")
+    spawn_count = u32(sc_at + 3) if img[sc_at: sc_at + 3] == bytes([0x66, 0x8B, 0x15]) else None
+    # The record's gHostSpawnCount is written from the same global when a world
+    # texture is created (`mov cx, word ptr [gHostSpawnCount]`).
+    check(spawn_count is not None and struct.pack("<I", spawn_count) in img[lt2_start: tail]
+          and img.find(bytes([0x66, 0x8B, 0x0D]) + struct.pack("<I", spawn_count), lt2_start, tail) > 0,
+          f"gHostSpawnCount operand is the global new world records are stamped with ({spawn_count and hex(spawn_count)})")
 
     spans = [(base + tail + TAIL_BRANCH, 6), (base + up32 + SIZE_CHECK, 10),
              (base + lt2_start + HEAD_NAME_MATCHED, 6)]
@@ -313,7 +313,7 @@ def main():
           f"({[(hex(base + w), hex(base + t)) for w, t in referenced]})")
     print("ok   no branch lands inside a detoured span" if not failures else "")
 
-    print(f"\nGL_LoadTexture2 tail +{tail:#x}, GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
+    print(f"\nGL_LoadTexture2 tail +{tail:#x}, GL_Upload32 +{up32:#x}, GL_Upload16 +{up16:#x}")
     sys.exit(1 if failures else 0)
 
 
@@ -368,27 +368,27 @@ def anniversary():
     check(entry > 0, f"GL_LoadTexture2 begins at +{entry:#x}")
 
     # The swap's span, and where the stub goes back to.
-    branch, jne = tail + offset("tail", "BRANCH"), tail + offset("tail", "JNE_UPLOAD8")
+    branch, jne = tail + offset("tail", "BRANCH"), tail + offset("tail", "JNE_UPLOAD16")
     stolen = const_bytes("BRANCH_STOLEN")
     check(img[branch:branch + len(stolen)] == stolen and branch + len(stolen) == jne, "swap span bytes, ending at the jne")
     check(instructions(branch, jne) == [(branch, "cmp dword ptr [ebp + 0xc], 5"), (branch + 4, "mov eax, dword ptr [ebp + 0x20]")],
           "the swap span is `cmp [ebp+0xc], 5; mov eax, [ebp+0x20]`")
-    check(img[jne:jne + 2] == b"\x0f\x85", "JNE_UPLOAD8 is a jne rel32")
+    check(img[jne:jne + 2] == b"\x0f\x85", "JNE_UPLOAD16 is a jne rel32")
 
     call32, jmp_after = tail + offset("tail", "CALL_UPLOAD32"), tail + offset("tail", "JMP_AFTER")
     check(img[call32] == 0xE8 and img[jmp_after] == 0xE9, "CALL_UPLOAD32 is a call, JMP_AFTER a jmp")
     up32 = rel32(call32, 1)
     check(img[up32:up32 + len(const_bytes("UPLOAD32_ENTRY"))] == const_bytes("UPLOAD32_ENTRY"), f"the tail calls GL_Upload32 (+{up32:#x})")
-    args8 = rel32(jne, 2)
-    upload8_args = const_bytes("UPLOAD8_ARGS")
-    check(img[args8:args8 + len(upload8_args)] == upload8_args, f"the jne goes to GL_Upload8's argument setup (+{args8:#x})")
-    call8 = args8 + len(upload8_args)
-    up8 = rel32(call8, 1) if img[call8] == 0xE8 else 0
-    check(up8 and img[up8:up8 + len(const_bytes("UPLOAD8_ENTRY"))] == const_bytes("UPLOAD8_ENTRY"), f"which calls GL_Upload8 (+{up8:#x})")
+    args16 = rel32(jne, 2)
+    upload16_args = const_bytes("UPLOAD16_ARGS")
+    check(img[args16:args16 + len(upload16_args)] == upload16_args, f"the jne goes to GL_Upload16's argument setup (+{args16:#x})")
+    call16 = args16 + len(upload16_args)
+    up16 = rel32(call16, 1) if img[call16] == 0xE8 else 0
+    check(up16 and img[up16:up16 + len(const_bytes("UPLOAD16_ENTRY"))] == const_bytes("UPLOAD16_ENTRY"), f"which calls GL_Upload16 (+{up16:#x})")
     after = rel32(jmp_after, 1)
-    pop = call8 + 5
-    check(img[pop:pop + 3] == const_bytes("UPLOAD8_POP") and pop + 3 == after,
-          f"GL_Upload8's `add esp, 0x1c` falls into the exit GL_Upload32's path jumps to (+{after:#x})")
+    pop = call16 + 5
+    check(img[pop:pop + 3] == const_bytes("UPLOAD16_POP") and pop + 3 == after,
+          f"GL_Upload16's `add esp, 0x1c` falls into the exit GL_Upload32's path jumps to (+{after:#x})")
 
     # GL_Upload32 takes the six arguments the stub pushes, and still stops at 512x1024.
     # (One caller pushes another call's argument first and pops both at once.)
@@ -409,18 +409,18 @@ def anniversary():
     check(any(t == "cmp eax, 0x80000" for _, t in instructions(up32, up32 + 0x300)),
           "GL_Upload32's ceiling is the stock `cmp eax, 0x80000` (replacements capped at 512)")
 
-    # GL_Upload8's palette operands.
-    for name in ("UPLOAD8_GAMMA", "UPLOAD8_DITHER"):
+    # GL_Upload16's palette operands.
+    for name in ("UPLOAD16_GAMMA", "UPLOAD16_DITHER"):
         off, op = const_operand(name)
-        check(img[up8 + off:up8 + off + len(op)] == op, f"{name} opcode at GL_Upload8+{off:#x}")
-    off, op = const_operand("UPLOAD8_DITHER")
-    dither = u32(up8 + off + len(op))
+        check(img[up16 + off:up16 + off + len(op)] == op, f"{name} opcode at GL_Upload16+{off:#x}")
+    off, op = const_operand("UPLOAD16_DITHER")
+    dither = u32(up16 + off + len(op))
     name_ptr = u32(dither - 0xC - base)
     cvar_name = img[name_ptr - base:name_ptr - base + 16].split(b"\0")[0]
     check(cvar_name == b"gl_dither", f"the dither operand is gl_dither.value ({cvar_name!r})")
-    off, op = const_operand("UPLOAD8_GAMMA")
-    gamma = u32(up8 + off + len(op))
-    check(any(f"{gamma:#x}" in t for _, t in instructions(up8, up8 + off + 8)[-2:]),
+    off, op = const_operand("UPLOAD16_GAMMA")
+    gamma = u32(up16 + off + len(op))
+    check(any(f"{gamma:#x}" in t for _, t in instructions(up16, up16 + off + 8)[-2:]),
           f"the gamma operand is the table the palette loop reads ({gamma:#x})")
 
     # ebx is the cache record at the tail.
@@ -451,11 +451,11 @@ def anniversary():
     check(img[je_hit:je_hit + 2] == b"\x0f\x84", "JE_HIT is a je rel32")
     hit = rel32(je_hit, 2)
     hit_bytes = const_bytes("HIT")
-    check(img[hit:hit + len(hit_bytes)] == hit_bytes, f"the hit path is `cmp word [esi+4], 0; jle; mov ax, [servercount]` (+{hit:#x})")
-    servercount = u32(hit + len(hit_bytes))
-    stamped = [a for a, t in body if t == f"movzx eax, word ptr [{servercount:#x}]"]
+    check(img[hit:hit + len(hit_bytes)] == hit_bytes, f"the hit path is `cmp word [esi+4], 0; jle; mov ax, [gHostSpawnCount]` (+{hit:#x})")
+    spawn_count = u32(hit + len(hit_bytes))
+    stamped = [a for a, t in body if t == f"movzx eax, word ptr [{spawn_count:#x}]"]
     check(len(stamped) == 1 and hit < stamped[0] < tail,
-          f"the new-record path stamps records from the same servercount ({servercount:#x}, read at {[hex(a) for a in stamped]})")
+          f"the new-record path stamps records from the same gHostSpawnCount ({spawn_count:#x}, read at {[hex(a) for a in stamped]})")
     next_record = head + offset("head", "NEXT_RECORD")
     check([t for _, t in instructions(next_record, next_record + 6)][:1] == [f"mov ecx, dword ptr [{u32(head + 2):#x}]"],
           "NEXT_RECORD reloads the record count, as the loop's top does")
@@ -523,8 +523,8 @@ def anniversary():
     buf = {u32(up32 + off + 1) for off, op in refs if img[up32 + off] == op}
     check(len(buf) == 1 and len(refs) == 5, f"ceiling: the five buffer references agree ({[hex(b) for b in buf]})")
     buf = buf.pop() if len(buf) == 1 else 0
-    exp = u32(up8 + int(exp_off, 0) + 1) if img[up8 + int(exp_off, 0)] == byte_list(exp_op)[0] else 0
-    check(exp == buf + 0x200000, f"ceiling: GL_Upload8's buffer starts 2 MB after it ({buf:#x} -> {exp:#x})")
+    exp = u32(up16 + int(exp_off, 0) + 1) if img[up16 + int(exp_off, 0)] == byte_list(exp_op)[0] else 0
+    check(exp == buf + 0x200000, f"ceiling: GL_Upload16's buffer starts 2 MB after it ({buf:#x} -> {exp:#x})")
     rpe = pefile.PE(ANNIVERSARY_DLL, fast_load=True)
     rpe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_BASERELOC"]])
     into = sorted(e.rva for b in rpe.DIRECTORY_ENTRY_BASERELOC for e in b.entries
@@ -609,10 +609,10 @@ def anniversary():
         k = texts.index(f"push {base + tga:#x}") if f"push {base + tga:#x}" in texts else -1
         check(k > 0 and "push 0x40" in texts[k:k + 3] and "lea eax, [ebp - 0x44]" in texts[k - 3:k + 3]
               and num(field(sk, "path_offset")) == 0x44, "sky: the path is the 64-byte buffer at [ebp-0x44]")
-        check(any(f"{gamma:#x}]" in t for t in texts), f"sky: the gamma loop uses GL_Upload8's texgamma table ({gamma:#x})")
+        check(any(f"{gamma:#x}]" in t for t in texts), f"sky: the gamma loop uses GL_Upload16's texgamma table ({gamma:#x})")
         check(any(f"[{dither:#x}]" in t for t in texts), "sky: and gl_dither")
 
-    print(f"\nGL_LoadTexture2 +{entry:#x} (tail +{tail:#x}), GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
+    print(f"\nGL_LoadTexture2 +{entry:#x} (tail +{tail:#x}), GL_Upload32 +{up32:#x}, GL_Upload16 +{up16:#x}")
     print(f"{len(failures)} check(s) FAILED" if failures else "all checks passed")
     sys.exit(1 if failures else 0)
 

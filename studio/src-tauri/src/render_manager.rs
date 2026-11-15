@@ -1618,6 +1618,30 @@ pub async fn cancel_render_jobs(
     Ok(())
 }
 
+/// Cancels every job that is Queued right now and leaves a Rendering one
+/// running. The status check and the change happen under one lock, so a job
+/// the scheduler starts a moment earlier is never caught.
+#[tauri::command]
+pub async fn cancel_queued_render_jobs(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+) -> Result<usize, String> {
+    let mut cancelled = 0usize;
+    {
+        let mut jobs = state.jobs.lock().unwrap();
+        for job in jobs.iter_mut().filter(|j| j.status == "Queued") {
+            job.cancel_flag.store(true, Ordering::Relaxed);
+            job.status = "Cancelled".to_string();
+            cancelled += 1;
+        }
+    }
+    log_markdown(&crate::messages::render::queued_jobs_cancelled(cancelled));
+    if cancelled > 0 {
+        emit_jobs_snapshot(&app, &state.jobs);
+    }
+    Ok(cancelled)
+}
+
 /// `reset_render_job` for several rows at once; only a Cancelled, Finished
 /// or Error job goes back to Queued.
 #[tauri::command]

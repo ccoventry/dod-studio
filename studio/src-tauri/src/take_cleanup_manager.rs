@@ -389,11 +389,17 @@ pub(crate) fn make_room(
     let why = Why::Room(room_for);
     let mut progress = Progress::new(app.clone(), why);
 
+    // The Windows drive counts only above "Keep free on the Windows drive"
+    // (#1430), as the capture and render routing that follow count it.
+    let headroom = need.headroom_bytes;
     let plan = plan_room(
         &need,
         &dirs,
         &busy,
-        native::sys::disk::get_available_bytes,
+        |target| {
+            native::sys::disk::get_available_bytes(target)
+                .map(|free| native::sys::windows_drive::free_for(target, headroom, free))
+        },
         |step| match step {
             RoomStep::Looking => {
                 if progress.report("looking", 0, 0) {

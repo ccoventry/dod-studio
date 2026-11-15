@@ -345,7 +345,7 @@ impl CaptureRoom {
         let pending = self.pending_on(&state, &volume_of(folder), policy(&self.app));
         let inputs = RoomInputs {
             free_bytes: free,
-            headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+            headroom_bytes: block_headroom(folder),
             writing_bytes: writing,
             next_clip_bytes: next_bytes,
             pending: &pending,
@@ -581,7 +581,9 @@ impl CaptureRoom {
                         format_gb(short)
                     ),
                 };
-                let why = why + &self.partial_on_drive(next);
+                let why = why
+                    + &self.partial_on_drive(next)
+                    + &windows_drive_note(&self.blocks[next].folder);
                 log_markdown(&crate::messages::capture::room_stopping_batch(
                     next + 1,
                     &why,
@@ -680,6 +682,32 @@ fn settle(folder: &Path, cancel: &AtomicBool) -> Option<u64> {
         std::thread::sleep(POLL * 2);
     }
     None
+}
+
+/// What a capture keeps free on the drive of the block at `folder`: the usual
+/// headroom, or on the Windows drive "Keep free on the Windows drive" when
+/// that is more (#1430). Read at every check, so a change applies to the next
+/// clip boundary of a running batch.
+fn block_headroom(folder: &Path) -> u64 {
+    native::sys::windows_drive::headroom_for(
+        existing_ancestor(folder),
+        native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+    )
+}
+
+/// The note a stopped batch adds when the block at `folder` is on the Windows
+/// drive and the setting raised its headroom (#1430), so the player knows
+/// which setting held it; empty otherwise. The batch's blocks were routed when
+/// it was planned, so a clip can't move to another drive mid-batch.
+fn windows_drive_note(folder: &Path) -> String {
+    let headroom = native::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
+    if block_headroom(folder) > headroom {
+        native::messages::windows_drive::kept_free_note(
+            native::sys::windows_drive::keep_free_bytes(),
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// The nearest folder of `path` that exists, for the free-space query: a
@@ -791,6 +819,50 @@ mod tests {
         state.settling = 1;
         state.take_settled(2, 100, None, false);
         assert_eq!((state.recorded.len(), state.partial.len()), (1, 1));
+    }
+
+    /// #1430: a clip on the Windows drive keeps "Keep free on the Windows
+    /// drive" free beside it (when that is more than the usual headroom); a
+    /// clip on another drive keeps the usual headroom.
+    #[cfg(windows)]
+    #[test]
+    fn a_clip_on_the_windows_drive_keeps_the_windows_drive_setting_free() {
+        let headroom = native::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
+        let windows = PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot"));
+        let session = windows.join("no-such-session-1430").join("clip_b0");
+        assert_eq!(
+            block_headroom(&session),
+            headroom.max(native::sys::windows_drive::keep_free_bytes())
+        );
+        let missing = (b'A'..=b'Z')
+            .map(|c| format!("{}:\\", c as char))
+            .find(|d| !Path::new(d).exists());
+        if let Some(drive) = missing {
+            assert_eq!(block_headroom(&Path::new(&drive).join("clip_b0")), headroom);
+            assert_eq!(windows_drive_note(&Path::new(&drive).join("clip_b0")), "");
+        }
+    }
+
+    /// #1430: room by the usual headroom but not past the Windows drive's
+    /// setting, with no take there to free, can never fit: the batch stops
+    /// with the reason instead of holding for space that won't come.
+    #[test]
+    fn a_windows_drive_clip_short_only_of_the_setting_with_nothing_to_free_cannot_fit() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let usual = RoomInputs {
+            free_bytes: 40 * GB,
+            headroom_bytes: 15 * GB,
+            writing_bytes: 0,
+            next_clip_bytes: 10 * GB,
+            pending: &[],
+            output_ratio: None,
+        };
+        assert_eq!(decide(&usual), RoomDecision::Continue);
+        let windows = RoomInputs {
+            headroom_bytes: 50 * GB,
+            ..usual
+        };
+        assert!(matches!(decide(&windows), RoomDecision::CannotFit { .. }));
     }
 
     #[test]

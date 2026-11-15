@@ -26,4 +26,15 @@ describe('resultsOf', () => {
     expect(rows[1].lateMs).toBe(240);
     expect(totals.captured).toBe(1);
   });
+
+  it("shows a clip the game reported failed or short by the game's verdict (#1401)", () => {
+    const { rows } = resultsOf({
+      blocks: [
+        block({ captured: false, clip_verdict: { failed: 'no_start' } }),
+        block({ captured: true, renderable: true, clip_verdict: { short: { recorded_secs: 16.75, planned_secs: 16.76, kills_outside: 1 } } }),
+        block({ captured: false }),
+      ],
+    }, dispatch());
+    expect(rows.map((r) => r.status)).toEqual(['failed', 'short_plan', 'missing']);
+  });
 });
