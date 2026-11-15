@@ -11,8 +11,8 @@
 //! there). `CClientEnvModel::Think` (`client+0x29b10`) then keeps one temp
 //! entity alive, `models/p_stick.mdl` with `entityType` 4, at the camera
 //! (`v_origin` while spectating, else the local player), and DoD's
-//! `StudioDrawModel` draws every stored model, PVS-culled, each time it is
-//! asked to draw that carrier. No carrier, no map models. Names from the
+//! `StudioDrawModel` (its loop at `client+0x4a3a9`) draws every stored model,
+//! PVS-culled, each time it is asked to draw that carrier. No carrier, no map models. Names from the
 //! Linux `client.so`'s symbols; the addresses are the Windows build's.
 //!
 //! ## Why they vanished under `dem_forcehltv 1`
@@ -93,6 +93,8 @@ static THINK: AtomicUsize = AtomicUsize::new(0);
 static REFUSED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// How many carriers [`poll`] has had `Think` create this session.
 static CREATED: AtomicU32 = AtomicU32::new(0);
+/// Whether [`poll`] has logged a `Think` that made no carrier.
+static NO_FREE_LOGGED: AtomicBool = AtomicBool::new(false);
 /// Lines [`poll`] writes to the log before it only counts.
 const LOG_LINES: u32 = 4;
 
@@ -247,20 +249,22 @@ pub fn poll() {
     // Safety: as `call_think` asks; `poll` runs on the engine's thread.
     unsafe { call_think(code) };
     let made = unsafe { *((code.object + CARRIER_OFFSET) as *const usize) } != 0;
-    let created = if made {
-        CREATED.fetch_add(1, Ordering::Relaxed) + 1
-    } else {
-        CREATED.load(Ordering::Relaxed)
-    };
+    if !made {
+        // Asked again next frame, as `CHud::Think` would; logged once.
+        if !NO_FREE_LOGGED.swap(true, Ordering::Relaxed) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "env_models: {count} map model(s) have no carrier and CClientEnvModel::Think made none: the game had no temp entity free; trying again each frame"
+                ))
+            };
+        }
+        return;
+    }
+    let created = CREATED.fetch_add(1, Ordering::Relaxed) + 1;
     if created <= LOG_LINES {
         unsafe {
             crate::debug::report(&format!(
-                "env_models: {count} map model(s) had no carrier to draw them (a demo played as HLTV); CClientEnvModel::Think {} ({created} so far)",
-                if made {
-                    "made one"
-                } else {
-                    "made none: the game had no temp entity free"
-                }
+                "env_models: {count} map model(s) had no carrier to draw them (a demo played as HLTV); CClientEnvModel::Think made one ({created} so far)"
             ))
         };
     }
