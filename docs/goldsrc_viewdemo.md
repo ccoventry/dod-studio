@@ -230,12 +230,13 @@ landed at 5:26 and played on from it, and `dem_jump 590` at 5:35 landed at
 the demo's last frame (22:27), but the view froze on the demo's first frames
 (warm-up, "Clan Match Begins in : 142 mins") and the client clock went to
 -8,524 s. That is what looked like "a jump back lands at the start" in
-#1452's probe: it typed absolute times into `dem_jump`, so its fourth jump
+#1452's probe: it typed absolute times into `dem_jump`, so its third jump
 ran past the end of an 18-minute demo. It is the engine, not the hook:
 nothing in the hook moves the clock on a `dem_jump` (the #893 gap skip
 logged nothing). So to go back by an amount, `dem_jump -<seconds>` (it
 pauses); to go to a time, `ds_demo_seek_to <seconds>` (it doesn't pause, and
-in an HLTV demo replays from the start so names, teams and zooms are right).
+going back in an HLTV demo it replays from the start so names, teams and
+zooms are right).
 A jump past the end is undone with `ds_demo_seek_to`.
 
 `ds_demo_seek_to <seconds>` and `ds_demo_seek_by <seconds>`
