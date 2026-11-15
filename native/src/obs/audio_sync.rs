@@ -14,9 +14,10 @@ use super::client::{ObsClient, ObsError};
 /// Measured against HLAE takes of the same spans (sound.wav is timed from the
 /// frames, so it is the reference), 0.8 s pieces of
 /// `ktps8w9-stealth_gskill_rr2_h1`, one PC (#1385): with no offset OBS's sound
-/// was +270 to +296 ms late on PRE; with -270 set before the game's sound
-/// started it was +8 to +35 ms on PRE. Another PC's waveOut latency may differ
-/// (#646). The game's `_snd_mixahead` (default 0.1 s) is part of it: at 0.05
+/// was +261 to +296 ms late on PRE and +259 to +321 on POST; with -270 set
+/// before the game's sound started it was +8 to +35 ms on PRE and -12 to +36
+/// on POST, within about two frames at 60 fps. Another PC's waveOut latency
+/// may differ (#646). The game's `_snd_mixahead` (default 0.1 s) is part of it: at 0.05
 /// the lag was about 50 ms shorter.
 pub const GAME_AUDIO_SYNC_OFFSET_MS: i64 = -270;
 
@@ -32,8 +33,9 @@ const STEP_HOLD: Duration = Duration::from_millis(250);
 /// adding the sound straight after what it already had, at the old time, until
 /// the stream next breaks, and only then does the new offset take effect.
 /// Measured on PRE with the game playing (#1385): 0 to -270 set live left the
-/// sound +271..+293 ms late, the offset doing nothing; the same change made
-/// through -1 first landed it +2..+35. Offsets set while no game sound plays
+/// sound +271..+293 ms late (POST +265..+300), the offset doing nothing; the
+/// same change made through -1 first landed it +2..+35 (POST -3..+28).
+/// Offsets set while no game sound plays
 /// take effect when it starts either way; the extra step costs nothing then.
 fn steps(current: i64, target: i64) -> Vec<i64> {
     if current == target {
@@ -49,7 +51,9 @@ fn steps(current: i64, target: i64) -> Vec<i64> {
 /// Sets `source`'s sync offset to `target` so that OBS applies it even while
 /// the game's sound is playing. Returns whether anything changed.
 pub fn set_offset(client: &mut ObsClient, source: &str, target: i64) -> Result<bool, ObsError> {
-    let current = client.input_audio_sync_offset(source)?;
+    // An offset OBS won't tell is taken as 0: the extra step is harmless, and
+    // the offset still gets set.
+    let current = client.input_audio_sync_offset(source).unwrap_or(0);
     let plan = steps(current, target);
     for (i, ms) in plan.iter().enumerate() {
         if i > 0 {
@@ -86,11 +90,15 @@ mod tests {
     }
 
     /// The offsets OBS is sent, in order, starting from `current`.
-    fn sent_from(current: i64) -> (bool, Vec<i64>) {
+    /// `None` is an OBS that refuses to say.
+    fn sent_from(current: Option<i64>) -> (bool, Vec<i64>) {
         let set = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&set);
         let obs = serve(move |kind, data| match kind {
-            "GetInputAudioSyncOffset" => Reply::ok(json!({ "inputAudioSyncOffset": current })),
+            "GetInputAudioSyncOffset" => match current {
+                Some(ms) => Reply::ok(json!({ "inputAudioSyncOffset": ms })),
+                None => Reply::err("no such input"),
+            },
             "SetInputAudioSyncOffset" => {
                 log.lock()
                     .unwrap()
@@ -108,11 +116,16 @@ mod tests {
 
     #[test]
     fn sets_a_fresh_source_through_minus_one() {
-        assert_eq!(sent_from(0), (true, vec![-1, -270]));
+        assert_eq!(sent_from(Some(0)), (true, vec![-1, -270]));
     }
 
     #[test]
     fn sends_nothing_when_the_offset_is_already_right() {
-        assert_eq!(sent_from(-270), (false, vec![]));
+        assert_eq!(sent_from(Some(-270)), (false, vec![]));
+    }
+
+    #[test]
+    fn an_offset_obs_will_not_read_is_still_set() {
+        assert_eq!(sent_from(None), (true, vec![-1, -270]));
     }
 }
