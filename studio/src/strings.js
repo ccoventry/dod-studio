@@ -814,11 +814,14 @@ export const STRINGS = {
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0, failed = 0) => {
-      const missing = total - captured - cutShort - stoppedEarly - startedLate - failed;
+    // Nor is a clip the batch ended before reaching (#1434): `endedBy` says why.
+    // The counts are takes_shortfall_toast.js's `takeShortfall`.
+    takesFoundMissing: (captured, total, { missing = 0, cutShort = 0, cutBy, stoppedEarly = 0, startedLate = 0, failed = 0, notReached = 0, endedBy } = {}) => {
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
+      const endedWhy = { game_closed: 'the game closed', stopped: 'the batch stopped', studio_closed: 'DoD Studio closed' }[endedBy] || 'batch cancelled';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
+      if (notReached > 0) parts.push(`${notReached} not reached (${endedWhy})`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       // OBS started recording after the clip's first frame (#1109).
@@ -2748,6 +2751,12 @@ export const STRINGS = {
       // An OBS recording nobody stopped: Studio closed mid-clip (#20).
       studio_closed: 'Cut short: DoD Studio closed while OBS recorded it (not captured)',
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
+    // A clip the batch ended before reaching (#1434), by what ended it.
+    notReachedBy: (endedBy) => ({
+      game_closed: 'Not reached: the game closed first',
+      stopped: 'Not reached: the batch stopped first',
+      studio_closed: 'Not reached: DoD Studio closed first',
+    })[endedBy] || 'Not reached: the batch was cancelled first',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     // Why the game's clip failed (#1401).
