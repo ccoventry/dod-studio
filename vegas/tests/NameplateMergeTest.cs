@@ -49,6 +49,25 @@ public static class NameplateMergeTest
         Console.WriteLine("FAIL  " + name + ": expected " + expected + ", got " + got);
     }
 
+    // All pieces in one group; counts its same-player joins.
+    static void CheckCount(string name, int expected, params EntryPoint.Piece[] pieces)
+    {
+        List<EntryPoint.Piece> list = new List<EntryPoint.Piece>(pieces);
+        List<int> group = new List<int>();
+        for (int i = 0; i < list.Count; i++) group.Add(i);
+        int got = EntryPoint.SamePlayerJoins(list, group);
+        if (got == expected) { Console.WriteLine("ok    " + name); return; }
+        failures++;
+        Console.WriteLine("FAIL  " + name + ": expected " + expected + ", got " + got);
+    }
+
+    static void CheckBool(string name, bool expected, bool got)
+    {
+        if (got == expected) { Console.WriteLine("ok    " + name); return; }
+        failures++;
+        Console.WriteLine("FAIL  " + name + ": expected " + expected + ", got " + got);
+    }
+
     public static int Main()
     {
         Check("one clip stays one", "[0]", P(1, "a", 0, 3000));
@@ -89,6 +108,16 @@ public static class NameplateMergeTest
             PP(1, "a", "x", 0, 1000), PP(1, "b", "x", 1000, 2000));
         CheckWith("same player joining off still joins pieces of one clip", false, "[0,1]",
             PP(1, "a", "x", 0, 1000), PP(1, "a", "x", 1000, 2000));
+
+        CheckCount("a, a, b: one same-player join", 1, P(1, "a", 0, 1000), P(1, "a", 1000, 2000), P(1, "b", 2000, 3000));
+        CheckCount("pieces of one clip: no same-player join", 0, P(1, "a", 0, 1000), P(1, "a", 1000, 2000));
+        CheckCount("a, b, c: two same-player joins", 2, P(1, "a", 0, 1000), P(1, "b", 1000, 2000), P(1, "c", 2000, 3000));
+        CheckCount("a single piece: none", 0, P(1, "a", 0, 1000));
+
+        CheckBool("a nameplate over a joined run covers its middle clip", true, EntryPoint.Covers(0, 3000, 1000, 2000));
+        CheckBool("an exact span is covered", true, EntryPoint.Covers(1000, 2000, 1000, 2000));
+        CheckBool("a longer run is not covered by a shorter nameplate", false, EntryPoint.Covers(1000, 2000, 1000, 3000));
+        CheckBool("a run starting before the nameplate is not covered", false, EntryPoint.Covers(1000, 3000, 500, 2000));
 
         Console.WriteLine(failures == 0 ? "all passed" : failures + " failed");
         return failures == 0 ? 0 : 1;

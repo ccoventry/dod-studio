@@ -46,7 +46,7 @@ A box then says how many nameplates it added and why any clip got none.
 
 It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
 
-Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A clip you stretched or trimmed since gets a new one and its old one stays for you to delete. The box says how many clips already had one.
+Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A run that sits wholly inside an existing nameplate counts as already done (so selecting only the middle clip of a joined run and rerunning adds nothing); a clip you stretched since, or a run whose clips each had their own nameplate before, gets a new one and the old ones stay for you to delete (the box counts them). A clip you trimmed shorter still sits inside its old nameplate, so it keeps it: delete that nameplate to get a fresh one. The box says how many clips already had one.
 
 ### Changing the defaults
 
