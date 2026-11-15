@@ -85,8 +85,10 @@ pub fn for_each(mut visit: impl FnMut(&[u8], &mut CmdFunction)) -> bool {
 /// on top and calls down to the first, which calls the engine.
 ///
 /// The one case this misses is a node the engine frees and registers again
-/// with a new handler: the commands wrapped here live in `hw.dll`, HLAE and
-/// this DLL, which never reload, and the engine refuses a second
+/// with a new handler: the commands wrapped here live in `hw.dll`, HLAE,
+/// this DLL and `client.dll` (`+map`, `+mapzoom` for `pov_map_keys`), none
+/// of which reload (`client.dll` stays loaded between demos, measured; see
+/// `docs/goldsrc_dod_quirks.md`), and the engine refuses a second
 /// registration of a name it has (`Cmd_AddCommand`: "already defined").
 pub fn wrap(entry: &mut CmdFunction, real: &AtomicUsize, wrapper: ConsoleCommandFn) -> bool {
     if real.load(Ordering::Relaxed) != 0 {

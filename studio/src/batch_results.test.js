@@ -37,4 +37,17 @@ describe('resultsOf', () => {
     }, dispatch());
     expect(rows.map((r) => r.status)).toEqual(['failed', 'short_plan', 'missing']);
   });
+
+  it('shows a clip a cancelled batch never reached as not reached, not missing (#1434)', () => {
+    const { rows } = resultsOf({
+      ended_by: 'cancel',
+      blocks: [
+        block({ captured: true, renderable: true }),
+        block({ captured: false }),
+        block({ captured: false, not_reached: true }),
+      ],
+    }, dispatch());
+    expect(rows.map((r) => r.status)).toEqual(['ok', 'missing', 'not_reached']);
+    expect(rows[2].endedBy).toBe('cancel');
+  });
 });

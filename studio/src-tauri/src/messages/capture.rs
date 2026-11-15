@@ -52,6 +52,13 @@ pub fn take_verify_cut_short(take_key: &str, why: impl Display, folder: &str) ->
     )
 }
 
+/// The clips a batch that ended early never got to (#1434): not missing.
+pub fn take_verify_not_reached(count: usize, total: usize, why: impl Display) -> String {
+    format!(
+        "[take-verify] {count} of {total} clip(s) not reached ({why}): no take expected, not counted as missing."
+    )
+}
+
 /// A clip the game recorded with no start, no stop or no frames (#1401).
 pub fn take_verify_clip_failed(
     take_key: &str,
@@ -279,6 +286,10 @@ mod tests {
         assert_eq!(
             take_stopped_writing_video(1.0, 2.5),
             "stopped writing video early (1.00 s of video, 2.50 s of audio)"
+        );
+        assert_eq!(
+            take_verify_not_reached(165, 340, "the batch was cancelled"),
+            "[take-verify] 165 of 340 clip(s) not reached (the batch was cancelled): no take expected, not counted as missing."
         );
         use native::capture_engine::clip_verdict::{ClipFailure, ShortClip};
         assert_eq!(
