@@ -21,9 +21,9 @@ use native::log_markdown;
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -339,6 +339,9 @@ pub struct RenderManager {
     /// The capture is held between clips for space (#861): nothing records,
     /// so renders started now get the machine as they would without a capture.
     capture_held: Arc<AtomicBool>,
+    /// The volume a held capture waits on for room (#1438): queued renders
+    /// of takes there start first, since only they free it.
+    room_volume: Arc<RwLock<Option<String>>>,
 }
 
 /// What the scheduler may run at once: the batch's own number, or, while a
@@ -353,6 +356,14 @@ fn concurrency_cap(configured: usize, while_capturing: Option<usize>) -> usize {
         Some(renders) => configured.min(renders.max(1)),
         None => configured,
     }
+}
+
+/// The order queued jobs start in, given each one's index in the list and
+/// whether its take is on the drive a held capture waits on: those first,
+/// since only they free its room (#1438), then the rest, each in list order.
+fn start_order(queued: impl IntoIterator<Item = (usize, bool)>) -> Vec<usize> {
+    let (first, rest): (Vec<_>, Vec<_>) = queued.into_iter().partition(|&(_, on)| on);
+    first.into_iter().chain(rest).map(|(i, _)| i).collect()
 }
 
 /// One render job of a take, for Render While Capturing's space check (#861).
@@ -374,6 +385,7 @@ struct SchedulerHandles {
     while_capturing: Arc<AtomicBool>,
     renders_while_capturing: Arc<AtomicUsize>,
     capture_held: Arc<AtomicBool>,
+    room_volume: Arc<RwLock<Option<String>>>,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -404,6 +416,7 @@ impl RenderManager {
             while_capturing: Arc::new(AtomicBool::new(false)),
             renders_while_capturing: Arc::new(AtomicUsize::new(1)),
             capture_held: Arc::new(AtomicBool::new(false)),
+            room_volume: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -419,6 +432,12 @@ impl RenderManager {
     /// The capture holds between clips (true) or records again (false).
     pub(crate) fn set_capture_held(&self, held: bool) {
         self.capture_held.store(held, Ordering::SeqCst);
+    }
+
+    /// The volume (`volume_of`) a capture holds for room on, whose takes'
+    /// renders start first (#1438), or `None` once it has room again.
+    pub(crate) fn set_room_volume(&self, volume: Option<String>) {
+        *self.room_volume.write().unwrap_or_else(|p| p.into_inner()) = volume;
     }
 
     /// The render jobs of the take(s) under `folder`, a capture block's
@@ -636,6 +655,7 @@ impl RenderManager {
             while_capturing: self.while_capturing.clone(),
             renders_while_capturing: self.renders_while_capturing.clone(),
             capture_held: self.capture_held.clone(),
+            room_volume: self.room_volume.clone(),
         }
     }
 }
@@ -859,6 +879,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         // Takes with a job that finished in this run, for the automatic take
         // cleanup (#644) once the run ends.
         let mut finished_takes: Vec<String> = Vec::new();
+        // Each take folder's volume, looked up once (it asks Windows): the
+        // start order reads it under the jobs lock every pass while a capture
+        // holds (#1438).
+        let mut take_volumes: HashMap<String, String> = HashMap::new();
 
         loop {
             // Studio is closing (#1439): its way out has stopped the renders
@@ -942,7 +966,32 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         effective_concurrent
                     };
 
-                    for job in guard.iter_mut() {
+                    let room_volume = handles
+                        .room_volume
+                        .read()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clone();
+                    let order = start_order(
+                        guard
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, j)| j.status == "Queued")
+                            .map(|(i, j)| {
+                                let on = room_volume.as_ref().is_some_and(|v| {
+                                    *take_volumes
+                                        .entry(j.clip.take_folder.clone())
+                                        .or_insert_with(|| {
+                                            native::hlcr::take_cleanup::volume_of(Path::new(
+                                                &j.clip.take_folder,
+                                            ))
+                                        })
+                                        == *v
+                                });
+                                (i, on)
+                            }),
+                    );
+                    for index in order {
+                        let job = &mut guard[index];
                         if started >= limit {
                             break;
                         }
@@ -1855,6 +1904,18 @@ mod tests {
         assert_eq!(concurrency_cap(4, Some(0)), 1);
         assert_eq!(concurrency_cap(0, None), 1);
         assert_eq!(concurrency_cap(0, Some(1)), 1);
+    }
+
+    /// #1438: while a capture holds for room on one drive, queued renders of
+    /// takes there start first; the rest keep their order behind them.
+    #[test]
+    fn renders_that_free_the_held_drive_start_first() {
+        assert_eq!(
+            start_order([(0, false), (2, true), (3, false), (5, true)]),
+            vec![2, 5, 0, 3]
+        );
+        assert_eq!(start_order([(1, false), (4, false)]), vec![1, 4]);
+        assert!(start_order([]).is_empty());
     }
 
     #[test]
