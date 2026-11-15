@@ -2,7 +2,10 @@
 //! `ds_demo_review` plays a highlight, a small box on the game screen says
 //! which one it is and lists the keys that answer it, so an answer doesn't
 //! need the ESC menu, nor waiting for the highlight to end (#1141). Under
-//! its title the box lists the highlight's kills, time, victim and weapon,
+//! its title the box says the kill range, with the scan's range in grey
+//! beside it when it was changed, and the note, cut short when long (#1399;
+//! display only: E's form changes them). Then it lists the highlight's
+//! kills, time, victim and weapon,
 //! with the next one to come in the key colour behind a `>` (#1140), under
 //! a line with the demo player's clock now, so a kill's time says how soon
 //! it comes.
@@ -329,7 +332,11 @@ pub(crate) fn take_pending() -> Option<Action> {
 pub(crate) struct Panel {
     /// `Highlight 3 of 12 | m00cat | 4 kills`; empty hides the box.
     pub title: String,
-    /// A second line in plain text ("Loading the demo..."), or empty.
+    /// The kill range in effect, and the scan's when it was changed (#1399).
+    pub range: RangeLine,
+    /// The note as the box shows it ([`note_shown`]); empty shows no line.
+    pub note: String,
+    /// A line in plain text ("Loading the demo..."), or empty.
     pub status: String,
     /// The answer keys' lines.
     pub keys: bool,
@@ -420,7 +427,7 @@ pub unsafe fn draw() {
 mod draw {
     use std::ffi::CString;
 
-    use super::{Action, KEYS_LIST, KillState, LAST_LINE, Panel};
+    use super::{Action, KEYS_LIST, KillState, LAST_LINE, NOTE_LABEL, Panel};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -429,7 +436,8 @@ mod draw {
     /// A key that does nothing now, and its word (B Back on the first
     /// highlight): greyed rather than hidden, so the keys keep their places.
     const DIM: (f32, f32, f32) = (0.4, 0.4, 0.4);
-    /// A kill already played (#1140): readable, but quieter than the rest.
+    /// A kill already played (#1140), and the scan's kill range beside a
+    /// changed one (#1399): readable, but quieter than the rest.
     const PAST: (f32, f32, f32) = (0.55, 0.55, 0.55);
     /// The mark in front of the next kill, and the gap that keeps the other
     /// lines in step with it.
@@ -451,6 +459,20 @@ mod draw {
     fn lines(panel: &Panel) -> Vec<Vec<Run>> {
         let mut lines = Vec::new();
         lines.push(run(&panel.title, WHITE).into_iter().collect());
+        // The range and note under the title (#1399); the scan's range,
+        // when it was changed, quieter beside the range in effect.
+        if !panel.range.now.is_empty() {
+            let mut range: Vec<Run> = run(&panel.range.now, WHITE).into_iter().collect();
+            if !panel.range.was.is_empty() {
+                range.extend(run(&panel.range.was, PAST));
+            }
+            lines.push(range);
+        }
+        if !panel.note.is_empty() {
+            let mut note: Vec<Run> = run(NOTE_LABEL, GREY).into_iter().collect();
+            note.extend(run(&panel.note, WHITE));
+            lines.push(note);
+        }
         if !panel.status.is_empty() {
             lines.push(run(&panel.status, GREY).into_iter().collect());
         }
@@ -589,6 +611,69 @@ pub(crate) fn clock_text(seconds: f64) -> String {
     format!("{}:{:02}", whole / 60, whole % 60)
 }
 
+/// The box's kill range line (#1399): `Kills 2-3`, and ` (was 1-4)` beside it,
+/// drawn quieter, when the range isn't the one the scan found.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct RangeLine {
+    /// The range in effect; empty shows no line.
+    pub now: String,
+    /// The scan's range, or empty when the range in effect is it.
+    pub was: String,
+}
+
+/// The kill range line for kills `from..=to` (from 1) of a highlight with
+/// `kills` kills. The scan always gives a highlight its whole list of kills
+/// as its range (`native::patch::scanner::capture_streaks`), and Studio
+/// counts a range as changed when it is narrower than that
+/// (`take_index.js`'s `isRangeModified`), so the original is `1-<kills>`.
+pub(crate) fn range_line(from: usize, to: usize, kills: usize) -> RangeLine {
+    let span = |a: usize, b: usize| {
+        if a == b {
+            format!("{a}")
+        } else {
+            format!("{a}-{b}")
+        }
+    };
+    let now = if from == to {
+        format!("Kill {from}")
+    } else {
+        format!("Kills {}", span(from, to))
+    };
+    let was = if (from, to) == (1, kills) {
+        String::new()
+    } else {
+        format!(" (was {})", span(1, kills))
+    };
+    RangeLine { now, was }
+}
+
+/// The word in front of the note on the box.
+pub(crate) const NOTE_LABEL: &str = "Note: ";
+/// The longest note the box shows, in characters, before it is cut short
+/// with [`NOTE_ELLIPSIS`]: about as wide as the keys' line, so a long note
+/// doesn't widen the box over the view (#1399).
+const NOTE_SHOWN_MAX: usize = 60;
+/// Three dots, not `…`: the pre-Anniversary console font is ASCII.
+const NOTE_ELLIPSIS: &str = "...";
+
+/// The note as the box shows it: on one line, cut short past
+/// [`NOTE_SHOWN_MAX`] characters with [`NOTE_ELLIPSIS`]; empty for no note.
+pub(crate) fn note_shown(note: &str) -> String {
+    let flat: String = note
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let flat = flat.trim();
+    if flat.chars().count() <= NOTE_SHOWN_MAX {
+        return flat.to_string();
+    }
+    let cut: String = flat
+        .chars()
+        .take(NOTE_SHOWN_MAX - NOTE_ELLIPSIS.len())
+        .collect();
+    format!("{}{NOTE_ELLIPSIS}", cut.trim_end())
+}
+
 /// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
 pub(crate) fn now_text(seconds: f64) -> String {
     format!("Now {}", clock_text(seconds))
@@ -711,6 +796,70 @@ mod tests {
             decide(true, b'w' as i32, KeyMode::Locked, 0),
             (false, None, 0)
         );
+    }
+
+    #[test]
+    fn an_unchanged_range_shows_no_bracket() {
+        assert_eq!(
+            range_line(1, 4, 4),
+            RangeLine {
+                now: "Kills 1-4".into(),
+                was: String::new()
+            }
+        );
+        assert_eq!(range_line(1, 1, 1).now, "Kill 1");
+        assert_eq!(range_line(1, 1, 1).was, "");
+    }
+
+    #[test]
+    fn a_changed_range_shows_the_scans_beside_it() {
+        assert_eq!(
+            range_line(2, 3, 4),
+            RangeLine {
+                now: "Kills 2-3".into(),
+                was: " (was 1-4)".into()
+            }
+        );
+        assert_eq!(range_line(3, 3, 4).now, "Kill 3");
+        assert_eq!(range_line(1, 3, 4).was, " (was 1-4)");
+        assert_eq!(range_line(2, 4, 4).was, " (was 1-4)");
+    }
+
+    #[test]
+    fn a_short_note_shows_whole_and_none_shows_nothing() {
+        assert_eq!(note_shown("  nice flick "), "nice flick");
+        assert_eq!(note_shown(""), "");
+        assert_eq!(note_shown(" \t "), "");
+    }
+
+    #[test]
+    fn a_long_note_is_cut_short_with_dots() {
+        let long = "a".repeat(NOTE_SHOWN_MAX + 1);
+        let shown = note_shown(&long);
+        assert_eq!(shown.chars().count(), NOTE_SHOWN_MAX);
+        assert!(shown.ends_with("..."));
+        // Exactly at the limit: whole.
+        let at = "b".repeat(NOTE_SHOWN_MAX);
+        assert_eq!(note_shown(&at), at);
+        // Cut between words: no space left before the dots.
+        let words = format!("{} {}", "c".repeat(NOTE_SHOWN_MAX - 4), "d".repeat(10));
+        assert_eq!(
+            note_shown(&words),
+            format!("{}...", "c".repeat(NOTE_SHOWN_MAX - 4))
+        );
+    }
+
+    #[test]
+    fn a_long_note_is_cut_on_a_character_not_a_byte() {
+        let long = "é".repeat(NOTE_SHOWN_MAX * 2);
+        let shown = note_shown(&long);
+        assert_eq!(shown.chars().count(), NOTE_SHOWN_MAX);
+        assert!(shown.starts_with('é'));
+    }
+
+    #[test]
+    fn a_note_shows_on_one_line() {
+        assert_eq!(note_shown("two\nlines"), "two lines");
     }
 
     #[test]

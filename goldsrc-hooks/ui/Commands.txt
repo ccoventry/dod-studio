@@ -179,7 +179,7 @@ DOD STUDIO WINDOW
   ds_ui_review_keys 0/1
       Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, its kill range (the original in grey when changed) and note, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
