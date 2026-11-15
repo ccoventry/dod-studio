@@ -47,6 +47,15 @@ pub fn take_failed(job_id: impl Display, base_name: impl Display, error: impl Di
 pub const CLEAR_QUEUE_EMPTIED: &str =
     "[render] clear_render_queue: list emptied once the batch stopped";
 
+/// A running render batch took export folders changed in Settings (#1430).
+pub fn export_dirs_changed(dirs: &[std::path::PathBuf]) -> String {
+    let list: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    format!(
+        "[render] Export folders changed during the batch: renders starting now go to {}",
+        list.join(", ")
+    )
+}
+
 pub const SCHEDULER_EXITING: &str =
     "[render] scheduler loop exiting: nothing left Rendering or Queued";
 
