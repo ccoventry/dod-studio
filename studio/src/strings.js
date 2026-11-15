@@ -814,11 +814,14 @@ export const STRINGS = {
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0, failed = 0) => {
-      const missing = total - captured - cutShort - stoppedEarly - startedLate - failed;
+    // Nor is a clip the batch ended before reaching (#1434): `endedBy` says why.
+    // The counts are takes_shortfall_toast.js's `takeShortfall`.
+    takesFoundMissing: (captured, total, { missing = 0, cutShort = 0, cutBy, stoppedEarly = 0, startedLate = 0, failed = 0, notReached = 0, endedBy } = {}) => {
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
+      const endedWhy = { game_closed: 'the game closed', stopped: 'the batch stopped', studio_closed: 'DoD Studio closed' }[endedBy] || 'batch cancelled';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
+      if (notReached > 0) parts.push(`${notReached} not reached (${endedWhy})`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       // OBS started recording after the clip's first frame (#1109).
@@ -889,6 +892,41 @@ export const STRINGS = {
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #1264: every video rendered for the loaded project, as one EDL.
+    EXPORT_PROJECT_EDL_BUTTON: 'Export Project to VEGAS…',
+    EXPORT_PROJECT_EDL_TITLE: "Save an EDL with every video rendered for the loaded project that is still on disk, even when its take was deleted, in movie order, with HUD passes laid over their clips. When highlights are ticked, only their videos go in. A video you moved is found again by its name in the render export folders. Same import as Export VEGAS EDL.",
+    exportProjectNone: (total) => total > 0
+      ? `None of the ${total} video${total === 1 ? '' : 's'} rendered for this project could be found. Add the folder they are in to the render export folders in Configuration.`
+      : 'No videos have been rendered for the loaded project yet, so there is nothing to export.',
+    exportProjectLooking: (count) => `Finding ${count} rendered video${count === 1 ? '' : 's'} on disk…`,
+    exportProjectReading: (n, total) => `Reading the length of video ${n} of ${total} for the EDL…`,
+    EXPORT_PROJECT_PICKING: 'Choose where to save the EDL…',
+    EXPORT_PROJECT_WRITING: 'Writing the EDL and the clip list…',
+    exportProjectLookFailed: "Couldn't look for the project's videos on disk.",
+    exportProjectDone: (count, scope, missing, skipped, nameplates = 0) => `EDL saved (${count} video${count === 1 ? '' : 's'}${scope === 'ticked' ? ' from the ticked highlights' : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${missing > 0 ? `, ${missing} missing` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    // #1442: find the project's videos again by the DoD Studio tag on each.
+    FIND_MOVED_BUTTON: 'Find Moved Videos',
+    FIND_MOVED_TITLE: "Find the videos rendered for the loaded project after you moved or renamed them, by the DoD Studio tag on each video, and point the project at their new place. Looks in the render export folders and their subfolders; when some still aren't found, you can pick another folder. Videos still where they were rendered get the tag too, so they can be found after a move. Tagging never changes the video.",
+    findMovedNone: 'No videos have been rendered for the loaded project yet, so there is nothing to find.',
+    findMovedTagging: (n, total) => `Looking at video ${n} of ${total} where it was rendered…`,
+    findMovedListing: (files) => `Listing the folders: ${files} video file${files === 1 ? '' : 's'} so far…`,
+    findMovedChecking: (n, total) => `Reading the tag of file ${n} of ${total}…`,
+    findMovedDone: ({ moved, notFound, total, complete = true, cloudSkipped = 0, cancelled = false }) => {
+      const found = moved > 0
+        ? `Found ${moved} moved video${moved === 1 ? '' : 's'} and pointed the project at ${moved === 1 ? 'it' : 'them'}.`
+        : `No moved videos found${notFound === 0 && !cancelled ? `: all ${total} are where they were rendered` : ''}.`;
+      const cloud = cloudSkipped > 0
+        ? ` ${cloudSkipped} file${cloudSkipped === 1 ? ' is' : 's are'} only in the cloud, so ${cloudSkipped === 1 ? 'it was' : 'they were'} left unread (reading would download ${cloudSkipped === 1 ? 'it' : 'them'}).`
+        : '';
+      if (cancelled) return `Stopped. ${found}${cloud}`;
+      if (notFound === 0) return `${found}${cloud}`;
+      const stopped = complete ? '' : ' The search stopped at its limit, so look in a smaller folder.';
+      return `${found} ${notFound} of ${total} still not found.${stopped}${cloud}`;
+    },
+    FIND_MOVED_CANCEL_BUTTON: 'Cancel',
+    FIND_MOVED_PICK_ACTION: 'Look in a folder…',
+    FIND_MOVED_PICK_TITLE: 'Folder to look for the videos in',
+    findMovedFailed: (err) => `Couldn't look for the project's videos: ${err}`,
     // #429: the nameplate script into VEGAS's script menu.
     VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
     VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
@@ -942,6 +980,8 @@ export const STRINGS = {
     START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    cancelQueued: (n) => `Cancel Queued (${n})`,
+    CANCEL_QUEUED_TITLE: 'Stop every row that is waiting to render. Rows already rendering keep going.',
     retrySelected: (n) => `Retry (${n})`,
     RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
     removeSelected: (n) => `Remove (${n})`,
@@ -1138,6 +1178,22 @@ export const STRINGS = {
     SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
     SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
+  // ── Keep free on the Windows drive (#1430) + windows_drive_setting.js ────
+  WINDOWS_DRIVE: {
+    KEEP_FREE_LABEL: 'Keep free on the Windows drive:',
+    KEEP_FREE_TITLE:
+        'Captures and renders skip the drive Windows is installed on once writing there would leave less than this free, so Windows keeps room for updates, its page file and temp files. A capture or export folder on that drive is used only while it has room above this; other drives are not affected. A change applies to the next render, even during a batch; a capture batch picks each clip\'s drive when it starts. 0 turns it off.',
+    KEEP_FREE_UNIT: 'GB',
+    // Start Capture Batch's banner when the setting is what's short.
+    noneUsableWarning: (required, free, keepGb) =>
+      `Capture needs ~${required} GB, and the only free space in the Capture Output folders is on the Windows drive: ${free} GB, below the ${keepGb} GB that "Keep free on the Windows drive" keeps free there. Lower that setting on Configuration → Destinations, or add a Capture Output folder on another drive.`,
+    someUsableWarning: (required, free, usable, keepGb) =>
+      `Capture needs ~${required} GB. The Capture Output folders have ${free} GB free, but only ${usable} GB of it can be used: "Keep free on the Windows drive" keeps ${keepGb} GB free on the Windows drive. Lower that setting on Configuration → Destinations, or add a Capture Output folder on another drive.`,
+    // Appended to the "will make room" heads-ups, whose figure leaves it out.
+    keptFreeNote: (keepGb) =>
+      `That leaves out the ${keepGb} GB kept free on the Windows drive ("Keep free on the Windows drive", Configuration → Destinations).`,
   },
 
   // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
@@ -1865,6 +1921,15 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── Closing while renders run (render_close_prompt.js, #1439) ──
+  RENDER_CLOSE_MODAL: {
+    TITLE: 'Renders running',
+    message: (running) => `${running === 1 ? 'A render is' : `${running} renders are`} running. Closing DoD Studio stops ${running === 1 ? 'it' : 'them'} and removes the unfinished clip${running === 1 ? '' : 's'}.`,
+    CLOSE_BUTTON: 'Stop renders and close',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+    logLine: (running, closed) => `Close asked while ${running} render(s) ran: ${closed ? 'closed, stopping them' : 'kept Studio open'}`,
+  },
+
   // ── What a running batch holds back (batch_guard.js, #1085) ──
   BATCH_GUARD: {
     HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
@@ -1917,6 +1982,11 @@ export const STRINGS = {
     CAPTURE_BUTTON: 'Capture them now',
     NOT_NOW_BUTTON: 'Not now',
     NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
+  },
+
+  // ── Highlights unticked once a batch has captured them (batch_untick.js) ──
+  BATCH_UNTICK: {
+    logLine: (unticked, shortLeft) => `Capture batch ended: unticked ${unticked} captured highlight(s), left ${shortLeft} short one(s) ticked.`,
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2704,6 +2774,12 @@ export const STRINGS = {
       // An OBS recording nobody stopped: Studio closed mid-clip (#20).
       studio_closed: 'Cut short: DoD Studio closed while OBS recorded it (not captured)',
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
+    // A clip the batch ended before reaching (#1434), by what ended it.
+    notReachedBy: (endedBy) => ({
+      game_closed: 'Not reached: the game closed first',
+      stopped: 'Not reached: the batch stopped first',
+      studio_closed: 'Not reached: DoD Studio closed first',
+    })[endedBy] || 'Not reached: the batch was cancelled first',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     // Why the game's clip failed (#1401).
@@ -3039,12 +3115,13 @@ export const STRINGS = {
     BUTTON: 'Review highlights',
     TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer each in the game with Y (Yes), M (Maybe) or N (No); R replays it, B goes back, Space goes on without answering, S stops the review, ESC opens the DoD Studio window\'s Review tab for the kill range and note. Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
     // #661: which Review marks a review plays.
-    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those; Ticked plays only the highlights ticked for capture, a last look before a batch.',
     COVERS_ALL: 'All',
     COVERS_UNMARKED: 'Unmarked',
     COVERS_KEEP: 'Keep',
     COVERS_MAYBE: 'Maybe',
     COVERS_SKIP: 'Skip',
+    COVERS_TICKED: 'Ticked',
     // #822: whose highlights an HLTV demo's review plays.
     HLTV_LABEL: 'HLTV:',
     HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; any players you pick from the HLTV demos (a whole team at once from the Teams list), kept in the project; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
@@ -3079,7 +3156,7 @@ export const STRINGS = {
       return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
     },
     nothingCovered: (covers, ticked) => {
-      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip', ticked: 'ticked for capture' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
     // #848: marks saved outside the project, brought onto demos a scan adds.

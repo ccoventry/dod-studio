@@ -296,6 +296,13 @@ pub struct AppSettings {
     /// game.
     #[serde(default = "default_renders_while_capturing")]
     pub renders_while_capturing: usize,
+    /// Configuration > Destinations' "Keep free on the Windows drive" (#1430),
+    /// in GB: captures and renders never write to the drive Windows is on
+    /// when that would leave less free. 50 by default, and for every
+    /// settings file written before it existed. Handed to `native` on load
+    /// and on every save ([`apply_windows_drive_keep_free`]).
+    #[serde(default = "default_windows_drive_keep_free_gb")]
+    pub windows_drive_keep_free_gb: u64,
     /// Configuration > Timing's "Gaps between kills over N s" (#831): kept,
     /// or recorded sped up. Kept by default, and for every settings file
     /// written before it existed.
@@ -526,6 +533,9 @@ fn default_take_after_finish() -> String {
 fn default_renders_while_capturing() -> usize {
     1
 }
+fn default_windows_drive_keep_free_gb() -> u64 {
+    native::sys::windows_drive::DEFAULT_KEEP_FREE_GB
+}
 fn default_dem_open_target() -> String {
     "analyzer".to_string()
 }
@@ -617,6 +627,7 @@ impl Default for AppSettings {
             take_delete_only_when_space_needed: false,
             render_while_capturing: false,
             renders_while_capturing: default_renders_while_capturing(),
+            windows_drive_keep_free_gb: default_windows_drive_keep_free_gb(),
             kill_gaps: native::patch::types::KillGaps::default(),
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
@@ -703,6 +714,7 @@ impl SettingsManager {
     pub fn new() -> Self {
         let settings = AppSettings::load_or_default();
         apply_game_folder(&settings);
+        apply_windows_drive_keep_free(&settings);
         // At start too, so the hook's copy follows a settings.json edited or
         // restored while Studio was closed.
         crate::players_tab::mirror_table(&settings);
@@ -722,6 +734,20 @@ pub fn apply_game_folder(settings: &AppSettings) {
             native::shared::paths::DEFAULT_GAME_FOLDER,
         ));
         let _ = native::shared::paths::set_game_folder("");
+    }
+}
+
+/// Hands "Keep free on the Windows drive" to `native` (#1430), where every
+/// capture and render drive choice reads it, so a change reaches a running
+/// batch's next clip or render. Logged only when it changes.
+pub fn apply_windows_drive_keep_free(settings: &AppSettings) {
+    let gb = settings.windows_drive_keep_free_gb;
+    let before = native::sys::windows_drive::keep_free_bytes();
+    native::sys::windows_drive::set_keep_free_gb(gb);
+    if native::sys::windows_drive::keep_free_bytes() != before {
+        native::log_markdown(&crate::messages::settings::windows_drive_keep_free(
+            native::sys::windows_drive::keep_free_bytes(),
+        ));
     }
 }
 
@@ -801,6 +827,8 @@ mod tests {
         // Settings saved before #861 don't render while capturing.
         assert!(!settings.render_while_capturing);
         assert_eq!(settings.renders_while_capturing, 1);
+        // Settings saved before #1430 keep 50 GB free on the Windows drive.
+        assert_eq!(settings.windows_drive_keep_free_gb, 50);
         // Settings saved before #831 keep the gaps between kills.
         assert_eq!(
             settings.kill_gaps.mode,

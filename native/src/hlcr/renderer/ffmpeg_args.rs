@@ -312,6 +312,8 @@ pub(super) struct FfmpegArgs<'a> {
     pub(super) encode: &'a Encode<'a>,
     pub(super) threads: usize,
     pub(super) out_file: &'a Path,
+    /// The render's DoD Studio tag, when the job has one (#1442).
+    pub(super) clip_tag: Option<&'a str>,
 }
 
 impl FfmpegArgs<'_> {
@@ -337,9 +339,29 @@ impl FfmpegArgs<'_> {
             ]
             .map(str::to_string),
         );
+        if let Some(tag) = self.clip_tag {
+            args.extend(tag_args(tag, self.encode.file_ext));
+        }
         args.push(self.out_file.to_string_lossy().into_owned());
         args
     }
+}
+
+/// The output options that write `tag` into the video (#1442). MOV and MP4
+/// keep a custom key only with `use_metadata_tags` (without it FFmpeg drops
+/// the key); MKV keeps any key as it is. AVI keeps no custom key at all, so an
+/// AVI render is found by its stream tag or fingerprint instead. `-movflags`
+/// is left off every other container so a Custom render's own `-movflags`
+/// stays the only one.
+pub(super) fn tag_args(tag: &str, file_ext: &str) -> Vec<String> {
+    let mut args = vec![
+        "-metadata".to_string(),
+        format!("{}={tag}", crate::hlcr::clip_id::METADATA_KEY),
+    ];
+    if file_ext == ".mov" || file_ext == ".mp4" {
+        args.extend(["-movflags".to_string(), "use_metadata_tags".to_string()]);
+    }
+    args
 }
 
 #[cfg(test)]
@@ -356,6 +378,7 @@ mod tests {
             target_codec: codec,
             custom_codec_args: custom.to_string(),
             max_concurrent_renders: 1,
+            clip_tag: None,
         }
     }
 
@@ -562,6 +585,7 @@ mod tests {
             encode: &encode,
             threads: 8,
             out_file: &out_file,
+            clip_tag: None,
         }
         .to_args();
         let mut expected: Vec<String> = "-y -hide_banner -probesize 32 -analyzeduration 0 -thread_queue_size 512 -framerate 30 -i all/%05d.bmp -thread_queue_size 512 -i sound.wav -c:v libx264 -preset fast -crf 16 -pix_fmt yuv420p -threads 8 -c:a aac -b:a 192k -shortest -progress pipe:1 -loglevel error"
@@ -570,5 +594,79 @@ mod tests {
             .collect();
         expected.push(out_file.to_string_lossy().into_owned());
         assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn a_tagged_mov_render_writes_the_tag_as_a_kept_custom_key_before_the_output() {
+        let clip = clip("single", "all", Some("sound.wav"), None, None);
+        let config = config(RenderCodec::ProRes, "");
+        let encode = encode_settings(false, &config).unwrap();
+        let out_file = PathBuf::from("export").join("clip.mov");
+        let args = FfmpegArgs {
+            clip: &clip,
+            fps: 30,
+            encode: &encode,
+            threads: 8,
+            out_file: &out_file,
+            clip_tag: Some("v1/s/t/1/all"),
+        }
+        .to_args();
+        let tail: Vec<&str> = args[args.len() - 5..].iter().map(String::as_str).collect();
+        let out = out_file.to_string_lossy();
+        assert_eq!(
+            tail,
+            [
+                "-metadata",
+                "dodstudio_clip=v1/s/t/1/all",
+                "-movflags",
+                "use_metadata_tags",
+                &out
+            ]
+        );
+    }
+
+    #[test]
+    fn only_mov_and_mp4_get_the_movflags() {
+        assert_eq!(tag_args("t", ".mp4").len(), 4);
+        assert_eq!(tag_args("t", ".mkv"), ["-metadata", "dodstudio_clip=t"]);
+        assert_eq!(tag_args("t", ".avi").len(), 2);
+    }
+
+    /// The tag args as a real FFmpeg takes them, read back by Studio's own
+    /// reader from each codec's container (#1442): ProRes and the HUD pass
+    /// (MOV), H.264 (MP4).
+    #[test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    fn a_real_ffmpeg_render_keeps_the_tag_where_studio_reads_it() {
+        let ffmpeg = std::env::var("DOD_FFMPEG").expect("DOD_FFMPEG must name ffmpeg.exe");
+        let dir = crate::test_support::Scratch::new("ffmpeg_clip_tag");
+        for (is_hud, codec) in [
+            (false, RenderCodec::ProRes),
+            (false, RenderCodec::H264Software),
+            (true, RenderCodec::ProRes),
+        ] {
+            let config = config(codec, "");
+            let encode = encode_settings(is_hud, &config).unwrap();
+            let out = dir.path().join(format!("clip_{is_hud}{}", encode.file_ext));
+            let tag = format!("v1/s/t/{}/all", out.display().to_string().len());
+            let status = std::process::Command::new(&ffmpeg)
+                .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+                .args(["-i", "testsrc2=size=64x48:rate=30:duration=0.2"])
+                .args(&encode.video_args)
+                .args(tag_args(&tag, encode.file_ext))
+                .arg(&out)
+                .status()
+                .unwrap();
+            assert!(status.success(), "{}", out.display());
+            assert_eq!(
+                crate::hlcr::clip_id::mov_tags::read_mov_tag(
+                    &out,
+                    crate::hlcr::clip_id::METADATA_KEY
+                ),
+                Some(tag),
+                "{}",
+                out.display()
+            );
+        }
     }
 }

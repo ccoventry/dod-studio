@@ -313,9 +313,12 @@ is the complete list):
   `src/review.rs`. The answer comes from keys on the game screen (Y M N R B Space S,
   ESC for the Review tab), while a highlight plays (#1141) or at its end,
   through `client.dll`'s `HUD_Key_Event`, with a box
-  drawn from `HUD_Redraw` saying which highlight plays (#660,
-  `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
-  instead.
+  drawn from `HUD_Redraw` saying which highlight plays, whose, its kill range
+  (with the scan's in grey beside it when it was changed) and its whole
+  note, labels and values in two colours (#660, #1399, #1437,
+  `src/review_keys.rs`, `src/review_header.rs`); Up and Down step the speed
+  through 0.25x to 4x while it plays (`src/review_speed.rs`).
+  `ds_ui_review_keys 0` pauses on the Review tab instead.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
@@ -481,6 +484,13 @@ there but not in an HLTV demo (#894): one byte, both builds
 (`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
 On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
+`src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo
+plays (#1441). The recorder's presses replay there and cycle the viewer's
+`_cl_minimap`; the map never draws in POV playback (#897), so all that shows
+is the full map's side effects: no crosshair and no flag row, for the rest of
+the session. Wrapped through the command list, no code patch. On by default;
+`GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise
@@ -497,4 +507,4 @@ crash. Set the variable to `0` to turn it off.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
-faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. A panic in this DLL ends the game through `panic = "abort"`, which skips that handler, so `src/panic_log.rs` writes a `PANIC:` line (message, source file and line, thread) first. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.
+faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. A panic in this DLL ends the game through `panic = "abort"`, which skips that handler, so `src/panic_log.rs` writes a `PANIC:` line (message, source file and line, thread) first. A freeze leaves only Windows' "not responding", so `src/hang.rs` watches for the engine thread drawing no frame for 20 s (`ds_debug_hang_report_seconds`, `0` off) and then logs where it is stuck as a `HANG:` block (`module+offset` frames), writes a minidump to `%APPDATA%\dod-studio\logs\dumps\`, and logs `HANG-END:` if frames come back; it only reads and never ends the game. `tools/crash_report.py` summarises every crash and freeze on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

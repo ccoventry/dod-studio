@@ -1,7 +1,7 @@
 // Render Studio frontend behavior, driven against tests/e2e/render-studio.html
 // (a minimal harness — see the comment at the top of that file and
 // tests/e2e/README.md for what this suite covers and what it doesn't).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** A RenderJobView-shaped fixture with sane defaults, overridable per test. */
 function job(overrides = {}) {
@@ -590,6 +590,25 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#cancel-render-btn')).toHaveText('Cancel (2)');
     await page.locator('#cancel-render-btn').click();
     expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([{ jobIds: ['0', '1'] }]);
+  });
+
+  test('Cancel Queued cancels every queued row and never a rendering one', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Rendering' }),
+      job({ id: '1', status: 'Queued', take_folder: 'D:/captures/demo1/chain_02_b0/take0000' }),
+      job({ id: '2', status: 'Queued', take_folder: 'D:/captures/demo1/chain_03_b0/take0000' }),
+    ]);
+    await expect(page.locator('#cancel-queued-render-btn')).toHaveText('Cancel Queued (2)');
+    await page.locator('#cancel-queued-render-btn').click();
+    expect(await invocationsFor(page, 'cancel_queued_render_jobs')).toHaveLength(1);
+    expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([]);
+  });
+
+  test('Cancel Queued is off with nothing queued', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering' })]);
+    await expect(page.locator('#cancel-queued-render-btn')).toBeDisabled();
   });
 
   test('Delete Take folders lists each ticked take once and skips a busy one', async ({ page }) => {

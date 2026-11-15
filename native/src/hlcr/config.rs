@@ -58,6 +58,12 @@ pub struct RenderConfig {
     #[serde(default)]
     pub custom_codec_args: String,
     pub max_concurrent_renders: usize,
+    /// The render's DoD Studio tag (`clip_id::ClipTag`, #1442), written into
+    /// the video's metadata. Per job, like `target_codec`: the scheduler sets
+    /// it on each job's own copy of the config. Never saved: an autosaved
+    /// batch gets a new tag when its job starts again.
+    #[serde(skip)]
+    pub clip_tag: Option<String>,
 }
 
 impl RenderCodec {
@@ -144,6 +150,7 @@ impl Default for RenderConfig {
             target_codec: RenderCodec::ProRes422,
             custom_codec_args: String::new(),
             max_concurrent_renders: 2,
+            clip_tag: None,
         }
     }
 }

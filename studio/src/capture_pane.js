@@ -1,5 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, capturePoolRoom, diagnoseCaptureOutputPaths, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
@@ -32,7 +32,8 @@ import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_settin
 import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind, completedToast } from './capture_progress.js';
-import { clipVerdictToasts, failedClipCount, shortClipCount } from './clip_verdict_toasts.js';
+import { clipVerdictToasts, shortClipCount } from './clip_verdict_toasts.js';
+import { takesShortfallToast } from './takes_shortfall_toast.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { startKillfeedLayoutWarning } from './killfeed_layout_warning.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -40,8 +41,10 @@ import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
+import { usableCaptureBytes, windowsDriveShortWarning, readWindowsDriveKeepFree, DEFAULT_KEEP_FREE_GB } from './windows_drive_setting.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
+import { createBatchUntick } from './batch_untick.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -266,14 +269,23 @@ export async function refreshLaunchGuard(state) {
   // is gone.
   const effectiveDrivePool = (resolvedState.targetDrives || []).filter(Boolean);
 
-  let availableBytes = 0;
+  // The drives' real free space, and the part captures may use: the Windows
+  // drive counts only above "Keep free on the Windows drive" (#1430), so a
+  // C: below it is short of room rather than "no free space".
+  let freeBytes = 0;
+  let room = null;
   let problemPaths = [];
   let willBeCreatedPaths = [];
   if (effectiveDrivePool.length > 0) {
     try {
-      availableBytes = await calculateExportPoolSpace(effectiveDrivePool);
+      freeBytes = await calculateExportPoolSpace(effectiveDrivePool);
     } catch (err) {
       console.error("Error calculating export pool space for launch guard:", err);
+    }
+    try {
+      room = await capturePoolRoom(effectiveDrivePool);
+    } catch {
+      // Logged by the bridge; the real free space stands in.
     }
     // Fetched unconditionally (not just when the pool is fully unusable) so a
     // *partially* bad pool — some valid drives, some typo'd/missing ones —
@@ -315,9 +327,15 @@ export async function refreshLaunchGuard(state) {
   const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
     || !document.querySelector('#hlae-path-input')?.value?.trim();
 
+  const availableBytes = usableCaptureBytes(freeBytes, room);
   const noDrivesConfigured = effectiveDrivePool.length === 0;
-  const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
+  const noUsableSpace = !noDrivesConfigured && freeBytes === 0;
   const insufficientSpace = !noDrivesConfigured && !noUsableSpace && requiredBytes > availableBytes;
+  // Set when the setting is what's short: the folders have the room.
+  const keepFreeGb = readWindowsDriveKeepFree();
+  const windowsDriveShort = insufficientSpace
+    ? windowsDriveShortWarning({ requiredBytes, freeBytes, usableBytes: availableBytes, keepFreeGb })
+    : null;
   // "Only when space is needed" (#644): finished takes on the capture drives
   // may cover the shortfall, and only the backend can tell (make_room runs
   // before the capture and stops the batch when it can't), so short of room
@@ -403,11 +421,15 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = 'var(--warn-orange)';
-      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
+      const heading = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
+      warningEl.textContent = availableBytes < freeBytes
+        ? `${heading} ${STRINGS.WINDOWS_DRIVE.keptFreeNote(keepFreeGb ?? DEFAULT_KEEP_FREE_GB)}`
+        : heading;
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = 'var(--danger)';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
+      warningEl.textContent = windowsDriveShort
+        ?? STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
       warningEl.style.color = 'var(--warn-orange)';
@@ -437,7 +459,7 @@ export async function refreshLaunchGuard(state) {
     footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
-  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing };
+  return { requiredBytes, availableBytes, blocked, noHighlightsSelected, agrFpsMissing, windowsDriveShort };
 }
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
@@ -1059,6 +1081,17 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       if (total === 0) return;
 
+      // The captured highlights are done: untick them (short ones stay).
+      if (lastDispatch) {
+        createBatchUntick({
+          getDemos: () => (currentGetState ? currentGetState() : null)?.currentScannedDemos || [],
+          onSelectionChange: () => { if (currentOnStatusChange) currentOnStatusChange(); },
+        }).apply({
+          streak_uids: lastDispatch.streaks.map((streak, i) => streakUid(lastDispatch.demoPaths[i], streak)),
+          blocks,
+        });
+      }
+
       if (advanced > 0 || markCleared) {
         // Both tables read status, and neither re-renders on its own.
         if (currentOnStatusChange) currentOnStatusChange();
@@ -1066,13 +1099,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       const marked = advanced > 0 ? STRINGS.CAPTURE.highlightsMarkedCaptured(advanced) : '';
       if (captured < total) {
-        // A take whose video stopped early (#1105) is cut_short too, but the
-        // batch's end isn't why. The end cuts one clip at most: its `cut_by`.
-        const stoppedEarly = blocks.filter((b) => b.short_take).length;
-        const cut = blocks.filter((b) => b.cut_short && !b.short_take);
-        // OBS started recording after the clip did (#1109).
-        const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate, failedClipCount(payload))}${marked}`, 'error');
+        // An info toast when a Cancel is all that left clips without a take (#1434).
+        const toast = takesShortfallToast(payload, captured, total);
+        showToast(`${toast.text}${marked}`, toast.type);
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else if (shortClipCount(payload) === 0) {
@@ -1207,6 +1236,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           stopWith(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING);
         } else if (guard.agrFpsMissing) {
           stopWith(STRINGS.CAPTURE.AGR_FPS_REQUIRED_WARNING);
+        } else if (guard.windowsDriveShort) {
+          stopWith(guard.windowsDriveShort);
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {

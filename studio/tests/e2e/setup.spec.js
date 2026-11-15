@@ -5,7 +5,7 @@
 // card going away once the required steps are set, the window's Steam-install
 // warning and build chip, folders listed with their free space, Skip and
 // Finish.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.goto('/tests/e2e/setup.html');

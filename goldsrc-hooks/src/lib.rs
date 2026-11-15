@@ -198,6 +198,10 @@
 //!   every printable key, as it never does in an HLTV demo (#894). One byte in
 //!   `Key_Event`, both builds. On by default;
 //!   `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
+//! - `pov_map_keys`: `+map` and `+mapzoom` do nothing while a POV demo
+//!   plays, so the recorder's presses can't leave `_cl_minimap` on the full
+//!   map, which hides the crosshair and the flag row and never draws there
+//!   (#1441). On by default; `GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -317,6 +321,7 @@ mod game_folder;
 mod gl_zoom;
 mod gun_log;
 mod hand_signals;
+mod hang;
 mod headshot_sound;
 mod hide_asset;
 mod hint_panel;
@@ -367,13 +372,16 @@ mod pmove_guard;
 mod position;
 mod pov_crosshair_gap;
 mod pov_live_bob;
+mod pov_map_keys;
 mod pov_recorder_shots;
 mod remote;
 mod review;
 mod review_ask;
 mod review_form;
+mod review_header;
 mod review_keys;
 mod review_lock;
+mod review_speed;
 mod run_in_background;
 mod scan;
 mod schedule;
@@ -525,6 +533,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // unless asked not to.
     demo_console_keys::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS", true),
+        Ordering::Relaxed,
+    );
+    // The map can't draw in POV playback, so its keys there only break the
+    // HUD (#1441): on unless asked not to.
+    pov_map_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_POV_MAP_KEYS", true),
         Ordering::Relaxed,
     );
     // Only this user's own processes can reach the pipe, and only a game

@@ -103,7 +103,7 @@ fn describe(code: u32) -> Option<&'static str> {
 /// `(module file name, RVA)` for an address, or `None` if it is not in a
 /// mapped image. `AllocationBase` is the module's load address, so the
 /// difference is exactly the RVA a disassembler wants.
-fn locate(address: usize) -> Option<(String, usize)> {
+pub(crate) fn locate(address: usize) -> Option<(String, usize)> {
     if address == 0 {
         return None;
     }
@@ -138,8 +138,8 @@ fn locate(address: usize) -> Option<(String, usize)> {
 }
 
 /// `module+0x1234 (0xdeadbeef)`, or the bare address when it belongs to no
-/// module.
-fn describe_address(address: usize) -> String {
+/// module. Also `hang.rs`'s, for where a stuck thread is.
+pub(crate) fn describe_address(address: usize) -> String {
     match locate(address) {
         Some((module, rva)) => format!("{module}+{rva:#x} ({address:#x})"),
         None => format!("{address:#x} (no module)"),

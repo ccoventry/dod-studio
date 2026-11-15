@@ -2,7 +2,7 @@
 // A test clip is a normal batch: the mocked start_capture_batch plays its
 // capture_status lines and the obs_test_takes_verified the backend sends for
 // a test's session, and obs_test_analyze answers from window.__verdicts.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page, { verdicts = {}, gameOpen = false, holdAnalyze = false } = {}) {
   await page.addInitScript(([v, open, hold]) => {
