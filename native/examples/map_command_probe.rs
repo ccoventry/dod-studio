@@ -62,16 +62,21 @@ fn main() {
                 if let FrameData::ConsoleCommand(cmd) = &frame.frame_data {
                     let text = cmd.command.to_str().unwrap_or("").trim_end_matches('\0');
                     let lower = text.trim().to_ascii_lowercase();
-                    if lower.contains("map") || lower.contains("minimap") {
+                    if lower.contains("map") {
                         if lower.starts_with("+map") && !lower.starts_with("+mapzoom") {
                             presses += 1;
                         }
-                        lines.push(format!("  {svc:9.2}  {text}  (+map presses so far {presses})"));
+                        lines.push(format!(
+                            "  {svc:9.2}  {text}  (+map presses so far {presses})"
+                        ));
                     }
                 }
             }
         }
-        println!("{name}: {} map command(s), {presses} +map press(es)", lines.len());
+        println!(
+            "{name}: {} map command(s), {presses} +map press(es)",
+            lines.len()
+        );
         for l in lines {
             println!("{l}");
         }

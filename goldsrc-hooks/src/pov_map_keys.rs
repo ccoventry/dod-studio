@@ -126,7 +126,11 @@ fn press(real: &AtomicUsize, name: &str) {
         unsafe {
             crate::debug::report(&format!(
                 "pov_map_keys: dropped {name} during POV playback ({n} so far{}); the map can't draw there and it would hide the crosshair and flags",
-                if n == LOGGED_DROPS { ", no more logged" } else { "" }
+                if n == LOGGED_DROPS {
+                    ", no more logged"
+                } else {
+                    ""
+                }
             ))
         };
     }
