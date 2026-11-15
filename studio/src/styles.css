@@ -2129,6 +2129,11 @@ button.danger-btn {
   color: var(--warn);
 }
 
+/* Not a problem: the batch ended before it got there (#1434). */
+.batch-results-row-not_reached td:first-child {
+  color: var(--text-muted);
+}
+
 .batch-results-row-ok td:first-child {
   color: var(--ok-light);
 }

@@ -27,6 +27,7 @@
 //! and the walk stops two folders up, so it describes the frames beside it,
 //! and a fixed 300 made every take captured at another rate the wrong speed.
 
+use crate::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
@@ -244,7 +245,7 @@ fn update_history(
     take_folder: &Path,
     change: impl FnOnce(&mut Vec<RenderAttempt>),
 ) -> std::io::Result<()> {
-    let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = lock_or_recover(&HISTORY_WRITE);
     let Some((path, mut meta)) = history_file(take_folder) else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,

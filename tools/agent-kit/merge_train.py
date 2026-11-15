@@ -2,6 +2,10 @@
 
     python -I tools/agent-kit/merge_train.py 1418 1416 1420
     python -I tools/agent-kit/merge_train.py 1418 1416 --dry-run
+    python -I tools/agent-kit/merge_train.py add 1449 1452      # join the running train's queue
+    python -I tools/agent-kit/merge_train.py status             # current PR, queue, done, why it stopped
+    python -I tools/agent-kit/merge_train.py remove 1452        # drop a queued PR
+    python -I tools/agent-kit/merge_train.py                    # no numbers: continue a stopped queue
 
 dev's ruleset requires the branch to be up to date (CLAUDE.md, "Merging into dev"), so
 every merge puts the rest behind. For each PR in turn this:
@@ -12,7 +16,10 @@ every merge puts the rest behind. For each PR in turn this:
   5. confirms GitHub shows it MERGED, then goes on to the next.
 It stops at the first red check, conflict, timeout or failed step, names the PR and the
 check, and touches nothing after it. It never passes `--admin` or `--auto` and never
-pushes. The required check names come from the ruleset itself
+pushes. The queue and a one-train lock live in the repo's `.git/merge-train/` (merge_queue.py):
+the train re-reads the queue after every PR, so `add` can feed it while it runs, and a second
+`merge_train.py N` while one runs joins its queue instead of starting a parallel train. When the
+train stops, the queue is kept; `status` says why. The required check names come from the ruleset itself
 (`repos/{owner}/{repo}/rules/branches/dev`), so a new required check needs no change here.
 """
 import argparse
@@ -27,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_paths  # noqa: E402
 from gh_util import ToolError  # noqa: E402
+import merge_queue  # noqa: E402
 
 BASE = "dev"
 POLL_INTERVAL_SECS = 30
@@ -165,6 +173,11 @@ class Result:
     stopped_at: int = None
     reason: str = ""
     untouched: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
+
+
+class Skip(Exception):
+    """Nothing to do for this PR (already merged or closed); the message says why."""
 
 
 class Stop(Exception):
@@ -178,16 +191,26 @@ class Train:
     def log(self, pr, text):
         self.out(f"[{datetime.now():%H:%M:%S}] #{pr} {text}")
 
-    def run(self, prs):
+    def run(self, queue):
+        """Rides every PR the queue hands out until it is empty or one stops the train.
+        `queue` is a list of PR numbers or a merge_queue queue (re-read after each PR)."""
+        if not hasattr(queue, "take"):
+            queue = merge_queue.MemoryQueue(queue)
         result = Result()
         required = self.gh.required_checks()
         self.out(f"[{datetime.now():%H:%M:%S}] required checks on {BASE}: {', '.join(required)}")
-        for i, pr in enumerate(prs):
+        while (pr := queue.take()) is not None:
             try:
                 self.ride(pr, required)
+                queue.merged(pr)
                 result.merged.append(pr)
+            except Skip as e:
+                self.log(pr, f"skipped: {e}")
+                queue.skipped(pr)
+                result.skipped.append(pr)
             except (Stop, ToolError) as e:
-                result.stopped_at, result.reason, result.untouched = pr, str(e), list(prs[i + 1:])
+                queue.stopped(pr, str(e))
+                result.stopped_at, result.reason, result.untouched = pr, str(e), queue.waiting()
                 self.log(pr, f"STOP: {e}")
                 break
         return result
@@ -195,6 +218,8 @@ class Train:
     def ride(self, pr, required):
         view = self.gh.view(pr)
         self.log(pr, f"{view['title']} (head {view['headRefOid'][:8]})")
+        if view["state"] in ("MERGED", "CLOSED"):
+            raise Skip(f"already {view['state'].lower()}")
         problem = pr_problem(view)
         if problem:
             raise Stop(problem)
@@ -281,29 +306,88 @@ class Train:
 
 def summary(prs, result, dry_run=False):
     lines = [("Would merge" if dry_run else "Merged") + f" ({len(result.merged)}/{len(prs)}): " + (", ".join(f"#{n}" for n in result.merged) or "none")]
+    if result.skipped:
+        lines.append("Skipped (already merged or closed): " + ", ".join(f"#{n}" for n in result.skipped))
     if result.stopped_at is not None:
         lines.append(f"Stopped at #{result.stopped_at}: {result.reason}")
         if result.untouched:
             lines.append("Not touched: " + ", ".join(f"#{n}" for n in result.untouched))
+        if not dry_run:
+            lines.append("The queue is kept: run merge_train.py with no PR numbers to continue; `status` shows it.")
     return lines
 
 
-def main(argv=None):
+def everything(result):
+    """Every PR the run saw, for the summary's count."""
+    stopped = [] if result.stopped_at is None else [result.stopped_at]
+    return result.merged + result.skipped + stopped + result.untouched
+
+
+def listed(numbers):
+    return ", ".join(f"#{n}" for n in numbers)
+
+
+def queue_command(argv, store):
+    """`add`, `remove` and `status`: they only touch the queue files, never GitHub."""
+    ap = argparse.ArgumentParser(prog="merge_train.py", description="Manage the running merge train's queue")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("add", help="queue PRs; a running train picks them up after its current PR").add_argument(
+        "prs", nargs="+", type=int)
+    sub.add_parser("remove", help="drop a queued PR").add_argument("pr", type=int)
+    sub.add_parser("status", help="the running train's current PR, queue, what is done and why it stopped")
+    args = ap.parse_args(argv)
+    if args.cmd == "add":
+        added, ignored, holder = store.add(args.prs)
+        if added:
+            print("Queued: " + listed(added))
+        if ignored:
+            print("Ignored (already queued or merged): " + listed(ignored))
+        print(f"The train (pid {holder}) picks them up after its current PR." if holder
+              else "No train is running, so nothing started. Run `merge_train.py` with no PR numbers to start it.")
+    elif args.cmd == "remove":
+        print(store.remove(args.pr))
+    else:
+        for line in merge_queue.status_lines(*store.snapshot()):
+            print(line)
+    return 0
+
+
+def main(argv=None, store=None, gh=None):
+    argv = sys.argv[1:] if argv is None else argv
+    store = store or merge_queue.QueueStore(merge_queue.default_dir())
+    if argv and argv[0] in ("add", "remove", "status"):
+        return queue_command(argv, store)
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("prs", nargs="+", type=int, help="PR numbers, merged in this order")
+    ap.add_argument("prs", nargs="*", type=int, help="PR numbers, merged in this order (none: continue the queue)")
     ap.add_argument("--dry-run", action="store_true", help="show what it would do; change nothing")
     ap.add_argument("--interval", type=float, default=POLL_INTERVAL_SECS, help="seconds between check polls")
     ap.add_argument("--timeout", type=float, default=CHECKS_TIMEOUT_SECS / 60,
                     help="minutes to wait for one PR's checks")
     args = ap.parse_args(argv)
     options = Options(interval_secs=args.interval, timeout_secs=args.timeout * 60, dry_run=args.dry_run)
+    owned = False
     try:
-        result = Train(Gh(), options).run(args.prs)
+        if args.dry_run:
+            # Nothing is written: the PRs given, or else the saved queue, run through a copy.
+            queue = merge_queue.MemoryQueue(args.prs or store.peek()["pending"])
+        else:
+            owned, added, ignored = store.acquire(args.prs)
+            if ignored:
+                print("Ignored (already queued or merged): " + listed(ignored))
+            if not owned:
+                print("A train is already running; " + ("queued " + listed(added) if added else "nothing new to queue")
+                      + ". It picks them up after its current PR (`merge_train.py status`).")
+                return 0
+            queue = store
+        result = Train(gh or Gh(), options).run(queue)
     except ToolError as e:
         print(f"merge_train: {e}")
         return 2
+    finally:
+        if owned:
+            store.release()
     print("--- summary" + (" (dry run, nothing changed)" if args.dry_run else ""))
-    for line in summary(args.prs, result, dry_run=args.dry_run):
+    for line in summary(everything(result), result, dry_run=args.dry_run):
         print(line)
     return 0 if result.stopped_at is None else 1
 
