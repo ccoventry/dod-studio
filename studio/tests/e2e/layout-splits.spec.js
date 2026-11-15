@@ -1,13 +1,13 @@
 // Draggable splits (#47): Capture Studio's queue / details panes and the Demo
 // Analyzer's Demos panel / report. Drives the real app shell against mocked IPC.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.use({ viewport: { width: 1600, height: 900 } });
 
 async function boot(page, savedSettings = {}) {
   await page.addInitScript((saved) => {
     window.__mockInvokeHandlers = {
-      get_settings: () => ({ pinned_folders: [], ...saved }),
+      get_settings: () => ({ setup_dismissed: true, pinned_folders: [], ...saved }),
       scan_demo_folders: () => [],
     };
   }, savedSettings);

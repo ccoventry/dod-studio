@@ -3,6 +3,7 @@
 // already knows, parsing the rest for highlights, and finding demos that have
 // moved or changed since the project last saw them.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -1168,10 +1169,7 @@ pub async fn scan_directory_impl(
                         // before #433 a one-demo folder showed a bare "Scanning..."
                         // for the whole parse, since its first finish was its last.
                         // The first of these also carries the total (`0 / N`).
-                        in_flight
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .push(idx);
+                        lock_or_recover(in_flight).push(idx);
                         emit_progress(
                             completed.load(std::sync::atomic::Ordering::Relaxed),
                             Some(&file_name),
@@ -1194,7 +1192,7 @@ pub async fn scan_directory_impl(
                                 file.display(),
                                 reason,
                             ));
-                            skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
+                            lock_or_recover(skipped).push((
                                 idx,
                                 file_name.clone(),
                                 plain_scan_failure(file, reason),
@@ -1220,7 +1218,7 @@ pub async fn scan_directory_impl(
                         if serialized.is_some() {
                             found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
+                        lock_or_recover(slots)[idx] = serialized;
 
                         let was_cached = plan.fresh[idx];
                         if !was_cached {
@@ -1230,7 +1228,7 @@ pub async fn scan_directory_impl(
                         }
                         let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                         let still_running = {
-                            let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
+                            let mut running = lock_or_recover(in_flight);
                             running.retain(|&i| i != idx);
                             running.first().copied()
                         };

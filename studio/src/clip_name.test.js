@@ -244,7 +244,7 @@ describe('names for takes', () => {
   });
 
   it('leaves room for the longest export folder', () => {
-    expect(maxNameLength(['D:\\Clips\\', 'E:\\Some\\Much\\Longer\\Folder'])).toBe(250 - 26 - 1 - 20);
+    expect(maxNameLength(['D:\\Clips\\', 'E:\\Some\\Much\\Longer\\Folder'])).toBe(250 - 26 - 1 - 28);
     expect(timeWord(754.9)).toBe('12m34s');
   });
 });

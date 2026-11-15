@@ -430,6 +430,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getTakeIndex: () => takeIndex,
     getAllDemos: queue.getDemos,
     getProjectTeams: () => projectTeams,
+    markDirty: () => markProjectDirty(),
     onStatusChange: onHighlightStatusChange
   });
 

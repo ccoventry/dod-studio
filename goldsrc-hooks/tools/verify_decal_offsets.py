@@ -44,8 +44,8 @@ Usage:
     python goldsrc-hooks/tools/verify_decal_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_decal_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one. Requires `pefile` and
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install. Requires `pefile` and
 `capstone` (`pip install pefile capstone`); both are analysis-only and are not
 build dependencies of anything in the workspace.
 """
@@ -65,7 +65,7 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll")
 SRC = Path(__file__).resolve().parent.parent / "src" / "decals.rs"
 
 # What R_DecalUnlink prints when a decal is not in its surface's list. Used to
