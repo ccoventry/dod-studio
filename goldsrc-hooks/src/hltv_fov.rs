@@ -200,11 +200,30 @@ fn spectator_fov(in_eye_target: Option<i32>, zoom_of: impl Fn(usize) -> i32) -> 
 }
 
 /// Whether the HUD's FOV `current` is one only a message to the recorder can
-/// have left, which `Think` would have replaced with `spectator`. DoD's own
-/// menu FOV (`CHudDoDCommon::Draw`, while a viewport panel is open) is left
-/// alone: `Think` meets it in an HLTV demo too.
-fn needs_settling(current: i32, spectator: i32) -> bool {
-    current != spectator && current != MENU_FOV
+/// have left, which `Think` would have replaced with `spectator`.
+///
+/// Left alone:
+/// - DoD's menu FOV (115). `CHudDoDCommon::Draw` sets it while a viewport
+///   panel is open; in an HLTV demo `Think` overwrites it with 90 and `Draw`
+///   sets 115 again later in the frame, so the value is `Draw`'s to keep.
+/// - A zoom (1..89) while `watching_own_view`, the camera in the local
+///   player's eyes: that is his own `SetFOV` (a scoped rifle), which a POV
+///   demo carries and its HLTV zoom table does not, so 90 would draw his
+///   scoped viewmodel and tell every other FOV check he is not zoomed.
+fn needs_settling(current: i32, spectator: i32, watching_own_view: bool) -> bool {
+    if current == spectator || current == MENU_FOV {
+        return false;
+    }
+    !(watching_own_view && (1..NO_ZOOM).contains(&current))
+}
+
+/// The local player's entity index, or `None` before a level is up.
+fn local_player_index() -> Option<i32> {
+    let engfuncs = engine::engfuncs()?;
+    // Safety: the engine's own accessor, read on the engine thread; the
+    // entity lives as long as the level.
+    let local = unsafe { (engfuncs.get_local_player)() } as *const engine::ClEntityS;
+    (!local.is_null()).then(|| unsafe { (*local).index })
 }
 
 /// Where `gHUD.m_iFOV` is ([`located_table`]), and the `client.dll` base it
@@ -272,18 +291,21 @@ pub fn settle_hud_fov() {
     // Safety: both inside client.dll's image (`table_address`'s bounds), plain
     // `.data` the engine's thread owns; this runs on that thread.
     unsafe {
-        let spectator = spectator_fov(crate::spectator_target::in_eye_target(), |slot| {
-            *(table as *const i32).add(slot)
-        });
+        let target = crate::spectator_target::in_eye_target();
+        let local = local_player_index();
+        let spectator = spectator_fov(target, |slot| *(table as *const i32).add(slot));
         let current = *(fov_at as *const i32);
-        if !needs_settling(current, spectator) {
+        let watching_own_view = target.is_some() && target == local;
+        if !needs_settling(current, spectator, watching_own_view) {
             return;
         }
         *(fov_at as *mut i32) = spectator;
         let settled = SETTLED.fetch_add(1, Ordering::Relaxed) + 1;
         if settled <= SETTLED_LOG_LINES {
             crate::debug::report(&format!(
-                "hltv_fov: the HUD's FOV was {current} with no CHud::Think to reset it (a POV demo played as HLTV); set to {spectator}, so the in-eye gun draws ({settled} so far{})",
+                "hltv_fov: the HUD's FOV was {current} with no CHud::Think to reset it (a POV demo played as HLTV); set to {spectator}, so the in-eye gun draws (in-eye on {}, local player {}; {settled} so far{})",
+                target.map_or("nobody".to_string(), |t| t.to_string()),
+                local.map_or("none".to_string(), |l| l.to_string()),
                 if settled == SETTLED_LOG_LINES {
                     ", counting quietly from here"
                 } else {
@@ -346,12 +368,25 @@ mod tests {
     /// right; `Think`'s own value and DoD's menu FOV are not touched.
     #[test]
     fn only_a_value_think_would_replace_is_settled() {
-        assert!(needs_settling(0, 90));
-        assert!(needs_settling(20, 90));
-        assert!(needs_settling(0, 20));
-        assert!(!needs_settling(90, 90));
-        assert!(!needs_settling(20, 20));
-        assert!(!needs_settling(MENU_FOV, 90));
+        assert!(needs_settling(0, 90, false));
+        assert!(needs_settling(20, 90, false));
+        assert!(needs_settling(0, 20, false));
+        assert!(!needs_settling(90, 90, false));
+        assert!(!needs_settling(20, 20, false));
+        assert!(!needs_settling(MENU_FOV, 90, false));
+    }
+
+    /// In the local player's own eyes his scoped zoom stays; his `ResetHUD`
+    /// or `YouDied` 0 is still put right.
+    #[test]
+    fn the_watched_local_players_own_zoom_stays() {
+        assert!(!needs_settling(20, 90, true));
+        assert!(!needs_settling(1, 90, true));
+        assert!(!needs_settling(89, 90, true));
+        assert!(needs_settling(0, 90, true));
+        assert!(!needs_settling(MENU_FOV, 90, true));
+        // Someone else's eyes: the recorder's zoom is not theirs.
+        assert!(needs_settling(20, 90, false));
     }
 
     /// The HUD's FOV sits past the table, so `gHUD` must leave room for it.
