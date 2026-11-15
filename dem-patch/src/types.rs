@@ -618,7 +618,13 @@ pub struct SvcServerInfo {
     pub hostname: ByteVec,
     pub map_file_name: ByteVec,
     pub map_cycle: ByteVec,
+    /// The VAC byte: Xash3D's GoldSrc client reads it as "server says it's
+    /// VAC2 secured". Today's servers send 0.
     pub unknown: u8,
+    /// The 21-byte block an old server build (`BUILD 2693`) sends after a set
+    /// VAC byte; `None` for every other demo. Kept so a round trip writes the
+    /// demo back unchanged.
+    pub legacy_trailer: Option<ByteVec>,
 }
 
 /// SVC_LIGHTSTYLE 12
