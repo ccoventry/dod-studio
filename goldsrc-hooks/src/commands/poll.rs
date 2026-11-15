@@ -378,6 +378,9 @@ pub fn poll() {
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
+    // Draws the map's own models in a POV demo played as HLTV, where the
+    // game never calls the code that does.
+    crate::env_models::poll();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
