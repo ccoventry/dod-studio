@@ -135,6 +135,16 @@ describe('createBatchCatchUp', () => {
     expect(io.listen).toHaveBeenCalledWith('batch_catch_up', expect.any(Function));
   });
 
+  it('unticks the captured highlights in the open queue and leaves the missing one ticked', async () => {
+    const d = demos();
+    d.forEach((demo) => demo.streaks.forEach((s) => { s.selected = true; }));
+    const io = fakeIo({ catchUp: vi.fn(async () => ({ batches: [batch(d)], waiting_for_game: false })) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.start();
+    expect(d[0].streaks.map((s) => s.selected)).toEqual([false, false, true]);
+    expect(d[1].streaks[0].selected).toBe(true);
+  });
+
   it('keeps keys this build does not know, backing a schema 1 file up first', async () => {
     const saved = demos();
     const file = JSON.stringify({ version: '0.12.0', demos: saved, settings: { a: 1 }, profile: 'FOTW' });

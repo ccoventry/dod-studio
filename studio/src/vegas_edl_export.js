@@ -18,10 +18,12 @@ import { fileNameOf } from './path_display.js';
 /**
  * The length of each file in `paths` as FFmpeg reads it (the Combine Clips
  * probe), one file at a time so one unreadable file leaves only itself out.
+ * @param {(done: number, total: number) => void} [onProgress]  after each file
  * @returns {Promise<Map<string, number>>} path to seconds, readable files only
  */
-async function probeLengths(paths, ffmpegPath) {
+export async function probeLengths(paths, ffmpegPath, onProgress = () => {}) {
   const lengths = new Map();
+  let done = 0;
   for (const path of paths) {
     try {
       const plan = await combinePlan([path], ffmpegPath);
@@ -30,6 +32,8 @@ async function probeLengths(paths, ffmpegPath) {
     } catch {
       // Left out of the EDL and counted in the toast's "left out".
     }
+    done += 1;
+    onProgress(done, paths.length);
   }
   return lengths;
 }
@@ -83,6 +87,13 @@ async function exportEdl(jobs, ffmpegPath, project) {
  * the nameplate script. A manifest that can't be saved doesn't undo the EDL.
  */
 async function finishExport({ path, clips, skipped, project }) {
+  const manifest = await saveManifest(path, clips, project);
+  logFrontendEvent(`Exported VEGAS EDL: ${clips.length} clips, ${skipped} left out`);
+  showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplateCount(manifest)), 'success');
+}
+
+/** Writes the clip manifest beside the EDL at `path` and returns it. */
+export async function saveManifest(path, clips, project) {
   const manifest = clipManifest(clips, {
     edlName: fileNameOf(path), ...project, useAsName, nameplatePath,
   });
@@ -91,6 +102,5 @@ async function finishExport({ path, clips, skipped, project }) {
   } catch (err) {
     showToast(STRINGS.RENDER.exportManifestFailed(err), 'error');
   }
-  logFrontendEvent(`Exported VEGAS EDL: ${clips.length} clips, ${skipped} left out`);
-  showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplateCount(manifest)), 'success');
+  return manifest;
 }

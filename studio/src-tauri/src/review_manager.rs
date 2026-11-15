@@ -10,6 +10,7 @@
 //! per game reads them for as long as that game runs and emits each one as a
 //! `review_event`.
 
+use native::shared::lock::lock_or_recover;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -87,7 +88,7 @@ fn send_to_any_game(lines: &[String]) -> Result<Option<u32>, String> {
 /// Starts reading `pid`'s answers, unless a thread already is.
 fn ensure_listener(app: AppHandle, pid: u32) {
     {
-        let mut listening = LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listening = lock_or_recover(&LISTENING);
         if *listening == Some(pid) {
             return;
         }
@@ -95,7 +96,7 @@ fn ensure_listener(app: AppHandle, pid: u32) {
     }
     std::thread::spawn(move || {
         listen(&app, pid);
-        let mut listening = LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listening = lock_or_recover(&LISTENING);
         if *listening == Some(pid) {
             *listening = None;
         }
@@ -259,7 +260,7 @@ pub fn game_review_finished(id: u64, error: Option<String>) {
 /// Ends the review in the game being read; its answers so far are already in.
 #[tauri::command]
 pub async fn stop_highlight_review() -> Result<(), String> {
-    let pid = *LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+    let pid = *lock_or_recover(&LISTENING);
     let Some(pid) = pid else { return Ok(()) };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         game_remote::send_console_commands(pid, &["ds_demo_review stop".to_string()])

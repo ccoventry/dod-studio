@@ -19,6 +19,16 @@ npm run test:e2e
 Playwright starts `npm run dev:e2e` (Vite on port 5183, using
 `vite.config.e2e.js`'s IPC aliasing) itself and tears it down after.
 
+## Page errors fail the test
+
+Specs import `test`/`expect` from `./fixtures.js`, not `@playwright/test`. Its
+auto fixture fails any test whose page throws or leaves a promise rejection
+unhandled, except what `ALLOWED_PAGE_ERRORS` lists (each entry says why).
+The IPC mock answers an unstubbed command with `undefined`; `DEFAULT_HANDLERS`
+in `mocks/tauri-core.js` gives the boot-time commands an empty answer instead.
+A test that boots `index.html` and is not about the first-run Setup window
+saves `setup_dismissed: true`, or that window covers the page.
+
 ## What this covers
 
 Frontend/DOM behavior only: does the right HTML render for a given

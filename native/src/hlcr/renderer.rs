@@ -8,6 +8,10 @@ use super::scanner::ClipData;
 
 mod ffmpeg_args;
 mod ffmpeg_run;
+mod partial_output;
+/// What marks a render's unfinished file name (#1439): a folder walk for
+/// finished clips skips names with it.
+pub use partial_output::PARTIAL_MARK;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
@@ -180,27 +184,70 @@ fn ledger_key(dir: &Path) -> PathBuf {
         .unwrap_or_else(|| dir.to_path_buf())
 }
 
+/// What [`try_reserve`] found: the directory it reserved on, if any, and the
+/// ones it passed over before it.
+#[derive(Debug, PartialEq)]
+struct Reserved {
+    /// The directory, what was already reserved on its volume, and its live
+    /// free space (`None` when unreadable, which counts as having room).
+    picked: Option<(PathBuf, u64, Option<u64>)>,
+    /// Each directory passed over, with its room: live free space less what
+    /// is reserved on its volume.
+    passed_over: Vec<(PathBuf, u64)>,
+}
+
 /// Reserves `amount` on the first of `dirs` whose volume has more than
-/// `amount + margin` free once the ledger's reservations there are taken off.
-/// Returns that directory, what was already reserved on its volume, and its
-/// live free space (`None` when unreadable, which counts as having room).
+/// `amount + margin_of(dir)` free once the ledger's reservations there are
+/// taken off. `margin_of` is per directory: the Windows drive keeps more
+/// (#1430).
 fn try_reserve(
     ledger: &mut HashMap<PathBuf, u64>,
     dirs: &[PathBuf],
     amount: u64,
-    margin: u64,
+    mut margin_of: impl FnMut(&Path) -> u64,
     mut free_of: impl FnMut(&Path) -> Option<u64>,
-) -> Option<(PathBuf, u64, Option<u64>)> {
+) -> Reserved {
+    let mut passed_over = Vec::new();
     for dir in dirs {
         let key = ledger_key(dir);
         let live_free = free_of(dir);
         let already_reserved = *ledger.get(&key).unwrap_or(&0);
-        if live_free.is_none_or(|free| free.saturating_sub(already_reserved) > amount + margin) {
+        let Some(free) = live_free else {
             *ledger.entry(key).or_insert(0) += amount;
-            return Some((dir.clone(), already_reserved, live_free));
+            return Reserved {
+                picked: Some((dir.clone(), already_reserved, None)),
+                passed_over,
+            };
+        };
+        let room = free.saturating_sub(already_reserved);
+        if room > amount.saturating_add(margin_of(dir)) {
+            *ledger.entry(key).or_insert(0) += amount;
+            return Reserved {
+                picked: Some((dir.clone(), already_reserved, live_free)),
+                passed_over,
+            };
         }
+        passed_over.push((dir.clone(), room));
     }
-    None
+    Reserved {
+        picked: None,
+        passed_over,
+    }
+}
+
+/// The first directory in `passed_over` that had room for `amount` past the
+/// usual [`EXPORT_SAFETY_MARGIN_BYTES`] and was passed over only for
+/// "Keep free on the Windows drive" (#1430), with its room. `margin_of` is the
+/// margin the choice used.
+fn held_back_for_windows_drive(
+    passed_over: &[(PathBuf, u64)],
+    amount: u64,
+    mut margin_of: impl FnMut(&Path) -> u64,
+) -> Option<&(PathBuf, u64)> {
+    passed_over.iter().find(|(dir, room)| {
+        *room > amount.saturating_add(EXPORT_SAFETY_MARGIN_BYTES)
+            && margin_of(dir) > EXPORT_SAFETY_MARGIN_BYTES
+    })
 }
 
 /// RAII release for a JIT export-drive reservation claimed by
@@ -251,6 +298,11 @@ pub async fn run_render_job(
     cancel_rx: Arc<AtomicBool>,
     reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
 ) {
+    // Studio is closing (#1439): a job the scheduler started on its way out
+    // does nothing and says nothing.
+    if is_exiting() {
+        return;
+    }
     let job = RenderJob::new(job_id, clip, config, tx, cancel_rx);
     // The take's own capture rate when its `dodstudio_take.json` says, else
     // Render Settings' Source FPS (`take_meta::render_fps`).
@@ -289,7 +341,7 @@ pub async fn run_render_job(
             return;
         }
     };
-    let out_file = output_folder.join(naming.file_name(&job, &output_folder, encode.file_ext));
+    let output = naming.reserve(&job, &output_folder, encode.file_ext);
     let threads = ffmpeg_args::threads_per_process(
         std::thread::available_parallelism().ok().map(|n| n.get()),
         job.config.max_concurrent_renders,
@@ -299,10 +351,11 @@ pub async fn run_render_job(
         fps: fps_used,
         encode: &encode,
         threads,
-        out_file: &out_file,
+        out_file: &output.partial,
+        clip_tag: job.config.clip_tag.as_deref(),
     }
     .to_args();
-    ffmpeg_run::run_ffmpeg(&job, args, &out_file).await;
+    ffmpeg_run::run_ffmpeg(&job, args, &output).await;
 }
 
 /// One render job as every stage sees it: the job, where its updates go,
@@ -504,18 +557,49 @@ fn reserve_export_dir(
     if config.export_directories.is_empty() {
         return Err(NO_EXPORT_FOLDER.to_string());
     }
+    // Read per job, not per batch: a change to "Keep free on the Windows
+    // drive" reaches the next render of a running batch (#1430).
+    let margins: HashMap<PathBuf, u64> = config
+        .export_directories
+        .iter()
+        .map(|dir| {
+            let margin = crate::sys::windows_drive::headroom_for(dir, EXPORT_SAFETY_MARGIN_BYTES);
+            (dir.clone(), margin)
+        })
+        .collect();
+    let margin_of = |dir: &Path| {
+        margins
+            .get(dir)
+            .copied()
+            .unwrap_or(EXPORT_SAFETY_MARGIN_BYTES)
+    };
     let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
-    let Some((dir, already_reserved, live_free)) = try_reserve(
+    let reserved = try_reserve(
         &mut ledger,
         &config.export_directories,
         reservation_estimate,
-        EXPORT_SAFETY_MARGIN_BYTES,
+        margin_of,
         crate::sys::disk::get_available_bytes,
-    ) else {
-        return Err(format!(
-            "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
+    );
+    let held_back =
+        held_back_for_windows_drive(&reserved.passed_over, reservation_estimate, margin_of);
+    let keep_free = crate::sys::windows_drive::keep_free_bytes();
+    if let Some((dir, room)) = held_back {
+        crate::log_markdown(&crate::messages::windows_drive::render_folder_skipped(
+            &job.job_id,
+            dir.display(),
+            *room,
+            keep_free,
+        ));
+    }
+    let Some((dir, already_reserved, live_free)) = reserved.picked else {
+        let note = held_back
+            .map(|_| crate::messages::windows_drive::kept_free_note(keep_free))
+            .unwrap_or_default();
+        return Err(crate::messages::render::no_export_folder_with_room(
             config.export_directories.len(),
-            (reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
+            reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES,
+            note,
         ));
     };
     // Shows this job's own estimate against what else was already
@@ -582,22 +666,34 @@ impl OutputNaming {
         }
     }
 
-    /// The file name in `output_folder` for an output with `file_ext` (with
-    /// its dot): the clip name made unique there (#441), else
-    /// `<demo>_<take><wav part>_<stream>_<hash><ext>`.
-    fn file_name(&self, job: &RenderJob, output_folder: &Path, file_ext: &str) -> String {
-        match clip_file_stem(&job.clip, &self.wav_part, job.is_hud) {
-            Some(stem) => get_unique_filename(output_folder, &stem, file_ext),
-            None => format!(
-                "{}_{}{}_{}_{}{}",
-                self.demo_name,
-                self.take_name,
-                self.wav_part,
-                self.stream_type,
-                self.hash_str,
-                file_ext
-            ),
+    /// Reserves the output's name in `output_folder` for an output with
+    /// `file_ext` (with its dot), made unique there: the clip name (#441),
+    /// cut to fit that folder (#1430), else
+    /// `<demo>_<take><wav part>_<stream>_<hash>`. Held until the job ends
+    /// (`partial_output`, #1439).
+    fn reserve(
+        &self,
+        job: &RenderJob,
+        output_folder: &Path,
+        file_ext: &str,
+    ) -> partial_output::Reserved<'static> {
+        let room = name_room(output_folder, &self.wav_part, job.is_hud, file_ext);
+        if let Some(name) = job.clip.clip_name.as_deref()
+            && sanitize_file_stem(name).encode_utf16().count() > room
+        {
+            crate::log_markdown(&crate::messages::render::clip_name_shortened(
+                name,
+                output_folder.display(),
+            ));
         }
+        let stem =
+            clip_file_stem(&job.clip, &self.wav_part, job.is_hud, room).unwrap_or_else(|| {
+                format!(
+                    "{}_{}{}_{}_{}",
+                    self.demo_name, self.take_name, self.wav_part, self.stream_type, self.hash_str
+                )
+            });
+        partial_output::in_flight().reserve(output_folder, &stem, file_ext)
     }
 }
 
@@ -642,9 +738,7 @@ async fn copy_source_video(job: &RenderJob, output_folder: &Path, naming: &Outpu
         .extension()
         .map(|e| e.to_string_lossy().into_owned())
         .unwrap_or_else(|| "mp4".to_string());
-    let final_name = naming.file_name(job, output_folder, &format!(".{ext}"));
-    let out_file = output_folder.join(&final_name);
-    let out_file_str = out_file.to_string_lossy().into_owned();
+    let output = naming.reserve(job, output_folder, &format!(".{ext}"));
 
     if job.cancel.load(Ordering::Relaxed) {
         job.finish_cancelled();
@@ -658,10 +752,26 @@ async fn copy_source_video(job: &RenderJob, output_folder: &Path, naming: &Outpu
     // during a large copy (Custom Output/lossless OBS captures — see
     // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
     // being silently ignored until the whole file has already moved.
-    match copy_cancellable(&source_video, &out_file, &job.cancel).await {
+    // Like FFmpeg, the copy writes under the partial name and takes the
+    // real one only once it is whole (#1439).
+    let copied = copy_cancellable(&source_video, &output.partial, &job.cancel).await;
+    if is_exiting() {
+        return;
+    }
+    match copied {
         Ok(true) => job.finish_cancelled(),
-        Ok(false) => job.finish_ok(out_file_str),
-        Err(e) => job.finish_error(format!("Failed to copy source video to export pool: {}", e)),
+        Ok(false) => match partial_output::in_flight().finish(&output) {
+            Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
+            Err(e) => job.finish_error(crate::messages::render::rename_failed(
+                output.partial.display(),
+                output.out_file.display(),
+                e,
+            )),
+        },
+        Err(e) => {
+            remove_partial_output(&output.partial).await;
+            job.finish_error(format!("Failed to copy source video to export pool: {}", e));
+        }
     }
 }
 
@@ -689,9 +799,9 @@ pub fn hold_render_wake_lock() -> Option<RenderWakeLock> {
 /// silently do nothing until the whole file had already moved, unlike the
 /// FFmpeg path, which polls its cancel flag every 200ms and kills the child.
 ///
-/// Returns `Ok(true)` if cancelled partway through, in which case the partial
-/// `dst` is removed before returning — a truncated file left behind under
-/// the pipeline's naming would look like a finished export.
+/// Returns `Ok(true)` if cancelled partway through, or Studio is closing
+/// (#1439), in which case the partial `dst` is removed before returning — a
+/// truncated file left behind would look like a finished export.
 async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::io::Result<bool> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -702,7 +812,7 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     // disk.
     let mut buf = vec![0u8; 2 * 1024 * 1024];
     loop {
-        if cancel.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) || is_exiting() {
             drop(writer);
             let _ = tokio::fs::remove_file(dst).await;
             return Ok(true);
@@ -717,22 +827,102 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     Ok(false)
 }
 
-/// Removes what FFmpeg wrote of `out_file` before it was stopped or failed:
-/// a truncated file under the pipeline's naming looks like a finished export,
-/// the same reason `copy_cancellable` removes its partial copy. A file that was
-/// there before the job started is never touched.
-async fn remove_partial_output(out_file: &Path, existed_before: bool) {
-    if !existed_before {
-        let _ = tokio::fs::remove_file(out_file).await;
+/// Removes what a stopped or failed render wrote of its partial file. The
+/// name is the job's own reservation (`partial_output`), so whatever is there
+/// is this job's, or a leftover of a render that never finished.
+async fn remove_partial_output(partial: &Path) {
+    let _ = tokio::fs::remove_file(partial).await;
+}
+
+/// Set once Studio is on its way out (#1439): renders stopped then report
+/// nothing and rename nothing, and the scheduler starts nothing more.
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+/// Whether Studio is closing: see [`stop_renders_for_exit`].
+pub fn is_exiting() -> bool {
+    EXITING.load(Ordering::SeqCst)
+}
+
+/// Studio's way out (#1439): ends every render FFmpeg at once and removes
+/// the unfinished files they were writing, so none outlives Studio or stays
+/// in an export folder. Marks Studio as exiting first, so a stopped render
+/// isn't recorded as failed and nothing new starts. Blocks for up to about
+/// 2 s while Windows lets go of the files. Logs what it did.
+pub fn stop_renders_for_exit() {
+    EXITING.store(true, Ordering::SeqCst);
+    let began = std::time::Instant::now();
+    if let Err(e) = crate::sys::child_job::end_all_with_studio() {
+        crate::log_markdown(&crate::messages::render::exit_stop_failed(e));
+    }
+    let removed = partial_output::in_flight().remove_all();
+    if removed.in_flight == 0 {
+        return;
+    }
+    crate::log_markdown(&crate::messages::render::exit_renders_stopped(
+        removed.in_flight,
+        removed.removed,
+        began.elapsed(),
+    ));
+    for (path, error) in &removed.failed {
+        crate::log_markdown(&crate::messages::render::exit_partial_left(
+            path.display(),
+            error,
+        ));
     }
 }
 
+/// The longest output path a render writes, in UTF-16 units as Windows
+/// counts them: `PATH_LIMIT` in `studio/src/clip_name.js`, which cuts clip
+/// names to fit the longest export folder when they are queued.
+const OUTPUT_PATH_LIMIT: usize = 250;
+/// What reserving a free name may add (`_99`, `partial_output`).
+const UNIQUE_SUFFIX_UNITS: usize = 3;
+
+/// How many UTF-16 units a clip name may take in `output_folder` so the
+/// whole path, with the wav suffix, `_hud`, a uniqueness suffix, the
+/// [`PARTIAL_MARK`] the file is written under until it is finished (#1439)
+/// and the extension, stays within [`OUTPUT_PATH_LIMIT`]: the unfinished
+/// file's path is the longer one, so it is the one that must fit. Names are cut to fit when
+/// they are queued, but an export folder added mid-batch (#1430) can be
+/// longer than the ones they were cut for.
+fn name_room(output_folder: &Path, wav_part: &str, is_hud: bool, file_ext: &str) -> usize {
+    let units = |s: &str| s.encode_utf16().count();
+    let taken = units(&output_folder.to_string_lossy())
+        + 1
+        + units(wav_part)
+        + if is_hud { units("_hud") } else { 0 }
+        + UNIQUE_SUFFIX_UNITS
+        + units(PARTIAL_MARK)
+        + units(file_ext);
+    OUTPUT_PATH_LIMIT.saturating_sub(taken)
+}
+
+/// `name` cut to at most `room` UTF-16 units, without the trailing dots and
+/// spaces Windows drops.
+fn fit_name(name: &str, room: usize) -> String {
+    let mut used = 0;
+    let cut: String = name
+        .chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= room
+        })
+        .collect();
+    cut.trim_end_matches(['.', ' ']).to_string()
+}
+
 /// The finished file's name, without its extension, when the take has a clip
-/// name (#441): the name, the wav suffix, and `_hud` for the HUD stream. The
-/// caller makes it unique, so a re-render never overwrites an earlier file.
-/// `None` without a usable clip name.
-fn clip_file_stem(clip: &ClipData, wav_part: &str, is_hud: bool) -> Option<String> {
-    let name = sanitize_file_stem(clip.clip_name.as_deref()?);
+/// name (#441): the name cut to `name_room` ([`name_room`]), the wav suffix,
+/// and `_hud` for the HUD stream. The caller makes it unique, so a re-render
+/// never overwrites an earlier file. `None` without a usable clip name, or
+/// with no room left for one (the hashed default name is used then).
+fn clip_file_stem(
+    clip: &ClipData,
+    wav_part: &str,
+    is_hud: bool,
+    name_room: usize,
+) -> Option<String> {
+    let name = fit_name(&sanitize_file_stem(clip.clip_name.as_deref()?), name_room);
     if name.is_empty() {
         return None;
     }
@@ -757,16 +947,6 @@ fn sanitize_file_stem(name: &str) -> String {
         })
         .collect();
     replaced.trim().trim_end_matches(['.', ' ']).to_string()
-}
-
-fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String {
-    let mut counter = 1;
-    let mut final_name = format!("{}{}", base_name, ext);
-    while output_dir.join(&final_name).exists() {
-        final_name = format!("{}_{}{}", base_name, counter, ext);
-        counter += 1;
-    }
-    final_name
 }
 
 #[cfg(test)]
@@ -810,12 +990,19 @@ mod tests {
             PathBuf::from(r"D:\x"),
         ];
 
-        let first = try_reserve(&mut ledger, &c_only, 10, 0, free);
-        assert_eq!(first.map(|r| r.0), Some(PathBuf::from(r"C:\a")));
-        assert_eq!(try_reserve(&mut ledger, &c_only, 10, 0, free), None);
-        let second = try_reserve(&mut ledger, &with_d, 10, 0, free);
-        assert_eq!(second.map(|r| r.0), Some(PathBuf::from(r"D:\x")));
-        assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
+        let picked = |r: Reserved| r.picked.map(|p| p.0);
+        let first = try_reserve(&mut ledger, &c_only, 10, |_| 0, free);
+        assert_eq!(picked(first), Some(PathBuf::from(r"C:\a")));
+        assert_eq!(
+            picked(try_reserve(&mut ledger, &c_only, 10, |_| 0, free)),
+            None
+        );
+        let second = try_reserve(&mut ledger, &with_d, 10, |_| 0, free);
+        assert_eq!(picked(second), Some(PathBuf::from(r"D:\x")));
+        assert_eq!(
+            picked(try_reserve(&mut ledger, &with_d, 10, |_| 0, free)),
+            None
+        );
         assert_eq!(ledger.get(&ledger_key(Path::new(r"C:\a"))), Some(&10));
         assert_eq!(ledger.get(&ledger_key(Path::new(r"D:\x"))), Some(&10));
     }
@@ -826,14 +1013,88 @@ mod tests {
     fn an_unreadable_export_folder_still_takes_a_reservation() {
         let mut ledger = HashMap::new();
         let dirs = [PathBuf::from("no-drive-a")];
-        let hit = try_reserve(&mut ledger, &dirs, 10, 5, |_| None);
-        assert_eq!(hit, Some((PathBuf::from("no-drive-a"), 0, None)));
+        let hit = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| None);
+        assert_eq!(hit.picked, Some((PathBuf::from("no-drive-a"), 0, None)));
         assert_eq!(ledger.get(&ledger_key(&dirs[0])), Some(&10));
         // Reservations never make an unreadable folder refuse.
-        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| None).is_some());
+        let again = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| None);
+        assert!(again.picked.is_some());
         let mut ledger = HashMap::new();
-        assert_eq!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(15)), None);
-        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(16)).is_some());
+        let short = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| Some(15));
+        assert_eq!(short.picked, None);
+        assert_eq!(short.passed_over, vec![(PathBuf::from("no-drive-a"), 15)]);
+        let fits = try_reserve(&mut ledger, &dirs, 10, |_| 5, |_| Some(16));
+        assert!(fits.picked.is_some());
+    }
+
+    /// #1430: the Windows drive (here C:) keeps its larger margin, so a job
+    /// that fits there by the usual margin goes on to D: instead.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_folder_below_its_keep_free_margin_is_passed_over() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut ledger = HashMap::new();
+        let dirs = [PathBuf::from(r"C:\Exports"), PathBuf::from(r"D:\Exports")];
+        let margin_of = |p: &Path| {
+            if p.starts_with(r"C:\") {
+                50 * GB
+            } else {
+                EXPORT_SAFETY_MARGIN_BYTES
+            }
+        };
+        let free = |p: &Path| {
+            Some(if p.starts_with(r"C:\") {
+                40 * GB
+            } else {
+                100 * GB
+            })
+        };
+
+        let reserved = try_reserve(&mut ledger, &dirs, 10 * GB, margin_of, free);
+        assert_eq!(reserved.picked.map(|p| p.0), Some(dirs[1].clone()));
+        assert_eq!(reserved.passed_over, vec![(dirs[0].clone(), 40 * GB)]);
+        // It had room by the usual margin, so the skip is the setting's.
+        assert_eq!(
+            held_back_for_windows_drive(&reserved.passed_over, 10 * GB, margin_of),
+            Some(&(dirs[0].clone(), 40 * GB))
+        );
+    }
+
+    /// With the Windows drive above its margin, it is used first as before.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_folder_with_room_past_its_margin_is_still_used_first() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut ledger = HashMap::new();
+        let dirs = [PathBuf::from(r"C:\Exports"), PathBuf::from(r"D:\Exports")];
+        let margin_of = |p: &Path| {
+            if p.starts_with(r"C:\") {
+                50 * GB
+            } else {
+                EXPORT_SAFETY_MARGIN_BYTES
+            }
+        };
+        let reserved = try_reserve(&mut ledger, &dirs, 10 * GB, margin_of, |_| Some(61 * GB));
+        assert_eq!(reserved.picked.map(|p| p.0), Some(dirs[0].clone()));
+        assert!(reserved.passed_over.is_empty());
+    }
+
+    /// A folder passed over because it was full by the usual margin too is
+    /// not blamed on the setting.
+    #[test]
+    fn a_folder_full_by_the_usual_margin_is_not_held_back_by_the_setting() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let passed = [(PathBuf::from("windows"), 5 * GB)];
+        assert_eq!(
+            held_back_for_windows_drive(&passed, 10 * GB, |_| 50 * GB),
+            None
+        );
+        // Room by the usual margin, but the folder keeps only that margin.
+        let passed = [(PathBuf::from("other"), 20 * GB)];
+        assert_eq!(
+            held_back_for_windows_drive(&passed, 10 * GB, |_| EXPORT_SAFETY_MARGIN_BYTES),
+            None
+        );
     }
 
     /// #120: the first clip of a kind reserves the raw estimate; once one
@@ -1080,6 +1341,7 @@ mod tests {
             target_codec: RenderCodec::SourceCopy,
             custom_codec_args: String::new(),
             max_concurrent_renders: 1,
+            clip_tag: None,
         }
     }
 
@@ -1250,6 +1512,78 @@ mod tests {
         }
         assert!(export_dir.join("anzio_krod_4k.mp4").is_file());
         assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
+    }
+
+    /// #1430: a clip name cut for the export folders at queue time can meet
+    /// a longer folder added mid-batch; the render cuts it again so the path
+    /// stays within the limit, keeping the wav and HUD suffixes.
+    #[test]
+    fn a_clip_name_is_cut_to_fit_a_longer_export_folder() {
+        let short = Path::new("D:/clips");
+        let long_name = "x".repeat(200);
+        let long = PathBuf::from(format!("E:/{}", "f".repeat(100)));
+        let clip = ClipData {
+            clip_name: Some(long_name.clone()),
+            ..sized_clip(1, 1, 1, "single")
+        };
+        let room = name_room(short, "-sound", true, ".mov");
+        let stem = clip_file_stem(&clip, "-sound", true, room).unwrap();
+        assert_eq!(stem, format!("{long_name}-sound_hud"));
+
+        let room = name_room(&long, "-sound", true, ".mov");
+        let stem = clip_file_stem(&clip, "-sound", true, room).unwrap();
+        assert!(stem.ends_with("-sound_hud"));
+        // The unfinished file's path, the longer of the two, is the one that
+        // fits exactly (#1439).
+        let path_units =
+            long.to_string_lossy().len() + 1 + stem.len() + 3 + PARTIAL_MARK.len() + ".mov".len();
+        assert_eq!(path_units, OUTPUT_PATH_LIMIT);
+
+        // No room at all: the default name, not an empty one.
+        let deep = PathBuf::from(format!("E:/{}", "f".repeat(300)));
+        let room = name_room(&deep, "", false, ".mov");
+        assert_eq!(clip_file_stem(&clip, "", false, room), None);
+        assert_eq!(fit_name("ab. c", 3), "ab");
+        assert_eq!(fit_name("é😀", 2), "é");
+    }
+
+    /// #1430 with #1439: the name a render reserves, and so the unfinished
+    /// `.partial` file it writes, is the cut name, and the unfinished file's
+    /// path stays within the limit even when `_N` is added for a clash.
+    #[test]
+    fn the_reserved_and_partial_names_are_the_cut_clip_name() {
+        let root = scratch("reserve_cut_name");
+        let used = root.to_string_lossy().encode_utf16().count();
+        let folder = root.join("f".repeat(OUTPUT_PATH_LIMIT - used - 60));
+        let clip = ClipData {
+            clip_name: Some("x".repeat(200)),
+            ..sized_clip(1, 1, 1, "single")
+        };
+        let (tx, _rx) = mpsc::channel();
+        let job = RenderJob::new(
+            "0".to_string(),
+            clip,
+            source_copy_config(&folder),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let naming = OutputNaming::new(&job);
+        let first = naming.reserve(&job, &folder, ".mov");
+        // A second render of the same clip while the first is in flight.
+        let second = naming.reserve(&job, &folder, ".mov");
+
+        let room = name_room(&folder, &naming.wav_part, false, ".mov");
+        let cut = "x".repeat(room);
+        assert_eq!(first.out_file, folder.join(format!("{cut}.mov")));
+        assert_eq!(
+            first.partial,
+            folder.join(format!("{cut}{PARTIAL_MARK}.mov"))
+        );
+        assert_eq!(second.out_file, folder.join(format!("{cut}_1.mov")));
+        for reserved in [&first, &second] {
+            let units = reserved.partial.to_string_lossy().encode_utf16().count();
+            assert!(units <= OUTPUT_PATH_LIMIT, "{units} units");
+        }
     }
 
     #[test]
@@ -1479,20 +1813,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A cancelled or failed FFmpeg render removes the file it was writing,
-    /// but never one that was there before the job started.
+    /// A cancelled or failed render removes its partial file. A finished
+    /// clip is never at risk: its name is never a partial name (#1439).
     #[tokio::test]
-    async fn remove_partial_output_only_removes_the_jobs_own_file() {
+    async fn remove_partial_output_removes_the_jobs_partial_file() {
         let root = scratch("partial_output");
-        let written = root.join("clip.mp4");
+        let written = root.join("clip.partial.mp4");
         std::fs::write(&written, b"48 bytes of a header").unwrap();
-        remove_partial_output(&written, false).await;
+        remove_partial_output(&written).await;
         assert!(!written.exists(), "the job's partial file must go");
-
-        let earlier = root.join("earlier.mp4");
-        std::fs::write(&earlier, b"someone's finished clip").unwrap();
-        remove_partial_output(&earlier, true).await;
-        assert!(earlier.exists(), "a file from before the job must stay");
+        // Already gone is fine.
+        remove_partial_output(&written).await;
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -80,6 +80,18 @@ back to `"1.0"`, gamma back to `"1.8"`, and others). It is not a cvar flag
 `sv_cheats` is the `cvar_t` at `0x1e56404`. Verified live and by disassembly of
 both binaries, 2026-09-16.
 
+### A POV demo's `+map` presses change the viewer's `_cl_minimap` (#1441)
+
+`+map` cycles `_cl_minimap` (0 → 1 full map → 2 minimap with `cl_dmsmallmap 1`
+→ 0) and is the only thing in client.dll that writes it. A POV demo records the
+recorder's presses and playback runs them, so the viewer's cvar ends wherever
+they leave it, for every later demo of the session. The map never draws in POV
+playback (#897), but at 1 the crosshair is hidden and the flag row moves onto
+the undrawn map; at 2 the kill feed moves down. A stepped seek across presses
+runs some of them and drops others, so where it ends is unpredictable. The hook
+drops `+map`/`+mapzoom` while a POV demo plays (`pov_map_keys.rs`). Surveyed:
+10 of 379 POV demos (8 of 43 recorders) carry presses.
+
 ## NetworkMessage Quirks & HLTV Protocol
 - **DRC_CMD_CAMERA Structure:** The `DRC_CMD_CAMERA` subcommand is a 30+ byte cinematic vector command (coordinates, FOV, direction vectors), not a 1-byte entity lock.
 - **Stream Alignment Crashing (patching):** Custom `svc_director` payloads must not be appended or prepended inside existing `NetworkMessage` packets. Modifying payload lengths without recalculating internal offsets crashes the parser with `FATAL ERROR: Server::ParsePacketEntities: entnum>MAX_PACKET_ENTITIES`.

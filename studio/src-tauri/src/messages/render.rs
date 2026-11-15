@@ -47,6 +47,15 @@ pub fn take_failed(job_id: impl Display, base_name: impl Display, error: impl Di
 pub const CLEAR_QUEUE_EMPTIED: &str =
     "[render] clear_render_queue: list emptied once the batch stopped";
 
+/// A running render batch took export folders changed in Settings (#1430).
+pub fn export_dirs_changed(dirs: &[std::path::PathBuf]) -> String {
+    let list: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    format!(
+        "[render] Export folders changed during the batch: renders starting now go to {}",
+        list.join(", ")
+    )
+}
+
 pub const SCHEDULER_EXITING: &str =
     "[render] scheduler loop exiting: nothing left Rendering or Queued";
 
@@ -119,6 +128,10 @@ pub fn ticked_jobs_cancelled(cancelled: usize, ticked: usize) -> String {
     format!("[render] cancel_render_jobs: {cancelled} of {ticked} ticked job(s) cancelled")
 }
 
+pub fn queued_jobs_cancelled(cancelled: usize) -> String {
+    format!("[render] cancel_queued_render_jobs: {cancelled} queued job(s) cancelled")
+}
+
 pub fn ticked_jobs_reset(reset: usize, ticked: usize) -> String {
     format!("[render] reset_render_jobs: {reset} of {ticked} ticked job(s) -> Queued")
 }
@@ -171,6 +184,10 @@ mod tests {
         assert_eq!(
             ticked_jobs_cancelled(1, 2),
             "[render] cancel_render_jobs: 1 of 2 ticked job(s) cancelled"
+        );
+        assert_eq!(
+            queued_jobs_cancelled(4),
+            "[render] cancel_queued_render_jobs: 4 queued job(s) cancelled"
         );
         assert_eq!(
             queue_cleared(3),

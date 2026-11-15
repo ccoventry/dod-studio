@@ -573,8 +573,8 @@ In `hw.dll` (both builds: `cl_enginefuncs` is at PRE `+0x136260`, POST
 -- `VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s own
 `CreateInterface`; there is no `vguimatsurface.dll` in GoldSrc -- with one
 font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
-(`dod/resource/TrackerScheme.res`), fetched once (PRE `+0x6a0f`, POST
-`+0x230d71`). It sets the font, position and colour, converts the string
+(`dod/resource/TrackerScheme.res`), fetched once, in `VGUI2_Draw_Init` (PRE `+0x69e0`, POST
+`+0x230d40`). It sets the font, position and colour, converts the string
 with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
 prints it, and then **resets the colour to `con_color`**. The width is the sum
 of `GetCharABCwide` over the characters, the height `GetFontTall`. The draw
@@ -665,7 +665,7 @@ outline bit (0x200), so `outline` is accepted and reported as not drawn.
 Neither engine build nor either client has a HUD scale: `CHud::VidInit`
 picks the 640 set on any screen 640 or wider and `pfnSPR_Draw*` draws exactly
 `rect` pixels, texture coordinates `(rect ± 0.5) / the frame's logical size`
-(`Draw_SpriteFrameGeneric`, PRE `hw+0x3d280`, Anniversary `+0x23b1c0`). DoD's
+(`Draw_Frame`, PRE `hw+0x3d280`, Anniversary `+0x23b1c0`). DoD's
 `d_*` icons are big and uneven -- `d_skull` 74×52, `d_garand` 201×34,
 `d_bren` 168×58, `d_britknife` 76×20 -- so the stock feed's line step already
 varies per line and the names sit at the top of each line.

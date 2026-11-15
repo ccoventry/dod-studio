@@ -1,7 +1,7 @@
 // Project files are `.dodstudio` (#528), driven against the File menu harness
 // in tests/e2e/recent-projects.html (the real project_session.js, Tauri's IPC
 // and its dialog plugin mocked).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/recent-projects.html');

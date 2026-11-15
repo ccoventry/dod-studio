@@ -4,10 +4,13 @@ mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
+mod capture_guards;
 mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
 mod catch_up_takes;
+mod clip_relink_manager;
+mod clip_verdicts;
 mod combine_manager;
 mod config_checks_cmd;
 mod crash_maps_manager;
@@ -42,6 +45,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod project_settings_snapshot;
+mod render_export_dirs;
 mod render_manager;
 mod review_library;
 mod review_manager;
@@ -53,6 +57,7 @@ mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
 mod trimmed_demos;
+mod unreached_clips;
 mod updater_manager;
 mod vegas_manager;
 
@@ -72,11 +77,12 @@ use game_process_manager::{
 };
 use obs_manager::launch_obs;
 use render_manager::{
-    RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
-    check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
-    get_render_jobs, get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
-    remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs, reset_all_render_jobs,
-    reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
+    RenderManager, cancel_queued_render_jobs, cancel_render_batch, cancel_render_job,
+    cancel_render_jobs, check_render_autosave, clear_render_queue, discard_render_autosave,
+    get_export_pool_free_gb, get_render_jobs, get_render_required_estimate_gb, queue_render_batch,
+    recover_render_batch, remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs,
+    reset_all_render_jobs, reset_render_job, reset_render_jobs, set_render_job_codec,
+    start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
 use std::path::{Path, PathBuf};
@@ -116,9 +122,14 @@ async fn get_settings(state: tauri::State<'_, SettingsManager>) -> Result<AppSet
 #[tauri::command]
 async fn save_settings(
     state: tauri::State<'_, SettingsManager>,
+    render: tauri::State<'_, render_manager::RenderManager>,
     settings: AppSettings,
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
+    // A running render batch takes the new export folders for the renders it
+    // starts next (#1430). Handed over under the settings lock, so two saves
+    // close together can't leave it the older list.
+    let export_dirs = render.export_dirs();
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
@@ -133,6 +144,8 @@ async fn save_settings(
         settings.pinned_folders_reviewed |= settings_manager::pinned_review_done_on_disk();
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
+        settings_manager::apply_windows_drive_keep_free(&settings);
+        export_dirs.saved(&settings.render_export_dirs);
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");
@@ -459,6 +472,19 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
     Ok(native::sys::disk::pool_free_bytes(&paths))
+}
+
+/// The capture folders' free space and the part captures may use, which
+/// leaves out what "Keep free on the Windows drive" keeps there (#1430), so
+/// Start Capture Batch's check can name the setting when it's what's short.
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
+#[tauri::command]
+async fn capture_pool_room(paths: Vec<String>) -> Result<native::sys::disk::PoolRoom, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+        native::sys::disk::pool_room(&paths)
+    }))
+    .await
 }
 
 #[derive(serde::Serialize)]
@@ -902,17 +928,26 @@ pub fn run() {
         ));
     }
 
+    // The render manager starts from the export folders settings.json has,
+    // so the first save of some other setting isn't taken for a change of
+    // them by a running batch (#1430).
+    let settings_manager = SettingsManager::new();
+    let render_manager = RenderManager::new();
+    render_manager
+        .export_dirs()
+        .saved(&native::shared::lock::lock_or_recover(&settings_manager.inner).render_export_dirs);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
-        .manage(RenderManager::new())
+        .manage(render_manager)
         .manage(take_preview_manager::TakePreviewManager::default())
         .manage(take_checks_manager::TakeChecksManager::default())
         .manage(ScanManager::default())
-        .manage(SettingsManager::new())
+        .manage(settings_manager)
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(demo_repair_manager::DemoRepairManager::default())
@@ -1033,6 +1068,7 @@ pub fn run() {
             estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
+            capture_pool_room,
             diagnose_capture_output_paths,
             queue_render_batch,
             start_queued_render,
@@ -1043,11 +1079,14 @@ pub fn run() {
             remove_render_job,
             remove_non_rendering_render_jobs,
             cancel_render_jobs,
+            cancel_queued_render_jobs,
             reset_render_jobs,
             remove_render_jobs,
             clear_render_queue,
             capture_history_manager::take_capture_states,
             capture_history_manager::locate_rendered_videos,
+            clip_relink_manager::relink_rendered_clips,
+            clip_relink_manager::cancel_relink_rendered_clips,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,
@@ -1162,8 +1201,15 @@ pub fn run() {
             project_convert::convert_project_file,
             project_settings_snapshot::keep_project_settings_snapshot,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // Render FFmpegs end with Studio's process anyway (their job
+            // object); this also removes the clips they were writing (#1439).
+            if let tauri::RunEvent::Exit = event {
+                native::hlcr::renderer::stop_renders_for_exit();
+            }
+        });
 }
 
 #[cfg(test)]
