@@ -158,7 +158,6 @@ pub fn relink_clips(
     for (index, path, found_by) in scan.match_candidates(&wanted, &candidates, progress) {
         scan.report.clips[index] = scan.place(&clips[index], &path, found_by);
     }
-    scan.report.files_checked = candidates.len();
     scan.report
 }
 
@@ -374,6 +373,9 @@ impl Scan<'_> {
                 done,
                 total: candidates.len(),
             });
+            // Counts the files read, not the files listed: a cancelled scan,
+            // or one whose clips were all found early, read fewer.
+            self.report.files_checked += 1;
             match tag_on(file) {
                 Some((tag, how)) => {
                     if let Some(i) = by_tag.remove(&tag) {
@@ -677,6 +679,23 @@ mod tests {
         assert!(report.cancelled);
         assert_eq!(report.clips[0].found_by, FoundBy::Missing);
         assert_eq!(report.files_checked, 0);
+    }
+
+    #[test]
+    fn a_scan_cancelled_while_reading_counts_only_the_files_it_read() {
+        let dir = Scratch::new("relink_cancel_reading");
+        for name in ["a.mov", "b.mov", "c.mov"] {
+            write(&dir.path().join(name), b"x");
+        }
+        let clips = [clip("s/t1", &dir.path().join("gone.mov"))];
+        let cancel = AtomicBool::new(false);
+        let report = relink_clips(&clips, &[dir.path().to_path_buf()], &cancel, &mut |step| {
+            if matches!(step, RelinkStep::Checking { done: 0, .. }) {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        });
+        assert!(report.cancelled);
+        assert_eq!(report.files_checked, 1);
     }
 
     #[test]
