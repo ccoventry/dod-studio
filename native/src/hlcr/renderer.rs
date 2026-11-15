@@ -343,6 +343,7 @@ pub async fn run_render_job(
         encode: &encode,
         threads,
         out_file: &out_file,
+        clip_tag: job.config.clip_tag.as_deref(),
     }
     .to_args();
     ffmpeg_run::run_ffmpeg(&job, args, &out_file).await;
@@ -1235,6 +1236,7 @@ mod tests {
             target_codec: RenderCodec::SourceCopy,
             custom_codec_args: String::new(),
             max_concurrent_renders: 1,
+            clip_tag: None,
         }
     }
 
