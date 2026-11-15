@@ -67,6 +67,12 @@ Caveats:
 - **`dem_forcehltv 1` drops them.** `Server::ProcessMessage` keeps demo data
   only when not forcing HLTV. Default is 0. (ReHLDS source; not re-derived from
   the binary.)
+- **A POV demo played with `dem_forcehltv 1` never runs `CHud::Think`**
+  (measured, PRE, `tr2.dem`, #1462): the recorder's `ResetHUD`, `YouDied` and
+  `SetFOV` messages still set the HUD's FOV, and nothing resets it, so from the
+  recorder's spawn to his death it sits at 0 and DoD's `StudioDrawModel` skips
+  the in-eye viewmodel (it does under 90, the scoped-in rule).
+  `goldsrc-hooks/src/hltv_fov.rs` puts `Think`'s spectator FOV back each frame.
 
 ## 2. The trailing directory: followed, and ours is right
 
