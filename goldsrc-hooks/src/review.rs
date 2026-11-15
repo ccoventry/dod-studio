@@ -1120,23 +1120,26 @@ fn key_action(action: crate::review_keys::Action) {
                 trace("X-ray: the engine's command buffer is not available");
             }
         }
-        Action::Faster => change_speed(true),
-        Action::Slower => change_speed(false),
+        // Greyed on the box at a highlight's end: a press then goes only to
+        // the log, not the console.
+        Action::Faster => change_speed(true, trace),
+        Action::Slower => change_speed(false, trace),
     }
 }
 
 /// Up or Down (#1437), or `faster` / `slower`: plays the highlight one step
 /// faster or slower (`review_speed`), from the speed it plays at now, until
 /// it ends. Only while it plays: at its end it is paused, and the next one
-/// starts at normal speed.
-fn change_speed(faster: bool) {
+/// starts at normal speed. `refuse` tells why it does nothing: the console
+/// for a typed command, only the log for a key.
+fn change_speed(faster: bool, refuse: fn(&str)) {
     let mut guard = lock();
     let Some(review) = guard.as_mut() else {
-        say("no review running");
+        refuse("no review running");
         return;
     };
     if !matches!(review.phase, Phase::Playing { .. }) {
-        say("the speed changes only while a highlight plays");
+        refuse("the speed changes only while a highlight plays");
         return;
     }
     let now = crate::demo_seek::clock().map_or(1.0, |c| c.time_scale);
@@ -1476,8 +1479,8 @@ pub unsafe extern "C" fn command() {
         "next" => next(),
         "back" => back(),
         "form" => open_form(),
-        "faster" => change_speed(true),
-        "slower" => change_speed(false),
+        "faster" => change_speed(true, say),
+        "slower" => change_speed(false, say),
         "range" => {
             let mut guard = lock();
             let Some(review) = guard.as_mut() else {

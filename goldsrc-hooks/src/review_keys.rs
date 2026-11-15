@@ -490,10 +490,11 @@ mod draw {
     /// both builds, and the box's dark fill keeps each one readable over
     /// bright and dark maps alike.
     const LABEL: (f32, f32, f32) = (1.0, 0.5, 0.1);
-    /// The answer in the header, by what it says.
+    /// The answer in the header, by what it says. No is a full red: a pinker
+    /// one read as the labels' orange in the game.
     const YES: (f32, f32, f32) = (0.35, 1.0, 0.35);
     const MAYBE: (f32, f32, f32) = (1.0, 0.9, 0.2);
-    const NO: (f32, f32, f32) = (1.0, 0.35, 0.35);
+    const NO: (f32, f32, f32) = (1.0, 0.15, 0.15);
     /// The mark in front of the next kill, and the gap that keeps the other
     /// lines in step with it.
     const NEXT_MARK: &str = "> ";
