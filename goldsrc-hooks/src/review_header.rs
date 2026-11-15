@@ -16,7 +16,7 @@
 //! separators are quieter. This file decides the words and their tones; the
 //! box's draw picks the colours.
 
-use crate::review::Verdict;
+use crate::review::{Highlight, Verdict};
 
 /// What a run of text is, which sets its colour on the box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +73,19 @@ fn span(text: impl Into<String>, tone: Tone) -> Span {
 }
 
 const SEPARATOR: &str = " | ";
+
+/// The header for highlight `at` of `queue`: which one, whose, the kill range,
+/// the note, and the clock and speed when `clock` has one (none while the
+/// demo loads).
+pub(crate) fn header(queue: &[Highlight], at: usize, clock: Option<f64>, speed: f32) -> Vec<Line> {
+    let h = &queue[at];
+    let mut header = vec![title_line(at, queue.len(), h.kills.len(), h.verdict)];
+    header.extend(player_line(&h.player));
+    header.push(range_line(h.from, h.to, h.kills.len()));
+    header.extend(note_lines(&h.note));
+    header.extend(clock.map(|c| now_line(c, speed)));
+    header
+}
 
 /// `Highlight 3 of 12 | 4 kills | answered yes`.
 pub(crate) fn title_line(at: usize, total: usize, kills: usize, verdict: Option<Verdict>) -> Line {

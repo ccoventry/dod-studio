@@ -85,8 +85,8 @@ pub const NAME: &str = console_name!("demo_review");
 pub(crate) const QUEUE_HEADER: &str = "dodstudio-review 1";
 
 /// Seconds played before a highlight's first kill, and after its last.
-const LEAD: f64 = 4.0;
-const TAIL: f64 = 2.0;
+pub(crate) const LEAD: f64 = 4.0;
+pub(crate) const TAIL: f64 = 2.0;
 /// How long a demo may take to load before the review gives up on it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 /// Frames after `viewdemo` before the demo player's state counts: until the
@@ -196,9 +196,6 @@ impl Highlight {
     }
 }
 
-/// The default fast-forward speed when the queue names none.
-const FAST_SPEED: f32 = 4.0;
-
 /// How the queue asks the review to play (#665).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Options {
@@ -215,7 +212,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             gap: 0.0,
-            speed: FAST_SPEED,
+            speed: crate::review_speed::FAST_SPEED,
             from: None,
         }
     }
@@ -252,33 +249,6 @@ fn parse_options<'a>(fields: impl Iterator<Item = &'a str>) -> Options {
         }
     }
     options
-}
-
-/// The stretches of a highlight to fast-forward: between two kills more than
-/// `gap` seconds apart, from [`TAIL`] after the first to [`LEAD`] before the
-/// second, the same margins a highlight starts and ends with.
-fn fast_spans(kills: &[f64], gap: f64) -> Vec<(f64, f64)> {
-    if gap <= 0.0 {
-        return Vec::new();
-    }
-    kills
-        .windows(2)
-        .filter(|pair| pair[1] - pair[0] > gap)
-        .map(|pair| (pair[0] + TAIL, pair[1] - LEAD))
-        .filter(|(start, end)| end > start)
-        .collect()
-}
-
-/// The log's note on what will be fast-forwarded, or nothing.
-fn describe_spans(spans: &[(f64, f64)], speed: f32) -> String {
-    if spans.is_empty() {
-        return String::new();
-    }
-    let list: Vec<String> = spans
-        .iter()
-        .map(|(s, e)| format!("{s:.1}..{e:.1}"))
-        .collect();
-    format!("; at {speed}x: {}", list.join(", "))
 }
 
 /// Reads a queue file.
@@ -845,7 +815,7 @@ fn detail(h: &Highlight, phase: &Phase) -> String {
 fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
-    let spans = fast_spans(&h.kills, review.options.gap);
+    let spans = crate::review_speed::fast_spans(&h.kills, review.options.gap);
     let started = crate::demo_seek::seek_to_seconds_then(from, h.camera_line()).and_then(|seek| {
         crate::demo_seek::set_time_scale(1.0)?;
         crate::demo_seek::set_paused(false)?;
@@ -858,7 +828,7 @@ fn play(review: &mut Review) {
                 "highlight {} of {}: playing {from:.1}..{until:.1} s, clock {now:.1} after the seek ({seek}){}",
                 review.at + 1,
                 review.queue.len(),
-                describe_spans(&spans, review.options.speed)
+                crate::review_speed::describe_spans(&spans, review.options.speed)
             ));
             review.phase = Phase::Playing {
                 until,
@@ -1026,29 +996,6 @@ fn under_form(mode: KeyMode, form_shown: bool) -> KeyMode {
     }
 }
 
-/// The box's header (`review_header`, #1437) for the highlight the review is
-/// on: which one, whose, the kill range, the note, and the clock and speed
-/// when `clock` has one.
-fn panel_header(
-    review: &Review,
-    clock: Option<f64>,
-    speed: f32,
-) -> Vec<crate::review_header::Line> {
-    use crate::review_header::{note_lines, now_line, player_line, range_line, title_line};
-    let h = &review.queue[review.at];
-    let mut header = vec![title_line(
-        review.at,
-        review.queue.len(),
-        h.kills.len(),
-        h.verdict,
-    )];
-    header.extend(player_line(&h.player));
-    header.push(range_line(h.from, h.to, h.kills.len()));
-    header.extend(note_lines(&h.note));
-    header.extend(clock.map(|c| now_line(c, speed)));
-    header
-}
-
 /// What the on-screen panel shows for the review as it stands at `now`,
 /// with the demo player's clock at `clock` and its speed at `speed`, and
 /// what the answer keys do.
@@ -1068,7 +1015,7 @@ fn panel_view(
     // The clock beside the kills' times, so the next kill's says how soon;
     // none while the demo loads.
     let panel = |clock: Option<f64>, status: &str| crate::review_keys::Panel {
-        header: panel_header(review, clock, speed),
+        header: crate::review_header::header(&review.queue, review.at, clock, speed),
         status: status.to_string(),
         keys,
         live: mode == KeyMode::Live,
@@ -1138,25 +1085,10 @@ fn change_speed(faster: bool, refuse: fn(&str)) {
         refuse("no review running");
         return;
     };
-    if !matches!(review.phase, Phase::Playing { .. }) {
-        refuse("the speed changes only while a highlight plays");
-        return;
-    }
-    let now = crate::demo_seek::clock().map_or(1.0, |c| c.time_scale);
-    let speed = crate::review_speed::step(now, faster);
-    match crate::demo_seek::set_time_scale(speed) {
-        Ok(()) => {
-            review.speed = Some(speed);
-            trace(&format!(
-                "highlight {}: speed {now}x -> {speed}x ({})",
-                review.at + 1,
-                if faster { "faster" } else { "slower" }
-            ));
-        }
-        Err(why) => trace(&format!(
-            "highlight {}: speed {speed}: {why}",
-            review.at + 1
-        )),
+    let playing = matches!(review.phase, Phase::Playing { .. });
+    match crate::review_speed::change(faster, playing, &mut review.speed) {
+        Ok(line) => trace(&format!("highlight {}: {line}", review.at + 1)),
+        Err(why) => refuse(&why),
     }
 }
 
@@ -1960,24 +1892,6 @@ mod tests {
             }
         );
         assert_eq!(parse("gap=inf"), Options::default());
-    }
-
-    #[test]
-    fn only_gaps_longer_than_the_setting_are_fast_forwarded() {
-        // Kills at 217, 234, 247, 254: gaps of 17, 13 and 7 s.
-        let kills = [217.0, 234.0, 247.0, 254.0];
-        assert_eq!(
-            fast_spans(&kills, 8.0),
-            vec![(217.0 + TAIL, 234.0 - LEAD), (234.0 + TAIL, 247.0 - LEAD)]
-        );
-        assert_eq!(fast_spans(&kills, 0.0), vec![]);
-        assert_eq!(fast_spans(&kills, 20.0), vec![]);
-    }
-
-    #[test]
-    fn a_gap_too_short_for_its_margins_plays_at_normal_speed() {
-        // 5 s apart, over a 3 s setting, but TAIL + LEAD is 6 s.
-        assert_eq!(fast_spans(&[10.0, 15.0], 3.0), vec![]);
     }
 
     #[test]
