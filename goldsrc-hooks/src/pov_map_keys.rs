@@ -36,6 +36,12 @@
 //! play and HLTV demos, where the map draws, are unchanged. A `_cl_minimap`
 //! the viewer set themselves stays as they set it. On by default;
 //! `GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
+//!
+//! The cvar is archived, so a value left by an earlier session (or by live
+//! play) comes back with config.cfg, and with `+map` dropped nothing in a POV
+//! demo can cycle it back. The game's files are the user's, so the hook never
+//! writes it: when a POV demo starts with `_cl_minimap` not 0, it says so in
+//! the hook log and the console, naming `_cl_minimap 0` as the way out.
 
 // Only the 32-bit build installs anything; a host check still compiles it.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -60,9 +66,49 @@ static RETRIES_LEFT: AtomicU32 = AtomicU32::new(600);
 static DROPPED: AtomicU32 = AtomicU32::new(0);
 const LOGGED_DROPS: u32 = 5;
 
-/// Wraps the commands once they exist; a no-op once done or given up. Runs
-/// every frame on the engine's thread.
+/// Whether a POV demo was playing on the last poll, to see one start.
+static WAS_POV: AtomicBool = AtomicBool::new(false);
+
+/// Runs every frame on the engine's thread: warns when a POV demo starts
+/// with the map left on, and wraps the commands once they exist.
 pub fn poll() {
+    warn_on_pov_start();
+    poll_wrap();
+}
+
+fn warn_on_pov_start() {
+    let pov = crate::anim_fix::pov_demo_playing();
+    if WAS_POV.swap(pov, Ordering::Relaxed) || !pov {
+        return;
+    }
+    let Some(engfuncs) = crate::engine::engfuncs() else {
+        return;
+    };
+    let value = unsafe { (engfuncs.pfn_get_cvar_float)(c"_cl_minimap".as_ptr()) };
+    if let Some(line) = stuck_map_warning(value) {
+        unsafe { crate::debug::report(&format!("pov_map_keys: {line}")) };
+        crate::commands::console_print(&format!("{line}\n"));
+    }
+}
+
+/// The warning for a POV demo starting with `_cl_minimap` at `value`, or
+/// None when the map is off.
+fn stuck_map_warning(value: f32) -> Option<String> {
+    if value == 0.0 {
+        return None;
+    }
+    let which = if value == 1.0 {
+        "the full map: no crosshair and no flag row"
+    } else {
+        "the minimap: the kill feed sits lower"
+    };
+    Some(format!(
+        "_cl_minimap is {value} ({which}), and the map never draws in a POV demo. Type _cl_minimap 0 to put the HUD back (#1441)"
+    ))
+}
+
+/// Wraps the commands once they exist; a no-op once done or given up.
+fn poll_wrap() {
     if RETRIES_LEFT.load(Ordering::Relaxed) == 0 {
         return;
     }
@@ -156,5 +202,18 @@ mod tests {
     #[test]
     fn presses_are_dropped_while_a_pov_demo_plays() {
         assert!(!lets_through(true));
+    }
+
+    #[test]
+    fn no_warning_while_the_map_is_off() {
+        assert_eq!(stuck_map_warning(0.0), None);
+    }
+
+    #[test]
+    fn a_map_left_on_is_named_with_the_way_out() {
+        let full = stuck_map_warning(1.0).unwrap();
+        assert!(full.contains("full map") && full.contains("_cl_minimap 0"));
+        let mini = stuck_map_warning(2.0).unwrap();
+        assert!(mini.contains("minimap") && mini.contains("_cl_minimap 0"));
     }
 }
