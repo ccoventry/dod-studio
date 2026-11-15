@@ -58,7 +58,8 @@ impl Line {
         }
     }
 
-    /// The line's text, every run joined.
+    /// The line's text, every run joined, for the tests.
+    #[cfg(test)]
     pub(crate) fn text(&self) -> String {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
