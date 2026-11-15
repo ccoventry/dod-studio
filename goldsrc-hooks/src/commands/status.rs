@@ -104,6 +104,7 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
+    lines.push(format!("in-eye HUD FOV: {}", crate::hltv_fov::status()));
     lines.push(format!(
         "{} = {} -- strafe twitch: {}",
         crate::strafe_twitch::NAME,

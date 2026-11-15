@@ -38,6 +38,22 @@
 //! `client.dll` is byte-identical in the pre-Anniversary and 25th Anniversary
 //! installs, so one set covers both; `tools/verify_hltv_fov_offsets.py`
 //! checks them against both installs' DLLs.
+//!
+//! ## A POV demo played as HLTV leaves the HUD's FOV at 0 (#1462)
+//!
+//! `Think` turns the table into the HUD's FOV, `gHUD.m_iFOV` (`gHUD+0x234`):
+//! in-eye the watched player's zoom, otherwise 90. DoD's `StudioDrawModel`
+//! skips the viewmodel while that FOV is under 90 (`client+0x49ed5`, the
+//! scoped-in case). `Think` runs from `HUD_UpdateClientData`, every frame of
+//! an HLTV demo, but not for a POV demo played with `dem_forcehltv 1`, where
+//! the recorder's own HUD messages still arrive: `ResetHUD` at his spawn and
+//! `YouDied` set the FOV to 0, `SetFOV` to his zoom. Measured on `tr2.dem`
+//! (PRE): the FOV sat at 0 from the recorder's spawn to his death and at 90
+//! from his `SetFOV 90` to his next spawn, and the watched player's gun was
+//! drawn exactly in the 90 stretches, whatever `ds_spec_match_pov` said.
+//! [`settle_hud_fov`] does `Think`'s job before the view is drawn.
+
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine;
 
@@ -69,6 +85,15 @@ pub const READ_BYTES: [u8; 4] = [0x8b, 0x44, 0x86, 0x70];
 /// count).
 pub const TABLE_OFFSET: usize = 0x70;
 pub const SLOTS: usize = 64;
+/// `gHUD.m_iFOV`'s offset in `CHud`, and `Think`'s in-eye store of the
+/// table's value there, `mov [esi+0x234], eax`.
+pub const HUD_FOV_OFFSET: usize = 0x234;
+pub const FOV_STORE_RVA: usize = 0x3_6d96;
+pub const FOV_STORE_BYTES: [u8; 6] = [0x89, 0x86, 0x34, 0x02, 0x00, 0x00];
+/// `Think`'s FOV for no zoom known.
+const NO_ZOOM: i32 = 90;
+/// The FOV `CHudDoDCommon::Draw` sets while a viewport panel is open.
+const MENU_FOV: i32 = 115;
 
 /// The table's address, from the thunk's bytes as loaded at `base`, or why
 /// they are not the analysed build's. `handler_ok` and `read_ok` say whether
@@ -103,7 +128,9 @@ fn table_address(
         ));
     }
     let ghud = word(GHUD_AT) as usize;
-    let end = SLOTS * 4 + TABLE_OFFSET;
+    // Everything read or written through `gHUD`: the table, and the HUD's
+    // FOV past it.
+    let end = (SLOTS * 4 + TABLE_OFFSET).max(HUD_FOV_OFFSET + 4);
     if ghud < base || ghud + end > base + image_size {
         return Err(format!(
             "the HLTV message thunk pushes {ghud:#x}, outside client.dll"
@@ -112,31 +139,44 @@ fn table_address(
     Ok(ghud + TABLE_OFFSET)
 }
 
-/// Sets every player's HLTV zoom back to "none known", as when the game
-/// starts. Called on the engine's thread (a console command, or `poll`).
-pub fn clear() -> Result<(), String> {
+/// The table's address in the loaded `client.dll`, once the thunk, the
+/// handler's store and `Think`'s read check out; with `fov_store`, also
+/// `Think`'s spectator FOV store ([`FOV_STORE_RVA`]).
+fn located_table(fov_store: bool) -> Result<usize, String> {
     let base =
         engine::client_module_base().ok_or_else(|| "client.dll is not loaded".to_string())?;
-    // Safety: `base` is client.dll's mapped image; every read is inside the
-    // module (its own code, at the analysed build's RVAs), and the table is
-    // written only once its address checks out, inside the image.
+    // Safety: `base` is client.dll's mapped image, and every read is inside
+    // the module (its own code, at the analysed build's RVAs).
     unsafe {
         let image_size = crate::pe::image_size(base as *mut u8)
             .ok_or_else(|| "client.dll has no readable PE header".to_string())?;
-        if HANDLER_RVA.max(READ_RVA) + 16 > image_size {
+        if HANDLER_RVA.max(READ_RVA).max(FOV_STORE_RVA) + 16 > image_size {
             return Err("client.dll is smaller than the analysed build".into());
         }
         let bytes =
             |rva: usize, len: usize| std::slice::from_raw_parts((base + rva) as *const u8, len);
-        let table = table_address(
+        if fov_store && bytes(FOV_STORE_RVA, FOV_STORE_BYTES.len()) != FOV_STORE_BYTES {
+            return Err(format!(
+                "CHud::Think's FOV store (+{FOV_STORE_RVA:#x}) is not the analysed build's"
+            ));
+        }
+        table_address(
             base,
             image_size,
             bytes(THUNK_RVA, CALL_END),
             bytes(STORE_RVA, STORE_BYTES.len()) == STORE_BYTES,
             bytes(READ_RVA, READ_BYTES.len()) == READ_BYTES,
-        )?;
-        std::ptr::write_bytes(table as *mut i32, 0, SLOTS);
+        )
     }
+}
+
+/// Sets every player's HLTV zoom back to "none known", as when the game
+/// starts. Called on the engine's thread (a console command, or `poll`).
+pub fn clear() -> Result<(), String> {
+    let table = located_table(false)?;
+    // Safety: `located_table` checked the address lies inside client.dll's
+    // image, where the table is plain `.data`.
+    unsafe { std::ptr::write_bytes(table as *mut i32, 0, SLOTS) };
     Ok(())
 }
 
@@ -145,6 +185,117 @@ pub fn clear_logged(why: &str) {
     if let Err(e) = clear() {
         unsafe { crate::debug::report(&format!("hltv_fov: could not clear ({why}): {e}")) };
     }
+}
+
+/// The FOV `Think` gives a spectator: the watched player's zoom from the
+/// table while in his eyes (`in_eye_target`, his entity index), else 90.
+/// `zoom_of` reads one table slot.
+fn spectator_fov(in_eye_target: Option<i32>, zoom_of: impl Fn(usize) -> i32) -> i32 {
+    in_eye_target
+        .and_then(|target| usize::try_from(target).ok())
+        .filter(|slot| (1..SLOTS).contains(slot))
+        .map(zoom_of)
+        .filter(|&zoom| zoom != 0)
+        .unwrap_or(NO_ZOOM)
+}
+
+/// Whether the HUD's FOV `current` is one only a message to the recorder can
+/// have left, which `Think` would have replaced with `spectator`. DoD's own
+/// menu FOV (`CHudDoDCommon::Draw`, while a viewport panel is open) is left
+/// alone: `Think` meets it in an HLTV demo too.
+fn needs_settling(current: i32, spectator: i32) -> bool {
+    current != spectator && current != MENU_FOV
+}
+
+/// Where `gHUD.m_iFOV` is, found once per session ([`located_table`]); 0
+/// until found, and [`HUD_FOV_REFUSED`] stops the search after a refusal.
+static HUD_FOV_AT: AtomicUsize = AtomicUsize::new(0);
+static HUD_FOV_REFUSED: AtomicBool = AtomicBool::new(false);
+/// How many times [`settle_hud_fov`] has put the FOV right this session.
+static SETTLED: AtomicU32 = AtomicU32::new(0);
+/// Lines [`settle_hud_fov`] writes to the log before it only counts.
+const SETTLED_LOG_LINES: u32 = 8;
+
+/// `gHUD.m_iFOV`'s address, or `None` when this isn't the analysed
+/// `client.dll` (logged once).
+fn hud_fov_address() -> Option<usize> {
+    let known = HUD_FOV_AT.load(Ordering::Relaxed);
+    if known != 0 {
+        return Some(known);
+    }
+    if HUD_FOV_REFUSED.load(Ordering::Relaxed) {
+        return None;
+    }
+    match located_table(true) {
+        Ok(table) => {
+            let at = table - TABLE_OFFSET + HUD_FOV_OFFSET;
+            HUD_FOV_AT.store(at, Ordering::Relaxed);
+            Some(at)
+        }
+        Err(why) => {
+            HUD_FOV_REFUSED.store(true, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!(
+                    "hltv_fov: the in-eye HUD FOV fix is off this session: {why}"
+                ))
+            };
+            None
+        }
+    }
+}
+
+/// Puts the HUD's FOV back to what `CHud::Think` gives a spectator, when a
+/// demo played as HLTV leaves it at a value `Think` would have replaced
+/// (#1462). Runs on the engine's thread once a frame, before the view is
+/// drawn; writes `gHUD.m_iFOV` and nothing else.
+///
+/// `Think` runs from `HUD_UpdateClientData`, which the engine does not call
+/// for a POV demo played with `dem_forcehltv 1`, while the recorder's own
+/// `ResetHUD`, `YouDied` and `SetFOV` messages still arrive and set the FOV to
+/// 0 or his zoom. DoD's `StudioDrawModel` (`client+0x49ed5`) skips the
+/// viewmodel while the FOV is under 90, so from the recorder's spawn to his
+/// death no gun is drawn in anyone's eyes. In an HLTV demo `Think` writes
+/// the same value every frame and this finds nothing to do.
+pub fn settle_hud_fov() {
+    let spectating = engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0);
+    if !spectating {
+        return;
+    }
+    let Some(fov_at) = hud_fov_address() else {
+        return;
+    };
+    let table = fov_at - HUD_FOV_OFFSET + TABLE_OFFSET;
+    // Safety: both inside client.dll's image (`table_address`'s bounds), plain
+    // `.data` the engine's thread owns; this runs on that thread.
+    unsafe {
+        let spectator = spectator_fov(crate::spectator_target::in_eye_target(), |slot| {
+            *(table as *const i32).add(slot)
+        });
+        let current = *(fov_at as *const i32);
+        if !needs_settling(current, spectator) {
+            return;
+        }
+        *(fov_at as *mut i32) = spectator;
+        let settled = SETTLED.fetch_add(1, Ordering::Relaxed) + 1;
+        if settled <= SETTLED_LOG_LINES {
+            crate::debug::report(&format!(
+                "hltv_fov: the HUD's FOV was {current} with no CHud::Think to reset it (a POV demo played as HLTV); set to {spectator}, so the in-eye gun draws ({settled} so far{})",
+                if settled == SETTLED_LOG_LINES {
+                    ", counting quietly from here"
+                } else {
+                    ""
+                }
+            ));
+        }
+    }
+}
+
+/// One line for `ds_debug_status`.
+pub fn status() -> String {
+    format!(
+        "the HUD's FOV put back for a POV demo played as HLTV {} time(s) this session",
+        SETTLED.load(Ordering::Relaxed)
+    )
 }
 
 #[cfg(test)]
@@ -172,6 +323,39 @@ mod tests {
         );
         // The bytes the analysis read: `e8 07 16 00 00`.
         assert_eq!(&thunk()[CALL_REL_AT..CALL_END], &[0x07, 0x16, 0x00, 0x00]);
+    }
+
+    /// `Think`'s spectator rule: the watched player's zoom in his eyes, 90
+    /// for no zoom known, out of his eyes, or a slot past the table.
+    #[test]
+    fn the_spectator_fov_is_thinks() {
+        let table = |slot: usize| if slot == 7 { 20 } else { 0 };
+        assert_eq!(spectator_fov(Some(7), table), 20);
+        assert_eq!(spectator_fov(Some(3), table), NO_ZOOM);
+        assert_eq!(spectator_fov(None, table), NO_ZOOM);
+        assert_eq!(spectator_fov(Some(0), |_| 20), NO_ZOOM);
+        assert_eq!(spectator_fov(Some(-1), |_| 20), NO_ZOOM);
+        assert_eq!(spectator_fov(Some(SLOTS as i32), |_| 20), NO_ZOOM);
+    }
+
+    /// The recorder's `ResetHUD`/`YouDied` 0 and his `SetFOV` zoom are put
+    /// right; `Think`'s own value and DoD's menu FOV are not touched.
+    #[test]
+    fn only_a_value_think_would_replace_is_settled() {
+        assert!(needs_settling(0, 90));
+        assert!(needs_settling(20, 90));
+        assert!(needs_settling(0, 20));
+        assert!(!needs_settling(90, 90));
+        assert!(!needs_settling(20, 20));
+        assert!(!needs_settling(MENU_FOV, 90));
+    }
+
+    /// The HUD's FOV sits past the table, so `gHUD` must leave room for it.
+    #[test]
+    fn the_hud_fov_must_be_inside_the_image() {
+        let ghud_end = 0x10_80b0 + HUD_FOV_OFFSET + 4;
+        assert!(table_address(BASE, ghud_end, &thunk(), true, true).is_ok());
+        assert!(table_address(BASE, ghud_end - 1, &thunk(), true, true).is_err());
     }
 
     #[test]
