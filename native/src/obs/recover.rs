@@ -36,13 +36,6 @@ pub struct OrphanReport {
     pub ours: bool,
 }
 
-impl OrphanReport {
-    /// Whether there is something worth offering to clean up.
-    pub fn actionable(&self) -> bool {
-        self.recording && self.ours
-    }
-}
-
 /// Whether a record directory could only have been set by this app.
 ///
 /// The test is the path shape, not a configured root, and that is deliberate:
@@ -149,8 +142,8 @@ mod tests {
     #[test]
     fn refuses_everything_else() {
         for path in [
-            r"C:\Users\chris\Videos",
-            r"C:\Users\chris\Videos\take0000",
+            r"C:\Users\someone\Videos",
+            r"C:\Users\someone\Videos\take0000",
             // The stream folder without a take folder above it.
             r"C:\all",
             // Right names, wrong order.

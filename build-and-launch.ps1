@@ -26,7 +26,10 @@ if ($frontendExit -ne 0) { exit $frontendExit }
 cargo build --release -p $ExeName --features tauri/custom-protocol
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# 5. Sign the binary to bypass WDAC
+# 5. Optional: on a PC that enforces WDAC (Windows Defender Application Control),
+# unsigned local builds are blocked. If a code-signing certificate named
+# LocalRustDev is in the current user's store, sign the binary with it.
+# Everywhere else this step does nothing.
 $cert = Get-Item Cert:\CurrentUser\My\* | Where-Object { $_.Subject -match 'LocalRustDev' } | Select-Object -First 1
 if ($cert -and (Test-Path $ExePath)) {
     Set-AuthenticodeSignature -Certificate $cert -FilePath $ExePath | Out-Null

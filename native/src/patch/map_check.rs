@@ -56,11 +56,6 @@ pub enum MapStatus {
 }
 
 impl MapStatus {
-    /// Whether anything derived from this map's geometry can be trusted.
-    pub fn geometry_is_trustworthy(&self) -> bool {
-        matches!(self, MapStatus::Ok { .. })
-    }
-
     /// Whether the demo can be played at all.
     pub fn is_playable(&self) -> bool {
         !matches!(self, MapStatus::Missing)
@@ -149,15 +144,17 @@ pub fn map_path(maps_dir: &Path, map_name: &str) -> PathBuf {
 
 /// The map library belonging to a given `hl.exe`.
 ///
-/// DoD's content sits beside the executable, so maps are `<hl.exe dir>/dod/maps`
-/// — and note that demos live *inside* `dod/`, one level below the exe. Deriving
+/// DoD's content sits beside the executable, so maps are
+/// `<hl.exe dir>/<game folder>/maps` (`dod` unless the Game folder setting says
+/// otherwise, #402) — and note that demos live *inside* the game folder, one
+/// level below the exe. Deriving
 /// this from a demo's own folder instead gives `dod/dod/maps`, which exists
 /// nowhere and fails silently.
 ///
 /// `None` when that does not resolve to a real directory, rather than handing
 /// back a path that can only fail later.
 pub fn maps_dir_for_exe(exe: &Path) -> Option<PathBuf> {
-    let dir = exe.parent()?.join("dod").join("maps");
+    let dir = crate::shared::paths::mod_dir_for_exe(exe)?.join("maps");
     dir.is_dir().then_some(dir)
 }
 
@@ -173,7 +170,9 @@ pub fn status_of(reference: &MapReference, maps_dir: &Path) -> MapStatus {
     match bsp::map_checksum_of_file(&path) {
         Ok(found) if found == expected => MapStatus::Ok { checksum: found },
         Ok(found) => MapStatus::WrongBuild { expected, found },
-        Err(reason) => MapStatus::Unreadable { reason },
+        Err(reason) => MapStatus::Unreadable {
+            reason: reason.to_string(),
+        },
     }
 }
 
@@ -243,10 +242,6 @@ mod tests {
             expected_checksum: None,
         };
         assert_eq!(status_of(&unstated, &maps), MapStatus::Unverifiable);
-        assert!(
-            !status_of(&unstated, &maps).geometry_is_trustworthy(),
-            "an unverified map must not be trusted for geometry"
-        );
     }
 
     #[test]

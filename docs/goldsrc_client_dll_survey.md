@@ -1,8 +1,8 @@
 # DoD 1.3 `client.dll`: a survey of what can be controlled
 
-A catalogue, not an implementation. Four features have been built against this
-binary — the HLTV animation fix, the gunshot fix, `dodstudio_deathmsg` and
-`dodstudio_objectives` — and each time the analysis went exactly as deep as the
+A catalogue, not an implementation. When this pass was written, four features
+had been built against this binary — the HLTV animation fix, the gunshot fix,
+`ds_hud_deathmsg` and `ds_hud_objectives` — and each time the analysis went exactly as deep as the
 feature needed and no wider. This is the wide pass: what else is in here, what
 controlling it would let a movie-maker do, and how much work each would be.
 
@@ -10,6 +10,21 @@ Opened as [issue #255](https://github.com/ccoventry/dod-studio/issues/255).
 Companion to `docs/goldsrc_client_dll_internals.md` (how the client library is
 entered at all), `docs/goldsrc_death_notices.md` (the kill feed) and
 `docs/goldsrc_objective_icons.md` (the objective HUD).
+
+**Status of the candidates below** (as of 2026-10; the sections keep their
+original "suggested task" wording):
+
+| Candidate | Built? | Command / module | Issue / PR |
+| --- | --- | --- | --- |
+| Hide or wrap any HUD element (§1) | yes, then retired to stock cvars and named settings | `ds_hud_hide_element` (retired), `hudelement.rs` (`ds_hud_hide_teammate_info`) | #265, PR #296, #342 |
+| Chat line cap, `SayText` (§3) | no | — | — |
+| Dump chosen user messages (§4) | yes | `ds_debug_msglog`, `msglog.rs` | #267 |
+| Move and size the overview map (§5) | yes | `ds_hud_overview_layout`, `overview_map.rs` | PR #303 |
+| Objective icons / timer position (§6) | yes | `ds_hud_objectives`, `objicons.rs` | #254, PR #263 |
+| The `+0x175c6c` VGUI panel (§6) | no | — | — |
+| `r_drawentities` / `cl_lw` quit check (§8) | handled by refusal, not hooked | `native/src/patch/cfg_scan.rs` | #205 |
+| Spectator bar (§10) | yes | `ds_spec_hide_bars`, `spectator_bars.rs`, `spectator_hud.rs` | #269, #328 |
+| Keep the spectator camera on one player (§10) | yes | `ds_spec_lock` / `ds_spec_target`, `spectator_follow.rs` | #206 |
 
 **Subject:** `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical across the
 stock, pre-Anniversary and post-Anniversary installs. Every RVA below is for
@@ -136,7 +151,8 @@ sound: walk the list from `gHUD+0`, and for each node compare `*(void**)element`
 against `module + <vftable RVA>` from the table above. That is an exact match on
 a value the compiler emitted, not a heuristic.
 
-> **Suggested task:** a `dodstudio_hudelement <name> <0|1>` command backed by the
+> **Suggested task (built as `ds_hud_hide_element`, #265, PR #296; retired in #342):** a
+> `dodstudio_hudelement <name> <0|1>` command backed by the
 > table above. It subsumes several separate feature requests (hide the ammo
 > counter, hide the status bar, hide the crosshair) into one mechanism, and it
 > is the cheapest thing in this document by a wide margin.
@@ -199,7 +215,7 @@ shipped code uses rather than one read off a header.
 | `CHudSayText`'s chat lines | `+0x45905` → `+0x190348` | 3072 bytes | **6 × 512** — six slots (see the two arrays below), 512 chars each |
 | …its per-line name colours | `+0x458ed` → `+0x190f48` | 6 dwords | one per line |
 | …its per-line name lengths | `+0x458f9` → `+0x190330` | 6 dwords | one per line |
-| `CHudDeathNotice`'s feed | `+0x2ae5d` → `+0x1765d8` | 780 bytes | 5 × 156 — **already raised to 127 by `dodstudio_deathmsg max`** |
+| `CHudDeathNotice`'s feed | `+0x2ae5d` → `+0x1765d8` | 780 bytes | 5 × 156 — **already raised to 127 by `ds_hud_deathmsg max`** |
 | `CHudMessage`'s slots | `+0x246bd` → *(this+0x14)* | 128 bytes | 16 × 8 — `maxHUDMessages` |
 | `CHudStatusIcons` | `+0x471ad` → *(this+0x14)* | 192 bytes | the icon slots |
 | `CHudAmmo`'s weapon list | `+0x274b3` → `+0x102108` | 21504 bytes | the `WEAPON` array |
@@ -217,8 +233,8 @@ second `deathmsg.rs`, and it needs its own verifier. *Risk:* medium; the
 failure mode is 40-ish writes into unrelated instructions, which is why
 `verify_deathmsg_offsets.py` exists and why a chat version would need the same.
 
-> **Suggested task:** `dodstudio_saytext max <5..N>` / `offset`, modelled on
-> `dodstudio_deathmsg`.
+> **Suggested task:** `ds_saytext max <5..N>` / `offset`, modelled on
+> `ds_hud_deathmsg`.
 
 ---
 
@@ -228,7 +244,7 @@ The complete table is `survey_client_dll.py messages`. The mechanism is already
 proven and needs no patching at all: `pfnHookUserMsg` **prepends** a fresh
 record and the engine's dispatcher stops at the first name match, so the newest
 hook wins and the game's own handler stays reachable by calling its thunk
-directly. That is how `dodstudio_deathmsg block` and `fake` work.
+directly. That is how `ds_hud_deathmsg block` and `fake` work.
 
 `CHud::Init` (`+0x21100`) registers 32 of them centrally; the rest belong to
 individual elements (see §1's table). The ones a movie-maker is most likely to
@@ -242,13 +258,13 @@ want:
 | `RoundState` / `TimeLeft` / `ClanTimer` | `+0x20c90` / `+0x20cb0` / `+0x2cb50` | round and match clock — a cut point for automated highlight selection |
 | `ScoreInfo` / `ScoreInfoLong` / `TeamScore` | `+0x20e60` / `+0x20e90` / `+0x20ec0` | live scoreboard state, without re-parsing the demo |
 | `StartProg` / `ProgUpdate` / `CancelProg` | `+0x2f680` / `+0x2f6c0` / `+0x2f6e0` | capture progress bars — when a flag cap starts, advances and aborts |
-| `HLTV` | `+0x20c50` | the engine telling the client it is an HLTV stream |
+| `HLTV` | `+0x20c50` | each player's zoom (and, with bit 7 set, health) in an HLTV stream, `[player, value]`; zooms kept in `gHUD+0x70`, `int[64]` (`hltv_fov.rs`, #830) |
 | `CurWeapon` | `+0x27120` | already used by `anim_fix`; listed so nobody hooks it twice |
 
 *Technique:* message hook. *Effort:* low per message. *Risk:* low — nothing is
 patched, and an unhandled message is forwarded untouched.
 
-**Built** as `dodstudio_debug_msglog <name>... | all | clear` (issue #267), covering
+**Built** as `ds_debug_msglog <name>... | all | clear` (issue #267), covering
 all 71, not just the eight above — the full name/thunk table this section's
 own tool derives. See `src/msglog.rs`.
 
@@ -267,7 +283,7 @@ computes two rectangles from `ScreenWidth`/`ScreenHeight` and caches them in
 
 `CHud::GetOverviewMapBounds` (`+0x22a60`, four out-params, `ret 0x10`) hands one
 of the two back depending on `CHud::OverviewMapMode` (`+0x228e0`, which returns
-`_cl_minimap`'s value while a spectator predicate holds and `gHUD`'s FOV field
+`_cl_minimap`'s value while the renderer is hardware (`IsHardware`) and `gHUD`'s FOV field
 is still 90), adding the `54 * ScreenHeight/480` spectator-bar offset to the
 full map's y. Callers: `CHudDeathNotice::Draw`, `CObjectiveIcons`' map path, and
 two more in the spectator GUI.
@@ -291,17 +307,18 @@ list — ten sites, found by their `fmul [1/480]`:
 | `+0x22a42` | `CHud::ComputeOverviewMapRects` | 2 | full map y |
 | `+0x22ac7` | `CHud::GetOverviewMapBounds` | 54 | the spectator-bar offset added to it |
 | `+0x2aeca` | `CHudDeathNotice::Draw` | 2 | kill feed y, overview-map path |
-| `+0x2af02` | `CHudDeathNotice::Draw` | 42 | kill feed y, spectating — **handled by `dodstudio_deathmsg offset`** |
+| `+0x2af02` | `CHudDeathNotice::Draw` | 42 | kill feed y, spectating — **handled by `ds_hud_deathmsg offset`** |
 | `+0x300a6` | `CObjectiveIcons::Draw` | 32 | the `clan_warmup_mode` VGUI panel at `+0x175c6c` |
-| `+0x3012d` | `CObjectiveIcons::Draw` | 54 | objective timer y — **`dodstudio_objectives timer`** |
-| `+0x3024e` | `CObjectiveIcons::Draw` | 2 / 54 | icon row y — **`dodstudio_objectives offset`** |
+| `+0x3012d` | `CObjectiveIcons::Draw` | 54 | objective timer y — **`ds_hud_objectives timer`** |
+| `+0x3024e` | `CObjectiveIcons::Draw` | 2 / 54 | icon row y — **`ds_hud_objectives offset`** |
 | `+0x308af` | `sub_0x306a0` | 54 | a second objective-icon path — it queries section 5 and reads `spec_pip`, like `Draw` does |
 | `+0x308e0` | `sub_0x306a0` | 2 | as above |
 | `+0x4c3a3` | `sub_0x4c250` | 20 | positions the same `+0x175c6c` VGUI panel as the `clan_warmup_mode` row |
 
-Two things worth taking from this. The `54` — DoD's spectator bar height in
-480-space — appears in **exactly four places**, and three of them are now
-controllable (`dodstudio_deathmsg offset`, and `dodstudio_objectives`'s two). The
+Two things worth taking from this. The `54` — the push DoD applies to the
+elements below the spectator bar, in 480-space (the bar itself is `64`; see
+`goldsrc-hooks/src/spectator_hud.rs`) — appears in **exactly four places**, and three of them are now
+controllable (`ds_hud_deathmsg offset`, and `ds_hud_objectives`'s two). The
 fourth, `+0x308af`, is the objective icons' overview-map path, which #254
 deliberately does not reach.
 
@@ -347,6 +364,53 @@ globals: once as a `pfnRegisterVariable` result and once as a
 `pfnGetCvarPointer` lookup. That is not a transcription slip — the client both
 registers them and looks them up again for the enforcement path.
 
+### Fog and atmosphere cvars (#1131)
+
+DoD's own "look" cvars, checked in demo playback on both movie installs
+(POV demos on dod_anzio, Brain account, grabs in `local\review-images\1129\`).
+Defaults and the archive flag come from each `pfnRegisterVariable` call; the
+effect comes from the client code that reads it.
+
+**Fog** is `RenderDoDFog` (`+0x2d410`), run each frame. `cl_fog` picks the mode:
+
+- `0`: no fog. Both movie installs' `config.cfg` set this.
+- `1` (the default): OpenGL linear fog, `glFogi(GL_FOG_MODE, GL_LINEAR)`,
+  from `cl_fog_start` to `cl_fog_end`. Its colour is a **fixed mid grey**
+  (`0.5, 0.5, 0.5`), so `cl_fog_red/green/blue` do nothing here, and
+  `cl_fog_density` does nothing either, since linear fog ignores it. Seen on
+  both builds: `cl_fog 1; cl_fog_start 50; cl_fog_end 900` greys out the far
+  end of a street and the sky. The 25th Anniversary renderer draws it too.
+- `2`: the engine's own fog through `pTriAPI->Fog(colour, start, end, 1)`,
+  the only mode that uses the colour cvars. Nothing showed on the
+  pre-Anniversary build with `cl_fog_end 900` and red colour, or after adding
+  `cl_fog_density`. So the colour cvars are not offered.
+
+The fog stands down when `cl_fog_start` or `cl_fog_end` is below 0, and in some spectator states (`gHUD+0x6e264` >= 3). It is
+also cut while zoomed, through a second cvar lookup at `gHUD+0x6e280`. All
+seven are archived (`config.cfg`). Defaults: `cl_fog 1`, start `10.0`, end
+`3500.0`, density `0.0`, colour `192 192 192`.
+
+**The others**, all accepted in playback with no clamp (the console reads back
+the set value). Their effect is from the code that reads each one; it was not
+checked by eye:
+
+- `cl_weatherdis` (archived, default `1700`): `CDoDParticle::Create`
+  (`+0x4c9b0`) makes no particle farther than this from the player, for the
+  effects created with its distance check. Values under 100 are raised to 100.
+  The variable is next to the weather globals (`g_iWeatherType`, #1129).
+- `cl_bulletejects` (archived, default `1`): the shell-casing ejects in the
+  weapon fire events (`+0x314a2`, `+0x315a2`); 0 skips them.
+- `cl_dynamiclights` (archived, default `1`): checked before each dynamic
+  light the client makes; 0 skips them.
+- `cl_corpsestay` (archived, default `10`): how long a dead body (the
+  `ClCorpse` temp entity, callbacks at `+0x4a30`) lies before it sinks into
+  the ground, in seconds. It is read when the body is made and again each
+  frame.
+- `cl_particlefx` (archived): 0 turns particle effects off; DoD's rain and snow only run at 2 (the weather updater skips below 2, `client+0x4c942`, found in #1129). Both movie installs' `config.cfg` set 1.
+- `room_off` (engine, `hw.dll`): 1 turns off the room reverb (DSP).
+- `max_rubble` (not archived, default `240`): its reader was not traced, so
+  it is not offered.
+
 ---
 
 ## 8. `CHud::Redraw`, in full
@@ -358,7 +422,7 @@ in issue #205; the complete order of operations is:
 1. Advance `m_flTime`/`m_flTimeDelta` (`gHUD+0x1c`..`+0x2c`), clamping a
    negative delta to zero. **This is the clock the kill feed's expiry compares
    against, and it does not advance while the console is down** — the finding
-   that made `dodstudio_deathmsg fake` need a re-stamp.
+   that made `ds_hud_deathmsg fake` need a re-stamp.
 2. If `spec_scoreboard`'s value changed since the cached copy at `+0x18a854`,
    toggle the VGUI scoreboard.
 3. Enforce five cvars, two of which end by **quitting the game**
@@ -383,15 +447,16 @@ Stated plainly, in the habit `docs/goldsrc_death_notices.md` set.
 - **`CHudBase` vftable slot 6.** A seventh virtual DoD added between `Reset` and
   `InitHUDData`. Every element inherits `CHudBase`'s stub (`+0x21970`); nothing
   overrides it, so there is no body to read and no call site was found.
-- **`+0x195e40`**, the spectator predicate `CHud::OverviewMapMode` calls. A
-  `.data` function pointer, zero in the image, that `client.dll`'s code only ever
+- **`+0x195e40`**, the function `CHud::OverviewMapMode` calls. A `.data`
+  function pointer, zero in the image, that `client.dll`'s code only ever
   *calls* — there is no store to it anywhere. It is filled by the 46-dword
-  `rep movsd` at `+0x362f3`, which copies an engine interface handed to
-  `client.dll` during initialisation into `+0x195da0`; the predicate is that
-  table's slot 40. **Which interface that is has not been established.** It is
-  not `gEngfuncs` — that is a separate 135-dword copy at `+0x176388` whose
-  `IsSpectateOnly` slot DoD calls 35 times by the ordinary route — so this is a
-  second mechanism, not the same one.
+  `rep movsd` at `+0x362f3`, which copies the engine's studio interface handed
+  to `client.dll` during initialisation into `+0x195da0`; it is that table's
+  slot 40. A 46-slot table is `engine_studio_api_t`, whose slot 40 is
+  `IsHardware` (inferred from the slot count, #897), so this is not a spectator
+  predicate, as earlier versions of this note said. It is not `gEngfuncs` — that
+  is a separate 135-dword copy at `+0x176388` whose `IsSpectateOnly` slot DoD
+  calls 35 times by the ordinary route.
 - **The objective timer's x.** Four literal digit positions (10, 24, 44, 58) plus
   a literal 0 for the background sprite, in `CObjectiveIcons::DrawDigit`'s
   callers. Five sites rather than one value; reachable but not as one setting.
@@ -442,7 +507,7 @@ interface pointer `Draw`'s 45 bytes and several other functions below all go
 through) whether to show, and if so tells the panel to draw itself. **The bar
 is a VGUI2 panel, not a `CHudBase`-drawn sprite** — confirms, from the
 disassembly rather than only from live testing, why #296 found hiding
-`spectator` via the `CHudBase::Draw`-slot mechanism (`dodstudio_hide_hudelement
+`spectator` via the `CHudBase::Draw`-slot mechanism (`ds_hud_hide_element
 spectator`) changed nothing: that mechanism can only stub this 45-byte
 gatekeeper, and the gatekeeper was never drawing anything to begin with.
 
@@ -453,15 +518,15 @@ A ten-case switch on `DRC_CMD - 1` (its own jump table at `+0x38370`),
 matching [`common/hltv.h`](https://github.com/FWGS/hlsdk-portable/blob/master/common/hltv.h)'s
 `DRC_CMD_*` values `1..10` exactly (case index 1, `DRC_CMD_EVENT`, is the
 sole writer of the spectator-target global; case index 2, `DRC_CMD_MODE`,
-is where `SetMode` gets called from a director message rather than a
+is where `SetModes` gets called from a director message rather than a
 keypress — see #206's own write-up on that issue for the full trace). Not
 `HandleButtonsDown`; that one is elsewhere (below), and is the *input*
-path into `SetMode`, where `DirectorMessage` is the *network* path. This
+path into `SetModes`, where `DirectorMessage` is the *network* path. This
 was the second time the `function_end` padding-heuristic trap mattered for
 `CHudSpectator` in one sitting; nothing past this point relies on it
 without independent confirmation from the raw bytes.
 
-### The mode global has exactly one writer: `SetMode` (`+0x38850`)
+### The mode global has exactly one writer: `SetModes` (`+0x38850`)
 
 `(int mode, ...)`, thiscall. Every one of the four writes to `+0xe88d4` is a
 case in one `switch (mode)` inside this function, `mode` clamped to `1..4`
@@ -475,14 +540,14 @@ carries a null-terminated table at `+0xcee35` — `"#OBS_IN_EYE"`,
 Half-Life SDK's `CHudSpectator::GetModeName`-shaped switch verbatim,
 [`cl_dll/hud_spectator.cpp`](https://github.com/FWGS/hlsdk-portable/blob/master/cl_dll/hud_spectator.cpp)),
 alongside the literal string `"usage:  spec_mode <Main Mode> [<Inset Mode>]"`
-— confirming `SetMode`'s second parameter (previously guessed as a target)
+— confirming `SetModes`'s second parameter (previously guessed as a target)
 is actually **`iNewInsetMode`** (the `spec_pip` inset window's own mode),
 matching what `docs/goldsrc_spectator_camera` memory already said about
 `spec_mode`'s second argument. `OBS_NONE=0, OBS_CHASE_LOCKED=1,
 OBS_CHASE_FREE=2, OBS_ROAMING=3, OBS_IN_EYE=4, OBS_MAP_FREE=5,
 OBS_MAP_CHASE=6` is the standard SDK enum
 ([`pm_shared/pm_shared.h`](https://github.com/FWGS/hlsdk-portable/blob/master/pm_shared/pm_shared.h)) —
-DoD's `SetMode` clamping to `1..4` means it supports every mode except the
+DoD's `SetModes` clamping to `1..4` means it supports every mode except the
 two map ones, consistent with DoD drawing its overview map through a
 separate VGUI2 mechanism (§5) rather than an observer mode.
 
@@ -509,7 +574,7 @@ or re-invoking with the same value.
 ### `HandleButtonsDown` (`+0x386a0`) drives it from input
 
 Reads a button-state bitmask (`bl`/`ebx`) and, gated behind bit `0x2`,
-computes the *next* mode in a fixed cycle and calls `SetMode` with it:
+computes the *next* mode in a fixed cycle and calls `SetModes` with it:
 
 ```
 current == 1 -> next = 2
@@ -521,7 +586,7 @@ anything else (0, unset) -> next = 2
 
 i.e. **the cycle order is 1 -> 2 -> 4 -> 3 -> 1**, not numeric order — bit
 `0x2` is presumably the edge for whatever key steps through the interface
-layouts. `SetMode` is then called unconditionally near the end of the
+layouts. `SetModes` is then called unconditionally near the end of the
 function on every path that reaches that far, passing either the freshly
 cycled mode or whatever `edi` held going in when bit `0x2` was not set — so
 this looks like a per-frame re-assert, not a one-shot keypress handler, but
@@ -549,15 +614,15 @@ input, not confirmed which physical bind maps to which bit.
    **Update:** `docs/goldsrc_spectator_bars.md` picks this back up and gets
    further — `CDoDSpectatorGUI` *is* real, RTTI-confirmed, and constructed at
    runtime; `+0x1a9d564` turns out to be a much bigger shared interface
-   (141 xrefs, offsets past `+0x368`) and not the panel itself. Still not
-   finished — the container object's own address isn't resolved yet — but the
-   open questions are narrower than "out of scope."
+   (141 xrefs, offsets past `+0x368`) and not the panel itself. **Resolved:**
+   `ds_spec_hide_bars` (#328, `spectator_bars.rs`) hides the panel
+   by filtering `PaintTraverse`, not through this interface.
 3. **Whether the `54` is reachable at its source.** Yes, more directly than
    §6 states: all four `54 * ScreenHeight / 480` sites read the *same* single
    `.rdata` float, `+0xab7a8` (confirmed by byte search — one address, four
    `fmul` xrefs, matching §6's site count exactly). One 4-byte `.rdata` write
    would rescale the spectator-bar compensation everywhere at once, instead of
-   `dodstudio_deathmsg`/`dodstudio_objectives` each patching their own call
+   `ds_hud_deathmsg`/`ds_hud_objectives` each patching their own call
    site. Not implemented — changing a shared constant changes DoD's own
    spectator-bar height assumption too, which is a real behaviour change, not
    a pure offset control like the existing per-element ones.
@@ -573,7 +638,7 @@ input, not confirmed which physical bind maps to which bit.
 python goldsrc-hooks/tools/survey_client_dll.py elements   # CHudSpectator's row now reads 45, not 879
 ```
 
-The rest (`SetMode`, `HandleButtonsDown`, the mode-dispatch table, the button
+The rest (`SetModes`, `HandleButtonsDown`, the mode-dispatch table, the button
 bitmask) was read by hand from `+0x38030`..`+0x38a70` and is not yet folded
 into any automated report section — there is no general "decode a switch
 table and diff its cases" pass, unlike the RTTI-driven element/message/cvar

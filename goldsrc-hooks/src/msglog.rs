@@ -1,4 +1,4 @@
-//! `dodstudio_debug_msglog` — dump chosen DoD user messages and their payloads to
+//! `ds_debug_msglog` — dump chosen DoD user messages and their payloads to
 //! the log, forwarded to the game untouched.
 //!
 //! Every investigation of "what does the client actually receive, and when"
@@ -11,9 +11,10 @@
 //!
 //! The same one `deathmsg`'s `block`/`fake` already rely on:
 //! `pfnHookUserMsg` **prepends** a fresh record rather than overwriting the
-//! existing one, so the engine's by-name dispatcher stops at the newest
-//! entry and the game's own handler stays reachable by calling its thunk
-//! directly. **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
+//! existing one, so the engine's by-number dispatcher -- the one every
+//! message from the server goes through -- stops at the newest entry and the
+//! game's own handler stays reachable by calling its thunk directly.
+//! **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
 //!
 //! One handler, [`hooked_msg`], is registered for every message DoD's
 //! `client.dll` hooks -- the full 71-entry name/thunk table below, derived
@@ -34,7 +35,7 @@
 //! back, is suppressed -- most of these resend the same state every tick
 //! while nothing changes, and a log that is one entry per actual change is
 //! the one worth reading. The command's own replies (what's now being
-//! watched) still go to the console, like every other `dodstudio_*` command.
+//! watched) still go to the console, like every other `ds_*` command.
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
@@ -150,7 +151,7 @@ fn find_thunk(name: &str) -> Option<usize> {
         .map(|&(_, rva)| rva)
 }
 
-/// What `dodstudio_debug_msglog` is currently set to watch.
+/// What `ds_debug_msglog` is currently set to watch.
 enum Wanted {
     None,
     All,
@@ -161,7 +162,7 @@ static WANTED: Mutex<Wanted> = Mutex::new(Wanted::None);
 
 /// True whenever [`WANTED`] is not [`Wanted::None`] -- lets [`poll`] skip the
 /// lock on the overwhelmingly common case (logging off) without changing
-/// behaviour, the same shape `commands.rs`' other `poll_*` helpers use.
+/// behaviour, the same shape `commands/poll.rs`' other `poll_*` helpers use.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The last payload logged per message name, for the identical-repeat
@@ -192,8 +193,17 @@ fn hex_dump(bytes: &[u8]) -> String {
     out
 }
 
-/// `client.dll`'s own handler for `name`, which we forward to.
-fn original_thunk(name: &str) -> Option<engine::UserMsgHookFn> {
+/// Whether this is currently re-prepending its own handler for `name` --
+/// `map_text` and `clan_text` stand aside when it is, so the two don't take
+/// turns at the head of the engine's list every frame (see `map_text.rs`'s
+/// module doc).
+pub(crate) fn watching(name: &str) -> bool {
+    ACTIVE.load(Ordering::Relaxed) && is_wanted(name)
+}
+
+/// `client.dll`'s own handler for `name`, which we forward to. Also
+/// `map_text`'s, for `HudText`.
+pub(crate) fn original_thunk(name: &str) -> Option<engine::UserMsgHookFn> {
     let base = engine::client_module_base()?;
     let rva = find_thunk(name)?;
     // Safety: rva is a code offset into the module taken from `MESSAGES`,
@@ -235,6 +245,70 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     } else {
         Some(unsafe { CStr::from_ptr(name) }.to_string_lossy())
     };
+    // Logged above either way; hidden here when ds_hud_hide_map_text says
+    // so, since this record sits in front of map_text's own while both want
+    // HudText.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::map_text::MESSAGE))
+    {
+        let payload: &[u8] = if size > 0 && !buf.is_null() {
+            unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }
+        } else {
+            &[]
+        };
+        if crate::map_text::hide(payload) {
+            return 1;
+        }
+    }
+    // ds_hud_deathmsg clear_on restart watches RoundState, and stands aside
+    // while this does.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("RoundState"))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::deathmsg::on_round_state(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
+    // ds_sound_restore_gunshots reads CurWeapon's clip the same way, for a
+    // POV recorder's own rounds (pov_recorder_shots).
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::pov_recorder_shots::MESSAGE))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::pov_recorder_shots::on_cur_weapon(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
+    // Same for ds_hud_hide_clan_text's three messages, and
+    // ds_hud_hide_center_text's TextMsg, which clan_text's filter asks.
+    if let Some(result) = name_str
+        .as_deref()
+        .and_then(|n| crate::clan_text::filter(n, size, buf))
+    {
+        return result;
+    }
+    // And ds_player_change_name's SayText, whose handler stands aside while
+    // this one watches it.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("SayText"))
+        && let Some(result) = crate::player_names::say_text(size, buf)
+    {
+        return result;
+    }
+    // And for ds_hud_hide_voice_menus' ShowMenu.
+    if let Some(result) = name_str
+        .as_deref()
+        .and_then(|n| crate::voice_menus::filter(n, size, buf))
+    {
+        return result;
+    }
     match name_str.as_deref().and_then(original_thunk) {
         Some(original) => unsafe { original(name, size, buf) },
         // No thunk on record for this name (should not happen -- we only
@@ -279,7 +353,7 @@ pub fn poll() {
     }
 }
 
-/// The command's own reply to a bare `dodstudio_debug_msglog` -- always something,
+/// The command's own reply to a bare `ds_debug_msglog` -- always something,
 /// including "logging nothing", since a query should never come back empty.
 fn status() -> String {
     match WANTED.lock() {
@@ -292,9 +366,9 @@ fn status() -> String {
     }
 }
 
-/// Folded into `dodstudio_debug_status`. `None` while logging is off, so that
+/// Folded into `ds_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `dodstudio_spec_match_pov`) can treat this the same way -- see `commands.rs`.
+/// `ds_spec_match_pov`) can treat this the same way -- see `commands/status.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;
@@ -310,26 +384,6 @@ fn usage() -> String {
          \x20 {COMMAND} all                everything (noisy; expect a large log)\n\
          \x20 {COMMAND} clear              stop logging\n"
     )
-}
-
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return Vec::new();
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(
-                unsafe { CStr::from_ptr(ptr) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .collect()
 }
 
 /// Resolves a list of typed tokens against [`MESSAGES`], case-insensitively.
@@ -354,7 +408,7 @@ fn resolve_names(rest: &[String]) -> Result<Vec<String>, Vec<String>> {
 
 fn dispatch(argv: &[String]) -> String {
     // argv[0] is the command name itself, so a bare invocation (or an empty
-    // argv, which args() returns when engfuncs isn't resolved yet) is a
+    // argv, which cmd_list::argv() returns when engfuncs isn't resolved yet) is a
     // query -- not `&argv[1..]`, which panics on an empty slice and aborts
     // the whole process under this DLL's release `panic = "abort"` profile.
     let rest = if argv.len() > 1 { &argv[1..] } else { &[] };
@@ -380,7 +434,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of message names, replacing whatever was
     // wanted before -- the same "each call restates the whole set" shape
-    // `dodstudio_deathmsg block <id>...` uses.
+    // `ds_hud_deathmsg block <id>...` uses.
     let canonical = match resolve_names(rest) {
         Ok(names) => names,
         Err(unknown) => {
@@ -400,7 +454,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("msglog: {} -> {}", argv.join(" "), reply.trim())) };
@@ -460,7 +514,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // dodstudio_hide_hudelement's own fix (commit 3e44cd7) applied.
+        // the since-retired ds_hud_hide_element's fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }
@@ -480,7 +534,7 @@ mod tests {
 
     #[test]
     fn a_genuinely_empty_argv_is_also_a_status_query() {
-        // args() returns Vec::new() whenever engine::engfuncs() isn't
+        // cmd_list::argv() returns Vec::new() whenever engine::engfuncs() isn't
         // resolved yet, not just a one-element argv0-only vec -- `&argv[1..]`
         // panics on that, and this DLL ships with `panic = "abort"`.
         let reply = dispatch(&[]);

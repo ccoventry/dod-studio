@@ -22,8 +22,10 @@ hlcr_config.json
 # resolved at runtime by render_manager.rs's resolve_ffmpeg(): user override,
 # then `local/tools/ffmpeg.exe` beside the *installed* binary (under /local/,
 # already ignored below), then bare `ffmpeg` on PATH. Nothing ever read this
-# folder, and tauri.conf.json never bundled it.
-/tools/
+# folder, and tauri.conf.json never bundled it. tools/agent-kit/ is the one
+# tracked folder in it: dev-only test helpers (its README).
+/tools/*
+!/tools/agent-kit/
 
 # === Demo Files ===
 # Guard against demos landing anywhere outside /demos/ (gitignored scratch
@@ -37,6 +39,10 @@ hlcr_config.json
 *.dem
 !/dem-patch/src/tests/*.dem
 /dem-patch/src/tests/demo2test.dem
+# The real recording CI tests parse (see test-fixtures/README.md).
+!/test-fixtures/ci_fixture.dem
+# The OBS capture test's demo, bundled with the app (see test-fixtures/README.md).
+!/test-fixtures/dodstudio_benchmark_anzio.dem
 
 # === IDEs and Editors ===
 .vs/
@@ -72,3 +78,5 @@ studio/src-tauri/gen/
 
 # === Claude Code harness state ===
 .claude/scheduled_tasks.lock
+# Personal, per-machine instructions Claude Code loads beside CLAUDE.md
+CLAUDE.local.md

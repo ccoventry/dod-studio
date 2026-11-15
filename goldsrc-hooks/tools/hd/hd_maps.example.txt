@@ -1,5 +1,5 @@
 # Which maps get HD map textures and skies. Copy this file to hd_maps.txt in
-# the game's dod\dodstudio_hd folder and list the maps you make movies on;
+# the game's dod_addon\dodstudio_hd folder and list the maps you make movies on;
 # build_all.py then skips every other map. Without hd_maps.txt, every map in
 # dod\maps is built.
 #

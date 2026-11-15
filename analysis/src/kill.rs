@@ -1,11 +1,19 @@
 use crate::{
-    AnalyzerEvent, AnalyzerState, mortality::MortalityState, player::PlayerGlobalId, time::GameTime,
+    AnalyzerEvent, AnalyzerState, mortality::MortalityState, player::PlayerGlobalId,
+    time::GameTime, wire_index::wire_slot,
 };
 use dod::{RoundState, Team, UserMessage, Weapon};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct KillStreak {
     pub kills: Vec<(GameTime, Weapon, PlayerGlobalId)>,
+    /// The slot (0-based, DeathMsg's killer index − 1) the player held when
+    /// these kills happened: what capture spectates (#573, #706). A player
+    /// who left before the demo ended has no slot then, and one who came back
+    /// may hold another, so the end-of-demo connection can't stand in for it.
+    /// `None` for a streak with no kills, or one cached before it was kept.
+    #[serde(default)]
+    pub slot: Option<u8>,
 }
 
 pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
@@ -13,11 +21,11 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
         let current_time = state.current_time.clone();
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index(death_msg.killer_client_index)
         } else {
             None
         };
-        let victim = state.find_player_by_client_index(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index(death_msg.victim_client_index);
 
         let is_teamkill = match (killer, victim) {
             (Some(fst), Some(snd)) => fst.team == snd.team,
@@ -26,9 +34,15 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
 
         let victim_id = victim.map(|v| v.id.clone());
 
-        let victim = state.find_player_by_client_index_mut(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index_mut(death_msg.victim_client_index);
 
         if let Some(victim) = victim {
+            // A life with no kills yet has no record. Give it one first, so
+            // a grenade or rocket that kills after this death finds the life
+            // it was fired in below, not the next one.
+            if victim.kill_streaks.is_empty() {
+                victim.kill_streaks.push(KillStreak::default());
+            }
             // End the victim's current streak by adding a new record
             victim.kill_streaks.push(KillStreak::default());
         }
@@ -38,32 +52,43 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
         }
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index_mut(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index_mut(death_msg.killer_client_index)
         } else {
             None
         };
 
         if let (Some(killer), Some(v_id)) = (killer, victim_id) {
+            // The killer was found by this index, so it is their slot now.
+            let Some(killer_slot) = wire_slot(death_msg.killer_client_index) else {
+                return;
+            };
             if killer.kill_streaks.is_empty() {
                 killer.kill_streaks.push(KillStreak::default());
             }
 
-            let streak = if killer.is_dead() && death_msg.weapon.is_grenade() {
-                if killer.kill_streaks.len() >= 2 {
-                    let prev_streak_index = killer.kill_streaks.len() - 2;
-                    killer.kill_streaks.get_mut(prev_streak_index)
-                } else {
-                    killer.kill_streaks.iter_mut().last()
-                }
+            let index = if killer.is_dead()
+                && death_msg.weapon.is_projectile()
+                && killer.kill_streaks.len() >= 2
+            {
+                killer.kill_streaks.len() - 2
             } else {
-                killer.kill_streaks.iter_mut().last()
+                killer.kill_streaks.len() - 1
+            };
+            // A streak is one slot's: kills from a slot the player reconnected
+            // into start a streak of their own, so each one's slot is right.
+            let index = match killer.kill_streaks[index].slot {
+                Some(slot) if slot != killer_slot => {
+                    killer.kill_streaks.push(KillStreak::default());
+                    killer.kill_streaks.len() - 1
+                }
+                _ => index,
             };
 
-            if let Some(streak) = streak {
-                streak
-                    .kills
-                    .push((current_time, death_msg.weapon.clone(), v_id));
-            }
+            let streak = &mut killer.kill_streaks[index];
+            streak.slot = Some(killer_slot);
+            streak
+                .kills
+                .push((current_time, death_msg.weapon.clone(), v_id));
         }
     } else if let AnalyzerEvent::UserMessage(UserMessage::RoundState(RoundState::Reset)) = event {
         // Active kill streaks must be terminated when round is reset (i.e., after all objectives are captured)
@@ -76,11 +101,11 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
 pub fn use_weapon_breakdown_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) = event {
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index(death_msg.killer_client_index)
         } else {
             None
         };
-        let victim = state.find_player_by_client_index(death_msg.victim_client_index - 1);
+        let victim = state.find_player_by_wire_index(death_msg.victim_client_index);
 
         let is_teamkill = match (killer, victim) {
             (Some(fst), Some(snd)) => fst.team == snd.team,
@@ -88,7 +113,7 @@ pub fn use_weapon_breakdown_updates(state: &mut AnalyzerState, event: &AnalyzerE
         };
 
         let killer = if death_msg.killer_client_index > 0 {
-            state.find_player_by_client_index_mut(death_msg.killer_client_index - 1)
+            state.find_player_by_wire_index_mut(death_msg.killer_client_index)
         } else {
             None
         };
@@ -119,7 +144,7 @@ pub fn use_teamkill_and_suicide_updates(state: &mut AnalyzerState, event: &Analy
     let AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) = event else {
         return;
     };
-    let Some(victim_slot) = death_msg.victim_client_index.checked_sub(1) else {
+    let Some(victim_slot) = wire_slot(death_msg.victim_client_index) else {
         return;
     };
 
@@ -132,7 +157,9 @@ pub fn use_teamkill_and_suicide_updates(state: &mut AnalyzerState, event: &Analy
         return;
     }
 
-    let killer_slot = death_msg.killer_client_index - 1;
+    let Some(killer_slot) = wire_slot(death_msg.killer_client_index) else {
+        return;
+    };
     let team_of = |slot| {
         state
             .find_player_by_client_index(slot)
@@ -186,6 +213,119 @@ mod tests {
             .map(|p| (p.name.as_str(), p.teamkills, p.suicides))
             .collect();
         assert_eq!(stats, [("axis1", 1, 0), ("axis2", 0, 1), ("allies1", 0, 1)]);
+    }
+
+    /// One DeathMsg through mortality and kill streaks, as `run_analyzers`
+    /// feeds them.
+    fn streak_death(state: &mut AnalyzerState, killer: u8, victim: u8, weapon: u8) {
+        let Ok(msg) = UserMessage::new(b"DeathMsg", &[killer, victim, weapon]) else {
+            panic!("DeathMsg did not parse");
+        };
+        let event = AnalyzerEvent::UserMessage(msg);
+        crate::mortality::with_mortality_detection(state, &event);
+        use_kill_streak_updates(state, &event);
+    }
+
+    fn streak_sizes(player: &crate::Player) -> Vec<usize> {
+        player.kill_streaks.iter().map(|s| s.kills.len()).collect()
+    }
+
+    #[test]
+    fn a_grenade_kill_after_dying_in_a_first_life_without_kills_stays_in_that_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 2, 1, 10); // allies kills axis: axis's first life ends, no kills
+        streak_death(&mut state, 1, 2, 14); // axis's stick grenade kills allies after that
+        assert_eq!(streak_sizes(&state.players[0]), [1, 0]);
+    }
+
+    #[test]
+    fn a_grenade_kill_after_dying_joins_the_life_it_was_thrown_in() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 1, 2, 10); // axis kills allies
+        streak_death(&mut state, 2, 1, 10); // allies kills axis
+        streak_death(&mut state, 1, 2, 14); // axis's grenade lands after
+        assert_eq!(streak_sizes(&state.players[0]), [2, 0]);
+    }
+
+    /// #1091: the laurateam-3v3-tensions-allies case, a bazooka round
+    /// landing 0.66 s after its shooter died.
+    #[test]
+    fn a_rocket_kill_after_dying_joins_the_life_it_was_fired_in() {
+        for rocket in [29, 30, 31] {
+            let mut state = AnalyzerState::default();
+            for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+                let mut player = Player::new_mock(slot, name);
+                player.team = Some(team);
+                state.players.push(player);
+            }
+            streak_death(&mut state, 1, 2, rocket); // axis kills allies
+            streak_death(&mut state, 2, 1, 24); // allies kills axis
+            streak_death(&mut state, 1, 2, rocket); // axis's rocket lands after
+            assert_eq!(streak_sizes(&state.players[0]), [2, 0], "weapon {rocket}");
+        }
+    }
+
+    #[test]
+    fn a_rocket_kill_after_dying_in_a_first_life_without_kills_stays_in_that_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 2, 1, 10); // allies kills axis: no kills yet
+        streak_death(&mut state, 1, 2, 30); // axis's panzerschreck round lands after
+        assert_eq!(streak_sizes(&state.players[0]), [1, 0]);
+    }
+
+    #[test]
+    fn a_hitscan_kill_after_dying_still_opens_the_next_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 1, 2, 10); // axis kills allies
+        streak_death(&mut state, 2, 1, 24); // allies kills axis
+        streak_death(&mut state, 1, 2, 10); // a K98 kill: axis has respawned
+        assert_eq!(streak_sizes(&state.players[0]), [1, 1]);
+    }
+
+    #[test]
+    fn a_streak_keeps_the_slot_its_kills_were_scored_from() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [
+            (3, "axis", Team::Axis),
+            (1, "allies", Team::Allies),
+            (2, "allies2", Team::Allies),
+        ] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 4, 2, 10); // axis (slot 3) kills allies
+        // axis reconnects into slot 5 without dying, and kills again.
+        state.players[0].connection = crate::Connection::Connected { client_id: 5 };
+        streak_death(&mut state, 6, 3, 10);
+        streak_death(&mut state, 6, 2, 10);
+        state.players[0].connection = crate::Connection::Disconnected;
+        let streaks: Vec<_> = state.players[0]
+            .kill_streaks
+            .iter()
+            .map(|s| (s.slot, s.kills.len()))
+            .collect();
+        assert_eq!(streaks, [(Some(3), 1), (Some(5), 2)]);
     }
 
     #[test]

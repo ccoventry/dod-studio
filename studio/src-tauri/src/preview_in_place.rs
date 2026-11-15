@@ -1,0 +1,130 @@
+//! Launch Preview without patching (#434, step 2), the Studio half.
+//!
+//! When the game will run with the goldsrc-hooks DLL and can reach the demo
+//! by a relative path, or by its full path on another drive with a hook DLL
+//! from #779 on (`native::preview_in_place`), Launch Preview plays the
+//! original demo and opens the in-game DoD Studio window's Highlights tab,
+//! which lists the highlights with Go (#565). Nothing is written to disk. In
+//! every other case Launch Preview patches a `<stem>_preview.dem` with a
+//! bookmark per highlight, as before.
+
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use native::patch::PatcherConfig;
+use native::preview_in_place::{
+    OPEN_HIGHLIGHTS, hook_plays_other_drives, preview_lines, viewdemo_arg_any_drive,
+};
+use native::sys::game_remote::{Sent, send_console_commands};
+
+/// How long a launched game has to open its command pipe.
+const PIPE_WAIT: Duration = Duration::from_secs(90);
+/// After the pipe answers, how long before the window is opened: the pipe
+/// opens while the engine is still starting.
+const SETTLE: Duration = Duration::from_secs(5);
+/// After `viewdemo`, how long before the Highlights tab is opened. With
+/// `ds_ui_viewdemo_in_panel 1`, `viewdemo` opens the window on its
+/// Playback tab a frame after the command runs, so a tab command sent in
+/// the same message loses to it.
+const TAB_AFTER: Duration = Duration::from_secs(3);
+
+/// The `viewdemo` argument for previewing `demo` in place (the highlights'
+/// demo, or its trimmed copy, #207), or `None` when this preview has to be
+/// patched.
+pub fn plan(config: &PatcherConfig, dod_dir: &Path, demo: &Path) -> Option<String> {
+    let dll = config.goldsrc_hooks_dll()?;
+    if !demo.is_file() {
+        return None;
+    }
+    // The DLL file is only read for a demo on another drive.
+    viewdemo_arg_any_drive(dod_dir, demo, false)
+        .or_else(|| viewdemo_arg_any_drive(dod_dir, demo, hook_plays_other_drives(&dll)))
+}
+
+/// Starts the game, then, once it takes commands, plays the original demo and
+/// opens the Highlights tab.
+///
+/// Not `+viewdemo` on the launch line: the engine cuts its command line at
+/// every '-', and a relative path to a demo elsewhere almost always has one
+/// ("Half-Life", "dod-studio", most demo names). Over the pipe, the line is
+/// the console's own, where a quoted argument keeps its dashes.
+pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
+    let before = crate::game_process_manager::running_game_pids();
+    let mut cmd = config.build_hlae_process("");
+    let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
+        .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
+    native::log_markdown(&crate::messages::preview::preview_launched_in_place(arg));
+    crate::game_process_manager::watch_for_error_dialogs(app, launcher);
+    let lines = preview_lines(arg);
+    std::thread::spawn(move || {
+        if let Some(pid) = send_when_ready(&before, &lines) {
+            open_highlights_later(pid);
+        }
+    });
+    Ok(())
+}
+
+/// Opens the Highlights tab in `pid`'s game once `viewdemo` has opened the
+/// window (`TAB_AFTER`).
+fn open_highlights_later(pid: u32) {
+    std::thread::sleep(TAB_AFTER);
+    let sent = send_console_commands(pid, &[OPEN_HIGHLIGHTS.to_string()]);
+    native::log_markdown(&crate::messages::preview::preview_sent_to_game(
+        OPEN_HIGHLIGHTS,
+        pid,
+        &sent,
+    ));
+}
+
+/// Sends the preview to a running game. `Ok(Some(line))` when one took it,
+/// `Ok(None)` when none takes commands.
+pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String> {
+    let lines = preview_lines(arg);
+    let viewdemo = lines.last().cloned().unwrap_or_default();
+    for &pid in pids {
+        match send_console_commands(pid, &lines)
+            .map_err(crate::messages::failed_to_send_to_running_game)?
+        {
+            Sent::Delivered => {
+                native::log_markdown(&crate::messages::preview::preview_sent_to_running_game(
+                    &viewdemo, pid,
+                ));
+                std::thread::spawn(move || open_highlights_later(pid));
+                return Ok(Some(viewdemo));
+            }
+            Sent::NotListening => continue,
+        }
+    }
+    Ok(None)
+}
+
+/// Waits for the game launched after `before` was listed to open its pipe,
+/// then sends it `lines`. Returns the game's pid once they were sent. Also
+/// used by the patched Launch Preview (#662).
+pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
+    let started = Instant::now();
+    while started.elapsed() < PIPE_WAIT {
+        std::thread::sleep(Duration::from_millis(500));
+        let fresh: Vec<u32> = crate::game_process_manager::running_game_pids()
+            .into_iter()
+            .filter(|pid| !before.contains(pid))
+            .collect();
+        for pid in fresh {
+            // An empty message checks the pipe without running anything.
+            if matches!(send_console_commands(pid, &[]), Ok(Sent::Delivered)) {
+                // The pipe opens before the hook has wrapped `viewdemo`, which
+                // is what lets the Highlights tab know the demo.
+                std::thread::sleep(SETTLE);
+                let sent = send_console_commands(pid, lines);
+                native::log_markdown(&crate::messages::preview::preview_sent_to_game(
+                    lines.join("; "),
+                    pid,
+                    &sent,
+                ));
+                return matches!(sent, Ok(Sent::Delivered)).then_some(pid);
+            }
+        }
+    }
+    native::log_markdown(crate::messages::preview::PREVIEW_PIPE_NEVER_OPENED);
+    None
+}

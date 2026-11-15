@@ -106,9 +106,21 @@ fn mutate(src: &[u8], seed: u64) -> (Strategy, Vec<u8>) {
     (strategy, out)
 }
 
+/// Parses a mutant strictly, then tolerantly (#811, what the analyzer reads
+/// with), so a crash in either costs this child. Exit 0: the strict parse
+/// read it; 10: it refused it and so did the tolerant one; 12: it refused it
+/// and the tolerant parse read part of it; 11: a caught panic in either.
 fn parse_one(path: &str) -> ! {
     let bytes = std::fs::read(path).expect("child: read mutant");
     let res = std::panic::catch_unwind(|| dem::open_demo_from_bytes(&bytes));
+    let tolerant = std::panic::catch_unwind(|| {
+        dem::types::Demo::parse_from_bytes_tolerant(&bytes, dem::types::MessageDataParseMode::Parse)
+            .is_ok()
+    });
+    let Ok(read_part) = tolerant else {
+        println!("PANIC (tolerant)");
+        std::process::exit(11)
+    };
     match res {
         Ok(Ok(_)) => {
             println!("OK");
@@ -116,7 +128,7 @@ fn parse_one(path: &str) -> ! {
         }
         Ok(Err(e)) => {
             println!("ERR {}", first_line(&e.to_string()));
-            std::process::exit(10)
+            std::process::exit(if read_part { 12 } else { 10 })
         }
         Err(_) => {
             println!("PANIC");
@@ -213,7 +225,7 @@ fn main() {
     let scratch = std::env::temp_dir().join(format!("dem_mangle_{}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("scratch dir");
 
-    let (mut ok, mut err, mut panicked) = (0u64, 0u64, 0u64);
+    let (mut ok, mut err, mut partial, mut panicked) = (0u64, 0u64, 0u64, 0u64);
     let mut sites: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let mut aborts: Vec<(u64, Strategy, i32)> = Vec::new();
     let mut kept: Vec<PathBuf> = Vec::new();
@@ -232,6 +244,7 @@ fn main() {
         match code {
             0 => ok += 1,
             10 => err += 1,
+            12 => partial += 1,
             11 => panicked += 1,
             other => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -261,7 +274,7 @@ fn main() {
                 }
             }
         }
-        if code != 0 && code != 10 && code != 11 {
+        if !matches!(code, 0 | 10 | 11 | 12) {
             // keep the mutant
         } else {
             let _ = std::fs::remove_file(&mutant);
@@ -274,7 +287,7 @@ fn main() {
 
     println!();
     println!(
-        "ok {ok}  err {err}  caught-panic {panicked}  ABORTS {}",
+        "ok {ok}  err {err} (tolerant read part of {partial})  caught-panic {panicked}  ABORTS {}",
         aborts.len()
     );
     if !sites.is_empty() {

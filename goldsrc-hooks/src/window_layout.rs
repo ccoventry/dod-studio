@@ -2,9 +2,9 @@
 //! bar, the events list, the Load Demo window, Options and the rest
 //! (issue #408):
 //!
-//! - `dodstudio_resizable_windows 1`: every one of them can be resized by
+//! - `ds_ui_resizable_windows 1`: every one of them can be resized by
 //!   its edges and corners, like the console.
-//! - `dodstudio_remember_window_layout 1`: each one comes back where it was
+//! - `ds_ui_remember_layout 1`: each one comes back where it was
 //!   last left, at the size it was left, after the game restarts.
 //!
 //! ## Why neither is a `.res` setting
@@ -43,7 +43,9 @@
 //!   lays itself out.
 //! - **Remembered:** each time a window becomes visible, it is moved to where
 //!   it was saved under its module and panel name (and resized, when it is
-//!   resizable) -- every time, not just the first, because the VCR bar comes
+//!   resizable, by as much as it had been resized from its `.res` size, so
+//!   another install's layout of the same window keeps its own rows, #1020)
+//!   -- every time, not just the first, because the VCR bar comes
 //!   back centred whenever it is closed and reopened, by `viewdemo <demo>` or
 //!   a bare `viewdemo` (tested live). While it stays open its place is
 //!   recorded, and written to `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt`
@@ -54,66 +56,32 @@
 //! everything else goes through the vgui2 interfaces. Each DLL is named by PE
 //! timestamp and image size, and anything else is refused.
 //! `tools/verify_window_layout.py` checks every slot and address against both
-//! movie installs. Both settings default to 0, so nothing changes until asked.
+//! movie installs. Both settings default to 1: a window you can resize, that
+//! opens where you left it, is a win for everyone.
 
 // The addresses are only used by the 32-bit build; a host build compiles them
 // for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
-pub const RESIZABLE_NAME: &str = console_name!("resizable_windows");
-pub const REMEMBER_NAME: &str = console_name!("remember_window_layout");
+pub const RESIZABLE_NAME: &str = console_name!("ui_resizable_windows");
+pub const REMEMBER_NAME: &str = console_name!("ui_remember_layout");
 
-/// The fallback path's flags, when the cvars could not be registered.
-pub static RESIZABLE: AtomicBool = AtomicBool::new(false);
-pub static REMEMBER: AtomicBool = AtomicBool::new(false);
-static RESIZABLE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static REMEMBER_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once the two cvars are registered.
-pub fn set_cvars(resizable: *mut CvarSPartial, remember: *mut CvarSPartial) {
-    RESIZABLE_CVAR.store(resizable, Ordering::Release);
-    REMEMBER_CVAR.store(remember, Ordering::Release);
-}
-
-fn flag(cvar: &AtomicPtr<CvarSPartial>, fallback: &AtomicBool) -> bool {
-    let cvar = cvar.load(Ordering::Acquire);
-    if cvar.is_null() {
-        fallback.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
+/// The two cvars, or their defaults (on) when they could not be
+/// registered.
+pub static RESIZABLE: Setting = Setting::new(RESIZABLE_NAME, true);
+pub static REMEMBER: Setting = Setting::new(REMEMBER_NAME, true);
 
 fn resizable() -> bool {
-    flag(&RESIZABLE_CVAR, &RESIZABLE)
+    RESIZABLE.on()
 }
 
 fn remember() -> bool {
-    flag(&REMEMBER_CVAR, &REMEMBER)
-}
-
-/// For the fallback toggle commands' bare-name query.
-pub fn resizable_status() -> String {
-    if resizable() {
-        "GameUI's windows can be resized".to_string()
-    } else {
-        "only the windows the game makes resizable can be resized".to_string()
-    }
-}
-
-pub fn remember_status() -> String {
-    if remember() {
-        "GameUI's windows come back where they were left".to_string()
-    } else {
-        "GameUI's windows open where the game puts them".to_string()
-    }
+    REMEMBER.on()
 }
 
 /// One DLL build: its identity.
@@ -253,6 +221,58 @@ pub(crate) fn fit_rect(
     (r.x, r.y, r.w, r.h)
 }
 
+/// [`fit_rect`], except that the control always takes all the height the
+/// window gains, whatever its share of the design height. For a tab's list:
+/// by the half rule alone, the Demos tab's (114 of a design height a little
+/// over 228) stretched on pre-Anniversary and stayed 5 rows tall on the
+/// Anniversary build, whose tab came out a few pixels taller (#612).
+pub(crate) fn fit_rect_tall(
+    child: (i32, i32, i32, i32),
+    design: (i32, i32),
+    now: (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = child;
+    let (x, w) = fit_axis(x, w, design.0, now.0);
+    (x, y, w, (h + now.1 - design.1).max(1))
+}
+
+/// Up to this much room past a tab's controls is the tab's own margin, not
+/// space the layout left empty on purpose.
+const MAX_SLACK: i32 = 120;
+/// The margin a tab's `.res` keeps past its last control.
+const LAYOUT_MARGIN: i32 = 8;
+
+/// The design and current tab size to fit a tab's controls against, measured
+/// from where its controls end rather than from the tab's own edge (#609).
+///
+/// A tab can come out taller or wider than its `.res` was drawn for: the
+/// 25th Anniversary build's tabs do (#612). The extra room then sits past the
+/// last control, and [`fit_axis`]'s "near the far edge" test stops seeing the
+/// bottom row as near the bottom: the console's input line stayed put while
+/// its history stretched. Taking that room off both sizes keeps a layout
+/// that fills its tab filling it. A layout that ends well short of its tab
+/// (more than [`MAX_SLACK`] past it, like the Studio tab's two rows) is left
+/// as drawn.
+pub(crate) fn content_frame(
+    controls: &[(i32, i32, i32, i32)],
+    design: (i32, i32),
+    now: (i32, i32),
+) -> ((i32, i32), (i32, i32)) {
+    let right = controls.iter().map(|c| c.0 + c.2).max().unwrap_or(design.0);
+    let bottom = controls.iter().map(|c| c.1 + c.3).max().unwrap_or(design.1);
+    let axis = |extent: i32, design: i32, now: i32| {
+        let slack = design - (extent + LAYOUT_MARGIN);
+        if slack > 0 && slack <= MAX_SLACK {
+            (design - slack, (now - slack).max(1))
+        } else {
+            (design, now)
+        }
+    };
+    let (dw, nw) = axis(right, design.0, now.0);
+    let (dh, nh) = axis(bottom, design.1, now.1);
+    ((dw, dh), (nw, nh))
+}
+
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
 /// `Frame::PerformLayout` places itself. In GameUI they have no name at all
 /// (listed live on both builds, 2026-10-01), while every control a `.res`
@@ -261,8 +281,41 @@ fn frame_part(name: &str) -> bool {
     name.is_empty() || name.starts_with("frame_")
 }
 
-/// `module/name<TAB>x y w h`, one window per line.
-fn parse(text: &str) -> BTreeMap<String, Rect> {
+/// One window's saved place, and the size its `.res` laid it out for when it
+/// was saved.
+///
+/// The file is shared by every install, and the same window can have a
+/// different layout in each: PRE's demo bar is 128 tall (the user's own
+/// `DemoPlayerDialog.res`), POST's is 96. Its size alone, saved on one and
+/// put back on the other, squashed PRE's bar by 32 px, and the fit then moved
+/// the button row onto the time slider's and hid the time under it (#1020).
+/// So the size is put back as a change from the design, not as it stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Saved {
+    at: Rect,
+    /// `None` on lines written before #1020, and for windows that lay
+    /// themselves out (the console), whose design isn't recorded.
+    design: Option<(i32, i32)>,
+}
+
+/// The size to give a window being put back at `saved`, whose `.res` laid it
+/// out for `design` this time (`None` when its design isn't recorded):
+/// the design plus however much it had been resized from the design it was
+/// saved with. A line that doesn't say what that design was gives no size
+/// when this window's design is known, since it may come from another layout;
+/// the window keeps its own, and the next save records it properly.
+fn restored_size(saved: Saved, design: Option<(i32, i32)>) -> Option<(i32, i32)> {
+    match (saved.design, design) {
+        (Some((dw, dh)), Some((w, h))) => {
+            Some(((w + saved.at.w - dw).max(1), (h + saved.at.h - dh).max(1)))
+        }
+        (None, Some(_)) => None,
+        (_, None) => Some((saved.at.w, saved.at.h)),
+    }
+}
+
+/// `module/name<TAB>x y w h [design_w design_h]`, one window per line.
+fn parse(text: &str) -> BTreeMap<String, Saved> {
     let mut out = BTreeMap::new();
     for line in text.lines() {
         let Some((key, numbers)) = line.split_once('\t') else {
@@ -272,20 +325,28 @@ fn parse(text: &str) -> BTreeMap<String, Rect> {
             .split_whitespace()
             .filter_map(|v| v.parse().ok())
             .collect();
-        if let [x, y, w, h] = n[..]
-            && w > 0
-            && h > 0
-        {
-            out.insert(key.to_string(), Rect { x, y, w, h });
+        let (at, design) = match n[..] {
+            [x, y, w, h] => (Rect { x, y, w, h }, None),
+            [x, y, w, h, dw, dh] if dw > 0 && dh > 0 => (Rect { x, y, w, h }, Some((dw, dh))),
+            _ => continue,
+        };
+        if at.w > 0 && at.h > 0 {
+            out.insert(key.to_string(), Saved { at, design });
         }
     }
     out
 }
 
-fn render(saved: &BTreeMap<String, Rect>) -> String {
+fn render(saved: &BTreeMap<String, Saved>) -> String {
     saved
         .iter()
-        .map(|(key, r)| format!("{key}\t{} {} {} {}\n", r.x, r.y, r.w, r.h))
+        .map(|(key, s)| {
+            let r = s.at;
+            match s.design {
+                Some((dw, dh)) => format!("{key}\t{} {} {} {} {dw} {dh}\n", r.x, r.y, r.w, r.h),
+                None => format!("{key}\t{} {} {} {}\n", r.x, r.y, r.w, r.h),
+            }
+        })
         .collect()
 }
 
@@ -376,7 +437,7 @@ mod hook {
     struct State {
         install: Install,
         frame: u64,
-        saved: Option<BTreeMap<String, Rect>>,
+        saved: Option<BTreeMap<String, Saved>>,
         windows: BTreeMap<Vpanel, Window>,
         changed_at: Option<u64>,
     }
@@ -670,23 +731,32 @@ mod hook {
                     if let Some(&want) = saved.get(&window.key) {
                         let (mut sw, mut sh) = (0, 0);
                         screen(api.surface, &mut sw, &mut sh);
-                        let at = on_screen(want, sw, sh);
-                        if api.sizeable(frame) {
-                            set_size(api.panel, vp, at.w, at.h);
+                        let at = on_screen(want.at, sw, sh);
+                        let size = restored_size(want, window.design.as_ref().map(|d| d.size))
+                            .filter(|_| api.sizeable(frame));
+                        if let Some((w, h)) = size {
+                            set_size(api.panel, vp, w, h);
                             if let Some(design) = &window.design {
                                 api.fit_children(vp, design);
                             }
                         }
                         set_pos(api.panel, vp, at.x, at.y);
+                        let size = match size {
+                            Some((w, h)) => format!("{w}x{h}"),
+                            None => "at its own size".to_string(),
+                        };
                         crate::debug::report(&format!(
-                            "window_layout: put {} back at {},{} {}x{}",
-                            window.key, at.x, at.y, at.w, at.h
+                            "window_layout: put {} back at {},{} {size}",
+                            window.key, at.x, at.y
                         ));
                     }
                     continue;
                 }
-                let now = api.rect(vp);
-                if now.w > 0 && now.h > 0 && saved.get(&window.key) != Some(&now) {
+                let now = Saved {
+                    at: api.rect(vp),
+                    design: window.design.as_ref().map(|d| d.size),
+                };
+                if now.at.w > 0 && now.at.h > 0 && saved.get(&window.key) != Some(&now) {
                     saved.insert(window.key.clone(), now);
                     state.changed_at = Some(state.frame);
                 }
@@ -763,43 +833,172 @@ pub fn poll() {
 mod tests {
     use super::*;
 
+    /// #609: the Console tab, drawn for 536x240, came out 60 px taller. Its
+    /// input line must still follow the bottom when the window grows, and
+    /// the history above it stretch.
+    #[test]
+    fn a_taller_tab_still_keeps_the_bottom_row_at_the_bottom() {
+        let controls = [(8, 6, 520, 196), (8, 208, 436, 24), (452, 208, 76, 24)];
+        let (design, now) = content_frame(&controls, (536, 300), (536, 400));
+        assert_eq!(design, (536, 240));
+        assert_eq!(now, (536, 340));
+        assert_eq!(fit_rect(controls[1], design, now), (8, 308, 436, 24));
+        assert_eq!(fit_rect(controls[0], design, now), (8, 6, 520, 296));
+        // Without it, the line stays put and the history runs under it.
+        assert_eq!(
+            fit_rect(controls[1], (536, 300), (536, 400)),
+            (8, 208, 436, 24)
+        );
+    }
+
+    #[test]
+    fn a_layout_that_fills_its_tab_is_unchanged() {
+        let controls = [(8, 6, 520, 226)];
+        assert_eq!(
+            content_frame(&controls, (536, 240), (700, 500)),
+            ((536, 240), (700, 500))
+        );
+    }
+
+    /// The Studio tab's two rows end far above its bottom on purpose: its
+    /// height is left as drawn. (Its width ends 40 px short, which is margin.)
+    #[test]
+    fn a_short_layout_is_left_as_drawn() {
+        let controls = [(8, 8, 160, 24), (8, 44, 480, 24)];
+        let ((_, design_h), (_, now_h)) = content_frame(&controls, (536, 240), (536, 400));
+        assert_eq!((design_h, now_h), (240, 400));
+    }
+
+    #[test]
+    fn a_tab_list_takes_the_height_whatever_its_share() {
+        // Under half the design height: the half rule leaves it alone...
+        assert_eq!(fit_rect((8, 106, 520, 96), (536, 240), (900, 600)).3, 96);
+        // ...the list rule doesn't, and keeps its top and the width rule.
+        let r = fit_rect_tall((8, 106, 520, 96), (536, 240), (900, 600));
+        assert_eq!(r, (8, 106, 520 + 364, 96 + 360));
+        // Shrinking never goes below a pixel.
+        assert_eq!(fit_rect_tall((8, 106, 520, 96), (536, 240), (536, 10)).3, 1);
+    }
+
     #[test]
     fn the_layout_file_round_trips() {
         let mut saved = BTreeMap::new();
         saved.insert(
             "GameUI/DemoPlayerDialog".to_string(),
-            Rect {
-                x: 10,
-                y: -4,
-                w: 700,
-                h: 120,
+            Saved {
+                at: Rect {
+                    x: 10,
+                    y: -4,
+                    w: 700,
+                    h: 120,
+                },
+                design: Some((464, 96)),
             },
         );
         saved.insert(
             "GameUI/GameConsole".to_string(),
-            Rect {
-                x: 0,
-                y: 0,
-                w: 640,
-                h: 480,
+            Saved {
+                at: Rect {
+                    x: 0,
+                    y: 0,
+                    w: 640,
+                    h: 480,
+                },
+                design: None,
             },
         );
         assert_eq!(parse(&render(&saved)), saved);
+        assert!(render(&saved).contains("GameUI/DemoPlayerDialog\t10 -4 700 120 464 96\n"));
     }
 
     #[test]
     fn a_bad_line_is_skipped_not_fatal() {
-        let parsed = parse("junk\nGameUI/A\t1 2 3\nGameUI/B\t1 2 0 5\nGameUI/C\t1 2 3 4\n");
+        let parsed = parse(
+            "junk\nGameUI/A\t1 2 3\nGameUI/B\t1 2 0 5\nGameUI/C\t1 2 3 4\n\
+             GameUI/D\t1 2 3 4 5\nGameUI/E\t1 2 3 4 0 9\nGameUI/F\t1 2 3 4 5 6 7\n",
+        );
         assert_eq!(parsed.len(), 1);
         assert_eq!(
             parsed["GameUI/C"],
-            Rect {
-                x: 1,
-                y: 2,
-                w: 3,
-                h: 4
+            Saved {
+                at: Rect {
+                    x: 1,
+                    y: 2,
+                    w: 3,
+                    h: 4
+                },
+                design: None,
             }
         );
+    }
+
+    /// #1020: the demo bar saved on POST (464x96, its own size) and put back
+    /// on PRE, where the user's layout is 464x128, keeps PRE's 128.
+    #[test]
+    fn a_window_saved_from_another_layout_keeps_its_own_size() {
+        let saved = |w, h, design| Saved {
+            at: Rect {
+                x: 66,
+                y: 285,
+                w,
+                h,
+            },
+            design,
+        };
+        assert_eq!(
+            restored_size(saved(464, 96, Some((464, 96))), Some((464, 128))),
+            Some((464, 128))
+        );
+        // Resized on POST: the same change carries over.
+        assert_eq!(
+            restored_size(saved(600, 110, Some((464, 96))), Some((464, 128))),
+            Some((600, 142))
+        );
+        // The same layout gets exactly what was saved.
+        assert_eq!(
+            restored_size(saved(600, 110, Some((464, 96))), Some((464, 96))),
+            Some((600, 110))
+        );
+        // Shrunk below a pixel never happens.
+        assert_eq!(
+            restored_size(saved(10, 10, Some((464, 128))), Some((100, 50))),
+            Some((1, 1))
+        );
+    }
+
+    /// A line from before #1020 doesn't say which layout it was saved from:
+    /// a window whose design is known keeps its own size (the squashed PRE
+    /// bar again otherwise); one that lays itself out, like the console,
+    /// still gets the saved size.
+    #[test]
+    fn an_old_line_resizes_only_windows_without_a_design() {
+        let old = Saved {
+            at: Rect {
+                x: 66,
+                y: 285,
+                w: 464,
+                h: 96,
+            },
+            design: None,
+        };
+        assert_eq!(restored_size(old, Some((464, 128))), None);
+        assert_eq!(restored_size(old, None), Some((464, 96)));
+        let new = Saved {
+            design: Some((464, 96)),
+            ..old
+        };
+        assert_eq!(restored_size(new, None), Some((464, 96)));
+    }
+
+    /// What #1020 looked like: the bar's rows in a 128-tall layout squeezed
+    /// to 96. The button row (64) lands on the slider's row (32) and the time
+    /// label with it; the slider, 64 px from the bottom, stays.
+    #[test]
+    fn squeezing_the_pre_bar_puts_the_buttons_on_the_slider_row() {
+        let row = |y, h| fit(Rect { x: 12, y, w: 24, h }, (464, 128), (464, 96)).y;
+        assert_eq!(row(32, 32), 32);
+        assert_eq!(row(64, 24), 32);
+        assert_eq!(row(96, 24), 64);
     }
 
     #[test]

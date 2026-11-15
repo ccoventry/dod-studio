@@ -131,29 +131,6 @@ pub fn atlas_path(dir: &Path, key: &MapKey) -> PathBuf {
     dir.join(key.file_name())
 }
 
-/// Unions one map's coordinates across several stores.
-///
-/// The intended shape is one writable store fed by this user's own captures
-/// plus any number of read-only ones — a store shipped with the app, or a
-/// pooled community store dropped in by the updater. Union is the whole merge
-/// rule: every entry is an independent claim that a surface exists at a
-/// coordinate, so two stores can never contradict each other, only cover
-/// different ground. Deduplication happens on the shared grid.
-pub fn load_all(dirs: &[PathBuf], key: &MapKey) -> Vec<[f32; 3]> {
-    let mut cells: BTreeMap<Cell, [f32; 3]> = BTreeMap::new();
-    for dir in dirs {
-        for p in load(dir, key) {
-            if cells.len() >= MAX_ATLAS_COORDS {
-                break;
-            }
-            if let Some(c) = to_cell(&p) {
-                cells.entry(c).or_insert(p);
-            }
-        }
-    }
-    cells.into_values().collect()
-}
-
 /// Reads one map's stored coordinates. A missing, unreadable or malformed file
 /// is an empty store, not an error: the flush works without one and fills it in
 /// on the way past.
@@ -163,10 +140,7 @@ pub fn load(dir: &Path, key: &MapKey) -> Vec<[f32; 3]> {
         return Vec::new();
     };
     let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
-        crate::log_markdown(&format!(
-            "⚠️ **Decal atlas unreadable** at `{}` — ignoring it for this run.",
-            path.display()
-        ));
+        crate::log_markdown(&crate::messages::decal_atlas_unreadable(path.display()));
         return Vec::new();
     };
 
@@ -174,10 +148,8 @@ pub fn load(dir: &Path, key: &MapKey) -> Vec<[f32; 3]> {
     // so a hand-copied or renamed file cannot silently apply to another build.
     let stored_sum = doc.get("checksum").and_then(|v| v.as_u64());
     if stored_sum != Some(key.checksum as u64) {
-        crate::log_markdown(&format!(
-            "⚠️ **Decal atlas checksum mismatch** at `{}` — the map has been rebuilt since these \
-             coordinates were recorded, so they are ignored.",
-            path.display()
+        crate::log_markdown(&crate::messages::decal_atlas_checksum_mismatch(
+            path.display(),
         ));
         return Vec::new();
     }
@@ -268,10 +240,10 @@ pub fn merge_and_save(
 
 fn write(dir: &Path, key: &MapKey, cells: &BTreeMap<Cell, [f32; 3]>, stats: &AtlasStats) {
     if let Err(e) = std::fs::create_dir_all(dir) {
-        crate::log_markdown(&format!(
-            "⚠️ **Decal atlas not saved** — could not create `{}`: {}",
+        crate::log_markdown(&crate::messages::decal_atlas_not_saved(
+            "create",
             dir.display(),
-            e
+            e,
         ));
         return;
     }
@@ -297,19 +269,19 @@ fn write(dir: &Path, key: &MapKey, cells: &BTreeMap<Cell, [f32; 3]>, stats: &Atl
         return;
     };
     if let Err(e) = std::fs::write(&tmp, text.as_bytes()) {
-        crate::log_markdown(&format!(
-            "⚠️ **Decal atlas not saved** — could not write `{}`: {}",
+        crate::log_markdown(&crate::messages::decal_atlas_not_saved(
+            "write",
             tmp.display(),
-            e
+            e,
         ));
         return;
     }
     if let Err(e) = std::fs::rename(&tmp, &path) {
         let _ = std::fs::remove_file(&tmp);
-        crate::log_markdown(&format!(
-            "⚠️ **Decal atlas not saved** — could not replace `{}`: {}",
+        crate::log_markdown(&crate::messages::decal_atlas_not_saved(
+            "replace",
             path.display(),
-            e
+            e,
         ));
         return;
     }

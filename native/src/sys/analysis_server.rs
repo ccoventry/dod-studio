@@ -1,6 +1,6 @@
 //! Studio analyses demos for the game (#565).
 //!
-//! The in-game DoD Studio window's Killstreaks tab needs a demo's analysis.
+//! The in-game DoD Studio window's Highlights tab needs a demo's analysis.
 //! The game is a 32-bit process, and the pre-Anniversary one has under 1 GB
 //! of address space left, while an analysis peaks at about 12 times the
 //! demo's size: a big demo doesn't fit. So while Studio runs, it serves a
@@ -13,41 +13,100 @@
 //! One request per connection, text lines:
 //!
 //! - the game: `analyze <absolute path to the .dem>`
-//! - Studio: `progress <0-100>` while it reads, then `done` or
-//!   `failed <reason>`.
+//! - Studio: `progress <0-100>` while it reads, then `cache v<N>` and `done`,
+//!   or `failed <reason>`.
+//!
+//! `cache v<N>` is the analyzer cache version Studio saved the result in
+//! (`analysis::cache::SCHEMA_VERSION`). A hook DLL built for another version
+//! reads another folder and would find nothing, so it says so instead of
+//! reporting the result missing (#684). A hook from before the line ignores
+//! it, as it ignores any line it doesn't know.
 //!
 //! The pipe takes local clients only, and a request only ever reads a `.dem`
 //! file and writes its cache entry.
 //!
-//! The hook DLL's side is `goldsrc-hooks/src/streaks.rs`; [`PIPE_NAME`] must
-//! match its `STUDIO_PIPE` to the character.
+//! A line starting `review ` is the in-game Review tab asking Studio to
+//! review the demo it has loaded instead (#1142); `game_review_requests`
+//! answers it on the same connection.
+//!
+//! ## Names
+//!
+//! Each Studio serves the pipe under its own name, and the first one open
+//! also under the plain [`PIPE_NAME`], so two Studios never answer each
+//! other's game (#1235, `sys::studio_pipe`).
+//!
+//! The hook DLL's side is `goldsrc-hooks/src/studio_pipe.rs`;
+//! [`PIPE_NAME`](crate::sys::analysis_server::PIPE_NAME) must match its
+//! `PLAIN_PIPE` to the character.
 
 use std::ffi::c_void;
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::io::FromRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+/// The plain name: asked by a game nothing named a pipe for, and by a hook
+/// DLL from before #1235.
 pub const PIPE_NAME: &str = r"\\.\pipe\dodstudio-analyzer";
 
 /// The longest request line read: a path, with room to spare.
 const MAX_REQUEST: u64 = 8192;
 
-static STARTED: AtomicBool = AtomicBool::new(false);
+/// How often a Studio that found the plain name taken tries it again, so it
+/// takes it over once the Studio holding it closes.
+const PLAIN_RETRY: Duration = Duration::from_secs(5);
 
-/// Starts serving the pipe on a thread of its own, once per process. Another
-/// Studio already serving it keeps it; this one then serves nothing.
+static STARTED: AtomicBool = AtomicBool::new(false);
+static SERVES_PLAIN: AtomicBool = AtomicBool::new(false);
+
+/// Starts serving this Studio's own pipe and, while no other Studio holds
+/// it, the plain one, each on a thread of its own; once per process.
 pub fn start() {
     if STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
+    let own = super::studio_pipe::instance_pipe();
+    crate::log_markdown(&crate::messages::analysis_server_serving(&own));
     let _ = std::thread::Builder::new()
         .name("analysis-server".into())
-        .spawn(|| serve(PIPE_NAME));
+        .spawn(move || {
+            if !serve(&own, None) {
+                crate::log_markdown(&crate::messages::analysis_server_name_held(&own));
+            }
+        });
+    let _ = std::thread::Builder::new()
+        .name("analysis-server-plain".into())
+        .spawn(serve_plain);
 }
 
-/// Accepts connections forever, each handled on its own thread.
-fn serve(name: &str) {
+/// Whether this Studio serves the plain [`PIPE_NAME`] now.
+pub fn serves_plain_name() -> bool {
+    SERVES_PLAIN.load(Ordering::Acquire)
+}
+
+/// Serves [`PIPE_NAME`] whenever no other Studio does: while one holds it,
+/// tries again every [`PLAIN_RETRY`].
+fn serve_plain() {
+    let mut said = false;
+    loop {
+        if serve(PIPE_NAME, Some(&SERVES_PLAIN)) {
+            return;
+        }
+        if !said {
+            said = true;
+            crate::log_markdown(&crate::messages::analysis_server_plain_name_shared(
+                PIPE_NAME,
+            ));
+        }
+        std::thread::sleep(PLAIN_RETRY);
+    }
+}
+
+/// Accepts connections on `name` forever, each handled on its own thread.
+/// Returns `false` at once when another process already serves `name`;
+/// `held` is set once this one does.
+fn serve(name: &str, held: Option<&AtomicBool>) -> bool {
     let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
     let mut first = true;
     loop {
@@ -72,13 +131,15 @@ fn serve(name: &str) {
         };
         if handle == INVALID_HANDLE_VALUE {
             if first {
-                crate::log_markdown(&format!(
-                    "Analysis server: {name} is already served (another DoD Studio), so this one is not"
-                ));
-                return;
+                return false;
             }
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(Duration::from_secs(1));
             continue;
+        }
+        if first && let Some(held) = held {
+            held.store(true, Ordering::Release);
+            // At start, or once the Studio holding it has closed.
+            crate::log_markdown(&crate::messages::analysis_server_serving(name));
         }
         first = false;
         // Safety: the handle just created; blocks until a client connects.
@@ -106,6 +167,12 @@ fn handle_client(pipe: std::fs::File) {
     {
         return;
     }
+    if super::game_review_requests::is_review_request(&line) {
+        super::game_review_requests::serve(&line, &mut writer);
+        // Safety: the pipe's own handle, as below.
+        unsafe { FlushFileBuffers(std::os::windows::io::AsRawHandle::as_raw_handle(&writer)) };
+        return;
+    }
     let reply =
         |writer: &mut std::fs::File, text: &str| writer.write_all(format!("{text}\n").as_bytes());
     let path = match parse_request(&line) {
@@ -115,10 +182,7 @@ fn handle_client(pipe: std::fs::File) {
             return;
         }
     };
-    crate::log_markdown(&format!(
-        "Analysis server: the game asked for {}",
-        path.display()
-    ));
+    crate::log_markdown(&crate::messages::analysis_server_request(path.display()));
     let mut last = None;
     let result = crate::run_analyzer_cached(&path, |done, total| {
         let percent = progress(done, total);
@@ -128,10 +192,9 @@ fn handle_client(pipe: std::fs::File) {
             let _ = reply(&mut writer, &format!("progress {percent}"));
         }
     });
-    let _ = match result {
-        Ok(_) => reply(&mut writer, "done"),
-        Err(why) => reply(&mut writer, &format!("failed {}", one_line(&why))),
-    };
+    for line in final_reply(result.map(|_| ())) {
+        let _ = reply(&mut writer, &line);
+    }
     let _ = writer.flush();
     // Safety: the pipe's own handle; lets the game read the last line before
     // the handle closes.
@@ -158,6 +221,18 @@ pub fn parse_request(line: &str) -> Result<PathBuf, String> {
         return Err("no such demo".to_string());
     }
     Ok(path.to_path_buf())
+}
+
+/// The lines that end a request: which cache the result went to, then
+/// `done`; or why it failed.
+fn final_reply(result: Result<(), String>) -> Vec<String> {
+    match result {
+        Ok(()) => vec![
+            format!("cache v{}", analysis::cache::SCHEMA_VERSION),
+            "done".to_string(),
+        ],
+        Err(why) => vec![format!("failed {}", one_line(&why))],
+    }
 }
 
 fn progress(done: usize, total: usize) -> u32 {
@@ -232,13 +307,48 @@ mod tests {
         assert_eq!(progress(usize::MAX / 2, usize::MAX), 49);
     }
 
+    #[test]
+    fn a_finished_request_names_its_cache_version_before_done() {
+        assert_eq!(
+            final_reply(Ok(())),
+            [
+                format!("cache v{}", analysis::cache::SCHEMA_VERSION),
+                "done".to_string()
+            ]
+        );
+        assert_eq!(
+            final_reply(Err("bad\r\nframe".to_string())),
+            ["failed bad  frame".to_string()]
+        );
+    }
+
+    /// Two Studios on one name: the first holds it, the second is told at
+    /// once and holds nothing (#1235).
+    #[test]
+    fn a_name_another_server_holds_is_not_served_twice() {
+        static FIRST: AtomicBool = AtomicBool::new(false);
+        let second = AtomicBool::new(false);
+        let name = format!(r"\\.\pipe\dodstudio-analyzer-held-{}", std::process::id());
+        let server_name = name.clone();
+        std::thread::spawn(move || serve(&server_name, Some(&FIRST)));
+        for _ in 0..50 {
+            if FIRST.load(Ordering::Acquire) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(FIRST.load(Ordering::Acquire));
+        assert!(!serve(&name, Some(&second)));
+        assert!(!second.load(Ordering::Acquire));
+    }
+
     /// A real round trip through the pipe: a file that isn't a demo comes
     /// back `failed`.
     #[test]
     fn the_pipe_answers_a_request() {
         let name = format!(r"\\.\pipe\dodstudio-analyzer-test-{}", std::process::id());
         let server_name = name.clone();
-        std::thread::spawn(move || serve(&server_name));
+        std::thread::spawn(move || serve(&server_name, None));
         let dir = std::env::temp_dir().join(format!("analysis_server_pipe_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let demo = dir.join("broken.dem");

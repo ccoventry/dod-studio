@@ -316,7 +316,8 @@ mod tests {
     //
     // A frame count is not a duration. Records are not evenly spaced and there
     // are several per rendered frame, so `seconds * fps` drifts — the mistake
-    // `docs/bugs.md` records as "All injected commands collapse to Tick 0".
+    // `docs/goldsrc_dod_quirks.md` records as "Never Convert Seconds to Ticks
+    // With an Average FPS".
 
     /// `(entry, frame, ordinal)` plus the matching timestamps, the two arrays
     /// `deadline_before` walks.

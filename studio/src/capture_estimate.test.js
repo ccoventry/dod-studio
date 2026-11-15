@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { streakSeconds, computeRequiredCaptureBytes } from './capture_estimate.js';
+import { streakSeconds, streakKillSeconds, rampSavedSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 
 const opts = {
   preRollSeconds: 2, postRollSeconds: 0.6,
@@ -42,5 +42,90 @@ describe('computeRequiredCaptureBytes', () => {
   it('ignores unselected highlights', () => {
     const demos = [{ streaks: [{ ...streak(10, 14), selected: false }] }];
     expect(computeRequiredCaptureBytes(demos, opts)).toBe(0);
+  });
+
+  it('bills AGR mode by its own bytes per frame, not the resolution', () => {
+    const demos = [{ streaks: [streak(10, 14)] }];
+    const agr = { ...opts, bytesPerFrame: AGR_BYTES_PER_FRAME };
+    expect(computeRequiredCaptureBytes(demos, agr)).toBe(4 * AGR_BYTES_PER_FRAME);
+  });
+});
+
+describe('bytesPerFrameFor (#1096)', () => {
+  it('bills a compressed video take at two thirds of raw, and raw frames as raw', () => {
+    expect(bytesPerFrameFor('direct_to_video', 'utvideo', 2560, 1440)).toBe(2560 * 1440 * 2);
+    expect(bytesPerFrameFor('direct_to_video', 'ffv1', 10, 10)).toBe(200);
+    expect(bytesPerFrameFor('direct_to_video', 'x264_lossless', 10, 10)).toBe(200);
+    expect(bytesPerFrameFor('direct_to_video', 'rawvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('frame_sequence', 'utvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('obs', 'utvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('agr', 'utvideo', 10, 10)).toBe(AGR_BYTES_PER_FRAME);
+  });
+});
+
+describe('an OBS take is billed by quality and length (#1096)', () => {
+  // One highlight billed for exactly 10 s: lead 0, 10 s of kills, trail 0.
+  const demos = [{ streaks: [{ selected: true, kills: [[0, 100], [0, 110]], start_index: 0, end_index: 1 }] }];
+  const base = { preRollSeconds: 0, postRollSeconds: 0, recordStartLead: 0, recordStopTrail: 0, captureFps: 120, resWidth: 2560, resHeight: 1440 };
+  const bill = (quality, w, h, fps) => computeRequiredCaptureBytes(demos, {
+    ...base, resWidth: w, resHeight: h, captureFps: fps, bytesPerSecond: obsBytesPerSecond(quality, w, h, fps),
+  });
+
+  it('agrees with the backend, figure for figure (builder/tests.rs pins the same numbers)', () => {
+    expect(bill('standard', 2560, 1440, 120)).toBe(633_333_334);
+    expect(bill('standard', 3840, 2160, 240)).toBe(2_850_000_000);
+    expect(bill('standard', 1280, 720, 60)).toBe(633_333_334);
+  });
+
+  it('is above the largest take measured per quality, within 25%', () => {
+    const measured = { small: 1900, standard: 3170, high: 4740, max: 5720, obs_simple: 3340 };
+    for (const [quality, mb] of Object.entries(measured)) {
+      const minute = obsBytesPerSecond(quality, 2560, 1440, 120) * 60;
+      expect(minute).toBeGreaterThan(mb * 1e6);
+      expect(minute).toBeLessThan(mb * 1e6 * 1.25);
+    }
+  });
+
+  it('bills an unknown quality as Standard', () => {
+    expect(obsBytesPerSecond('', 2560, 1440, 120)).toBe(obsBytesPerSecond('standard', 2560, 1440, 120));
+  });
+});
+
+describe('fast-forwarded gaps between kills (#831)', () => {
+  const gaps = { overSeconds: 8, speed: 4 };
+
+  it('saves three quarters of the stretch between the margins at 4x', () => {
+    // Kills 20 s apart: 2 s after to 4 s before leaves 14 s, recorded in 3.5.
+    expect(rampSavedSeconds([10, 30], gaps)).toBeCloseTo(10.5);
+  });
+
+  it('saves nothing with gaps kept, a short gap, or nothing between the margins', () => {
+    expect(rampSavedSeconds([10, 30], null)).toBe(0);
+    expect(rampSavedSeconds([10, 18], gaps)).toBe(0);
+    expect(rampSavedSeconds([10, 15], { overSeconds: 3, speed: 4 })).toBe(0);
+  });
+
+  it("takes the highlight's selected kills", () => {
+    const s = { kills: [[1, 10, 'a'], [2, 20, 'b'], [3, 30, 'c']], start_index: 1, end_index: 2 };
+    expect(streakKillSeconds(s)).toEqual([20, 30]);
+    expect(streakKillSeconds({ kills: [] })).toEqual([]);
+  });
+
+  it('bills a take less its sped-up gaps', () => {
+    const demos = [{ streaks: [{ selected: true, kills: [[0, 10, 'x'], [0, 30, 'y']] }] }];
+    // 20 s take, less 10.5 s saved: 9.5 s -> 10 frames at 1 fps, 3 bytes each.
+    expect(computeRequiredCaptureBytes(demos, { ...opts, killGaps: gaps })).toBe(30);
+    expect(computeRequiredCaptureBytes(demos, opts)).toBe(60);
+  });
+
+  it('finds the gap between two highlights merged into one take', () => {
+    const demos = [{ streaks: [
+      { selected: true, kills: [[0, 10, 'x']] },
+      { selected: true, kills: [[0, 25, 'y']] },
+    ] }];
+    const rolls = { ...opts, preRollSeconds: 10, postRollSeconds: 10 };
+    // One 15 s take; its 15 s gap saves 9 s x 3/4: 8.25 s -> 9 frames.
+    expect(computeRequiredCaptureBytes(demos, { ...rolls, killGaps: gaps })).toBe(27);
+    expect(computeRequiredCaptureBytes(demos, rolls)).toBe(45);
   });
 });

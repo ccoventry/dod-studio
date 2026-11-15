@@ -1,4 +1,4 @@
-//! `dodstudio_scoreboard`: stop a POV demo's recorded TAB presses from putting
+//! `ds_hud_hide_scoreboard`: stop a POV demo's recorded TAB presses from putting
 //! the scoreboard on screen.
 //!
 //! ## The problem this exists for
@@ -72,8 +72,8 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_scoreboard");
+/// The cvar name, for status and error text. Registered in `commands/install.rs`.
+pub const NAME: &str = console_name!("hud_hide_scoreboard");
 
 /// The whole `+showscores` handler, wildcarded over the two absolute addresses
 /// and the one relative call.
@@ -183,7 +183,7 @@ pub fn suppressed() -> bool {
     SUPPRESSED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !suppressed() {
         return "the scoreboard behaves normally; a POV demo's recorded TAB presses will show it"

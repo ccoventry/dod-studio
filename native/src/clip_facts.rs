@@ -1,0 +1,149 @@
+//! What a clip name can say about a highlight that the streak itself doesn't
+//! carry (#441): the killer's side, and each victim's name and side.
+//!
+//! `CaptureStreak.kills` is `(tick, time, weapon)`, which the patcher uses and
+//! which stays as it is. These facts ride beside it on the Studio side only.
+
+use analysis::{Analysis, Connection, FlagTag, Headshot, Team, flag_tags_of, headshot_of};
+
+/// A highlight's facts beside its streak (the clip name, the headshot
+/// filter, the flag tags), one entry per kill.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StreakFacts {
+    /// "Allies", "British", "Axis", "Spectator" or "Unknown".
+    pub faction: String,
+    pub victims: Vec<String>,
+    pub victim_factions: Vec<String>,
+    /// Whether each kill was a headshot (#1128).
+    pub headshots: Vec<Headshot>,
+    /// What was going on at the flags at each kill (#1132).
+    pub flag_tags: Vec<Vec<FlagTag>>,
+}
+
+/// A side as a clip name spells it. `allies_are_british` covers a demo
+/// whose Allies are the British without the team itself saying so.
+pub fn faction_name(team: Option<&Team>, allies_are_british: bool) -> &'static str {
+    match team {
+        Some(Team::Allies) if allies_are_british => "British",
+        Some(Team::Allies) => "Allies",
+        Some(Team::British) => "British",
+        Some(Team::Axis) => "Axis",
+        Some(Team::Spectators) => "Spectator",
+        Some(Team::Unassigned) | None => "Unknown",
+    }
+}
+
+/// The facts for the streak `player_index` (the slot its kills were scored
+/// from, as `CaptureStreak.player_index` holds it) started at
+/// `first_kill_tick`, or `None` when no such streak is in the analysis.
+///
+/// Sides are each player's team at the end of the demo, which is the side
+/// they played for a demo that is one half of a match.
+pub fn streak_facts(
+    analysis: &Analysis,
+    player_index: usize,
+    first_kill_tick: i32,
+) -> Option<StreakFacts> {
+    let british = analysis.state.allies_are_british;
+    let players = &analysis.state.players;
+    // The streak's own slot, as `analysis::highlights` reads it: a player
+    // who left before the demo ended holds none at its end (#573).
+    let (player, streak) = players.iter().find_map(|p| {
+        let end_slot = match p.connection {
+            Connection::Connected { client_id } => Some(client_id),
+            Connection::Disconnected => None,
+        };
+        let streak = p.kill_streaks.iter().find(|s| {
+            s.slot.or(end_slot).map(usize::from) == Some(player_index)
+                && s.kills
+                    .first()
+                    .is_some_and(|(time, _, _)| time.frame_index as i32 == first_kill_tick)
+        })?;
+        Some((p, streak))
+    })?;
+    let mut facts = StreakFacts {
+        faction: faction_name(player.team.as_ref(), british).to_string(),
+        ..StreakFacts::default()
+    };
+    for (time, _, victim_id) in &streak.kills {
+        facts
+            .headshots
+            .push(headshot_of(&analysis.state.kill_positions, time, victim_id));
+        facts.flag_tags.push(flag_tags_of(
+            &analysis.state.kill_positions,
+            time,
+            victim_id,
+        ));
+        let victim = players.iter().find(|p| &p.id == victim_id);
+        facts
+            .victims
+            .push(victim.map(|v| v.name.clone()).unwrap_or_default());
+        facts
+            .victim_factions
+            .push(faction_name(victim.and_then(|v| v.team.as_ref()), british).to_string());
+    }
+    Some(facts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn faction_names() {
+        assert_eq!(faction_name(Some(&Team::Allies), false), "Allies");
+        assert_eq!(faction_name(Some(&Team::Allies), true), "British");
+        assert_eq!(faction_name(Some(&Team::British), false), "British");
+        assert_eq!(faction_name(Some(&Team::Axis), true), "Axis");
+        assert_eq!(faction_name(Some(&Team::Spectators), false), "Spectator");
+        assert_eq!(faction_name(Some(&Team::Unassigned), false), "Unknown");
+        assert_eq!(faction_name(None, false), "Unknown");
+    }
+
+    #[test]
+    fn a_streaks_facts_carry_each_kills_headshot_and_flag_tags() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let analysis = Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = analysis::highlights::highlights(&analysis);
+        let mut headshots = 0;
+        let mut while_capping = 0;
+        for highlight in highlights.shown() {
+            let first = highlight.kills[0].frame_index as i32;
+            let slot = usize::from(highlight.slot.unwrap());
+            let facts = streak_facts(&analysis, slot, first).unwrap();
+            assert_eq!(facts.headshots.len(), highlight.kills.len());
+            assert_eq!(facts.headshots.len(), facts.victims.len());
+            assert_eq!(facts.flag_tags.len(), facts.victims.len());
+            let shown: Vec<_> = highlight
+                .kills
+                .iter()
+                .map(|k| k.flag_tags.clone())
+                .collect();
+            assert_eq!(facts.flag_tags, shown);
+            while_capping += facts
+                .flag_tags
+                .iter()
+                .filter(|tags| tags.contains(&FlagTag::WhileCapping))
+                .count();
+            headshots += facts
+                .headshots
+                .iter()
+                .filter(|h| **h == Headshot::Yes)
+                .count();
+        }
+        assert_eq!(
+            headshots,
+            highlights
+                .shown()
+                .map(|h| h.headshot_counts().0)
+                .sum::<usize>()
+        );
+        assert!(headshots > 0);
+        // The recorder scored three kills on a flag (#1132).
+        assert_eq!(while_capping, 3);
+    }
+}

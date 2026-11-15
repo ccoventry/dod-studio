@@ -29,7 +29,7 @@
 //!
 //! That bleed is what lets filtered and blended sprite edges fade out
 //! cleanly; without it the invisible texels stay black and every edge pulls
-//! black in. `GL_LoadTexture` (pre-Anniversary `+0x3ec60`) returns the cached
+//! black in. `GL_LoadTexture2` (pre-Anniversary `+0x3ec60`) returns the cached
 //! texture by name and size without uploading again, so whatever
 //! `gl_spriteblend` was at that first upload is baked in until the process
 //! exits.
@@ -213,7 +213,7 @@ unsafe fn check_is_spriteblend_value(base: usize, operand: usize) -> Result<(), 
     Ok(())
 }
 
-/// One `dodstudio_debug_status` line, once installed.
+/// One `ds_debug_status` line, once installed.
 pub fn status_line() -> Option<String> {
     (PATCHED_RVA.load(Ordering::Relaxed) != 0)
         .then(|| "sprite uploads: edge colour always bled (gl_spriteblend at load no longer sticks, #467)".to_string())

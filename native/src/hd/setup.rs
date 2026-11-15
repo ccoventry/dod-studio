@@ -240,13 +240,7 @@ fn download(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, Option<u64>),
 ) -> Result<(), String> {
-    let mut response = ureq::get(url)
-        .call()
-        .map_err(|e| crate::messages::labeled(url, e))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(crate::messages::url_returned_status(url, status));
-    }
+    let mut response = crate::utils::http::get(url)?;
     let total = response
         .headers()
         .get("content-length")

@@ -14,6 +14,13 @@ impl Display for PlayerGlobalId {
     }
 }
 
+/// The SteamID64 in a player's global id, when it is one: a 17-digit number.
+/// A demo with no SteamIDs (a bot's, a LAN server's) falls back to
+/// `PLAYER_<n>` or `CONNECTION_<n>` ids, which name nobody outside it.
+pub fn steam_id_of(id: &str) -> Option<String> {
+    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Player {
     pub id: PlayerGlobalId,
@@ -42,6 +49,11 @@ pub struct Player {
     /// (`objective.rs`).
     #[serde(default)]
     pub cap_credits: u32,
+
+    /// Enemy capture attempts this player stopped by killing a capper just
+    /// before the `CancelProg` (`objective.rs`, #192).
+    #[serde(default)]
+    pub cap_breaks: u32,
 
     /// Kills of a teammate, resolved against both teams at the moment of the
     /// kill.
@@ -88,6 +100,7 @@ impl Player {
             mortality: vec![],
             obj_points: 0,
             cap_credits: 0,
+            cap_breaks: 0,
             teamkills: 0,
             suicides: 0,
         }
@@ -167,6 +180,7 @@ impl Player {
             mortality: vec![],
             obj_points: 0,
             cap_credits: 0,
+            cap_breaks: 0,
             teamkills: 0,
             suicides: 0,
         }

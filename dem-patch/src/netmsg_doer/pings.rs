@@ -4,6 +4,10 @@ use crate::nom_helper::nom_fail;
 
 use super::*;
 
+const SLOT_BITS: usize = 5;
+const PING_BITS: usize = 12;
+const LOSS_BITS: usize = 7;
+
 impl Doer for SvcPings {
     fn id(&self) -> u8 {
         17
@@ -13,12 +17,15 @@ impl Doer for SvcPings {
         let mut br = BitReader::new(i);
         let mut pings: Vec<PingS> = vec![];
 
+        // Field widths are `SV_EmitPings`'s: slot 5, ping 12, loss 7 bits. An
+        // 8+8+8 read takes the same 24 bits per entry, so it stays in step
+        // but splits them at the wrong places (#1031).
         while br.read_1_bit() {
             pings.push(PingS {
                 has_ping_data: true,
-                player_id: Some(br.read_n_bit(8).to_u8()),
-                ping: Some(br.read_n_bit(8).to_u8()),
-                loss: Some(br.read_n_bit(8).to_u8()),
+                player_id: Some(br.read_n_bit(SLOT_BITS).to_u8()),
+                ping: Some(br.read_n_bit(PING_BITS).to_u16()),
+                loss: Some(br.read_n_bit(LOSS_BITS).to_u8()),
             })
         }
 
@@ -57,9 +64,9 @@ impl Doer for SvcPings {
         for ping in &self.pings {
             if ping.has_ping_data {
                 bw.append_bit(true);
-                bw.append_u8(ping.player_id.unwrap());
-                bw.append_u8(ping.ping.unwrap());
-                bw.append_u8(ping.loss.unwrap());
+                bw.append_u32_range(ping.player_id.unwrap().into(), SLOT_BITS as u32);
+                bw.append_u32_range(ping.ping.unwrap().into(), PING_BITS as u32);
+                bw.append_u32_range(ping.loss.unwrap().into(), LOSS_BITS as u32);
             } else {
                 bw.append_bit(false);
             }

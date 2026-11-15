@@ -30,6 +30,24 @@
 
 use std::path::{Path, PathBuf};
 
+/// Points `native::log_markdown` away from the user's real activity log for
+/// this test binary. `native` redirects its own tests with `cfg(test)`, but
+/// that flag is off in a library another crate links, so this crate's tests
+/// wrote lines like `[batch-catch-up] session session_a …` into the real
+/// `dod-studio\logs` (#760). `DOD_STUDIO_LOG_DIR` is the redirect `native`
+/// reads for exactly this case. Every [`Scratch`] calls it, since a test that
+/// touches the disk is one that runs code which logs.
+pub(crate) fn quiet_activity_log() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir().join("dod_studio_test_logs");
+        // SAFETY: Rust's std serialises its own environment reads and
+        // writes, and nothing in this test binary reads the environment
+        // from C while it runs.
+        unsafe { std::env::set_var("DOD_STUDIO_LOG_DIR", dir) };
+    });
+}
+
 /// A temporary directory that empties itself on the way in and removes itself
 /// on the way out.
 ///
@@ -52,6 +70,7 @@ impl Scratch {
     /// Takes over an arbitrary path, for the handful of tests that need an
     /// exact one. Creates it if it does not exist.
     pub(crate) fn at(path: PathBuf) -> Self {
+        quiet_activity_log();
         // Clearing on entry stays, and is not redundant with the `Drop`: it is
         // what makes a directory left behind by a *previous* build -- one from
         // before this guard existed, or from a hard-killed test process --
@@ -65,6 +84,7 @@ impl Scratch {
     /// name nothing exists at. Still removed on drop, in case the code under
     /// test creates it.
     pub(crate) fn absent(tag: impl std::fmt::Display) -> Self {
+        quiet_activity_log();
         let path = std::env::temp_dir().join(format!("dod_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         Self { path }
@@ -104,6 +124,15 @@ impl AsRef<Path> for Scratch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_with_a_scratch_logs_away_from_the_real_activity_log() {
+        let _dir = Scratch::new("test_support_quiet_log");
+        assert_eq!(
+            native::activity_log_dir(),
+            std::env::temp_dir().join("dod_studio_test_logs")
+        );
+    }
 
     #[test]
     fn a_scratch_directory_is_created_and_then_removed() {

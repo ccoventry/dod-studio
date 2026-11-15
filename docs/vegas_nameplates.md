@@ -1,0 +1,90 @@
+# Nameplates in VEGAS Pro (#429)
+
+Every highlight clip is one player's kills. This puts that player's nameplate picture (a PNG, for example their name with an outline) on its own video track above each of their clips in VEGAS Pro 21, lined up with the clip. It stays a separate event, so you can move, resize, fade or delete it per clip. VEGAS draws it at the project's resolution when it renders, so a large PNG stays sharp in a 4K render of 1440p footage.
+
+Studio does not burn the nameplate into the clip. Burning it in, as an option for clips shared straight from Studio, is still to come (#429).
+
+## 1. Pick a picture per player
+
+Configuration > **Players**. Add each player (from the queue's demos, or by SteamID), then click **Pick a PNG…** in their **Nameplate** column and pick the picture. It can be anywhere on disk; Studio saves the path, not a copy, so leave the file where it is.
+
+- A nameplate follows the player's SteamID, like **Use as**, so a player who changed names keeps one nameplate. A player added by name has no SteamID, so their Nameplate button is greyed out.
+- A picture that has gone from where it was shows as `name.png (missing)`. Pick it again, or put the file back.
+- × takes the nameplate off the row. The file itself stays.
+
+## 2. Render, then export
+
+Capture and render the highlights as usual. Then on the Render tab click **Export VEGAS EDL…** and save the EDL. Studio saves it as a `.txt` because VEGAS Pro's File > Import > EDL Text File dialog only lists `*.txt`. Studio writes writes two files:
+
+- `dod_highlights.txt`: the finished renders, one after another (#110), in VEGAS's own EDL text format: a HUD-only render goes on its own video track above its clip (#1251).
+- `dod_highlights.dodstudio.json`: the clip list. For each clip: its file, whose highlight it is (SteamID, the **Use as** name or else the in-game name) and that player's nameplate path.
+
+The save dialog opens in the clips' folder (the one holding most of them, if they span several). Save the EDL there or in the folder above it, and the script finds the clip list by itself. Saving anywhere else makes it ask for the list with an Open dialog.
+
+A clip gets no nameplate when its player has none set, when Studio doesn't know whose it is (a take captured before Studio kept track of takes, or a project that isn't loaded), or when one take holds two players' highlights.
+
+## 3. Run the script in VEGAS
+
+The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Nameplates.cs).
+
+1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place). Studio's export is a `.txt`, so the dialog lists it. An `.edl` from another tool needs the dialog's file type switched to all files (or `*.*` typed in the file name box).
+2. **Edit > Select None.** VEGAS leaves the first imported event selected, and the script works on the selected clips only when any are selected, so skipping this gives you one nameplate.
+3. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
+
+   To have it in the Tools > Scripting menu instead, click **Add Nameplate Script to VEGAS** on the Render tab (next to **Export VEGAS EDL…**). Studio copies the script into your `Documents\Vegas Script Menu` folder (made if it is not there; your real Documents folder, so a OneDrive-redirected one works) and replaces an older copy of it; other scripts in that folder are left alone. Then in VEGAS use Tools > Scripting > Rescan Script Menu Folder. Studio tells you where it put the file.
+   By hand, the same thing: copy `vegas/DoD Studio Nameplates.cs` from the repo into that folder yourself, then rescan.
+
+With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.
+
+It adds a track called **Nameplates** above every video track (so above a HUD pass laid over a clip too, which never covers it), and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now.
+
+**A clip you cut into pieces gets one nameplate, not one per piece.** Events that are on the same track, play the same media file (the same entry in the clip list) and touch end to start are one clip: the nameplate runs from the first piece's start to the last piece's end. "Touch" allows a gap of up to 4 frames (`JOIN_FRAMES`, in the script's defaults) and any overlap, so a crossfade between pieces still joins them. Speed changes (ctrl-drag slow motion or fast forward) don't matter: the script compares the media, never the length or the offset. A different clip between two pieces, or a real gap, starts a new nameplate. The box at the end says how many it added and how many pieces it joined, for example "5 nameplates for 9 events." then "4 split pieces joined into the clip before them." The joining rule is `GroupPieces` in the script; `powershell -ExecutionPolicy Bypass -File vegas\tests\run.ps1` runs its tests (no VEGAS needed to run them).
+
+**Back-to-back clips of the same player share one nameplate too.** Events on the same track that touch as above and have the same nameplate picture in the clip list (the same player), even when they are different media files, get one nameplate from the first clip's start to the last one's end, so it doesn't fade out and straight back in at the cut. Another player's clip, a clip with no nameplate, or a real gap between them starts a new nameplate. The box counts these separately: "3 clips of the same player joined into the clip before them." A run whose clips each had their own nameplate from an earlier run gets the new joined one and the old ones stay for you to delete, like a stretched clip below. To give every clip its own fade-in instead, set `JOIN_SAME_PLAYER` to `false` in the script's defaults.
+
+A box then says how many nameplates it added and why any clip got none.
+
+It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
+
+Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips (or runs of pieces) that have none over their exact start and length, so a rerun doesn't stack duplicates. A run that sits wholly inside an existing nameplate counts as already done (so selecting only the middle clip of a joined run and rerunning adds nothing); a clip you stretched since, or a run whose clips each had their own nameplate before, gets a new one and the old ones stay for you to delete (the box counts them). A clip you trimmed shorter still sits inside its old nameplate, so it keeps it: delete that nameplate to get a fresh one. The box says how many clips already had one.
+
+### Changing the defaults
+
+The defaults are at the top of the script, with a comment each:
+
+| Setting | Default | What it is |
+|---|---|---|
+| `NAMEPLATE_HEIGHT` | `0.20` | its height, as a share of the frame's height |
+| `MARGIN` | `0.04` | the gap to the frame's edges, as a share of the frame's height |
+| `CORNER` | `"BottomLeft"` | `BottomLeft`, `BottomRight`, `TopLeft` or `TopRight` |
+| `FADE_IN_SECONDS`, `FADE_OUT_SECONDS` | `0.25` | fades; `0` for none, never more than a third of a short clip |
+| `JOIN_FRAMES` | `4` | how many frames apart (or overlapping) events may be and still share a nameplate |
+| `JOIN_SAME_PLAYER` | `true` | back-to-back clips of the same player share one nameplate; `false` gives each clip its own |
+| `TRACK_NAME` | `"Nameplates"` | the new track's name |
+
+Edit them in any text editor and run the script again. The placement is each event's Pan/Crop, so one clip's nameplate can be moved on its own afterwards (Event Pan/Crop), or all of them at once with the track's Track Motion.
+
+## The clip list's format
+
+For other scripts or editors. JSON, UTF-8:
+
+```json
+{
+  "format": "dodstudio-clip-manifest",
+  "version": 1,
+  "edl": "dod_highlights.txt",
+  "clips": [
+    {
+      "name": "m00cat_3k_anzio",
+      "path": "D:\\Clips\\m00cat_3k_anzio.mov",
+      "seconds": 4.2,
+      "player": { "steam_id": "76561197972576011", "name": "Chris", "in_game_name": "dicE[: :]m00cat :D" },
+      "nameplate": "D:\\Nameplates\\m00cat.png"
+    }
+  ]
+}
+```
+
+- `clips` are in the EDL's order. `seconds` is the length Studio placed the clip at.
+- `player` is `null` when Studio doesn't know one player for the clip; `nameplate` is `null` when there is none. `player.name` is the Use as name when one is set, else the in-game name.
+- The format only grows: readers ignore fields they don't know, and `version` goes up only if a field changes meaning. The writer is `studio/src/clip_manifest.js`.

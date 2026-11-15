@@ -17,9 +17,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAP_LIST = "hd_maps.txt"
 MY_STYLES = "my_styles.txt"
 
-# Largest replacement side: texture_hires raises the engine's upload ceiling
-# to 1024x1024 (see its module doc).
-CAP = 1024
+# Largest replacement side, a power of two from 1024 to 4096 (build_all.py
+# --cap, HD_CAP). The hook lets the engine take up to 4096x4096 (see
+# texture_hires.rs's module doc), and gl_max_size in the game decides what
+# is shown; 1024 is the size everything was built at before there was a
+# choice. The scripts upscale 4x whatever the cap, so it only matters for
+# originals over 256 a side: detail textures (mostly 512), a few large map
+# textures and model skins.
+CAPS = (1024, 2048, 4096)
+
+
+def _cap():
+    raw = os.environ.get("HD_CAP", "1024")
+    if not raw.isdigit() or int(raw) not in CAPS:
+        sys.exit(f"HD_CAP={raw!r}: one of {', '.join(map(str, CAPS))}")
+    return int(raw)
+
+
+CAP = _cap()
 
 # World textures never drawn, or drawn by a different path (sky): not built.
 # The hook's TOOL_TEXTURES list must match this one.
@@ -29,6 +44,9 @@ SKIP = {"aaatrigger", "clip", "origin", "null", "skip", "hint", "bevel", "sky", 
 # fnv1a32's results, keyed by a BLAKE2b digest of the same bytes, kept on
 # disk between runs: 16-byte digest + 4-byte hash per record, append-only.
 FNV_CACHE = os.path.join(tempfile.gettempdir(), "dodstudio_hd_work", "fnv1a32.cache")
+# Set (to anything) for a run that reads the cache but leaves writing it to
+# another run going at the same time (build_all.py's plain steps).
+FNV_CACHE_READONLY = "HD_FNV_CACHE_READONLY"
 _fnv_known = None
 _fnv_new = []
 
@@ -79,7 +97,7 @@ def _load_fnv_cache():
 
 
 def _save_fnv_cache():
-    if not _fnv_new:
+    if not _fnv_new or os.environ.get(FNV_CACHE_READONLY):
         return
     try:
         os.makedirs(os.path.dirname(FNV_CACHE), exist_ok=True)
@@ -104,6 +122,26 @@ def pot(n):
     return min(p, CAP)
 
 
+def tga_size(path):
+    """(width, height) from a TGA's header, or None when there's no file."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(18)
+    except OSError:
+        return None
+    if len(head) < 18:
+        return None
+    return int.from_bytes(head[12:14], "little"), int.from_bytes(head[14:16], "little")
+
+
+def built(path, w, h):
+    """Whether `path` is already built at least `w` x `h`: what every build
+    step skips. A file from a smaller cap is rebuilt, so raising the cap
+    replaces only the files it enlarges."""
+    size = tga_size(path)
+    return size is not None and size[0] >= w and size[1] >= h
+
+
 def _steam_libraries():
     roots = []
     try:
@@ -126,31 +164,48 @@ def _steam_libraries():
     return list(seen.values())
 
 
-def _studio_game():
-    """The folder of the hl.exe DoD Studio launches, from its settings."""
+def _studio_settings():
+    """DoD Studio's settings.json, or {} when there is none."""
     try:
         import json
         cfg = os.path.join(os.environ.get("APPDATA", ""), "dod-studio", "settings.json")
-        hl = json.load(open(cfg, encoding="utf-8")).get("hl_path")
-        game = os.path.dirname(hl) if hl else None
-        return game if game and os.path.isdir(os.path.join(game, "dod")) else None
-    except (OSError, ValueError, AttributeError):
-        return None
+        settings = json.load(open(cfg, encoding="utf-8"))
+        return settings if isinstance(settings, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def game_folder():
+    """The mod folder, the <mod> of -game <mod> (#402): HD_GAME_FOLDER (DoD
+    Studio sets it on every build), else Studio's Game folder setting, else
+    dod. Only a plain folder name counts."""
+    name = os.environ.get("HD_GAME_FOLDER") or _studio_settings().get("game_folder") or "dod"
+    name = str(name).strip()
+    bad = not name or ".." in name or any(c in name for c in '/:*?"<>|' + chr(92)) or name[0] in "-+"
+    return "dod" if bad else name
+
+
+def _studio_game():
+    """The folder of the hl.exe DoD Studio launches, from its settings."""
+    hl = _studio_settings().get("hl_path")
+    game = os.path.dirname(hl) if isinstance(hl, str) and hl else None
+    return game if game and os.path.isdir(os.path.join(game, game_folder())) else None
 
 
 def game_root():
-    """The Half-Life folder holding dod/."""
+    """The Half-Life folder holding the game folder (dod/ by default)."""
+    mod = game_folder()
     env = os.environ.get("HD_GAME")
     if env:
-        if not os.path.isdir(os.path.join(env, "dod")):
-            sys.exit(f"HD_GAME={env!r} has no dod folder; point it at the Half-Life folder that does")
+        if not os.path.isdir(os.path.join(env, mod)):
+            sys.exit(f"HD_GAME={env!r} has no {mod} folder; point it at the Half-Life folder that does")
         return env
     studio = _studio_game()
     if studio:
         return studio
     found = sorted({os.path.normcase(os.path.dirname(d)): os.path.dirname(d)
                     for lib in _steam_libraries()
-                    for d in glob.glob(os.path.join(lib, "steamapps", "common", "*", "dod"))}.values())
+                    for d in glob.glob(os.path.join(lib, "steamapps", "common", "*", mod))}.values())
     if len(found) == 1:
         return found[0]
     listing = "\n  ".join(found) or "(none found)"
@@ -164,7 +219,7 @@ old_place_noted = set()
 
 def user_file(name, env):
     """Where one of the user's own lists is read from: the path in `env` if
-    set, else <game>/dod/dodstudio_hd/<name>, beside the files it shapes.
+    set, else in the install's dodstudio_hd folder (hd_dir), beside the files it shapes.
 
     That folder belongs to one install and survives a re-clone of the repo;
     this folder does neither (#385). A copy left here from before still works
@@ -214,13 +269,14 @@ def select_maps(names, patterns):
 
 
 def all_maps(game):
-    """Every map in dod/maps, as hd_maps.txt narrows it (all of them without
-    the file). Patterns that match no map are reported, since a typo there
-    would otherwise quietly build nothing."""
-    names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+    """Every map in dod/maps (the game folder's), as hd_maps.txt narrows it
+    (all of them without the file). Patterns that match no map are reported,
+    since a typo there would otherwise quietly build nothing."""
+    mod = game_folder()
+    names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, mod, "maps", "*.bsp")))
     chosen, unused = select_maps(names, map_patterns())
     for p in unused:
-        print(f"  {MAP_LIST}: {p!r} matches no map in dod/maps", flush=True)
+        print(f"  {MAP_LIST}: {p!r} matches no map in {mod}/maps", flush=True)
     return chosen
 
 
@@ -247,12 +303,18 @@ def clear_partial(out_dir):
 
 
 def dod_dir():
-    return os.path.join(game_root(), "dod")
+    return os.path.join(game_root(), game_folder())
 
 
 def hd_dir():
-    """dod/dodstudio_hd, where texture_hires looks."""
-    return os.path.join(dod_dir(), "dodstudio_hd")
+    """Where texture_hires looks (#415): dod_addon/dodstudio_hd, or
+    dod/dodstudio_hd while that one exists and the dod_addon one doesn't (an
+    install built before #415). native::hd::hd_root picks the same way."""
+    addon = os.path.join(game_root(), game_folder() + "_addon", "dodstudio_hd")
+    old = os.path.join(dod_dir(), "dodstudio_hd")
+    if os.path.isdir(old) and not os.path.isdir(addon):
+        return old
+    return addon
 
 
 def work_dir(name):

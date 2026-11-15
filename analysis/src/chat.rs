@@ -69,7 +69,7 @@ pub fn use_chat_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             // 1. Try to find the split position based on player name first (if player is resolved)
             let mut split_pos = None;
             if say_text.client_index > 0
-                && let Some(player) = state.find_player_by_client_index(say_text.client_index - 1)
+                && let Some(player) = state.find_player_by_wire_index(say_text.client_index)
             {
                 let p_name = &player.name;
                 if let Some(name_pos) = cleaned_raw.find(p_name) {
@@ -142,7 +142,7 @@ pub fn use_chat_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 || sender_block_trimmed.contains("(Spectator)");
 
             let (sender_name, sender_team, is_dead_state) = if say_text.client_index > 0 {
-                let player = state.find_player_by_client_index(say_text.client_index - 1);
+                let player = state.find_player_by_wire_index(say_text.client_index);
                 if let Some(player) = player {
                     (
                         Some(player.name.clone()),
@@ -588,29 +588,5 @@ mod tests {
             None,
         );
         assert_eq!(res3, "This is a test with multiple lines");
-    }
-
-    #[test]
-    #[ignore]
-    fn test_find_untranslated_chat_keys() {
-        use std::fs;
-        let dir = std::path::Path::new("../local/demos");
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.extension().map(|e| e == "dem").unwrap_or(false) {
-                    println!("Analyzing chat for untranslated keys in {:?}", path);
-                    if let Ok(bytes) = fs::read(&path)
-                        && let Ok(analysis) = crate::Analysis::try_from_bytes(&bytes)
-                    {
-                        for msg in &analysis.state.chat_messages {
-                            if msg.text.contains('#') {
-                                println!("  [UNTRANSLATED] {:?}", msg.text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }

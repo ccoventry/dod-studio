@@ -78,8 +78,17 @@ pub(super) fn find_deployable_weapon(viewmodel_name: &str) -> Option<&'static De
 pub(super) enum BodyAction {
     Shoot,
     Reload,
+    /// A rifle's bayonet stab (`*_bolt_stab`) or butt strike
+    /// (`*_rifle_swing`): an attack with no round, so no fire event and no
+    /// missing-gunshot stand-in ever animated it (#813).
+    Melee,
     Other,
 }
+
+/// The names the rifle viewmodels give their melee animation: "stab" on the
+/// 98k, scoped 98k and Enfield, "smash" on the Garand and K43. Exact match
+/// first, so the 98k's "stab" wins over its "stabslash".
+pub(super) const MELEE_SEQUENCES: &[&str] = &["stab", "smash"];
 
 pub(super) fn classify_body_sequence(label: &str) -> BodyAction {
     let label = label.to_ascii_lowercase();
@@ -93,6 +102,8 @@ pub(super) fn classify_body_sequence(label: &str) -> BodyAction {
         // "throw", for both, so an overhand throw animated and a rolled one
         // did not.
         BodyAction::Shoot
+    } else if label.ends_with("_stab") || label.ends_with("_swing") {
+        BodyAction::Melee
     } else if label.contains("reload") || label.contains("zoomload") {
         // "zoomload" is the rocket weapons reloading while scoped.
         BodyAction::Reload
@@ -273,6 +284,16 @@ mod tests {
             assert_eq!(classify_body_sequence(label), BodyAction::Reload, "{label}");
         }
 
+        // The rifles' melee, as us-inf.mdl names it (#813).
+        for label in [
+            "stand_bolt_stab",
+            "prone_bolt_stab",
+            "crouch_rifle_swing",
+            "prone_rifle_swing",
+        ] {
+            assert_eq!(classify_body_sequence(label), BodyAction::Melee, "{label}");
+        }
+
         for label in [
             // Aiming is the resting state between shots, and is what makes a
             // repeated shot show up as a sequence *change* at all.
@@ -282,9 +303,6 @@ mod tests {
             "dod_idle1",
             "prone_forward",
             "die_headshot",
-            // A rifle-butt swing, deliberately left alone: the viewmodels have
-            // no matching sequence.
-            "stand_rifle_swing",
         ] {
             assert_eq!(classify_body_sequence(label), BodyAction::Other, "{label}");
         }

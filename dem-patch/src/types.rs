@@ -350,6 +350,13 @@ pub enum MessageData {
 pub enum MessageDataParseMode {
     /// Parses network messages
     Parse,
+    /// [`MessageDataParseMode::Parse`] leaving every `svc_sound` out of the
+    /// parsed list, for a caller that only reads the demo and reads no
+    /// sound (the analyzer, #37). Sounds are a fifth of a demo's messages
+    /// and several heap blocks each. The sounds are still read through, so
+    /// a demo fails to parse exactly where `Parse` fails. Never write a demo
+    /// parsed this way: its sounds are gone.
+    ParseWithoutSounds,
     /// Store raw network message bytes
     Raw,
     /// Does not store any network message bytes
@@ -367,16 +374,35 @@ pub type BitSlice = _BitSlice<u8, Lsb0>;
 pub type ByteVec = Vec<u8>;
 
 // Delta
-pub type Delta = HashMap<String, ByteVec>;
+pub use crate::delta_fields::{Delta, DeltaValue, FieldName};
 pub type DeltaDecoder = Vec<DeltaDecoderS>;
 pub type DeltaDecoderTable = HashMap<String, DeltaDecoder>;
 
 #[derive(Debug, Clone)]
 pub struct DeltaDecoderS {
     pub name: ByteVec,
+    /// `name` as the key a decoded [`Delta`] files the field under, made once
+    /// here so every decoded field shares it rather than copying it (#37).
+    pub key: FieldName,
     pub bits: u32,
     pub divisor: f32,
     pub flags: u32,
+}
+
+impl DeltaDecoderS {
+    pub fn new(name: ByteVec, bits: u32, divisor: f32, flags: u32) -> Self {
+        // A decoder table built from a corrupted delta_description can carry
+        // a non-UTF-8 field name. Lossy rather than `unwrap`, because the
+        // release profile aborts on panic. #225.
+        let key = FieldName::from(String::from_utf8_lossy(&name));
+        Self {
+            name,
+            key,
+            bits,
+            divisor,
+            flags,
+        }
+    }
 }
 
 #[repr(u32)]
@@ -592,7 +618,13 @@ pub struct SvcServerInfo {
     pub hostname: ByteVec,
     pub map_file_name: ByteVec,
     pub map_cycle: ByteVec,
+    /// The VAC byte: Xash3D's GoldSrc client reads it as "server says it's
+    /// VAC2 secured". Today's servers send 0.
     pub unknown: u8,
+    /// The 21-byte block an old server build (`BUILD 2693`) sends after a set
+    /// VAC byte; `None` for every other demo. Kept so a round trip writes the
+    /// demo back unchanged.
+    pub legacy_trailer: Option<ByteVec>,
 }
 
 /// SVC_LIGHTSTYLE 12
@@ -648,11 +680,17 @@ pub struct SvcStopSound {
 pub struct SvcPings {
     pub pings: Vec<PingS>,
 }
+/// One scoreboard entry of `svc_pings`. On the wire each entry is a 1-bit
+/// "more" flag, then the player's 0-based slot in 5 bits, ping in ms in 12 bits
+/// and loss in percent in 7 bits (`SV_EmitPings`; #1031).
 #[derive(Debug, Clone)]
 pub struct PingS {
     pub has_ping_data: bool,
+    /// 0-based client slot (5 bits), the same index as `SvcServerInfo::player_index`.
     pub player_id: Option<u8>,
-    pub ping: Option<u8>,
+    /// Milliseconds (12 bits).
+    pub ping: Option<u16>,
+    /// Percent (7 bits).
     pub loss: Option<u8>,
 }
 
@@ -1845,14 +1883,14 @@ pub struct SvcHltv {
 ///
 /// To interpret message, check
 ///
-/// https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682
+/// <https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682>
 #[derive(Debug, Clone)]
 pub struct SvcDirector {
     pub length: u8,
     pub command: u8,
     /// To interpret message, check
     ///
-    /// https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682
+    /// <https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682>
     pub message: ByteVec,
 }
 

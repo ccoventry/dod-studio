@@ -1,0 +1,72 @@
+<!doctype html>
+<!--
+  Finish-clips (#440) test harness for the Playwright e2e suite — same idea as
+  render-studio.html: not the real app shell, just the DOM finish_clips.js and
+  render_pane.js touch, with Tauri's IPC mocked (vite.config.e2e.js). The
+  capture side is skipped: a test calls `requestFinishClips` directly with a
+  `capture_takes_verified`-shaped payload, which is all capture_pane.js does.
+-->
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Finish clips test harness</title>
+</head>
+<body>
+  <!-- Capture footer: the finish step's second phase. -->
+  <p id="batch-status">Status: Waiting...</p>
+  <div id="capture-progress-container" style="display: none;">
+    <div id="capture-progress-bar" style="width: 0%;"></div>
+  </div>
+
+  <!-- Render Settings, including the finish settings. -->
+  <select id="render-codec-select">
+    <option value="prores">ProRes 422 HQ</option>
+    <option value="dnxhr">DNxHR HQ</option>
+    <option value="custom">Custom</option>
+  </select>
+  <input type="text" id="render-custom-codec-input" />
+  <input type="number" id="render-fps-input" value="300" />
+  <input type="number" id="render-max-concurrent-input" value="2" />
+  <input type="text" id="ffmpeg-override-path-input" />
+  <select id="config-finish-clips">
+    <option value="off">Leave the takes for the Render tab</option>
+    <option value="finish">Finish clips automatically</option>
+  </select>
+  <select id="config-finish-codec-obs">
+    <option value="source_copy">Keep as captured</option>
+    <option value="render_tab">Same as the Codec setting</option>
+  </select>
+  <select id="config-finish-codec-video">
+    <option value="render_tab">Same as the Codec setting</option>
+  </select>
+  <select id="config-finish-codec-frames">
+    <option value="render_tab">Same as the Codec setting</option>
+    <option value="prores">ProRes 422 HQ</option>
+  </select>
+
+  <!-- Render tab: only what render_pane.js needs to boot and toast. -->
+  <button id="scan-render-btn">Scan for Takes</button>
+  <button id="start-render-btn">Start Render Batch</button>
+  <button id="cancel-render-btn" disabled>Cancel All</button>
+  <p id="render-status">Status: Waiting...</p>
+  <table><tbody id="render-jobs-tbody"></tbody></table>
+  <div id="render-footer-queue-summary"></div>
+
+  <script type="module">
+    import { initRenderUI } from '../../src/render_pane.js';
+    import { initFinishClips, requestFinishClips } from '../../src/finish_clips.js';
+
+    window.__testExportDirs = ['E:\\exports'];
+    window.__testSettingsChangeCount = 0;
+
+    initRenderUI(() => [], () => window.__testExportDirs, null, null);
+    initFinishClips({
+      getExportDirs: () => window.__testExportDirs,
+      onSettingsChange: () => { window.__testSettingsChangeCount += 1; },
+    });
+
+    window.__requestFinish = (verified, mode) => requestFinishClips(verified, mode);
+    window.__finishReady = true;
+  </script>
+</body>
+</html>

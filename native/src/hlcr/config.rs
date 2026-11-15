@@ -1,5 +1,3 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -11,7 +9,18 @@ pub enum RenderCodec {
     /// docs/archive/tauri_parity_audit.md Area 5) to keep both software and NVENC
     /// H.264 as separate, explicit options rather than picking one.
     H264Software,
+    /// ProRes 422 HQ. Keeps the plain name (and the `"prores"` id) because
+    /// every settings file, preset and autosave written before the other
+    /// profiles existed means HQ by it.
     ProRes,
+    /// ProRes 422 (Apple's "standard"): about 2/3 of HQ's size, looking the
+    /// same in a game capture. The default for new installs.
+    ProRes422,
+    /// ProRes 422 LT: about half of HQ's size.
+    ProResLt,
+    /// ProRes 4444 without alpha, for the main picture. The HUD stream's
+    /// 4444 with alpha is separate and doesn't follow this choice.
+    ProRes4444,
     DnxHr,
     /// Lossless. Pairs with the AVI container, HuffYUV's native home and the
     /// one every decoder actually expects it in.
@@ -49,22 +58,31 @@ pub struct RenderConfig {
     #[serde(default)]
     pub custom_codec_args: String,
     pub max_concurrent_renders: usize,
+    /// The render's DoD Studio tag (`clip_id::ClipTag`, #1442), written into
+    /// the video's metadata. Per job, like `target_codec`: the scheduler sets
+    /// it on each job's own copy of the config. Never saved: an autosaved
+    /// batch gets a new tag when its job starts again.
+    #[serde(skip)]
+    pub clip_tag: Option<String>,
 }
 
 impl RenderCodec {
     /// Maps the frontend's codec-select string values to the enum used by
-    /// `run_render_job`. Unrecognized values fall back to ProRes, matching
-    /// `studio`'s prior `codec_args_and_ext()` default.
+    /// `run_render_job`. An empty or unrecognized value falls back to the
+    /// default for new installs, ProRes 422; `"prores"` is HQ and stays HQ.
     pub fn from_str_id(id: &str) -> Self {
         match id {
             "h264" => Self::H264Software,
             "h264_nvenc" => Self::NvencH264,
+            "prores" => Self::ProRes,
+            "prores_lt" => Self::ProResLt,
+            "prores_4444" => Self::ProRes4444,
             "dnxhr" => Self::DnxHr,
             "huffyuv" => Self::HuffYuv,
             "uncompressed" => Self::Uncompressed,
             "custom" => Self::Custom,
             "source_copy" => Self::SourceCopy,
-            _ => Self::ProRes,
+            _ => Self::ProRes422,
         }
     }
 
@@ -80,7 +98,26 @@ impl RenderCodec {
             Self::Uncompressed => "uncompressed",
             Self::Custom => "custom",
             Self::ProRes => "prores",
+            Self::ProRes422 => "prores_422",
+            Self::ProResLt => "prores_lt",
+            Self::ProRes4444 => "prores_4444",
             Self::SourceCopy => "source_copy",
+        }
+    }
+
+    /// `prores_ks`'s `-profile:v` and the pixel format for a ProRes choice,
+    /// with its expected size next to HQ's at the same frame size, for the
+    /// render reservation before a render of that profile has finished
+    /// (`renderer::job_reservation_estimate`). Measured on a 300 fps
+    /// 2560x1440 game capture: 422 0.67x, LT 0.47x, 4444 1.47x (from an HQ
+    /// copy, so slightly low); Apple's target rates give the same ratios.
+    pub fn prores_profile(self) -> Option<(&'static str, &'static str, f64)> {
+        match self {
+            Self::ProRes => Some(("hq", "yuv422p10le", 1.0)),
+            Self::ProRes422 => Some(("standard", "yuv422p10le", 0.67)),
+            Self::ProResLt => Some(("lt", "yuv422p10le", 0.47)),
+            Self::ProRes4444 => Some(("4444", "yuv444p10le", 1.5)),
+            _ => None,
         }
     }
 
@@ -94,7 +131,10 @@ impl RenderCodec {
             Self::HuffYuv => "HuffYUV",
             Self::Uncompressed => "Uncompressed",
             Self::Custom => "Custom",
-            Self::ProRes => "ProRes",
+            Self::ProRes => "ProRes HQ",
+            Self::ProRes422 => "ProRes 422",
+            Self::ProResLt => "ProRes LT",
+            Self::ProRes4444 => "ProRes 4444",
             Self::SourceCopy => "Skip (Keep Original)",
         }
     }
@@ -107,42 +147,12 @@ impl Default for RenderConfig {
             source_folder: "".to_string(),
             export_directories: Vec::new(),
             fps: 300,
-            target_codec: RenderCodec::ProRes,
+            target_codec: RenderCodec::ProRes422,
             custom_codec_args: String::new(),
             max_concurrent_renders: 2,
+            clip_tag: None,
         }
     }
-}
-
-pub fn get_config_path() -> PathBuf {
-    if let Ok(exe_path) = std::env::current_exe()
-        && let Some(parent) = exe_path.parent()
-    {
-        return parent.join("hlcr_config.json");
-    }
-    PathBuf::from("hlcr_config.json")
-}
-
-pub fn load_config() -> RenderConfig {
-    let path = get_config_path();
-    if path.exists()
-        && let Ok(content) = std::fs::read_to_string(&path)
-        && let Ok(config) = serde_json::from_str::<RenderConfig>(&content)
-    {
-        return config;
-    }
-    let default_config = RenderConfig::default();
-    let _ = save_config(&default_config);
-    default_config
-}
-
-pub fn save_config(config: &RenderConfig) -> Result<(), String> {
-    let path = get_config_path();
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write config file to {}: {}", path.display(), e))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -158,6 +168,9 @@ mod tests {
             RenderCodec::NvencH264,
             RenderCodec::H264Software,
             RenderCodec::ProRes,
+            RenderCodec::ProRes422,
+            RenderCodec::ProResLt,
+            RenderCodec::ProRes4444,
             RenderCodec::DnxHr,
             RenderCodec::HuffYuv,
             RenderCodec::Uncompressed,
@@ -165,14 +178,52 @@ mod tests {
             RenderCodec::SourceCopy,
         ] {
             assert_eq!(RenderCodec::from_str_id(codec.to_str_id()), codec);
+            // The enum's own serde form (RenderConfig, autosaves) too.
+            let json = serde_json::to_string(&codec).unwrap();
+            assert_eq!(serde_json::from_str::<RenderCodec>(&json).unwrap(), codec);
         }
     }
 
+    /// Settings, presets and autosaves written before the other profiles
+    /// existed say "prores" (or `ProRes` in serde form): that stays HQ.
     #[test]
-    fn test_from_str_id_unrecognized_falls_back_to_prores() {
+    fn old_prores_values_still_mean_hq() {
+        assert_eq!(RenderCodec::from_str_id("prores"), RenderCodec::ProRes);
         assert_eq!(
-            RenderCodec::from_str_id("not_a_real_codec"),
+            serde_json::from_str::<RenderCodec>("\"ProRes\"").unwrap(),
             RenderCodec::ProRes
         );
+        assert_eq!(RenderCodec::ProRes.prores_profile().unwrap().0, "hq");
+    }
+
+    #[test]
+    fn each_prores_choice_has_its_own_profile() {
+        let profile = |c: RenderCodec| c.prores_profile().map(|(p, f, _)| (p, f));
+        assert_eq!(profile(RenderCodec::ProRes), Some(("hq", "yuv422p10le")));
+        assert_eq!(
+            profile(RenderCodec::ProRes422),
+            Some(("standard", "yuv422p10le"))
+        );
+        assert_eq!(profile(RenderCodec::ProResLt), Some(("lt", "yuv422p10le")));
+        // No alpha: the main picture is opaque; the HUD stream has its own.
+        assert_eq!(
+            profile(RenderCodec::ProRes4444),
+            Some(("4444", "yuv444p10le"))
+        );
+        assert_eq!(profile(RenderCodec::DnxHr), None);
+        let ratio = |c: RenderCodec| c.prores_profile().unwrap().2;
+        assert!(ratio(RenderCodec::ProResLt) < ratio(RenderCodec::ProRes422));
+        assert!(ratio(RenderCodec::ProRes422) < ratio(RenderCodec::ProRes));
+        assert!(ratio(RenderCodec::ProRes) < ratio(RenderCodec::ProRes4444));
+    }
+
+    #[test]
+    fn test_from_str_id_unrecognized_falls_back_to_prores_422() {
+        assert_eq!(
+            RenderCodec::from_str_id("not_a_real_codec"),
+            RenderCodec::ProRes422
+        );
+        assert_eq!(RenderCodec::from_str_id(""), RenderCodec::ProRes422);
+        assert_eq!(RenderConfig::default().target_codec, RenderCodec::ProRes422);
     }
 }

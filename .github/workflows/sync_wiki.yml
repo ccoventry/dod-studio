@@ -24,7 +24,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build the wiki pages
         run: python3 .github/scripts/build_wiki.py "$RUNNER_TEMP/wiki-out"

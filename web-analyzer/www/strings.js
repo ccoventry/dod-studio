@@ -1,7 +1,8 @@
 // strings.js — subset of studio/src/strings.js's STRINGS.ANALYZER,
 // copied verbatim so render.js can be a faithful, low-diff port of
-// analyzer_pane.js's render functions. Keep in sync by hand; there is no
+// analyzer_report.js's render functions. Keep in sync by hand; there is no
 // shared build step between this static site and the desktop app.
+// studio/src/web_analyzer_copy.test.js fails when the two disagree (#238).
 export const STRINGS = {
   ANALYZER: {
     ANALYZER_TITLE: 'Demo Analyzer',
@@ -47,12 +48,6 @@ export const STRINGS = {
 
     scoreboardHeading: (alliesLabel, alliesScore, cmp, axisScore) => `Scoreboard: ${alliesLabel} (${alliesScore}) ${cmp} Axis (${axisScore})`,
     compareGlyph: (a, b) => (a > b ? '>' : (a === b ? '=' : '<')),
-    durationLong: (h, m, s) => {
-      if (h > 0) return `${h}h ${m}m ${s}s`;
-      if (m > 0) return `${m}m ${s}s`;
-      return `${s}s`;
-    },
-    secondsSuffix: (n) => `${n}s`,
     megabytesLabel: (mb) => `${mb} MB`,
     KD_BADGE_LABEL: 'K/D',
     partialRecordingBoth: (fmt) => `Partial recording — demo started with ${fmt} remaining and ended before the match concluded.`,
@@ -97,7 +92,7 @@ export const STRINGS = {
     KILLS_TITLE: 'Kills',
     DEATHS_TITLE: 'Deaths',
     AVG_LIFESPAN_TITLE: 'Avg. Lifespan',
-    minMaxBadge: (min, max) => `Min: ${min}s / Max: ${max}s`,
+    minMaxBadge: (min, max) => `Min: ${min} / Max: ${max}`,
     WEAPON_BREAKDOWN_TITLE: 'Weapon Breakdown',
     COL_WEAPON: 'Weapon',
     COL_PCT_TOTAL: '% of Total',
@@ -106,6 +101,14 @@ export const STRINGS = {
     COL_WAVE: 'Wave',
     COL_TIME: 'Time',
     COL_DURATION: 'Duration',
+    // #448: engagement distance in the kill list and the player's tables.
+    COL_DISTANCE: 'Distance',
+    COL_AVG_DISTANCE: 'Avg. distance',
+    AVG_DISTANCE_TITLE: 'Avg. Distance',
+    DISTANCE_UNKNOWN_TITLE: 'Position unknown',
+    DISTANCE_AVERAGE_NOTE: 'Averaged over the kills where the position of both players is known; team kills are left out.',
+    distanceMeasured: (measured, total) => `${measured} of ${total} kills`,
+    metres: (m) => `${m.toFixed(1)} m`,
     WEAPON_CATEGORY_GRENADES: 'Grenades',
     WEAPON_CATEGORY_MELEE: 'Melee',
     WEAPON_CATEGORY_ALLIED: 'Allied',
@@ -130,7 +133,7 @@ export const STRINGS = {
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
     FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
-    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    flagsTeamBadge: (captures, fromEnemy, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${fromEnemy} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
     FLAGS_TITLE: 'Flags',
     flagArea: (area) => `Area ${area}`,
     COL_FLAG: 'Flag',
@@ -141,12 +144,14 @@ export const STRINGS = {
     CAPTURES_TITLE: 'Captures',
     COL_TEAM: 'Team',
     COL_CAPPERS: 'Cappers',
-    FLAGS_BREAK: 'from the other team',
+    FLAGS_FROM_ENEMY: 'from the other team',
     FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
     CAPPERS_TITLE: 'Cappers',
     COL_PLAYER: 'Player',
     COL_CAP_CREDITS: 'Caps',
     COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_CAP_BREAKS: 'Breaks',
+    COL_CAP_BREAKS_TITLE: 'Enemy captures the player stopped: a timed capture cancelled within 1.1 seconds of the player killing one of its cappers',
     COL_OBJ_POINTS: 'Objective points',
     COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
@@ -176,6 +181,11 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #207: what decides whether the pre-Anniversary engine can play it.
+    PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
+    peakEntitiesValue: (peak) => (peak > 256
+      ? `${peak}: over the pre-Anniversary engine's 256, so it closes the game there. The 25th Anniversary engine plays it.`
+      : peak >= 240 ? `${peak}: close to the pre-Anniversary engine's limit of 256` : String(peak)),
     GAME_MOD_DOD: 'Day of Defeat',
     GAME_MOD_CS: 'Counter-Strike',
     GAME_MOD_HL: 'Half-Life',

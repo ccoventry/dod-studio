@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DoD Tools Studio",
+  "productName": "DoD Studio",
+  "mainBinaryName": "dod-studio",
   "version": "0.1.0",
-  "identifier": "com.dodtools.studio",
+  "identifier": "com.dodstudio.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -13,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "DoD Tools Studio",
+        "title": "DoD Studio",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -28,6 +29,19 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": ["dodstudio"],
+        "name": "DoDStudio.Project",
+        "description": "DoD Studio project",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer_hooks.nsh"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,7 +56,11 @@
       "../../goldsrc-hooks/tools/hd/valve_models.txt": "hd-scripts/valve_models.txt",
       "../../goldsrc-hooks/tools/hd/hd_maps.example.txt": "hd-scripts/hd_maps.example.txt",
       "../../goldsrc-hooks/tools/hd/my_styles.example.txt": "hd-scripts/my_styles.example.txt",
-      "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md"
+      "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
+      "../../blender/*.py": "blender-scripts/",
+      "../../blender/README.md": "blender-scripts/README.md",
+      "../../vegas/DoD Studio Nameplates.cs": "vegas-scripts/DoD Studio Nameplates.cs",
+      "../../test-fixtures/dodstudio_benchmark_anzio.dem": "obs-test/dodstudio_benchmark_anzio.dem"
     }
   },
   "plugins": {

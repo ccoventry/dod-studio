@@ -79,24 +79,27 @@ pub(super) const SOUND_FLUSH_LEAD_SECONDS: f32 = 1.0;
 /// next one's start. Two highlights closer than this are merged into a single
 /// take rather than risking a stop/start cycle that tight.
 ///
-/// This is a deliberately conservative guard, not a measured threshold — how
-/// long HLAE needs to finalise a take (flush the BMP sequence, write the WAV)
-/// before accepting a new one isn't something the demo side can observe. The
-/// failure it guards against is a take landing without its audio, which is
-/// exactly the "captured but not renderable" case take verification reports.
-/// Merging instead costs a second of connective footage inside one clip, which
-/// is a far cheaper outcome than a silent take.
-pub const MIN_TAKE_SEPARATION_SECONDS: f32 = 1.0;
+/// Measured on the pre-Anniversary build (#9): after `mirv_recordmovie_stop`
+/// on a 2 s 720p take, HLAE spends about 0.28 s of wall time finalising it
+/// (closing the frame files, writing the WAV) inside one engine frame, and
+/// since the engine is back on real time once recording stops, that frame
+/// moves the demo clock by the same amount. A next take asked for sooner
+/// starts late and loses the frames in between: 0.25 s lost 1 frame, 0.1 s
+/// lost 6, each with its audio cut short. From 0.5 s up nothing was lost.
+///
+/// 0.5 s rather than the ~0.3 s floor because finalising grows with the take
+/// (a longer `sound.wav`, more files to close) and with a slower disk, and the
+/// cost of being wrong is a short take, while the cost of merging is half a
+/// second of connective footage inside one clip.
+pub const MIN_TAKE_SEPARATION_SECONDS: f32 = 0.5;
 
 /// The separation this batch's capture mode actually needs.
 ///
-/// `MIN_TAKE_SEPARATION_SECONDS` above is HLAE's, and was a deliberately
-/// conservative guess because the demo side cannot observe how long HLAE takes
-/// to finalise a take. The OBS figure is not a guess — it is measured, and it
-/// is larger — so the mode has to choose.
+/// `MIN_TAKE_SEPARATION_SECONDS` above is HLAE's. The OBS figure is measured
+/// separately, and is larger, so the mode has to choose.
 ///
-/// Public so `find_overlaps` and the tests ask the same question the merge loop
-/// does, rather than re-deriving it and drifting.
+/// Public so `find_overlaps` and the tests ask the same question
+/// `blocks::cut_blocks` does, rather than re-deriving it and drifting.
 pub fn take_separation_seconds(config: &PatcherConfig) -> f32 {
     match config.capture_mode {
         crate::patch::CaptureMode::Obs => crate::patch::types::OBS_TAKE_SEPARATION_SECONDS,
@@ -276,12 +279,28 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
     }
 }
 
-/// The `host_framerate` fast-forward runs at: Configuration's FF Speed
-/// (`fast_forward_speed`), or the 0.05 default when that is not a positive
-/// number. `host_framerate 0` is real time, so 0 cannot mean "fast".
-pub(crate) fn fast_forward_host_framerate(config: &PatcherConfig) -> f32 {
-    let v = config.fast_forward_speed;
-    if v.is_finite() && v > 0.0 { v } else { 0.05 }
+/// Logs a warning for each roll shorter than its [`roll_floors`] floor.
+///
+/// The rolls are load-bearing — the audio resync, the sound flush, the decal
+/// sweep's lead and any Scheduled Command's offset all measure against them —
+/// so say when one is too short rather than leaving it to be found in a
+/// capture that looks almost right.
+pub(super) fn warn_short_rolls(config: &PatcherConfig) {
+    let floors = roll_floors(config);
+    if config.pre_roll_seconds < floors.pre_roll {
+        crate::log_markdown(&crate::messages::pre_roll_too_short(
+            config.pre_roll_seconds,
+            floors.pre_roll,
+            floors.pre_roll_binding,
+        ));
+    }
+    if config.post_roll_seconds < floors.post_roll {
+        crate::log_markdown(&crate::messages::post_roll_too_short(
+            config.post_roll_seconds,
+            floors.post_roll,
+            floors.post_roll_binding,
+        ));
+    }
 }
 
 /// Whether a scheduled command lands while playback is still fast-forwarding.
@@ -312,7 +331,7 @@ pub fn runs_during_fast_forward(
 /// given padding is applied to each side.
 ///
 /// Called twice per highlight pair, with different padding, to answer two
-/// different questions (see `build_batch_queue`'s merge loop):
+/// different questions (see `blocks::cut_blocks`):
 ///
 /// - with start-lead/stop-trail: do the **recordings** overlap? If so the two
 ///   highlights physically cannot be separate takes and must be merged.
@@ -350,6 +369,18 @@ pub(super) fn last_kill_frame(streak: &CaptureStreak) -> i32 {
         .get(idx)
         .map(|k| k.0)
         .unwrap_or(streak.end_tick)
+}
+
+/// Frame indices of the kills a block records: its Kill Range, from the first
+/// recorded kill to the last (a merged block's absorbed highlights add their
+/// last kills, see the merge in `build_batch_queue`).
+pub(super) fn block_kill_frames(streak: &CaptureStreak) -> Vec<i32> {
+    let last = streak.end_index.min(streak.kills.len().saturating_sub(1));
+    streak
+        .kills
+        .get(streak.start_index..=last)
+        .map(|kills| kills.iter().map(|k| k.0).collect())
+        .unwrap_or_default()
 }
 
 // ── Drive allocation ──────────────────────────────────────────────────────────

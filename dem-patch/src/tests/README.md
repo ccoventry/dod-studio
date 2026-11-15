@@ -27,6 +27,5 @@ contains.
 Files these tests produce as output (`demotest_out.dem`, `demo2test.dem`) are
 gitignored — only commit the source fixture itself.
 
-Run with `cargo test -p dem --lib` from the workspace root — `dem-patch` is pulled
-in only via `[patch.crates-io]`, not a `[workspace]` member (see the repo's
-`CLAUDE.md`), so `cargo test --workspace` alone still won't reach these.
+Run with `cargo test -p dem --lib` from the workspace root; `cargo test --workspace`
+also covers it, since `dem-patch` is a workspace member.

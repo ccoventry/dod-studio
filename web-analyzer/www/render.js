@@ -1,11 +1,14 @@
-// render.js — port of studio/src/analyzer_pane.js's report-rendering
+// render.js — port of studio/src/analyzer_report.js's report-rendering
 // logic (Summary / Scoreboard / Player Details / Team Details / Timeline /
 // Rounds / Chat Log tabs) for the browser/WASM build. Deliberately excludes
 // analyzer_pane.js's Explorer sidebar + folder-browsing code — this build is
 // single-file-drop only, see docs/demo_stats_feasibility.md sibling decision
 // in the web port planning conversation. Report shape (demo_info + state) is
 // identical to what desktop's analyze_demo_full Tauri command returns, so
-// these functions are a near-verbatim copy of their analyzer_pane.js source.
+// these functions are a near-verbatim copy of their analyzer_report.js source.
+// studio/src/web_analyzer_copy.test.js fails when a shared function drifts,
+// and lists the deliberate differences (#238).
+import { killDistanceLookup, playerDistanceSummaries, unitsToMetres } from './kill_distance.js';
 import { STRINGS } from './strings.js';
 import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
@@ -50,11 +53,7 @@ function teamLabel(team, alliesAreBritish) {
 function durSecs(d) { return d ? (d.secs || 0) + (d.nanos || 0) / 1e9 : 0; }
 
 function formatDuration(totalSecs) {
-  totalSecs = Math.max(0, Math.floor(totalSecs || 0));
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  return STRINGS.ANALYZER.durationLong(h, m, s);
+  return durationText(totalSecs);
 }
 
 function formatMMSS(totalSecs) {
@@ -62,6 +61,18 @@ function formatMMSS(totalSecs) {
   const m = Math.floor(totalSecs / 60);
   const s = totalSecs % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// studio/src/time_format.js's durationText (#880): `2.1 s`, `6 min 12 s`.
+function durationText(seconds) {
+  const x = Math.max(0, Number(seconds) || 0);
+  const tenths = Math.round(x * 10);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const whole = Math.round(x);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  return `${h ? `${h} h ` : ''}${m} min ${s} s`;
 }
 
 function formatGameTime(totalSecs) {
@@ -277,6 +288,9 @@ function renderSummaryTab(container) {
       ${section(STRINGS.ANALYZER.TECH_SPECS_SECTION, [
         [STRINGS.ANALYZER.DEMO_PROTOCOL_LABEL, String(di.demo_protocol)],
         [STRINGS.ANALYZER.NETWORK_PROTOCOL_LABEL, String(di.network_protocol)],
+        [STRINGS.ANALYZER.PEAK_ENTITIES_LABEL, Number.isInteger(di.peak_packet_entities)
+          ? esc(STRINGS.ANALYZER.peakEntitiesValue(di.peak_packet_entities))
+          : STRINGS.ANALYZER.EMPTY_DASH],
       ])}
     </div>`;
 }
@@ -292,6 +306,7 @@ function buildScoreboardGroups() {
     else if (p.team === 'Spectators') groups.spec.push(p);
     else groups.unassigned.push(p);
   });
+  // Score DESC, Kills DESC, Deaths ASC, Name ASC, id ASC — matches dev's ScoreboardCache sort key.
   const sortFn = (a, b) => {
     if (b.stats[0] !== a.stats[0]) return b.stats[0] - a.stats[0];
     if (b.stats[1] !== a.stats[1]) return b.stats[1] - a.stats[1];
@@ -361,6 +376,9 @@ function renderScoreboardTab(container) {
     tr.addEventListener('click', () => {
       const id = tr.dataset.playerId;
       highlightedPlayerId = highlightedPlayerId === id ? null : id;
+      // Keep the Player Details dropdown in sync so selection works both
+      // ways (dropdown -> scoreboard already did via renderPlayerDetailsTab).
+      if (highlightedPlayerId) selectedPlayerId = highlightedPlayerId;
       renderScoreboardTab(container);
     });
   });
@@ -397,6 +415,8 @@ function renderPlayerDetailsTab(container) {
     selectedId = highlightedPlayerId && players.find((p) => p.id === highlightedPlayerId) ? highlightedPlayerId : players[0].id;
   }
   selectedPlayerId = selectedId;
+  // Any change in the effective selected player (dropdown, scoreboard click,
+  // or a kill-streak victim jump) clears the per-player weapon filter state.
   if (selectedId !== previousSelectedId) disabledWeapons = new Set();
 
   const options = players.map((p) => `<option value="${esc(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
@@ -418,6 +438,23 @@ function renderPlayerDetailsTab(container) {
   renderPlayerDetailsBody(container, players.find((p) => p.id === selectedId));
 }
 
+// ── Engagement distance (#448) ───────────────────────────────────────────────
+
+function distanceCell(units) {
+  if (typeof units !== 'number') return `<td class="text-muted" style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_UNKNOWN_TITLE)}"></td>`;
+  return `<td style="text-align:right;">${esc(STRINGS.ANALYZER.metres(unitsToMetres(units)))}</td>`;
+}
+
+function averageDistanceCell(summary) {
+  if (!summary || summary.average === null) return distanceCell(null);
+  // "n of m kills" only when some kills have no position: with every kill
+  // measured it just repeats the Kills column.
+  const note = summary.measured < summary.total
+    ? ` <span class="text-muted" style="font-size:0.85em;">(${esc(STRINGS.ANALYZER.distanceMeasured(summary.measured, summary.total))})</span>`
+    : '';
+  return `<td style="text-align:right;" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}">${esc(STRINGS.ANALYZER.metres(unitsToMetres(summary.average)))}${note}</td>`;
+}
+
 function renderPlayerDetailsBody(tabContainer, p) {
   const body = tabContainer.querySelector('#player-details-body');
   if (!body) return;
@@ -435,6 +472,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
   const steamForms = steamIdForms(p.id);
 
   const weaponRows = Object.entries(p.weapon_breakdown || {}).sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
+  const distances = playerDistanceSummaries(report.state.kill_positions, p.id);
   const totalKills = weaponRows.reduce((s, [, v]) => s + v[0], 0) || 1;
 
   body.innerHTML = `
@@ -461,7 +499,8 @@ function renderPlayerDetailsBody(tabContainer, p) {
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.MATCH_SCORE_TITLE}</div><div class="stat-value">${p.stats[0]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.KILLS_TITLE}</div><div class="stat-value">${p.stats[1]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.DEATHS_TITLE}</div><div class="stat-value">${p.stats[2]}</div><div class="stat-badge" style="color:${kd >= 1 ? '#22c55e' : '#ef4444'};">${kd.toFixed(2)} ${STRINGS.ANALYZER.KD_BADGE_LABEL}</div></div>
-      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${STRINGS.ANALYZER.secondsSuffix(avgLife.toFixed(1))}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(minLife.toFixed(0), maxLife.toFixed(0))}</div></div>
+      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${durationText(avgLife)}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(durationText(minLife), durationText(maxLife))}</div></div>
+      <div class="analyzer-stat-card" title="${esc(STRINGS.ANALYZER.DISTANCE_AVERAGE_NOTE)}"><div class="stat-title">${STRINGS.ANALYZER.AVG_DISTANCE_TITLE}</div><div class="stat-value">${distances.all.average === null ? STRINGS.ANALYZER.EMPTY_DASH : esc(STRINGS.ANALYZER.metres(unitsToMetres(distances.all.average)))}</div><div class="stat-badge text-muted">${esc(STRINGS.ANALYZER.distanceMeasured(distances.all.measured, distances.all.total))}</div></div>
     </div>
 
     <div class="analyzer-stacked-sections">
@@ -469,7 +508,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
         <h4 class="analyzer-section-title">${STRINGS.ANALYZER.WEAPON_BREAKDOWN_TITLE}</h4>
         <div class="table-wrapper" style="max-height:320px;">
           <table class="analyzer-table">
-            <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_PCT_TOTAL}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_TEAM_KILLS}</th></tr></thead>
+            <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_PCT_TOTAL}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_TEAM_KILLS}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_AVG_DISTANCE}</th></tr></thead>
             <tbody>
               ${weaponRows.map(([w, [k, tk]]) => `
                 <tr>
@@ -477,7 +516,8 @@ function renderPlayerDetailsBody(tabContainer, p) {
                   <td style="text-align:right;">${k}</td>
                   <td><div class="analyzer-progress"><div class="analyzer-progress-fill" style="width:${(k / totalKills * 100).toFixed(1)}%;"></div></div><span class="analyzer-progress-label">${(k / totalKills * 100).toFixed(1)}%</span></td>
                   <td style="text-align:right;">${tk}</td>
-                </tr>`).join('') || `<tr><td colspan="4" class="table-empty">${STRINGS.ANALYZER.NO_WEAPON_DATA}</td></tr>`}
+                  ${averageDistanceCell(distances.byWeapon.get(w))}
+                </tr>`).join('') || `<tr><td colspan="5" class="table-empty">${STRINGS.ANALYZER.NO_WEAPON_DATA}</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -549,6 +589,7 @@ function renderKillStreaksTable(container, p) {
     return;
   }
 
+  const distanceOf = killDistanceLookup(report.state.kill_positions);
   const rows = streaks.map((s, idx) => {
     const kills = s.kills;
     const startSecs = durSecs(kills[0][0].viewdemo_offset);
@@ -561,7 +602,7 @@ function renderKillStreaksTable(container, p) {
       const victimName = victim ? victim.name : k[2];
       const victimColor = victim ? teamColor(victim.team) : '#7ec8e3';
       const delta = i === 0 ? STRINGS.ANALYZER.EMPTY_DASH : `+${formatMMSS(durSecs(k[0].viewdemo_offset) - durSecs(kills[i - 1][0].viewdemo_offset))}`;
-      return `<tr class="killstreak-subrow"><td></td><td class="text-muted">${esc(delta)}</td><td colspan="2" style="font-size:0.85em;">${esc(weaponName(k[1]))} &#9876; <span class="killstreak-victim" data-victim-id="${esc(k[2])}" style="color:${victimColor};cursor:pointer;">${esc(victimName)}</span></td></tr>`;
+      return `<tr class="killstreak-subrow"><td></td><td class="text-muted">${esc(delta)}</td><td colspan="2" style="font-size:0.85em;">${esc(weaponName(k[1]))} &#9876; <span class="killstreak-victim" data-victim-id="${esc(k[2])}" style="color:${victimColor};cursor:pointer;">${esc(victimName)}</span></td>${distanceCell(distanceOf(p.id, k[2], k[0]))}</tr>`;
     }).join('');
 
     return `
@@ -569,16 +610,17 @@ function renderKillStreaksTable(container, p) {
         <td>${idx + 1}</td>
         <td>${kills.length}</td>
         <td>${formatGameTime(startSecs)}</td>
-        <td>${STRINGS.ANALYZER.secondsSuffix(durationSecs.toFixed(1))}</td>
+        <td>${durationText(durationSecs)}</td>
+        <td></td>
       </tr>
-      <tr><td></td><td colspan="3" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
+      <tr><td></td><td colspan="4" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
       ${sub}`;
   }).join('');
 
   container.innerHTML = `
     <div class="table-wrapper" style="max-height:320px;">
       <table class="analyzer-table">
-        <thead><tr><th>${STRINGS.ANALYZER.COL_WAVE}</th><th>${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_TIME}</th><th>${STRINGS.ANALYZER.COL_DURATION}</th></tr></thead>
+        <thead><tr><th>${STRINGS.ANALYZER.COL_WAVE}</th><th>${STRINGS.ANALYZER.COL_KILLS}</th><th>${STRINGS.ANALYZER.COL_TIME}</th><th>${STRINGS.ANALYZER.COL_DURATION}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_DISTANCE}</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -643,6 +685,8 @@ function renderTeamWeaponSections(players, alliesAreBritish) {
   const axisColor = teamColor('Axis');
 
   const sections = [];
+  // Matches dev exactly: show the Allies/US section unless there's British
+  // data present with no pure-Allies data at all.
   if (alliesPlayers.length > 0 || britishPlayers.length === 0) {
     const label = alliesAreBritish ? STRINGS.ANALYZER.ALLIES_US_LABEL : STRINGS.ANALYZER.ALLIES_LABEL;
     sections.push(`<details open class="analyzer-collapsible"><summary style="color:${alliesColor};">${esc(label)}</summary>${weaponBreakdownTable(alliesPlayers)}</details>`);
@@ -924,7 +968,7 @@ function renderChatTab(container) {
       <label>${STRINGS.ANALYZER.TEAM_LABEL}
         <select id="chat-filter-team">
           ${[
-            ['All', STRINGS.ANALYZER.TYPE_ALL || 'All'],
+            ['All', STRINGS.ANALYZER.TYPE_ALL],
             ['Allies', STRINGS.ANALYZER.ALLIES_LABEL],
             ['British', STRINGS.ANALYZER.BRITISH_LABEL],
             ['Axis', STRINGS.ANALYZER.AXIS_LABEL],

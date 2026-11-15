@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  Harness for demo_drop.js (#530): the two drop zones, and a strip that is
+  neither. `window.__drag(payload)` delivers a Tauri drag-drop event (as
+  getCurrentWebview().onDragDropEvent would); `window.__added` holds each
+  addDroppedPaths(files, folders) call; `window.__busy` makes a scan run.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>demo_drop.js test harness</title>
+  <style>
+    body { margin: 0; }
+    #scan-panel { position: absolute; left: 0; top: 0; width: 400px; height: 100px; }
+    #master-pane { position: absolute; left: 0; top: 120px; width: 400px; height: 200px; }
+    #elsewhere { position: absolute; left: 500px; top: 0; width: 200px; height: 200px; }
+  </style>
+</head>
+<body>
+  <div id="scan-panel">Directory Scan</div>
+  <div id="master-pane">Master Demo Queue</div>
+  <div id="elsewhere">Another pane</div>
+
+  <script type="module">
+    import { createDemoDrop } from '/src/demo_drop.js';
+
+    window.__added = [];
+    window.__busy = false;
+    window.__mockInvokeHandlers.sort_dropped_paths = ({ paths }) => ({
+      demos: paths.filter((p) => /\.dem$/i.test(p)),
+      folders: paths.filter((p) => !p.includes('.')),
+      skipped: paths.filter((p) => p.includes('.') && !/\.dem$/i.test(p)).map((p) => p.split('/').pop()),
+    });
+    let handler = null;
+    createDemoDrop({
+      addDroppedPaths: async (files, folders) => { window.__added.push({ files, folders }); },
+      isScanning: () => window.__busy,
+      subscribe: async (h) => { handler = h; return () => {}; },
+    });
+    window.__drag = (payload) => handler({ payload });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

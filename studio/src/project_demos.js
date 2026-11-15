@@ -4,8 +4,9 @@
 // Moved out of main.js, which owns the queue. The queue array is reassigned
 // there, so it's reached through getDemos() rather than held.
 
-import { open } from '@tauri-apps/plugin-dialog';
-import { locateMissingDemos, changedDemos } from './ipc_bridge.js';
+import { pickPath } from './pick_path.js';
+import { locateMissingDemos, changedDemos, logFrontendEvent } from './ipc_bridge.js';
+import { missingDemosLine, changedDemosLine } from './project_log.js';
 import { renameDemoInTakeIndex } from './take_index.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
@@ -25,10 +26,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // 64 KB) near the project and its old folders, and ask before using a
   // match. Anything still missing is named in a toast. Also run by Start
   // Capture Batch over the demos with a highlight picked (no project path
-  // then). Resolves to how many of `demos` are still missing.
-  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos()) {
+  // then). Resolves to how many of `demos` are still missing. `onSearched`
+  // is called when the folder search is done, before any dialog (#958).
+  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
     const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
-    const nameOf = (p) => p.split(/[\\/]/).pop();
     // Nearest first: where each demo was, then the project's folder, then the
     // scan folders. The search is breadth-first in this order, so a demo moved
     // next door is found before a big scan folder uses up the search budget.
@@ -44,6 +45,8 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
       dirs
     );
+    onSearched?.();
+    logFrontendEvent(missingDemosLine(demos.length, missing.length, missing.filter((m) => m.candidate).length));
     // A demo marked missing earlier that is back where the queue says.
     const missingPaths = new Set(missing.map((m) => m.path));
     const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
@@ -70,7 +73,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       // then the folder it's in now, shortened to the drive and the last
       // folders; the full path is the entry's hover text.
       const details = found.map((m) => {
-        const oldName = nameOf(m.path);
+        const oldName = fileNameOf(m.path);
         const newName = fileNameOf(m.candidate);
         return {
           primary: oldName === newName ? oldName : STRINGS.MAIN.relocateRenamed(oldName, newName),
@@ -111,10 +114,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     refreshQueue(relocated.size > 0);
     const notFound = stillMissing.filter((m) => !m.candidate);
     if (notFound.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => nameOf(m.path))), 'warning', 10000);
+      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path))), 'warning', 10000);
     }
     if (leftFound.length > 0) {
-      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => nameOf(d.path))), 'warning', 15000, {
+      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => fileNameOf(d.path))), 'warning', 15000, {
         action: { label: STRINGS.MAIN.USE_ALL_FOUND_COPIES, onClick: () => useFoundCopies(leftFound) },
       });
     }
@@ -123,8 +126,9 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
 
   // Start Capture Batch's check: a demo can go missing after the queue was
   // loaded. True when every demo with a highlight picked is where the queue
-  // says, after any the user chose to relocate.
-  async function pickedDemosPresent() {
+  // says, after any the user chose to relocate. `onProgress({ done, total })`
+  // counts the changed-demo check, for Start Capture's line (#953).
+  async function pickedDemosPresent({ onProgress = null } = {}) {
     const picked = getDemos().filter((d) => (d.streaks || []).some((s) => s.selected === true));
     if (picked.length === 0) return true;
     if ((await checkMissingDemos(null, [], picked)) !== 0) return false;
@@ -133,7 +137,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     // anyway") is at the right path but isn't the demo that was scanned:
     // every highlight would record the wrong moment, and any past its end
     // would leave the game stopped at the end of the demo.
-    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })));
+    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })), onProgress);
     if (changed.length === 0) return true;
     const rescan = await themedConfirm(STRINGS.MAIN.CHANGED_DEMOS_MESSAGE, {
       title: STRINGS.MAIN.CHANGED_DEMOS_TITLE,
@@ -142,6 +146,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       details: changed.map((p) => ({ primary: fileNameOf(p), secondary: shortFolder(folderOf(p)), title: p })),
       footer: STRINGS.MAIN.CHANGED_DEMOS_QUESTION,
     });
+    logFrontendEvent(changedDemosLine(changed.length, !!rescan));
     if (rescan) await scan(changed);
     return false;
   }
@@ -281,7 +286,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // demo has a saved file key and the pick doesn't match it, ask first.
   async function locateDemoByHand(demo) {
     try {
-      const picked = await open({
+      const picked = await pickPath({
+        field: 'project.locate_demo',
+        // Missing, so the dialog starts in its nearest folder that's left.
+        current: demo.path,
         multiple: false,
         title: STRINGS.MAIN.LOCATE_DEMO_DIALOG_TITLE,
         filters: [{ name: 'Demo', extensions: ['dem'] }],

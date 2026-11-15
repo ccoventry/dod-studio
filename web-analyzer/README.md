@@ -11,6 +11,13 @@ that failed to parse). Deployed to GitHub
 Pages on every push to `main` that touches `web-analyzer/`, `analysis/`,
 `dod/`, or `dem-patch/` (`.github/workflows/deploy_web.yml`).
 
+The analysis runs in a module Web Worker (`www/analyzer_worker.js`), so the
+page keeps responding and shows progress while a demo is parsed; one worker,
+and so one wasm instance, serves every demo. `src/heap.rs` wraps the wasm
+allocator so memory grows in large steps: without it, a demo's first
+analysis made thousands of small `memory.grow` calls, each slower than the
+last in V8, and ran 5-80x slower than the same demo analysed again.
+
 ## Build and serve locally
 
     rustup target add wasm32-unknown-unknown
@@ -32,5 +39,6 @@ tested under plain Node (not wired into CI):
     node --test web-analyzer/tests/export.test.mjs
 
 The `wasm-bindgen` crate dependency and CLI version **must match exactly** —
-a mismatch fails at the bindgen step. Bump both together (see the pinning
-comment in `Cargo.toml`).
+a mismatch fails at the bindgen step. Bump both together (the pin and its
+comment are in the root `Cargo.toml`, and the CLI version is also set in
+`.github/workflows/deploy_web.yml`).

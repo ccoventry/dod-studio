@@ -9,6 +9,10 @@
 // moves the ticks but never mutates the kills array, so the uid stays put
 // across range edits.
 
+import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { recordCapture, carryCaptures } from './take_record.js';
+import { carryRenders } from './take_renders.js';
+
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
  * save/load, and Kill Range edits. Cached onto the streak after first use.
@@ -30,35 +34,28 @@ export function streakUid(demoPath, streak) {
   return uid;
 }
 
-/**
- * Copies the user-owned, non-derivable state from a previously-loaded version
- * of a demo onto a freshly-scanned one, matching highlights by uid.
- *
- * A re-scan re-parses the demo and produces brand new streak objects, so
- * without this every status, selection, and note on that demo is silently
- * destroyed. Only fields the user set are carried over — everything derived
- * from the demo file itself comes from the fresh scan.
- */
-export function preserveHighlightState(previousDemo, freshDemo) {
-  if (!previousDemo?.streaks?.length || !freshDemo?.streaks?.length) return freshDemo;
+// ── Curation (#44) ──────────────────────────────────────────────────────────
+//
+// An editorial mark, separate from `status` (which drives what the pipeline
+// does): unset = not reviewed yet, Keep, Maybe (look again later, #661), or
+// Skip. Skip unticks the row and locks it, so no batch can include it; Maybe
+// leaves the row tickable. Frontend-only, persisted in the project file with
+// the rest of the streak.
 
-  const previousByUid = new Map(
-    previousDemo.streaks.map(s => [streakUid(previousDemo.path, s), s])
-  );
+export const CURATION = { KEEP: 'Keep', MAYBE: 'Maybe', SKIP: 'Skip' };
 
-  freshDemo.streaks.forEach(fresh => {
-    const previous = previousByUid.get(streakUid(freshDemo.path, fresh));
-    if (!previous) return;
-    if (previous.status !== undefined) fresh.status = previous.status;
-    if (previous.statusByHand) fresh.statusByHand = true;
-    if (previous.selected !== undefined) fresh.selected = previous.selected;
-    if (previous.notes !== undefined) fresh.notes = previous.notes;
-    // Kill Range edits are user edits too, not scan output.
-    if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
-    if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
-  });
+const MARKS = new Set(Object.values(CURATION));
 
-  return freshDemo;
+/** True for a highlight marked Skip: never selectable, never captured. */
+export function isSkipped(streak) {
+  return streak?.curation === CURATION.SKIP;
+}
+
+/** Sets the mark ('' clears it). Skip also unticks the row. */
+export function setCuration(streak, value) {
+  if (MARKS.has(value)) streak.curation = value;
+  else delete streak.curation;
+  if (value === CURATION.SKIP) streak.selected = false;
 }
 
 // ── Status source (#105) ────────────────────────────────────────────────────
@@ -114,10 +111,69 @@ export function setVerifiedStatus(streak, status) {
  * the same key again (e.g. a re-capture) just unions the uid sets rather
  * than dropping the earlier ones.
  */
-export function recordTake(takeIndex, takeKey, uids) {
+export function recordTake(takeIndex, takeKey, uids, meta) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
   const existing = takeIndex[takeKey] || [];
   takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+  // How it was captured goes beside the index, never into it (take_record.js).
+  recordCapture(takeIndex, takeKey, meta);
+}
+
+/**
+ * Marks the highlights a captured block covers Captured and records its take
+ * in the take index, so a render of it resolves back to them. Shared by the
+ * post-batch verification and Render While Capturing (#861), which renders
+ * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
+ * It also records when and how the take was captured (#439): `block` is a
+ * verified block or a `capture_clip_ready` payload (which carries its own
+ * rate); the dispatch's own rate (what the mode really records at) wins, then
+ * `captureFps` for a block that carries none. `block.capture_settings`, when
+ * there, is the full settings record (part of #1085); a block without it
+ * leaves an earlier one in place.
+ */
+export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
+  let advanced = 0;
+  let markCleared = false;
+  // A block can cover several highlights — overlapping ones are recorded
+  // as one continuous take — so every highlight it covers advances.
+  const uids = [];
+  const sourceIndices = block.source_streak_indices || [];
+  sourceIndices.forEach(i => {
+    const streak = dispatch?.streaks?.[i];
+    if (!streak) return;
+    const demoPath = dispatch?.demoPaths?.[i];
+    uids.push(streakUid(demoPath, streak));
+    // Merged blocks (2+ source highlights recorded into one take) get a
+    // visible affordance in Highlight Details (detail_pane.js) so it's
+    // obvious why the rows flipped together. Non-enumerable, same as
+    // `.uid`, so it never leaks into a future capture payload sent
+    // over IPC (buildCapturePayload pushes the live streak object).
+    if (sourceIndices.length > 1 && block.take_key) {
+      Object.defineProperty(streak, 'mergedTakeKey', { value: block.take_key, enumerable: false, configurable: true });
+      Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
+    }
+    // Status only ever moves forward. Re-capturing something already
+    // rendered must not knock it back down to Captured -- unless that
+    // Rendered was set by hand: a verified capture beats an unverified
+    // claim (#105).
+    if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
+    if (streak.statusByHand) markCleared = true;
+    if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
+  });
+  // Recorded even when the take isn't renderable yet — a future render
+  // still needs to resolve this take_key back to these highlights once
+  // it succeeds, and the index outlives this dispatch's in-memory state.
+  if (takeIndex && block.take_key) {
+    recordTake(takeIndex, block.take_key, uids, {
+      session_id: block.session_id ?? dispatch?.sessionId,
+      captured_at: Date.now(),
+      capture_mode: block.capture_mode ?? dispatch?.captureMode,
+      capture_fps: dispatch?.captureFps ?? block.capture_fps ?? captureFps,
+      take_folder: block.take_folder,
+      settings: block.capture_settings,
+    });
+  }
+  return { advanced, markCleared };
 }
 
 /**
@@ -136,6 +192,18 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
 }
 
 /**
+ * Points each recorded uid in `renames` (old uid -> new uid) at its new one:
+ * a split demo's highlights live on in its pieces under new uids (#217), and
+ * their captured takes must still resolve to them.
+ */
+export function renameUidsInTakeIndex(takeIndex, renames) {
+  if (!takeIndex || !renames || renames.size === 0) return;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = Array.from(new Set(takeIndex[key].map((uid) => renames.get(uid) ?? uid)));
+  });
+}
+
+/**
  * Highlight uids the given take key maps to, or an empty array if this take
  * was never recorded (e.g. captured before Phase 3, or from a project saved
  * on an older version that had no take index at all).
@@ -143,6 +211,22 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
 export function resolveTake(takeIndex, takeKey) {
   if (!takeIndex || !takeKey) return [];
   return takeIndex[takeKey] || [];
+}
+
+/**
+ * Marks Rendered every highlight in `demos` the takes `takeKeys` cover, as a
+ * render finishing does (render_pane.js): a verified status, so a hand-set
+ * one is overruled. For renders found in the take folders when a project
+ * opens (#1345). Returns how many changed status.
+ */
+export function markTakesRendered(takeIndex, takeKeys, demos) {
+  const uids = new Set((takeKeys || []).flatMap((key) => resolveTake(takeIndex, key)));
+  if (uids.size === 0) return 0;
+  let changed = 0;
+  (demos || []).forEach((demo) => (demo.streaks || []).forEach((streak) => {
+    if (uids.has(streakUid(demo.path, streak)) && setVerifiedStatus(streak, HIGHLIGHT_STATUS.RENDERED)) changed += 1;
+  }));
+  return changed;
 }
 
 /**
@@ -158,6 +242,8 @@ export function pruneTakeIndex(takeIndex, knownUids) {
     const kept = uids.filter(uid => known.has(uid));
     if (kept.length > 0) pruned[key] = kept;
   }
+  carryCaptures(takeIndex, pruned);
+  carryRenders(takeIndex, pruned);
   return pruned;
 }
 
@@ -173,28 +259,32 @@ export function isRangeModified(streak) {
 /**
  * True if this highlight carries anything the user did on purpose — real
  * pipeline-earned status (Pending/Captured/Rendered), a note, or a narrowed
- * kill range. This is deliberately a wide net (per user, 2026-08-19): any
- * one of the three is enough to protect the row from Clear Untracked in
- * Workspace mode.
+ * kill range. This is deliberately a wide net: any one of the three is
+ * enough to protect the row from Clear Untracked in Workspace mode.
  *
- * `Pending` used to deliberately NOT count (revised 2026-08-19, was
- * originally "status !== None"): back then `streak.status` started as
- * `undefined` and the status dropdown *displayed* undefined as "Pending"
- * purely for convenience, without ever writing to the field — so an
- * explicit "Pending" selection looked identical to an untouched row, and
- * counting it as tracked could silently flip a row's protection with no
- * visible change. That premise is gone now that an unset status displays
- * (and counts, master_pane.js's countByStatus) as "None" instead —
- * "Pending" only ever appears once the user deliberately sets it, e.g. to
- * flag a highlight for a later capture pass without selecting it yet — so
- * it is exactly the kind of on-purpose signal this predicate exists to
- * protect, and the 2026-08-19 restriction no longer applies.
+ * `Pending` counts because an unset status displays (and counts,
+ * master_pane.js's countByStatus) as "None" — "Pending" only ever appears
+ * once the user deliberately sets it, e.g. to flag a highlight for a later
+ * capture pass without selecting it yet — so it is exactly the kind of
+ * on-purpose signal this predicate exists to protect.
  */
 function isHighlightTracked(streak) {
   if (!streak) return false;
-  if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
+  if (streak.status === HIGHLIGHT_STATUS.PENDING || streak.status === HIGHLIGHT_STATUS.CAPTURED || streak.status === HIGHLIGHT_STATUS.RENDERED) return true;
   if (streak.notes && streak.notes.trim()) return true;
+  if (streak.clipName && streak.clipName.trim()) return true;
+  if (streak.curation) return true;
   return isRangeModified(streak);
+}
+
+/**
+ * Whether a highlight is one of the project's clips, which is worked out, not
+ * stored: anything tracked or captured, short of a Skip. `takenUids` is the
+ * Set of uids the take index holds.
+ */
+export function isClipInProject(demoPath, streak, takenUids) {
+  if (isSkipped(streak)) return false;
+  return isHighlightTracked(streak) || takenUids.has(streakUid(demoPath, streak));
 }
 
 /** True if any of a demo's highlights are tracked (see isHighlightTracked). */

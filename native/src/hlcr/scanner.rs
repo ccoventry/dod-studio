@@ -1,5 +1,3 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -46,13 +44,18 @@ pub struct ClipData {
     /// which only works while HLAE spells the folder exactly that way. Carrying
     /// the name the scanner actually saw on disk means the renderer is told its
     /// partner rather than guessing it, and is the one piece of the standalone
-    /// HLCR's design (see `docs/render_studio_hlcr_parity.md`) that does not
+    /// HLCR's design (see `docs/archive/render_studio_hlcr_parity.md`) that does not
     /// depend on frame counts.
     ///
     /// `#[serde(default)]` for the same reason as `video_file`: autosaves
     /// written before this field existed must keep loading.
     #[serde(default)]
     pub alpha_folder: Option<String>,
+    /// The highlight's clip name (#441), which the finished file is named
+    /// after. Set by Render Studio's queue from the project; `None` for a take
+    /// no loaded project knows, which keeps the `<demo>_<take>` name.
+    #[serde(default)]
+    pub clip_name: Option<String>,
 }
 
 /// Whether a clip is eligible for "Skip (keep original)" — no FFmpeg pass at
@@ -131,7 +134,7 @@ fn collect_image_folders(take_folder: &Path) -> Vec<PathBuf> {
 const VIDEO_EXTENSIONS: &[&str] = &["avi", "mp4", "mkv", "mov"];
 
 /// The video inside a stream folder, whatever container it is in.
-fn stream_video_path(folder: &Path) -> Option<PathBuf> {
+pub(crate) fn stream_video_path(folder: &Path) -> Option<PathBuf> {
     // `video.avi` first so an HLAE take resolves without touching the disk
     // more than once — it is by far the common case.
     let preferred = folder.join(VIDEO_FILE);
@@ -219,6 +222,45 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
     false
 }
 
+/// Whether this exact folder is what the scan hands out as a clip's
+/// `take_folder`: it holds the streams itself, not through a nested `take*`.
+/// Delete Take (#644) asks this, so it can never act on a block or session
+/// folder that merely contains a take.
+pub fn is_take_folder(folder: &Path) -> bool {
+    take_shape_is_renderable(folder)
+}
+
+/// Frames the longest stream directly inside `folder` holds (one take
+/// folder, not a block folder with HLAE's `take*` inside): an AVI's from its
+/// header, a frame sequence's by its files. `None` when no stream there can
+/// be counted this cheaply (an OBS MP4/MKV, an AGR take, no stream at all),
+/// so an unknown length is never taken for a short one (#1105). An AVI whose
+/// header says 0 frames was never finalised and counts as 0.
+pub fn take_frame_count(folder: &Path) -> Option<usize> {
+    collect_image_folders(folder)
+        .iter()
+        .filter_map(|stream| match stream_video_path(stream) {
+            Some(video)
+                if video
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("avi")) =>
+            {
+                Some(avi_frame_count(&video).unwrap_or(0))
+            }
+            Some(_) => None,
+            None => Some(count_bmps(stream)),
+        })
+        .max()
+}
+
+/// The audio HLAE wrote beside the streams in one take folder (#1105): the
+/// first `.wav` by name, as the render pass picks it.
+pub fn take_wav(folder: &Path) -> Option<PathBuf> {
+    collect_wav_files(folder)
+        .first()
+        .map(|name| folder.join(name))
+}
+
 /// The two admissible shapes, checked against one specific folder.
 ///
 /// 1. **Audio beside a stream folder.** How HLAE writes a take, whether that
@@ -274,9 +316,18 @@ pub fn scan_folder_background(
             continue;
         }
 
+        // walkdir does not follow links by default; the depth cap is #376's.
+        // An output folder can be a drive root, whose Recycle Bin keeps
+        // deleted takes under their own names (#843).
         for entry in WalkDir::new(&source_folder)
+            .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
             .into_iter()
-            .filter_entry(|e| !is_bmp_stream_folder(e))
+            .filter_entry(|e| {
+                !is_bmp_stream_folder(e)
+                    && !(e.depth() > 0
+                        && e.file_type().is_dir()
+                        && crate::sys::folder_walk::is_system_folder(e.file_name()))
+            })
             .filter_map(|e| e.ok())
         {
             if !entry.file_type().is_dir() {
@@ -359,7 +410,7 @@ pub fn scan_folder_background(
             // noticing. Windows resolves the paths case-insensitively either
             // way, so only this lookup was ever at risk.
             //
-            // `docs/render_studio_hlcr_parity.md` notes the standalone HLCR
+            // `docs/archive/render_studio_hlcr_parity.md` notes the standalone HLCR
             // pairs folders generically instead — any `alpha`/`mask` folder with
             // a same-frame-count `color`/`rgb` one — which is more robust than
             // literal names and remains the better long-term shape.
@@ -380,8 +431,23 @@ pub fn scan_folder_background(
                 && folder_names.contains_key("hudcolor")
                 && folder_names.contains_key("hudalpha")
             {
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "contains_key was checked for all three names just above"
+                )]
                 let all_folder = folder_names.get("all").unwrap();
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "contains_key was checked for all three names just above"
+                )]
                 let hud_color_folder = folder_names.get("hudcolor").unwrap();
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "contains_key was checked for all three names just above"
+                )]
                 let hud_alpha_folder = folder_names.get("hudalpha").unwrap();
                 let frame_count = stream_frame_count(all_folder);
                 let (width, height) = stream_dimensions(all_folder);
@@ -403,6 +469,7 @@ pub fn scan_folder_background(
 
                 if all_has_audio {
                     let clip_all = ClipData {
+                        clip_name: None,
                         take_folder: take_folder.to_string_lossy().into_owned(),
                         clip_type: "single".to_string(),
                         img_folder: on_disk_name(all_folder),
@@ -419,6 +486,7 @@ pub fn scan_folder_background(
 
                     if wav_to_use.is_some() {
                         let clip_hud = ClipData {
+                            clip_name: None,
                             take_folder: take_folder.to_string_lossy().into_owned(),
                             clip_type: "hud_only".to_string(),
                             // Both halves of the pair are named from what is actually on
@@ -478,6 +546,7 @@ pub fn scan_folder_background(
                     .into_owned();
                 let date = get_clip_date(&img_folder);
                 let clip = ClipData {
+                    clip_name: None,
                     take_folder: take_folder.to_string_lossy().into_owned(),
                     clip_type: "single".to_string(),
                     img_folder: folder_name,

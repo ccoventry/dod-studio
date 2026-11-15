@@ -20,16 +20,12 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 tabled = { workspace = true }
 chrono = "0.4.45"
-web-time = { workspace = true }
-nom = { workspace = true }
 log = { workspace = true }
 dirs = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "io-util", "time"] }
 walkdir = "2.5.0"
 hl-demo-auditor = { path = "../hl-demo-auditor" }
-rfd = "0.14"
 open = "5.1"
 sysinfo = { workspace = true }
 keepawake = "0.6"
@@ -45,13 +41,14 @@ ureq = "3"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 sha2 = "0.11.0"
 base64 = "0.23.1"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { workspace = true }
-wasm-bindgen-futures = "0.4.50"
-console_error_panic_hook = { workspace = true }
-js-sys = { workspace = true }
-web-sys = { version = "0.3.77", features = ["HtmlCanvasElement", "Window", "Document", "Element", "File", "Storage", "Worker", "Blob", "Url", "DedicatedWorkerGlobalScope", "MessageEvent", "HtmlCollection", "NodeList"] }
+# Delete Take (#644) sends a take folder to the Recycle Bin, never a permanent
+# delete, so a wrong click can be undone from Explorer.
+trash = "5.2"
+# "Add a crosshair file…" (#842) takes the sprite out of the ZIP Vertex's
+# crosshair creator downloads. Only DEFLATE (with flate2's default pure-Rust
+# backend, which zip's own dependency leaves off) and STORE are needed.
+zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1.1"
 
 # ── Binaries ────────────────────────────────────────────────────────────────
 # Real tools, not probes. Anything exploratory belongs in native/examples/,

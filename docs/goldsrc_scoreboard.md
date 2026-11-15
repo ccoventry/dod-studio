@@ -1,6 +1,6 @@
 # Hiding DoD's scoreboard without editing `ScoreBoard.res`
 
-How `dodstudio_hide_scoreboard` works, what it does not cover, and the evidence for
+How `ds_hud_hide_scoreboard` works, what it does not cover, and the evidence for
 each claim. Everything here is from offline analysis of DoD 1.3's `client.dll`
 (`pefile` + `capstone`, the house method in
 `docs/goldsrc_client_dll_internals.md` §10) plus a parse of real demos.
@@ -142,13 +142,13 @@ string, rather than trusting that the signature found the right function.
 ## 4. Using it
 
 ```
-dodstudio_hide_scoreboard 1     block +showscores
-dodstudio_hide_scoreboard 0     back to the game's own behaviour (the default)
-dodstudio_hide_scoreboard       report the current state
-dodstudio_debug_status                report it alongside every other setting
+ds_hud_hide_scoreboard 1     block +showscores
+ds_hud_hide_scoreboard 0     back to the game's own behaviour (the default)
+ds_hud_hide_scoreboard       report the current state
+ds_debug_status                report it alongside every other setting
 ```
 
-It is a cvar, so it also takes `+dodstudio_hide_scoreboard 1` on the launch line or
+It is a cvar, so it also takes `+ds_hud_hide_scoreboard 1` on the launch line or
 a line in any `.cfg` the session execs — which is the useful form for an
 unattended capture, since it is then set before the first demo loads.
 
@@ -196,7 +196,8 @@ could blank them at patch time instead. The command field is a fixed
 added or removed, and therefore **no frame ordinals shift** — the +1 hazard
 `CLAUDE.md` warns about does not apply.
 
-That route needs no companion DLL at all, and is a targeted instance of #30
-(strip pre-existing console commands from a source demo). It is worth doing as
-well, not instead: it bakes the decision in at patch time, where this one is
+That route needs no companion DLL at all, and was a targeted instance of
+stripping pre-existing console commands from a source demo (the original scope
+of #30, which was later retitled and closed as the HLTV text hook). It is no
+longer wanted: #434 is retiring demo patching in favour of the hook, which is
 live-toggleable while reviewing a demo.

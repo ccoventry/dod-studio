@@ -1,9 +1,11 @@
 # DoD 1.3 death notices: raising the line count, and the rest of `mirv_deathmsg`
 
 > **Status 2026-09-16 — implemented and live-tested.**
-> Lives in `goldsrc-hooks/src/deathmsg.rs`, on branch
-> `feat/goldsrc-hooks-companion-dll`. One console command,
-> `dodstudio_deathmsg`, with four subcommands.
+> Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
+> `ds_hud_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
+> plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
+> `font` (§6, #562), `scale` (§7, #728) and `layout` (§8, #1022) came later,
+> in `deathmsg/`.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -283,6 +285,9 @@ y differently. DoD's `Draw` starts at y = 20 and accumulates line height
 +0x2af19  add eax, 0x14                    ; else ScreenHeight/480*42 + 20
 ```
 
+(`<spectator mode>` below is really the overview map's size, not a spectator
+mode: see `docs/goldsrc_objective_icons.md` §5.)
+
 `offset` does **not** patch either immediate. It detours, the way HLAE does,
 for a reason the three code paths make obvious:
 
@@ -316,7 +321,7 @@ included.
 
 > **"Spectator mode" above is the wrong name, established later.** The call at
 > `+0x2aeba` is `client.dll+0x228e0`, which returns `_cl_minimap`'s value — and
-> only while a spectator predicate holds and `gHUD`'s FOV field is still 90. So
+> only while the renderer is hardware (`IsHardware`) and `gHUD`'s FOV field is still 90. So
 > "mode 2" is **the minimap** (`_cl_minimap 2`, top right), not a spectator
 > mode: the kill feed starts `round(2 * ScreenHeight / 480)` below the
 > minimap's bottom edge while it is up. (An earlier version of this note said
@@ -361,13 +366,13 @@ are checked against `Y_STOLEN` before anything is written.
 ## 4. The console surface
 
 ```
-dodstudio_deathmsg max <4..127>      lines shown at once (default 4)
-dodstudio_deathmsg offset <0..127>   y the feed starts at (default 20)
-dodstudio_deathmsg offset default    put the y back
-dodstudio_deathmsg block <id>...     hide frags involving these players
-dodstudio_deathmsg block !<id>...    hide everything EXCEPT these players
-dodstudio_deathmsg block clear       stop hiding anything
-dodstudio_deathmsg fake <killer> <victim> <weapon>
+ds_hud_deathmsg max <4..127>      lines shown at once (default 4)
+ds_hud_deathmsg offset <0..127>   y the feed starts at (default 20)
+ds_hud_deathmsg offset default    put the y back
+ds_hud_deathmsg block <id>...     hide frags involving these players
+ds_hud_deathmsg block !<id>...    hide everything EXCEPT these players
+ds_hud_deathmsg block clear       stop hiding anything
+ds_hud_deathmsg fake <killer> <victim> <weapon>
 ```
 
 `max 4` restores the shipped bytes exactly, array included, so there is always a
@@ -416,12 +421,14 @@ python goldsrc-hooks/tools/verify_deathmsg_offsets.py [path-to-client.dll]
 ## 4a. The spectator layout
 
 While spectating, the feed's `~95 + 20` starts above the bottom of the spectator
-bar, which is `64 * ScreenHeight / 480` tall. So the feed's first line overlaps
+bar, which is `64 * ScreenHeight / 480` tall (`BAR_UNITS` in `spectator_hud.rs`;
+the `54` the survey docs mention is how far the game pushes the *other*
+elements down, not the bar's height). So the feed's first line overlaps
 the bar. `goldsrc-hooks/src/spectator_hud.rs` sets the feed's y through this
 detour whenever no `offset` has been typed:
 
 - bar shown: 20 below the bar;
-- `dodstudio_hide_spectator_bars 1`: 20, as in a POV demo.
+- `ds_spec_hide_bars 1`: 20, as in a POV demo.
 
 The minimap is the exception: while it is up, the game already places the feed
 under it. So the layout leaves the feed alone and moves the minimap instead. A
@@ -540,3 +547,306 @@ patch state is reset too rather than inherited.
 The `[demo N]` column in the DLL's log is client time since process start, not
 demo playback position. It reads as though a demo is running when none is, which
 is exactly how the crash above was misdiagnosed once before being pinned down.
+
+## 6. The font (`font`, #562)
+
+`Draw` draws the names with the engine's console-string calls, all
+`call [gEngfuncs + slot*4]`:
+
+| RVA | call | slot |
+| --- | --- | --- |
+| `0x2b00d` | `pfnDrawConsoleStringLen(victim, &w, &h)` | 29 (`+0x74`) |
+| `0x2b04e` | `pfnDrawConsoleStringLen(killer, &w, &h)` | 29 |
+| `0x2b079` | `pfnDrawSetTextColor(KillerColor[0..3])`, if non-null | 28 (`+0x70`) |
+| `0x2b089` | `pfnDrawConsoleString(x, y, killer)` | 27 (`+0x6c`) |
+| `0x2b0de` | `SPR_Set(icon, 255, 255, 255)` | 4 |
+| `0x2b0f1` | `SPR_DrawHoles(0, x, y, &rect)` | 6 |
+| `0x2b125` | `pfnDrawSetTextColor(VictimColor[0..3])`, if non-null | 28 |
+| `0x2b135` | `pfnDrawConsoleString(x, y, victim)` | 27 |
+
+`x = ScreenWidth - len(victim) - icon width [- 5 - len(killer)]`, and the
+next line starts `rect.bottom - rect.top` (the icon's height) lower, at
+`0x2b13e..0x2b14e`, not a constant 20 as the SDK's `Draw` has.
+
+In `hw.dll` (both builds: `cl_enginefuncs` is at PRE `+0x136260`, POST
+`+0x319b08`), `pfnDrawConsoleString` draws through the engine's vgui2 surface
+-- `VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s own
+`CreateInterface`; there is no `vguimatsurface.dll` in GoldSrc -- with one
+font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
+(`dod/resource/TrackerScheme.res`), fetched once, in `VGUI2_Draw_Init` (PRE `+0x69e0`, POST
+`+0x230d40`). It sets the font, position and colour, converts the string
+with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
+prints it, and then **resets the colour to `con_color`**. The width is the sum
+of `GetCharABCwide` over the characters, the height `GetFontTall`. The draw
+first turns every character `iswprint` rejects into a space (PRE `+0x6c42`;
+POST likewise), the length call does not, so a name holding `⅞` or `★` shows
+a blank there and measures a little wider than it draws.
+
+`ISurface` slots (slot 0 is the destructor; MSVC lays adjacent overloads out
+in reverse order), checked by `ret` size on both builds in
+`tools/verify_killfeed_font_offsets.py`: 13 `DrawSetTextFont`, 15
+`DrawSetTextColor(r,g,b,a)`, 16 `DrawSetTextPos`, 18 `DrawPrintText`, 21
+`DrawFlushText`, 59 `CreateFont`, 60 `AddGlyphSetToFont`, 62 `GetFontTall`,
+63 `GetCharABCwide`.
+
+**Measure what is drawn, not `GetTextSize` (#1052).** `DrawPrintText` calls
+`DrawUnicodeChar` (slot 19) for every character, and that advances by the
+character's `GetCharABCwide` a+b+c. `GetTextSize` (slot 65) skips `&` and
+every character `iswprint` rejects (`⅞`, `★`, `™`, `€`, emoji halves: the
+CRT asks `GetStringTypeW`, and these symbols carry no print class), so it
+measured such a name short by those characters: the killer's name ran into
+the icon and the victim's off the screen. `font.rs` sums slot 63 over the
+characters it prints instead; the verify script checks both builds draw
+that way.
+
+**Past Latin-1 the face is not the face.** `AddGlyphSetToFont` gives the face
+asked for U+0000..U+00FF only and adds `Tahoma` for U+0100..U+FFFF (both
+builds), unless the face is `Tahoma`. So `⅞` in a `Bahnschrift` name was
+drawn in Tahoma. `font.rs` writes such a character as its Unicode
+compatibility form when that is plain Latin-1 (`⅞` as `7/8`, `™` as `TM`,
+fullwidth letters as ASCII), so it is drawn in the chosen face; anything else
+stays as it is, drawn in Tahoma and measured as drawn. The game's own font
+gets the same forms while the six sites are the hook's.
+
+**But the face can be given what it has (#1054).** The split is the font
+manager's, not Windows': the surface's `AddGlyphSetToFont` (slot 60) drops
+its range arguments, and the manager gives the whole range only to `Marlett`
+(its one "foreign language capable" face) and to `Tahoma` itself. The
+handle's glyph set is an amalgam, a `CUtlVector` of `{low, high, CWin32Font*}`
+ranges where `GetFontForChar` takes the first that holds the character
+(PRE `+0xd2420`, POST `+0x26fdf0`). So `font.rs` raises the first range of its
+own fresh handle from `0xff` to `0xffff` (only when the two ranges are
+exactly the manager's split) and draws each name in runs: the face's handle
+for the characters the face has (`GetFontUnicodeRanges`), a `Tahoma` handle
+for the rest. Bahnschrift then draws `Łukasz`, Cyrillic, Greek, Vietnamese,
+`™` and `€` itself; `★`, CJK and emoji, which it lacks, stay Tahoma's. The
+compatibility forms apply only to characters the face lacks. The manager is
+found through slot 60's thunk (`call FontManager; mov ecx, eax; call ...`,
+`FontManager()` being `mov eax, imm32; ret` on both builds), and
+`verify_killfeed_font_offsets.py` checks the layout on both.
+
+**Backup faces come before Tahoma (#1079).** `fallback <face>...` makes one
+more handle per face, at the font's size, weight and effects, widened the
+same way (a backup's own upper range is Tahoma's too), and reads its
+coverage. A character the face lacks goes to the first backup that has it,
+and Tahoma gets only what none has; each run is measured in its own handle,
+so the width stays what the draw advances past. A backup named `Tahoma`
+shares the fallback's handle. A face Windows does not have is left out with a
+note rather than silently swapped (`GetTextFaceA` on the font Windows made
+names the substitute): unquoted, `fallback Segoe UI` asks for `Segoe` and `UI`.
+The compatibility forms still win over a backup, so `⅞` stays `7/8` in the
+chosen face.
+
+The engine's own string draw (`EngineFont`; PRE `hw+0x6be0`) goes through the
+same manager, so it has the same split, and it also turns every character
+`iswprint` rejects into a space.
+
+**A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
+`+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a
+glyph set, and the interface has no `DeleteFont`. So `font` creates a new
+handle each time and leaves the old one (one table entry; the Windows font
+behind it is cached by name, size and flags). The next frame draws with the
+new handle: live, no demo reload.
+
+The hook rewrites the six text calls to `call rel32; nop` (same six bytes)
+into `goldsrc-hooks/src/deathmsg/font.rs`, which forwards to the engine until
+a font is set, then draws and measures with its own handle and keeps each
+name's colour from the `pfnDrawSetTextColor` just before it (`con_color` when
+none was set, as the engine does). A 16-byte detour at the line step makes it
+`max(icon height, font height)`. The icon's size is §7's.
+
+Flags: vgui2's scheme loader maps `dropshadow` to 0x80 when
+`ISurface::SupportsFeature(2)` is true, which it is on both builds (and the
+PRE `EngineFont`'s own shadow shows it renders). Neither font manager tests an
+outline bit (0x200), so `outline` is accepted and reported as not drawn.
+
+## 7. The icon scale (`scale`, #728)
+
+Neither engine build nor either client has a HUD scale: `CHud::VidInit`
+picks the 640 set on any screen 640 or wider and `pfnSPR_Draw*` draws exactly
+`rect` pixels, texture coordinates `(rect ± 0.5) / the frame's logical size`
+(`Draw_Frame`, PRE `hw+0x3d280`, Anniversary `+0x23b1c0`). DoD's
+`d_*` icons are big and uneven -- `d_skull` 74×52, `d_garand` 201×34,
+`d_bren` 168×58, `d_britknife` 76×20 -- so the stock feed's line step already
+varies per line and the names sit at the top of each line.
+
+Everything in a line's layout comes from one `wrect_t` -- the icon's entry in
+`gHUD.m_rgrcRects` (`gHUD+0x18c`, `{left, right, top, bottom}`, 16 bytes per
+sprite id, `new wrect_t[m_iSpriteCount]` once in `VidInit`, `client+0x21c9c`;
+`m_iSpriteCount` is `gHUD+0x10`, `m_rghSprites` `gHUD+0x188`). `Draw` reads
+the array exactly twice, both `mov eax, [gHUD+0x18c]`:
+
+| RVA | use |
+| --- | --- |
+| `0x2b017` | anchor: `x = ScreenWidth - (right - left) - victim width [- 5 - killer width]` |
+| `0x2b097` | the stack copy handed to `SPR_DrawHoles(0, x, y, &rect)` at `0x2b0f1`, then the advance `right - left` (`0x2b0ff`) and the line step `bottom - top` (`0x2b13e`) |
+
+So the feed scales without a code patch beyond three operands, each the same
+length (`goldsrc-hooks/src/deathmsg/scale.rs`):
+
+1. Both reads become `mov eax, [RECTS]`, a pointer the hook owns. At S = 1 it
+   is the game's array, re-read every frame. At S ≠ 1 it is a copy with
+   `right = left + round(S·w)`, `bottom = top + round(S·h)`: the anchor, the
+   advance and the step come out S× by themselves, and §6's step detour makes
+   the step `max(S·icon height, font height)`.
+2. The `call [gEngfuncs+0x18]` becomes `call rel32; nop` into the hook. At
+   S = 1 it forwards to whatever the table held (HLAE's wrapper, if HLAE hooked
+   the slot), moving the icon down by `(font height - icon height) / 2` when a
+   font is set and taller. At S ≠ 1 it looks the unscaled rect up (same index
+   in the copy), moves the icon down by `(font height - S·icon height) / 2`
+   when the font is taller, and calls that same function with the
+   **unscaled** rect under
+   `glPushMatrix; glTranslatef(x+.5, y+.5); glScalef(S, S, 1);
+   glTranslatef(-(x+.5), -(y+.5)); …; glPopMatrix` on `GL_MODELVIEW`
+   (`opengl32.dll`'s exports; the matrix mode is restored if it was another).
+   The engine draws its own quad -- its texture coordinates, alpha test,
+   `gl_spriteblend`, scissor, `GL_Bind`'s cache -- S× bigger about the icon's
+   corner. `glTranslatef`/`glScalef` post-multiply, so this is the engine's
+   pixel space whatever matrix the HUD pass has current.
+3. The names are centred on the line when the icon is the taller. The
+   killer's name is drawn before the icon (`0x2b089`, the icon at `0x2b0f1`),
+   so the line's height has to be known at its start: a 6-byte detour at
+   `0x2b026` (`shl ebx, 4; add esp, 0xc`, just after the first rect read, with
+   `ebx` the line's sprite index and `eax` the array `Draw` reads) stores
+   `rect.bottom - rect.top` -- the scaled height at S ≠ 1. §6's name draws
+   then use `y + (max(icon height, font height) - text height) / 2`, the text
+   height being our font's, or the engine font's as its length call reports
+   it. At S = 1 with no font they leave `y` alone, so the stock layout is
+   untouched.
+
+Why not a vftable wrapper around `Draw` (slot 3 of `+0xac1c4`, which does hold
+`Draw`) with a per-call swap of the table slot: `hudelement` owns that slot --
+it refuses a value that is neither the stock `Draw` nor `CHudBase::Draw`, and
+writes both -- and a swap needs a restore on every exit. Why not TriAPI: it
+would mean re-deriving the texture coordinates and the alpha-test state the
+engine's own draw already has.
+
+The magnified icon is the 640-set sprite under bilinear filtering, so it is
+soft at 2×; HD HUD sprites (#728 (a), `texture_hires` with `mipmap = 1`) are
+what make it sharp. `SPR_DrawHoles` (`Draw_SpriteFrameHoles`, pre-Anniversary
+`hw+0x3d430`) enables the alpha test and, while `gl_spriteblend` is non-zero,
+`GL_BLEND` with `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`; the alpha function in force
+for the HUD is the engine's default `GL_NOTEQUAL 0` (read live on both builds,
+`ds_debug_status`). So the draw blends whatever alpha the texture has:
+an HD kill-feed sheet keeps its file's soft alpha and draws blended even at
+`gl_spriteblend 0` (`hud_sprite_edges.rs`, #841), and how smooth its edges
+are is down to the alpha the sheet carries.
+`tools/verify_killfeed_scale_offsets.py` checks the three operands, the
+line-start detour's span and registers, the field offsets, the stride, the
+vftable slot and that both installs ship the same `client.dll`.
+
+## 8. One box height for every icon (`layout even`, #1022)
+
+`hud.txt`'s `d_*` rects are 9 to 34 rows tall, so even at one scale each line
+of the feed steps differently, and the guns' barrels sit at different heights.
+`layout even` gives every icon a box 26 stock rows tall, every long gun's
+barrel top on row 8, nothing cut: a long gun is as wide as Valve's drawing,
+and shrinks with its barrel kept on the line when its magazine or bipod
+would hang below the box (the MP40 and MP44 to 71%); pistols and launchers (the mortars too, #1088)
+keep their size, moved onto the line (the launchers and the Bren move up or
+down as little as fits); knives, the spade and grenades keep their size,
+centred; the icons with no weapon model to render whole (`d_skull`, the
+bayonet close-ups, the butt stroke) are composed from model
+renders in the same look (`killfeed_composites.py`, #1088), centred, shrunk
+only when taller than 26 rows.
+
+§7's rect copy already decides each line's anchor, advance and step, so a
+26-row box per icon gives every line one step. But the engine samples the
+texture from that same rect, and the 256×256 `weapons<N>` sheets are packed
+too tight: 27 of the 35 modelled icons can't grow to 26 rows without reading
+the icon below. So the icons go into an atlas of our own, built by
+`goldsrc-hooks/tools/hd/killfeed_icons.py --even`:
+
+- `sprites/dodstudio_killfeed.spr` (in `dod_addon`, which the engine searches
+  first with `-addons`): 256×256 alpha-test frames laid out like Valve's
+  sheets, whose own pixels are only grey boxes;
+- `sprites/dodstudio_killfeed.txt` beside it: `name frame x y w h` per icon;
+- the HD frames, `dodstudio_hd\sprites\<style>\dodstudio_killfeed_<n>_<hash>.tga`,
+  keyed like every HD sprite frame. The placeholder depends on the boxes
+  alone, so every style's frames share one sprite.
+
+`goldsrc-hooks/src/deathmsg/even.rs` checks both files (bounds, frame count,
+format) before the engine is handed the sprite, loads it with the engine's
+`SPR_Load` once per level load, and gives each sprite index its box by name:
+`gHUD.m_rgszSpriteNames` (`gHUD+0x190`, `new char[24 * m_iSpriteCount]` in
+`VidInit`, `client+0x21cb4`, each `hud.txt` name `strncpy`'d into 24 bytes at
+`+0x21d4a`). §7's copy then holds each box, scaled; the line-start stub also
+stores the line's sprite index (`ebx` before the shift), so the icon draw
+knows exactly which entry it draws, and draws that box of the atlas
+(`SPR_Set` to the atlas with the game's colour, the engine's
+`SPR_DrawHoles`, blended as a soft weapons sheet, the game's sprite set back)
+under the same matrix as §7. The copy is in use at S = 1 too, and the names
+are centred on the 26-row line as with a scale.
+
+It draws only while every frame of the atlas went up with its HD file this
+session and `ds_hd_enabled` is 1; otherwise -- no atlas, a bad file, HD off,
+no atlas built for the style -- the feed is the game's own, exactly as with
+`layout default`. The engine keeps a sprite's first upload until it exits, so
+an atlas rebuilt while the game runs is refused until a restart (the hook
+compares the files with the ones it first handed the engine): the old pixels
+laid out by the new boxes would draw the wrong crops. Nothing in `hw.dll` is touched, and the sprite calls go
+through `gEngfuncs`, so both engine builds take the same path.
+`tools/verify_killfeed_scale_offsets.py` also checks the names field.
+
+### The butt stroke's icon per line (#1088)
+
+`DeathMsg` sends weapon 42 (`d_garandbutt`) for both rifles' butt strokes,
+the Garand's and the K43's, so the game draws one icon for both. The atlas
+carries six variants, the killer's rifle by the victim's head
+(`d_garandbutt` Garand on an Axis head, `d_garandbutt_us`, `d_k43butt_axis`,
+`d_k43butt_us`, and the British heads `d_garandbutt_brit`, `d_k43butt_brit`,
+#1089), trimmed to one box so any of them fits the line the game
+laid out for `d_garandbutt`. While `layout even` is asked for, the hook's
+`DeathMsg` handler notes each butt stroke the game adds
+(`goldsrc-hooks/src/deathmsg/butt.rs`): the rifle from the killer's
+`entity_state_t::weaponmodel` (`p_k43.mdl` or `p_garand.mdl`), else his team
+(Axis: K43); the head from the victim's `g_PlayerExtraInfo` team, an Allied
+head British when the map's Allies are (`gHUD.m_bBritish`, `client+0x108226`:
+the `GameRules` message's first byte `& 4`, stored at `+0x2c69a` and read
+for the overview's `brit_camera` at `+0x2f426`). The note is keyed by the line's
+killer's and victim's names, because `Draw` moves lines up the array as
+older ones expire. The line-start stub (§7) also stores `edi`, `Draw`'s slot
+offset into the array (`slot * 156`, `[edi + &list[0].iSuicide]` at
+`+0x2b037`), so the icon draw reads that line's fields and draws its
+variant's box. An atlas without the first four variants in one size (one
+built before #1088) draws `d_garandbutt` for every butt stroke; one without
+the British two (built before #1089) draws the US heads for them. The default layout
+draws Valve's sheet, whose one rect holds the Garand on an Axis head.
+
+### The space between the names and the icon (`gap`)
+
+`Draw` puts the icon 5 px after the end of the killer's name
+(`add eax, 5` at `client+0x2b092`, after `DrawConsoleString` returns) and the
+victim's name straight after the icon's advance, so any empty columns inside
+an icon's box are space between a name and its art. Atlas v1's boxes were
+cut to each render's own box, and the short icons kept much of it, in atlas
+px left/right: the PIAT 16/22, the spade 4/18, the Luger 3/17, the German
+knife 4/11, the stick grenade 4/9, against 0.5/0.5 for every long gun. At
+`scale 2.5` the stick grenade's names sat ~20 px further from its art than
+a Garand's.
+
+The engine draws a box from half a texel inside each edge (texture
+coordinates `(rect ± 0.5) / frame size`), so a long gun's 0.5 never shows.
+`killfeed_icons.py` (`EVEN_VERSION` 2, `trim_box`) now narrows every box to
+its icon's visible columns plus that half texel each side, the art centred
+to the HD pixel (at most 3/8 of a stock px of slack a side, under 1 screen
+px at `scale 2.5`); a box its art fills already keeps its size, and the rows
+are untouched (the barrel row, the centring). The trimming is the tool's
+because the tool has the pixels: the hook sees only the grey placeholder
+sprite and the box table, and the HD frames go to the GPU without passing
+through it.
+
+`ds_hud_deathmsg gap <px>` sets both spaces to `px` screen pixels, counted
+from the names' outline when one is drawn (an outline is drawn around the
+name's text and reaches `outline` px past it on both sides, into the gap),
+and on the killer's side from our `font`'s drop shadow, which reaches 1 px
+right of the ink (measured: the killer's name 1 px nearer the icon with
+`shadow` than without, the victim's side unchanged).
+The killer's side goes into the killer's width call and the end its draw
+returns (the two `font` sites, `+0x2b04e` and `+0x2b089`, only on a line
+whose icon is in the atlas: the line-start stub has stored the line's sprite
+index by then), the victim's into the box's advance in §7's copy, so a line
+with no killer gets the victim's side only. `gap default` is the game's 5 px
+and nothing, which with the trimmed boxes is how far a rifle's names always
+sat. The names' own side bearings (the space a font leaves around a glyph,
+a pixel or two) stay as the font draws them.

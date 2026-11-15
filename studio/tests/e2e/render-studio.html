@@ -20,22 +20,42 @@
 <body>
   <div id="render-status-row">
     <button id="scan-render-btn">Scan for Takes</button>
-    <button id="start-render-btn">Start Render Batch</button>
-    <button id="cancel-render-btn" disabled>Cancel All</button>
-    <button id="reset-all-render-btn" disabled>Reset All</button>
-    <button id="remove-all-render-btn" disabled>Remove All (Not Rendering)</button>
+    <button id="vegas-script-install-btn">Add Nameplate Script to VEGAS</button>
+    <button id="start-render-btn" disabled>Start Render Batch</button>
+    <button id="cancel-render-btn" disabled>Cancel (0)</button>
+    <button id="cancel-queued-render-btn" disabled>Cancel Queued (0)</button>
+    <button id="retry-render-btn" disabled>Retry (0)</button>
+    <button id="remove-render-btn" disabled>Remove (0)</button>
+    <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+    <button id="clear-render-queue-btn" disabled>Clear Queue</button>
     <p id="render-status">Status: Waiting...</p>
+    <!-- #954: Scan for Takes' sliding block. -->
+    <div id="render-scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
     <div id="render-job-container"></div>
+  </div>
+
+  <!-- #70: the selection's own controls, copied from index.html. -->
+  <div id="render-selection-row">
+    <button id="render-select-unrendered-btn" disabled>Select unrendered</button>
+    <button id="render-select-finished-btn" disabled>Select finished</button>
+    <select id="render-finished-age-select" disabled>
+      <option value="0">of any age</option>
+      <option value="86400000">over a day old</option>
+    </select>
+    <span id="render-selection-count">0 of 0 selected</span>
   </div>
 
   <div id="render-settings-row">
     <select id="render-codec-select">
+      <option value="prores_422">ProRes 422 (2/3 the size of HQ)</option>
       <option value="prores">ProRes 422 HQ</option>
+      <option value="prores_lt">ProRes 422 LT (half the size of HQ)</option>
       <option value="dnxhr">DNxHR HQ</option>
       <option value="h264">H.264 (Software, MP4)</option>
       <option value="h264_nvenc">H.264 (NVENC GPU, MP4)</option>
       <option value="custom">Custom (paste FFmpeg args)</option>
     </select>
+    <p id="render-codec-hint" hidden></p>
     <div id="render-custom-codec-group" style="display: none;">
       <input type="text" id="render-custom-codec-input" />
     </div>
@@ -45,17 +65,51 @@
     <span id="render-export-pool-free">0.0 GB</span>
   </div>
 
+  <!-- The folder fields that Configuration holds in the real app (#25). -->
+  <div class="input-row"><input type="text" id="drive-path-input" /><button id="add-drive-btn">Add</button></div>
+  <div id="target-drive-list"></div>
+  <div class="input-row"><input type="text" id="render-export-dir-input" /><button id="add-render-export-dir-btn">Add</button></div>
+  <div id="render-export-dir-list"></div>
+
   <table id="render-jobs-table">
     <thead>
       <tr>
-        <th data-sort="name">Clip Name</th><th data-sort="stream">Stream</th><th data-sort="frames">Frames</th><th data-sort="date">Date</th>
-        <th>Settings</th><th data-sort="status">Status</th><th>Speed</th><th>Progress</th><th data-sort="size">File Size</th><th>Actions</th>
+        <th><input type="checkbox" id="render-select-all-cb" disabled /></th>
+        <th>Picture</th><th data-sort="name">Clip Name</th><th data-sort="stream">Stream</th><th data-sort="frames">Frames</th><th data-sort="date">Date</th>
+        <th>Settings</th><th data-sort="status">Status</th><th>Speed</th><th>Progress</th><th data-sort="size">File Size</th><th>History</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="render-jobs-tbody">
-      <tr><td colspan="10" class="table-empty">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+      <tr><td colspan="13" class="table-empty">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
     </tbody>
   </table>
+
+  <!-- #1069: take pictures, copied from index.html. -->
+  <div id="render-take-preview-progress" style="display: none;">
+    <div class="progress-bar-container"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+    <span id="render-take-preview-progress-label"></span>
+  </div>
+  <div id="take-preview-hover" hidden><img alt="" /></div>
+  <div id="take-sheet-modal" style="display: none;">
+    <h2 class="take-sheet-title"></h2>
+    <p class="take-sheet-status"></p>
+    <div class="take-sheet-grid"></div>
+    <div class="take-sheet-checks" hidden></div>
+    <button class="take-sheet-close">Close</button>
+  </div>
+
+  <div id="render-take-delete-progress" style="display: none;">
+    <div class="progress-bar-container"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+    <span id="render-take-delete-progress-label"></span>
+  </div>
+
+  <!-- Delete Take's confirm (#644), copied from index.html. -->
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
 
   <div id="render-footer-pool-free">Export Pool Free: 0.0 GB</div>
   <div id="render-footer-required-space">Required (Over-estimated): 0.00 GB</div>
@@ -81,6 +135,9 @@
 
   <script type="module">
     import { initRenderUI, checkRenderRecoveryOnStartup } from '../../src/render_pane.js';
+    import { initThemedConfirm } from '../../src/themed_confirm.js';
+
+    initThemedConfirm();
 
     // Test-controlled inputs, set via page.evaluate before Scan/Start is
     // clicked — mirrors what main.js's own closures over `targetDrives`/
@@ -88,7 +145,10 @@
     // scan input is the same shared Capture Locations list Capture Studio
     // writes to, not its own separate list — see #81).
     window.__testCaptureLocations = [];
-    window.__testExportDirs = [];
+    // One export folder, as Start needs one; a test clears it to check that.
+    window.__testExportDirs = ['E:/exports'];
+    window.__mockInvokeHandlers = window.__mockInvokeHandlers || {};
+    window.__mockInvokeHandlers['get_export_pool_free_gb'] = () => 100;
     window.__testSettingsChangeCount = 0;
 
     initRenderUI(

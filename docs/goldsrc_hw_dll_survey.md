@@ -21,6 +21,23 @@ read but never modified.
 python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 ```
 
+> ### Status (2026-10)
+>
+> §1–§5 are the first pass; §7–§11 are later passes (#273, closed) that resolved
+> most of what §3.3–§3.5 and §4 leave open. Where the two disagree, trust the
+> later section; §11 is what is still not surveyed. §12–§14 are #300: §12
+> redoes the HLAE map against HLAE 2.192.4 for **both** engine builds, and
+> supersedes §1–§2's counts; §13–§14 open the demo reader.
+>
+> | Candidate | Built? | Command / module | Issue / PR |
+> | --- | --- | --- | --- |
+> | raise `ex_interp`'s 100 ms ceiling (§3.2) | yes | `ds_demo_ex_interp_max`, `ex_interp.rs` | #271, PR #301 |
+> | empty the decal pool (§3.4, §9) | yes | `ds_map_clear_decals`, `decals.rs` | PR #297; #290 still open |
+> | the 64-byte command limit (§3.1) | not reachable | — | #256 |
+> | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
+> | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
+> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207: Studio plays a trimmed copy of the demo instead |
+>
 > ### Read this before §1
 >
 > **This is a partial survey, and says so up front.** `hw.dll` is ten times the
@@ -37,6 +54,8 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 `AfxHookGoldSrc.dll` registers its pattern keys as C++ static initialisers —
 `push <name>; push <result slot>; mov ecx, <map>; call` — which makes the
 database recoverable exactly rather than approximately. There are **68 keys**.
+*(In the HLAE build this section read. HLAE 2.192.4 has 69, and a different
+set — §12.1.)*
 
 ### The list in issue #256 was a guess, and several entries were wrong
 
@@ -82,7 +101,7 @@ other direction, now confirmed against the whole database rather than a
 `strings` dump.
 
 So on the DoD client side we have the module entirely to ourselves, and
-`dodstudio_deathmsg` and `dodstudio_objectives` cannot be colliding with anything
+`ds_hud_deathmsg` and `ds_hud_objectives` cannot be colliding with anything
 of HLAE's. That is worth knowing with certainty rather than by inference.
 
 ---
@@ -91,7 +110,8 @@ of HLAE's. That is worth knowing with certainty rather than by inference.
 
 `AfxHookGoldSrc.dll` carries `.detourc` and `.detourd` sections and a statically
 linked Microsoft Detours. Its install sequence is the standard transaction —
-begin, update-thread, then `DetourAttach(&target, hook)` per hook, 34 of them —
+begin, update-thread, then `DetourAttach(&target, hook)` per hook, 34 of them
+(40 in HLAE 2.192.4, which also span-patches; §12) —
 and `DetourAttach` rewrites **the first ≥5 bytes of the target function**,
 building a trampoline from the instructions it displaced.
 
@@ -150,8 +170,8 @@ not reproduce; the tool reports the match count rather than guessing.
 
 ### 3.1 The 64-byte command limit — settled, and its name is wrong
 
-**`CLAUDE.md` calls it "GoldSrc's 64-byte `Cbuf_AddTextToBuffer` limit". There is
-no such limit.**
+**`CLAUDE.md` used to call it "GoldSrc's 64-byte `Cbuf_AddTextToBuffer` limit".
+There is no such limit.**
 
 `Cbuf_Init` at `hw+0x272b0`:
 
@@ -166,8 +186,11 @@ push "filteredcmd_text"
 call SZ_Alloc
 ```
 
-GoldSrc's command buffer is **16 KB**, and `hw.dll` contains no string
-containing "Cbuf" at all — there is no overflow message to hit.
+GoldSrc's command buffers are **16 KB**. (This section used to say `hw.dll`
+holds no "Cbuf" string; it holds two, `Cbuf_AddTextToBuffer: overflow` and
+`Cbuf_InsertText: overflow`, both for the 16 KB limit. A long stepped seek in a
+POV demo hits the first one thousands of times: `filteredcmd_text` runs one
+command a frame, see `goldsrc_viewdemo.md`, #702.)
 
 The 64 is real, but it is the **demo file format**: a Type-3 `ConsoleCommand`
 frame carries a fixed `char command[64]`. This project's own reader says so —
@@ -178,8 +201,8 @@ frame carries a fixed `char command[64]`. This project's own reader says so —
 **Consequence: not reachable, and there is nothing to raise.** The limit is a
 property of the bytes we write into a file the engine parses, not of a buffer we
 could grow. Staggering long paths across ticks remains the answer. What changes
-is the reasoning — and `CLAUDE.md`'s wording, which currently sends anyone
-investigating this to a function that does not impose it.
+is the reasoning. `CLAUDE.md` now says so: the limit is a file-format property
+and cannot be raised.
 
 *(Not proven: the engine's own read of that 64-byte field was not located. The
 conclusion rests on the format side — our reader, and the pipeline's own naming
@@ -219,13 +242,19 @@ nothing else, and it is not a cheat vector in a demo. `cl_updaterate` still sets
 the floor, so a demo recorded at a low update rate cannot be smoothed below what
 it captured.
 
-*Not proven: what the flag at `+0x2d5df84` is. It is written to `1` at
-`hw+0x10880` in the demo-start path, so "playing a demo" is the obvious reading
-and would mean demos already get the 200 ms ceiling — but that is inference, and
-it is exactly the sort of thing that should be checked before the work is
-costed.*
+*Not proven here: what the flag at `+0x2d5df84` is. (Answered since by
+`docs/goldsrc_ex_interp.md` §2–§2b, and the guess below was wrong: the
+demo-start path writes `0` there, at `hw+0x1087a`, not `1`; the only write of
+`1` on this build is unreachable. On the Anniversary build `svc_hltv` mode 0
+sets it.)* The first pass read the demo-start write as "playing a demo" and
+inferred that demos already get the 200 ms ceiling; checking it before costing
+the work was the right call.
 
 ### 3.3 Demo playback and parsing — located, not surveyed
+
+*(Later passes: §7 names `CL_ParseServerMessage` and the dispatch table, §8 reads
+`CL_ParsePacketEntities`, §10 pins HLAE's span patch inside it. The demo reader
+itself is still unopened, per §11.)*
 
 `CL_ParseServerMessage` is at the function containing `hw+0x1aab2`
 (`CL_ParseServerMessage: svc_updateuserinfo > MAX_CLIENTS`), and the whole
@@ -246,6 +275,9 @@ pass, not a paragraph.
 
 ### 3.4 Entity and decal limits — located, not surveyed
 
+*(Resolved by §9 (#273): the ring's size is not reachable; see
+`docs/goldsrc_decals.md` for the shipped `ds_map_clear_decals`.)*
+
 `r_decals` is registered at `hw+0x46c35` with a default of `4096.0`, alongside
 `sp_decals` and `mp_decals`. `Draw_DecalMaterial` is one of the fourteen
 functions HLAE detours, which is the first thing anyone touching decals
@@ -258,6 +290,8 @@ decal above the new limit — and the pipeline already works around it from
 
 ### 3.5 `CL_FlushEntityPacket` — not located
 
+*(Resolved by §8 (#273): located, and the predicate is computable offline.)*
+
 No self-naming string, and no pattern of HLAE's points at it. The condition
 under which it fires is already recorded from the demo side, and that is what
 the reseq work needed; whether the engine side is reachable remains open.
@@ -265,6 +299,9 @@ the reseq work needed; whether the engine side is reachable remains open.
 ---
 
 ## 4. What is left that is worth doing
+
+*(First-pass table. §7–§9 (#273) resolved the `CL_ParseServerMessage` naming and
+the decal and flush rows; see the status table at the top.)*
 
 Subtracting HLAE, and taking §3 at face value:
 
@@ -320,8 +357,13 @@ python goldsrc-hooks/tools/survey_hw_dll.py parse       # the svc table, and nam
 python goldsrc-hooks/tools/survey_hw_dll.py entities    # the flush and its predicate
 python goldsrc-hooks/tools/survey_hw_dll.py decals      # the decal ring
 python goldsrc-hooks/tools/survey_hw_dll.py pin         # HLAE's ambiguous patterns
+python goldsrc-hooks/tools/survey_hw_dll.py writes      # every HLAE write primitive (§12)
+python goldsrc-hooks/tools/survey_hw_dll.py spans       # HLAE's span patches, this build (§12)
 python goldsrc-hooks/tools/survey_hw_dll.py --hw ... --afx ...
 ```
+
+`spans` picks its build from the `hw.dll` it is given, so pass the
+Anniversary `hw.dll` with `--hw` to check that build's seven.
 
 `parse`, `entities` and `decals` run without HLAE present, as `findings` does.
 `findings` runs without HLAE present and re-checks each address in §3 against
@@ -400,6 +442,30 @@ There is also a per-opcode counter array at `0x2d09de0`, incremented as
 `inc [opcode*4 + 0x2d09de0]` for every message parsed — a ready-made histogram
 of what a session actually received.
 
+### Centre print and HUD messages (#677)
+
+Two text paths the engine owns, both read for `goldsrc-hooks` and checked on
+both builds by `tools/verify_engine_text_offsets.py`:
+
+- **`svc_centerprint`** (`hw+0x1dc80`; 25th Anniversary `+0x1a9cc0`) is
+  `call MSG_ReadString; push eax; call SCR_CenterPrint; pop ecx; ret`.
+  `SCR_CenterPrint` (`+0x4ba90` / `+0x24cde0`) copies 1023 bytes into the
+  centre string; `svc_finale`, `svc_cutscene` and the client's
+  `pfnCenterPrint` wrapper (`+0xb0e0`) are its other callers.
+  `engine_center_print.rs` turns only the handler's call into `nop`s.
+- **`TE_TEXTMESSAGE`**, inside `CL_ParseTEnt`, fills one of four
+  `client_textmessage_t`s named `__NETMESSAGE__1..4` (text at `+0x28`) and
+  calls `CL_HudMessage` (`+0x19ab0` / `+0x1a30a0`), which dispatches
+  `"HudText"` **by name** (`+0x1a7c0` / `+0x1a9260`). Unlike the by-number
+  dispatcher every server message uses, the by-name one calls every record
+  with that name, so a `pfnHookUserMsg` hook cannot drop these:
+  `client.dll`'s own record runs after it. `plugin_text.rs` points the
+  `CL_HudMessage` call (`+0x23da4` / `+0x1b0a0d`) at a filter instead.
+- The user-message list itself is freed only where the engine unloads
+  `client.dll` (`+0xbda0`: `HUD_Shutdown`, then `FreeLibrary`), and
+  `svc_newusermsg` (`+0x1a550`) numbers every record with a message's name, so
+  a hook added once `HUD_Init` has run keeps working across connects.
+
 ### The self-naming heuristic was too narrow
 
 The first pass matched `Name:` as a *prefix*. The function #273 said was not
@@ -477,6 +543,18 @@ CL_UPDATE_MASK     hw+0x13afcc = 63
 That is why the predicate is checkable offline at all, and it is what
 `survey_hw_dll.py entities` re-checks.
 
+### The new frame is sized by the declared count
+
+The new frame's entity array is allocated from the packet's `entity_count`,
+and carried entities are copied into it with no check against that size:
+`hw+0x13453` is a `rep movsd` of 0x55 dwords (one 340-byte `entity_state_t`)
+to `frame[+0x24] + newindex * 0x154`. The `newindex == MAX_PACKET_ENTITIES`
+message just before it only prints. A packet that declares fewer entities than
+the client's carried set overruns the heap: #15's salvaged `m1_h1` faults there
+writing an 11th entry into a block declared for 10, and others corrupt the heap and fault
+later. Any rewrite of packet entities has to state the count the client will
+actually build (`analysis/examples/shared/entity_carry.rs`).
+
 ---
 
 ## 9. The decal ring
@@ -488,7 +566,7 @@ The pool is a fixed array, not a sized allocation: `r_decals` only bounds how
 far the rotating index travels before wrapping, and evicts nothing. Measured:
 
 ```
-R_DecalRemoveAll<by flag>  hw+0x4a000
+R_DecalRemoveWithFlag      hw+0x4a000
 R_DecalInit                hw+0x49da0
 R_DecalUnlink              hw+0x49e80
 gDecalPool                 0x2325cb8 .. 0x2341cb8   (0x1c000 bytes)
@@ -503,11 +581,12 @@ What *is* reachable is **emptying** it, which is the thing the pipeline actually
 wanted. `R_DecalInit` alone would be a crash — it wipes the pool without
 unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
 renderer still walks. The engine's own remove functions unlink first, and
-`dodstudio_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
+`ds_map_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
 
-Note this is the one finding here that is **pre-Anniversary only**: the
-Anniversary engine compiles the remove loop differently, so `R_DecalUnlink`
-cannot be recovered from it this way. `R_DecalInit`'s signature matches both.
+The Anniversary engine inlines `R_DecalUnlink` into its remove loops, so it
+can't be recovered from the loop there. `decals.rs` finds that build's
+standalone copy by its own signature instead (`goldsrc_decals.md` §5).
+`R_DecalInit`'s signature matches both.
 
 ---
 
@@ -569,3 +648,604 @@ Shorter than §5, and deliberately not empty.
   it was the only one.
 - **The engine's own read of the demo `ConsoleCommand` field** (§3.1), and the
   **`ex_interp` flag at `+0x2d5df84`** (§3.2). Both unchanged.
+
+*(#300 picks these up. §12 answers the HLAE items — the eight keys and the
+census of writes — for both builds; §13 is the demo reader; §3.2's flag is
+answered by `docs/goldsrc_ex_interp.md` §2–§2b. §14 closes what §12 and §13
+left: HLAE's writes through computed pointers, its unhook paths, and the rest
+of the demo reader.)*
+
+---
+
+## 12. Every HLAE write, per build (#300)
+
+#300 asked two things of HLAE, and the 2026-09-28 review (D6) narrowed it to
+exactly those, **per build**: how HLAE uses `R_PushDlights`, `SND_PickChannel`
+and the six `UnkDrawHud*` keys, which it resolves but never `DetourAttach`es;
+and whether the 34 `DetourAttach` sites plus §10's span patch are all of its
+writes.
+
+**Subjects:** `AfxHookGoldSrc.dll` from **HLAE 2.192.4** (449,536 bytes, the
+one install on this machine), against both engines: the pre-Anniversary
+`hw.dll` (§1–§11's subject) and the 25th Anniversary `hw.dll` from the
+*POST-Anniversary for Movies* install (3,598,176 bytes, `ImageBase
+0x10000000`). Offline, `pefile` + `capstone`; `survey_hw_dll.py writes` and
+`spans` reproduce it.
+
+### 12.1 First: §1's HLAE was an older build
+
+§1–§2 and §10 read a different `AfxHookGoldSrc.dll`, and HLAE has moved. Against
+2.192.4:
+
+| §1 says | 2.192.4 has |
+| --- | --- |
+| 68 keys, 46 engine-side, 22 game-client | **69**: 50 engine-side, 19 game-client |
+| 34 `DetourAttach` sites | **40** |
+| `R_DrawEntitiesOnList_In`/`_Out`, `R_DrawSkyBox_Begin`/`_End`, `S_StartDynamicSound`, `S_Update_`, `CL_ParseServerMessage_CmdRead_MsgReadByte_CallAddrOfs` do not exist | all seven exist |
+| `SND_PickChannel`, `GetSoundtime` are keys | **neither is** |
+
+So §1's "the issue guessed / actually" table was right about the build it read
+and is wrong about this one. **The `SND_PickChannel` half of item 2 has no
+answer to give: 2.192.4 does not resolve it at all.**
+
+The reason for most of the drift is that this HLAE supports both engines. It
+picks a branch per key from one test, made once at `hw.dll` load: **does
+`hw.dll` contain the string `A3D.DLL`?** The pre-Anniversary build does, the
+Anniversary build does not. (Proven: the resolver stores the result of that
+search in the flag every two-branch key reads.) Most keys carry one pattern per
+branch, which is why `collide` reports so many `0 matches` lines — each is the
+*other* build's pattern, not a miss.
+
+### 12.2 The census (item 3)
+
+The question was whether a `VirtualProtect`-and-write exists outside the
+`DetourAttach` count. The way to close it is from the API side: `VirtualProtect`
+is imported once, and everything that changes a page's protection has to reach
+it.
+
+It is reached from **14 call sites in 9 functions** — 8 direct, 6 through one
+jump thunk. Three of the functions are the statically linked Microsoft Detours
+(`DetourAttachEx`, transaction begin, transaction commit; they are the thunk's
+callers). The other six are HLAE's own, and with the in-place jump writer —
+which reaches `VirtualProtect` only through the bracketed-write pair — they are
+the complete list of its write primitives:
+
+| primitive | what it writes | call sites |
+| --- | --- | --- |
+| Detours `DetourAttach` | rewrites a function's first ≥5 bytes, trampoline elsewhere | **40** |
+| trampolined jump | copies a span to a new trampoline, NOPs it, writes `E9 rel32` over its start | **2** |
+| in-place jump | NOPs a span and writes `E9 rel32`; no trampoline — HLAE re-creates the displaced instructions in a stub of its own | **15**: 6 into `hw.dll`, 4 into `cstrike`/`tfc` `client.dll` (`*_Draw_YRes`), 5 into its own stubs |
+| bracketed write | unprotect *n* bytes, plain store, restore | **12** |
+| import-table slot | one pointer | 2 functions of one import-hook manager, entered from **4** places: `hl.exe`, `hw.dll`, `SDL2.dll`, `client.dll` |
+| executable allocation | HLAE's own heap, never foreign memory | 4 |
+
+The twelve bracketed writes, for instance, are: two `cstrike` crosshair factors
+in `client.dll`; one `cldll_func_t` slot (three call paths); four that *read*
+`hw.dll` span bytes out into HLAE's stubs under the bracket; two around
+`skytextures`; one around `msg_readcount`; and one inside each jump writer.
+
+Every call site of every one of those is attributed in §12.3. **That closes item
+3 for protection-changing writes, proven:** there is no `VirtualProtect` call in
+the module that is not one of these, and none of these has an unattributed
+caller.
+
+What a `VirtualProtect` census *cannot* see is a store into memory that is
+already writable. Two kinds turned up by following the key slots, and they are
+in the table too: **console command handlers** (a `cmd_function_t` node's
+handler field, heap) and **slots of the engine's `cldll_func_t` copy** (`.data`;
+HLAE brackets these anyway). A scan for every `mov [reg+disp], <AfxHookGoldSrc
+code address>` finds only six, all inside one of HLAE's own objects. *Not
+proven:* a store into writable memory through a pointer HLAE computes at run
+time from something that is not a key would not show in either search. Nothing
+suggests one exists.
+
+### 12.3 The map
+
+`hw.dll` addresses, per build. "At load" means HLAE's `hw.dll` installer, which
+runs once when `hw.dll` is loaded, before `client.dll` exists; "lazy" means on
+the first use of a console command, and never otherwise.
+
+**Prologue detours in `hw.dll`** — the §2 model, unchanged:
+
+| target | builds | when |
+| --- | --- | --- |
+| `CL_Disconnect`, `Host_Init`, `_Host_Frame`, `Mod_LeafPVS`, `R_DrawParticles`, `R_DrawViewModel`, `R_PolyBlend`, `R_RenderView` | both | at load |
+| the function `cl_enginefuncs` slot 69 points at (`pfnHookEvent`) | both | at load |
+| `R_DrawEntitiesOnList`, `R_DrawSkyBoxEx` | **pre-Anniversary only** | at load |
+| `R_StudioSetHeader`, `R_SetRenderModel`, `R_SetupRenderer` (`engine_studio_api_t`) | both | once the studio interface is handed over (from HLAE's hook on that hand-off; the chain was not traced end to end) |
+| `S_PaintChannels`, `S_TransferPaintBuffer`, `S_StartDynamicSound` | both | lazy: when HLAE starts recording sound |
+| `Draw_DecalMaterial` | both | lazy: `mirv_decalfilter` or `mirv_noadverts` |
+| `CL_EmitEntities` | both | lazy: `dem_forcehltv` |
+| the function `cl_enginefuncs` slot 66 points at (`pfnWeaponAnim`) | both | its installer is named for `cstrike`; the gate was not traced |
+
+That is 20 of the 40 call sites. The other 20 are 19 in `client.dll`
+(`cstrike_*`, `tfc_*`, `valve_*`, all game-gated) and one on the game window's
+procedure in `SDL2.dll`. The three studio-interface targets are named by HLAE's
+own failure messages, not by anything in `hw.dll`.
+
+**Span patches in `hw.dll` `.text`** — the shape §10 found, and it was not
+alone. Each overwrites the listed span in the middle of a function:
+
+| key | pre-Anniversary | 25th Anniversary | span | when |
+| --- | --- | --- | --- | --- |
+| `UnkDrawHudIn` | `hw+0xb75b4` | `hw+0x25d2d2` | 5 (a `call`) | at load |
+| `UnkDrawHudOut` | `hw+0xb7639` | `hw+0x25d34f` | 5 (a `call`) | at load |
+| `R_DrawEntitiesOnList_In` | — | `hw+0x244354` | 9 | at load |
+| `R_DrawEntitiesOnList_Out` | — | `hw+0x244492` | 12 | at load |
+| `R_DrawSkyBox_Begin` | — | `hw+0x251521` | 8 | at load |
+| `R_DrawSkyBox_End` | — | `hw+0x2516e6` | 6 | at load |
+| `CL_ParseServerMessage_CmdRead` | `hw+0x1d3e6` | `hw+0x1a7ddc` | 7 / 11 | lazy: `mirv_voice_block` |
+
+The containing functions: pre-Anniversary `hw+0xb74e0` (both `UnkDrawHud*`) and
+`hw+0x1d300` (`CL_ParseServerMessage`); Anniversary `hw+0x25d1f0`,
+`hw+0x244130` (`R_DrawEntitiesOnList`), `hw+0x2513c0` (`R_DrawSkyBox`) and
+`hw+0x1a7cb0`.
+
+The pattern is a substitution: **`R_DrawEntitiesOnList` and `R_DrawSkyBoxEx`
+are prologue-detoured on the old engine and span-patched on the new one** —
+the installer asks "old engine?" and takes one path or the other (proven; why
+HLAE chose spans there is not something the binary says). So the per-build
+collision maps differ in kind, not just in address.
+
+§10's span patch, for the record, **is lazy**: it is installed the first time
+`mirv_voice_block` runs, which strips voice data from blocked players by
+advancing `msg_readcount` past it. In a session where nobody types that command,
+`hw+0x1d3e6` is untouched. On the Anniversary build the span is 11 bytes, not 7
+— a `mov [ebp-0x10c], ebx` ahead of the same `call MSG_ReadByte`.
+
+**Data writes** (writable already):
+
+| what | where | when |
+| --- | --- | --- |
+| `cldll_func_t` slot 19 (`V_CalcRefdef`) | the engine's copy of the client table | lazy: `__mirv_force_players_solid` |
+| slot 15 (`CL_IsThirdPerson`) | same | lazy: `dem_forcehltv` |
+| slot 6 (`HUD_PlayerMove`) | same | lazy: `__mirv_moveto` |
+| `skytextures[6]` (24 bytes) | `hw.dll` `.data` | swapped around each sky draw, from the sky hooks |
+| `msg_readcount` | `hw.dll` `.data` | per message, after `mirv_voice_block` |
+| handler of `connect`, `dem_forcehltv`, `startmovie`, `endmovie` | `cmd_function_t` nodes | once, right after `Host_Init` returns (from HLAE's `Host_Init` hook) |
+
+**Import-table slots in `hw.dll`:** `KERNEL32!LoadLibraryA`,
+`KERNEL32!GetProcAddress` and `SDL2!SDL_GL_GetProcAddress`, at load. The same
+manager hooks imports of `hl.exe`, `SDL2.dll` (`GetProcAddress`,
+`CreateWindowExW`, `DestroyWindow`, `SetCursorPos`, `SwapBuffers`) and
+`client.dll`.
+
+**One write in `client.dll`, and it is DoD's too.** `__mirv_demozoom` puts a
+trampolined jump over `client.dll`'s exported `Demo_ReadBuffer` (6 bytes, lazy).
+Every GoldSrc client exports that, so §1's "on the DoD client side we have the
+module entirely to ourselves" is true of HLAE's *patterns* — there is still no
+`dod_` key — but not of every HLAE write. It needs a command nobody types.
+
+### 12.4 Item 2, answered
+
+- **`R_PushDlights` — read, never written.** HLAE stores its address beside
+  `R_RenderView`'s and calls it through that pointer from one small helper,
+  which pushes the dynamic lights and then runs HLAE's own `R_RenderView`
+  hook again — an extra render pass, gated on a flag the hook sets.
+  Pre-Anniversary `hw+0x433a0`; Anniversary `hw+0x241cd0`, one match each.
+- **`SND_PickChannel` — gone** from 2.192.4 (§12.1).
+- **The six `UnkDrawHud*` keys — two span patches**, and the names explain
+  themselves once the offsets are read. `In` and `Out` are two 5-byte `call`
+  instructions in the same function, `0x85` bytes apart on the old engine and
+  `0x7d` on the new; `InCall`/`OutCall` are those calls' targets and
+  `InContinue`/`OutContinue` are the addresses just after them. Each `call` is
+  replaced by a jump into a stub that runs HLAE's code, makes the original call
+  itself, and jumps back to `Continue` — a bracket around one piece of HUD
+  drawing. Installed at load, on both builds, in every HLAE session. Same shape
+  as §10, so item 2's hunch was right for six of the eight.
+
+### 12.5 What it means for `goldsrc-hooks`
+
+**Three shared slots, all safe by chaining.** `goldsrc-hooks` and HLAE write the
+same location in three places:
+
+| location | ours | HLAE's |
+| --- | --- | --- |
+| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine.rs` | at load |
+| the `connect` command's handler | `connect_guard.rs` | after `Host_Init` |
+| `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
+
+In every one, **both sides save the slot's current value and call through it**
+— `hook_import` stores `*slot` as the real function, `cmd_list::wrap`
+keeps the handler it replaces, and HLAE's three writers do the same — so either
+install order gives a working chain. *Inferred, not traced:* that neither side
+restores its saved value while the other's hook is above it. Restoring would
+silently unhook the other.
+
+`pfnHookEvent` is a near miss rather than a collision: HLAE detours the
+*function* slot 69 points at, at load; `missing_shots.rs` swaps the *slot*,
+later. Ours calls through what it found, which is the engine's function, whose
+prologue now jumps to HLAE. Also chain-safe.
+
+**No byte overlap with any span.** No address of ours lies within 32 bytes of
+any HLAE span (three on the old build, seven on the new), and the only one
+inside a containing function is `hw+0x1d791`, the unreachable `ex_interp` flag
+write that `verify_ex_interp_offsets.py` checks and nothing of ours writes.
+Checked against everything the `verify_*` tools print — twelve for the
+pre-Anniversary build, the four that take `--anniversary` for the other. That second list is not
+complete, so on the Anniversary build this is "nothing found", not "proven
+disjoint". `detour.rs`'s byte check is still the backstop: an `E9` where a stub
+expected the original bytes fails loudly.
+
+The practical rule §10 gave for the message stream — don't touch the
+`CmdRead` span, watch `msg_readcount` instead — holds on both builds, with the
+Anniversary span 11 bytes long. And there is now a second region with the same
+warning on the Anniversary build only: **`R_DrawEntitiesOnList` and
+`R_DrawSkyBox` are not detour targets there; their insides are HLAE's.**
+
+---
+
+## 13. The demo reader (#300 item 1)
+
+D6 dropped this item from #300 — #434 moves the schedule out of the demo file,
+which takes most of the motivation with it. It is recorded here as far as one
+bounded pass went, because what it found also answers §3.1's open question and
+explains a rule `cfg_scan.rs` learned empirically. Pre-Anniversary addresses;
+§13.4 says what was rechecked on the Anniversary build.
+
+### 13.1 Where "corrupt" is decided: at open, and only on the directory
+
+`Error: Corrupt demo file.` has one reference (`hw+0x108fa`), in the `playdemo`
+handler, and it fires on exactly one condition. The handler:
+
+1. opens the file — `ERROR: couldn't open.` and stop on failure;
+2. reads the 544-byte header (`HLDEMO`, two protocol ints, map name, game dir,
+   map CRC, directory offset);
+3. **magic** — the first 6 bytes must be `HLDEMO`, else `%s is not a demo file`
+   and stop;
+4. **protocols** — demo protocol 5 and network protocol 48 are expected, and
+   **a mismatch only warns** (`WARNING! demo protocol outdated`) and carries on;
+5. seeks to the directory offset and reads the entry count — **the only
+   "corrupt" test: fewer than 1 or more than 1024 entries**. That prints the
+   message, closes the file and calls `CL_Disconnect`;
+6. reads `count × 92` bytes of entries and seeks to entry 0's offset.
+
+Nothing checks the directory offset, an entry's offset or length, or its frame
+count against the file. The map name and game directory are not compared here
+(other code reads them later), and the header's map CRC field has no absolute
+reference anywhere in `hw.dll`. So a file the engine calls corrupt is one whose directory count
+is out of range — everything else that is wrong is found, if at all, while
+frames are being read.
+
+### 13.2 The frame reader: what it validates, and what it tolerates
+
+The per-frame reader (`hw+0x1104d`) reads a 9-byte header — type byte, float
+time, int frame — **without checking any of the three reads**, then dispatches
+on the type:
+
+| type | what it does |
+| --- | --- |
+| 2 `DemoStart` | resets the playback clock, reads the next frame |
+| 3 `ConsoleCommand` | reads **exactly 64 bytes**, filters, `Cbuf_AddFilteredText`s it plus `"\n"` |
+| 4 `ClientData` | reads 32 bytes |
+| 5 `NextSection` | advances to the next directory entry |
+| 6, 7, 8 | event, weapon animation, sound — each its own reader |
+| 9 `DemoBuffer` | reads a length, **clamps it to 32,768** and reads that many |
+| **anything else** | **read as a network message** — 0 and 1, and also 10–255 |
+
+Every type except 0 and 5 is time-gated: if it is not yet due, the reader seeks
+back to the header and returns, to try again next frame.
+
+The network message is the only checked read: the length must arrive whole
+(`Bad demo length.`), not be negative (`Demo message length < 0.`), not exceed
+65,536 (`Demo message > MAX_POSSIBLE_MSG`), and the payload must arrive whole
+(`Error reading demo message data.`). All four end the session through
+`Host_EndGame`. The payload then becomes `net_message` and goes to
+`CL_ParseServerMessage`.
+
+What that means for anything that writes demos:
+
+- **An unknown frame type is not an error, it is a misread.** Its bytes are
+  taken as a network message's preamble and length, so it ends in one of the
+  four messages above or, worse, a plausible length and a parse of garbage.
+  Every corrupt-demo symptom downstream of a bad type byte starts here.
+- **A `DemoBuffer` frame longer than 32,768 bytes desyncs the rest of the
+  file.** The reader clamps the length rather than skipping the remainder, so
+  the leftover bytes are read as the next frame header. The format side
+  (`dem-patch`) does not have that limit.
+- **The reader never looks at a frame's ordinal.** The header's `int frame`
+  is read into a local and never read back (timedemo pacing uses the host's
+  own frame count). So the "+1 ordinal shift" an injected frame causes
+  (CLAUDE.md, decal ring) is a fact about our own tooling's indexing, and
+  possibly the directory's frame counts (§13.5), not something the reader
+  checks.
+
+### 13.3 The 64-byte `ConsoleCommand` field, from the engine's side (§3.1)
+
+§3.1 concluded the 64-byte limit from the format side only. The read is:
+
+```asm
+hw+0x111c3  push 0x40                ; FS_Read(buf, 64, 1, demofile)
+hw+0x111c6  call FS_Read             ; buf is a 64-byte local
+hw+0x111cf  call hw+0x1dce0          ; the command filter (below)
+hw+0x111e3  call Cbuf_AddFilteredText  ; buf, then "\n"
+```
+
+The call goes to `hw+0x27350`, which appends to `filteredcmd_text`, not
+`cmd_text`: Valve's Linux `sw.so` names it `Cbuf_AddFilteredText`
+(`goldsrc_linux_symbols.md`, #1133). `Cbuf_AddText` proper is `hw+0x272e0`.
+
+**Proven: the engine reads exactly 64 bytes and writes no terminator.** The
+buffer is 64 bytes on the stack and the next local is the `ClientData`
+buffer, so a command that fills all 64 bytes is read on into whatever that
+holds until a zero turns up. The pipeline's rule — strictly *under* 64 bytes —
+is what guarantees the terminator, and that is now a fact about the reader
+rather than an assumption about it.
+
+**Proven: every `ConsoleCommand` frame goes through the same filter as
+`svc_stufftext`** (`hw+0x1dce0`; its other callers are the `stufftext` handler
+and two more). During demo playback it always runs. In order:
+
+1. **On the command's name** (`Cmd_Argv(0)`), case-insensitively: dropped if it
+   **starts with** `connect`, or **contains anywhere** `bind`, `_set`,
+   `unbind`, `retry`, `quit`, `_restart`, `motd_write`, `motdfile`, `kill`,
+   `exit`, `writecfg`, `cl_filterstuffcmd` or `unbindall`.
+2. **On the whole line:** dropped if it starts with `alias `; or contains
+   `bind `, `unbind `, `_restart`, `exit`, `writecfg`, `cl_filterstuffcmd` or
+   `unbindall`; or has `connect ` (not the one inside `reconnect`),
+   `motd_write`, `motdfile`, `retry`, `_set`, `quit` or `kill` at the start of
+   a token (line start, or after a space, `;` or newline) — and if it contains
+   **`exec`, unless the game directory is `tfc`**.
+3. **Only if `cl_filterstuffcmd` is non-zero** (default `0`): also `ex_interp `,
+   `say `, `developer`, `rate`, `fps_max`, `sensitivity`, `setinfo`, `volume`
+   and a dozen more, any `cl_`/`gl_`/`m_`/`r_`/`hud_` token, and any
+   non-printable character.
+
+That is what `cfg_scan.rs`'s old `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`)
+was a subset of. Two consequences worth knowing:
+
+- **The name test is a substring test.** Any command whose *name* contains
+  `_set`, `kill`, `exit`, `bind` or `quit` is dropped when it arrives through a
+  demo's message stream — HLAE's `mirv_matte_setcolor` and
+  `mirv_draw_sv_hitboxes_setucolor` included.
+- **`exec` is dropped for DoD specifically**; the `tfc` exemption is a
+  game-directory check, not a setting.
+
+Stages 1 and 2 are now `cfg_scan.rs`'s `DEMO_FILTER_*` lists, reported for
+Initial and Scheduled Commands (#679; `docs/command_tiers.md`). #434's move
+away from demo-borne commands would sidestep the filter entirely.
+
+### 13.4 The Anniversary build
+
+Rechecked, not re-traced: its reader has the same messages (`Bad demo length.`
+and `Demo message > MAX_POSSIBLE_MSG` in one function, `hw+0x199d20` — the
+reader proper; `hw+0x199cc0` just before it is the wrapper §14.1 describes;
+`Error: Corrupt demo file.` in `hw+0x199890`), the same filter (`hw+0x1aaa30`,
+the same strings in the same order, called from the `stufftext` handler and
+from the reader immediately after a 64-byte read at `hw+0x199f40`). The gate
+details in §13.3 — the `tfc` exemption and the `cl_filterstuffcmd` stage — were
+read on the pre-Anniversary build only *(§14.5 rechecks both on the
+Anniversary build)*.
+
+### 13.5 What is still not surveyed
+
+- What `NextSection` does when there is no next entry, and the timedemo path.
+- The six type-specific readers (types 4, 6, 7, 8, 9's client hand-off) beyond
+  their read sizes.
+- The 92-byte directory entry's fields other than `offset`, and whether
+  playback ever consults `length` or the frame count.
+
+*(§14 answers all three, on both builds.)*
+
+---
+
+## 14. What §12 and §13 left (#300)
+
+After #678, #300 had five loose ends: two about HLAE (writes through pointers
+that are not keys, and its unhook paths) and three about the demo reader
+(§13.5). All five are answered here, offline, on both engine builds: the
+pre-Anniversary `hw.dll` (`ImageBase 0x1d00000`) and the 25th Anniversary one
+(`0x10000000`), with HLAE 2.192.4 (§12). Code is `hw+<rva>`; data globals are
+written as absolute addresses, as the rest of this document does.
+
+### 14.1 First: `viewdemo` does not use this reader
+
+Every demo message reaches the client through one wrapper (pre-Anniversary
+`hw+0x1151d`, Anniversary `hw+0x199cc0`). It asks one question — is
+`DemoPlayer.dll` loaded **and** was this demo started by `viewdemo`? — and
+either takes the message from `DemoPlayer.dll`'s interface or falls into the
+`hw.dll` frame reader §13 describes (`hw+0x1104d` / `hw+0x199d20`). `viewdemo`
+sets that mode flag to 1 and hands the file to `DemoPlayer.dll`'s own loader;
+`playdemo` sets it to 0 (proven on both builds: the setter is called with 1 from
+the `viewdemo` handler, `hw+0x1093d` / `hw+0x19c590`, and with 0 from
+`playdemo`'s).
+
+So **§13 and this section describe `playdemo` and `timedemo`**, which is what
+a patched capture batch uses (`game_handoff.rs` starts every chain demo with
+`playdemo`). `viewdemo` — which Goto and Review use — reads the file in
+`DemoPlayer.dll`, which this survey does not open. It very likely shares the
+*consumers*: an engine-side interface has four consecutive vtable slots
+(pre-Anniversary `0x1e1e294`, `.rdata`) whose methods are thin wrappers around
+the same ClientData, event, weapon-animation and sound consumers the `hw.dll`
+reader calls (§14.4). That this is the interface `DemoPlayer.dll` calls back
+into is inferred from its shape, not traced. So what each frame type *does* is
+most likely common to both commands; how the file is read and validated is not.
+
+### 14.2 The end of the directory, and the end of the file
+
+`NextSection` (type 5, pre-Anniversary `hw+0xf36d`, inlined on the Anniversary
+build at `hw+0x199e85`):
+
+1. if the segment being left has flag `4` (a CD track), queues `cd stop`;
+2. moves to the next directory entry; **if there is none, calls
+   `Host_EndGame("End of demo.")`**;
+3. otherwise stores the entry's `cdtrack`, seeks to its `offset`, resets the
+   playback clock and the per-segment message counter, and reads on.
+
+`Host_EndGame` does not return on either build: it `longjmp`s out of the frame
+(after moving to the next demo of a `startdemos` list, or disconnecting when
+there is none). So the normal end of a demo is the second `NextSection` — the
+one at the end of the playback segment — and nothing after it in the file is
+read. A demo whose last frame is not a `NextSection` is not detected as
+truncated: the 9-byte header reads are unchecked, so the type byte keeps
+whatever that stack slot held, and the frame is decided by that.
+*Inferred from the code, not tested:* the likely outcome is the
+network-message path, ending at `Bad demo length.`.
+
+### 14.3 The clock: `playdemo`'s speed, `host_framerate` and `timedemo`
+
+The reader's clock is **`realtime × replayspeed`**, measured from the last
+`DemoStart` or `NextSection` (pre-Anniversary `hw+0xd1e0`; inlined on the
+Anniversary build). `replayspeed` is `playdemo`'s optional second argument:
+1.0 by default, and any value ≤ 0 becomes 1.0 (`Playdemo:  Time scale %f`). A
+frame is due when its recorded time is below that clock (types 0 and 5 are
+never held back, §13.2).
+
+`host_framerate` reaches the reader through `realtime`. When it is above zero
+**and a demo is playing** (or a local server runs), the host frame advances
+`realtime` by exactly `sys_timescale × host_framerate`, whatever the wall clock
+did (pre-Anniversary `hw+0x56f86`, Anniversary `hw+0x1d43fd`). So under
+`playdemo` a fixed `host_framerate` makes the demo advance a fixed step per
+rendered frame — the frame-locked behaviour a capture relies on.
+
+`timedemo` (pre-Anniversary `hw+0x10b1d`, Anniversary `hw+0x19c530`) runs
+`playdemo` and then sets the timedemo flag. With it set:
+
+- **nothing is time-gated**: every frame is due as soon as it is read;
+- **one network message per host frame**: a second one in the same host frame
+  is put back (the reader seeks 9 bytes back over its header) for the next
+  frame. Non-message frames (commands, events, sounds) are not limited;
+- the `fps_max` limiter in the host frame is skipped (pre-Anniversary
+  `hw+0x570c3`; Anniversary `hw+0x1d4513`);
+- the start time is taken one host frame after `timedemo` runs, when the
+  first message is read, rather than when the command runs.
+
+### 14.4 The type-specific readers
+
+Every read below is unchecked (`FS_Read`'s count is never compared), as the
+header's are. Pre-Anniversary addresses first, then Anniversary.
+
+| type | reads | then |
+| --- | --- | --- |
+| 0, 1, and 10–255 | the 436-byte demo-info block and the 28-byte sequence block (straight into the engine's netchan sequence fields), then the checked length and payload (§13.2) | the message is parsed. As a segment starts, its entry's CD track, title and fades run (§14.6) |
+| 4 `ClientData` | 32 bytes: origin, view angles, weapon bits, FOV | the client's `HUD_UpdateClientData` export is offered the block with the client time. If it returns non-zero, **and the HLTV flag is clear**, the view angles are copied back to the engine; the FOV is stored either way. The origin is never used by the engine itself. `hw+0xc010` / `hw+0x196cf0` |
+| 6 event | flags, index, delay, then 72 bytes of `event_args_t` | queued by the same function `svc_event` and `svc_event_reliable` call (`hw+0x1e910`; inlined, calling `hw+0x1aa750`) |
+| 7 weapon animation | sequence, body | `pfnWeaponAnim`, the function `cl_enginefuncs` slot 66 points at (`hw+0xc990` / `hw+0x1963e0`): it sets the view model's sequence and body, and writes them to a demo being recorded. HLAE detours this function (§12.3), so with that hook in, a recorded type 7 frame runs through HLAE |
+| 8 sound | channel, a name length **clamped to 255**, that many bytes, attenuation, volume, flags, pitch | the sound is started (`hw+0xf8ed`). As with type 9, a longer recorded name is not skipped: the rest of it is read as the next frame header |
+| 9 `DemoBuffer` | a length clamped to 32,768, that many bytes | handed to the client's `Demo_ReadBuffer` export, if it has one (`hw+0xc120` / `hw+0x1972a0`); the engine reads none of it |
+
+The HLTV flag in the type 4 row is `docs/goldsrc_ex_interp.md`'s flag
+(`0x2d5df84` / `0x1140e9f4`). On the pre-Anniversary build nothing ever sets
+it, so a POV demo's and an HLTV demo's `ClientData` angles are both applied; on
+the Anniversary build `svc_hltv` sets it, so an HLTV demo's are not. Same
+build split as the `ex_interp` ceiling.
+
+### 14.5 The `ConsoleCommand` filter on the Anniversary build
+
+§13.3's two gates hold there too. The `exec` test is skipped when a flag is
+set, and the only writes to that flag (`0x10531150`, two sites) follow a
+comparison of the game directory with `tfc`, as on the pre-Anniversary build.
+The `cl_filterstuffcmd` value is read right after the always-on lists, where
+the pre-Anniversary build reads it. One layout difference: the Anniversary build's 64-byte command
+buffer ends at the function's stack cookie, so a command that fills all 64
+bytes is read on into the cookie (random, rarely containing a zero) and the
+saved frame pointer — the pipeline's strictly-under-64 rule matters there for
+the same reason as on the old build.
+
+### 14.6 The directory entry: what playback reads
+
+Every function that loads the current-entry pointer or the entry array (ten on
+the pre-Anniversary build, nine on the Anniversary one) was followed through
+the registers those land in, and every field access listed:
+
+| field | read on playback? | what for |
+| --- | --- | --- |
+| `+0x04` description | yes | shown as on-screen text as the segment starts, when flag `1` is set |
+| `+0x44` flags | yes | `1` title text; `4` CD track (`cd play` at the start, `cd stop` on leaving); `8` / `0x10` a 2 s / 0.5 s fade in at the start; `0x20` / `0x40` a 2 s / 0.5 s fade out near the end |
+| `+0x48` cdtrack | yes | the `cd play` argument |
+| `+0x4c` time | yes | only to time the fade out |
+| `+0x54` offset | yes | where `playdemo` and `NextSection` seek |
+| `+0x50` frames | **no** | written by the recorder only |
+| `+0x58` length | **no** | written by the recorder only (end position − `offset`) |
+
+So **playback never consults an entry's frame count or length**, on either
+build. A tool that inserts or removes frames does not have to keep them
+consistent for the engine to play the file; only `offset` must be right, and
+the flags decide which of the title, CD and fade effects run. (That says
+nothing about `DemoPlayer.dll`, which reads the directory itself.)
+
+### 14.7 HLAE's writes through pointers that are not keys (closes §12.2's "not proven")
+
+§12.2 could not rule out a store into already-writable memory through a pointer
+HLAE computes at run time. A store that *redirects* anything has to put an HLAE
+address there — a function or a vtable — so the module was searched for every
+way one can travel (a linear sweep of `.text`, restarting past any byte
+capstone cannot decode):
+
+- **Stores of an HLAE code address**, as an immediate or through a register
+  loaded from one: 15. Eight go into HLAE's own globals (its static import-hook
+  objects and function-pointer variables it calls through), six into one HLAE
+  object (§12.2's six), one into a stack descriptor that registers a console
+  command.
+- **Code addresses passed as arguments** (178, leaving out the 138 that are
+  only a C++ prologue's exception-handler push): they go to HLAE's own command
+  registry (67), Detours' `DetourAttach` (40), the C runtime's `atexit` (37),
+  the write primitives already in §12.2's table and their helpers — the jump
+  writers, the import-hook manager, the `cldll_func_t` slot setter (3), the
+  command-handler swapper (4) — and the rest to C runtime internals and one
+  HLAE-internal callback list. None reaches engine memory any other way.
+- **Stores of a vtable address** (120): every one belongs, by HLAE's own RTTI,
+  to an HLAE class (campath interpolators, capture streams, import-hook
+  objects) or to the C++ library (`std::ostringstream`, exceptions,
+  `rapidxml`). None is a class shaped like an engine interface, so HLAE
+  replaces no engine object's vtable.
+
+**So §12.2's census is complete for redirections, proven within the sweep.**
+HLAE still writes plain *values* into engine memory — `msg_readcount`
+(§12.3) is one — but a value is data, not a hook, and does not change which
+code runs. This search does not list those.
+
+### 14.8 HLAE's unhook paths: there are none
+
+- **Detours:** `DetourDetach` is not in the module. Detours' pending-transaction
+  state is touched by exactly four functions (begin, `DetourAttachEx`, commit,
+  update-thread), and all 30 transactions contain at least one attach.
+- **`cldll_func_t` slots, command handlers, import slots:** each saved original
+  is written once, when the hook goes in, and afterwards only called through.
+  The slot setter has three callers, all installs; the command-handler swapper
+  four, all in the one function that runs after `Host_Init`; the import-hook
+  manager's only writes store the new pointer after saving the old one.
+- **Span patches and jumps:** the jump writers have only their installers as
+  callers, and the bracketed writes are §12.2's twelve. The one write that puts
+  something back is by design and per call: `skytextures` is swapped back after
+  each sky draw.
+
+Every HLAE hook therefore lasts for the life of the process. That turns §12.5's
+*inferred* "neither side restores its saved value" into a proven one for HLAE;
+`goldsrc-hooks` has no restore path for the three shared slots either
+(`hook_import`, `cmd_list::wrap` and `swap_slot` only ever install).
+So the three shared slots are chain-safe in either install order, and stay so.
+
+One detail of the swapper: for `startmovie` and `endmovie` HLAE throws the old
+handler away rather than keeping it, so those two commands are replaced, not
+wrapped. Nothing of ours wraps either.
+
+### 14.9 Landmarks
+
+The shortest byte run that is unique in `.text` at each address (absolute
+addresses inside the runs make them build-specific; they locate, they are not
+our signatures):
+
+| | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| message wrapper (§14.1) | `hw+0x1151d` `e8 de 11 02 00 85 c0 75` | `hw+0x199cc0` `e8 2b 7d 02 00 85 c0 0f` |
+| frame reader | `hw+0x1104d` `55 8b ec b8 74 00 01 00` | `hw+0x199d20` `55 8b ec b8 58 02 01 00` |
+| 64-byte command read | `hw+0x111c3` `6a 40 52 e8 55 aa 02 00` | `hw+0x199f34` `6a 40 50 e8 b4 e1 02 00` |
+| `NextSection` | `hw+0xf36d` `a1 60 e2 f2 02 83 f8 01` | `hw+0x199e85` (inlined) `a1 e0 ea 45 11 83 f8 01` |
+| segment start (CD, fade in) | `hw+0xf28d` `55 8b ec 81 ec 80 00 00 00 a1 a0` | inlined in the reader |
+| `playdemo` | `hw+0x105fd` `55 8b ec 81 ec 00 01 00 00 a1 7c` | `hw+0x199890` (20 bytes; prologue + cookie) |
+| `timedemo` | `hw+0x10b1d` `83 3d 7c 82 d0 02 01 75 47` | `hw+0x19c530` `83 3d 00 cc 24 11 01 75 4f` |
+| `viewdemo` | `hw+0x1093d` `55 8b ec 81 ec 04 01 00 00 a1 7c` | `hw+0x19c590` (22 bytes; prologue + cookie) |
+| `host_framerate` step | `hw+0x56f86` `d9 05 b0 9d e4 01 d8 1d` | `hw+0x1d43fd` `f3 0f 10 0d 3c b6 31 10` |
+| `ClientData` consumer | `hw+0xc010` `55 8b ec 51 a1 70 ed f2` | `hw+0x196cf0` `55 8b ec a1 50 ef 45 11` |
+
+Nothing in `goldsrc-hooks` patches any of these, so there is no `verify_*`
+tool for them; the one-off scripts that produced §14 disassembled these
+functions, followed the directory pointers, and swept `AfxHookGoldSrc.dll` for
+code and vtable addresses, and were not kept.
+
+### 14.10 What is still not surveyed
+
+- `DemoPlayer.dll`'s own reader, the one `viewdemo` uses (§14.1).
+- The 436-byte demo-info block's fields, beyond its size.
+- Most of `hw.dll`, as before.

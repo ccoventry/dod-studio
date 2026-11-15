@@ -36,8 +36,12 @@ export const TRASH_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" f
  * @param {boolean} [opts.unique] - reject add()/browse() when the primary field's value already exists elsewhere in the list
  * @param {() => void} [opts.onChange] - called after any add/edit/remove/reorder
  * @param {() => Promise<string|null>} [opts.browse] - opens a native picker for the primary field; adds a per-row 📁 button when set
+ * @param {(row: Element, item: *, idx: number) => void} [opts.decorateRow] - called for each row as it is built, so a caller can add a status chip to it (Capture Output, #25)
+ *
+ * A text field may carry `enhance(input)`, called on each of its inputs as
+ * the row is built (the Commands tab's type-ahead, #215).
  */
-export function createListEditor({ container, getItems, fields, unique = false, onChange, browse }) {
+export function createListEditor({ container, getItems, fields, unique = false, onChange, browse, decorateRow }) {
   function notify() {
     onChange?.();
   }
@@ -87,6 +91,7 @@ export function createListEditor({ container, getItems, fields, unique = false, 
           setFieldValue(items, idx, field, v);
         });
         refreshAfterTyping(input, () => notify());
+        field.enhance?.(input);
       }
       input.className = 'list-editor-field';
       row.appendChild(input);
@@ -150,6 +155,7 @@ export function createListEditor({ container, getItems, fields, unique = false, 
     });
     row.appendChild(removeBtn);
 
+    decorateRow?.(row, item, idx);
     return row;
   }
 
@@ -169,6 +175,18 @@ export function createListEditor({ container, getItems, fields, unique = false, 
     return true;
   }
 
+  /** Removes the item whose primary value is `value`. Returns false when
+   *  there is none. */
+  function removeItem(value) {
+    const items = getItems();
+    const idx = items.findIndex((item) => primaryValue(item, fields) === value);
+    if (idx === -1) return false;
+    items.splice(idx, 1);
+    notify();
+    render();
+    return true;
+  }
+
   render();
-  return { render, addItem };
+  return { render, addItem, removeItem };
 }

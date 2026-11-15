@@ -210,7 +210,7 @@ fn check_anchors(
     Ok(())
 }
 
-/// One `dodstudio_debug_status` line, once it has acted.
+/// One `ds_debug_status` line, once it has acted.
 pub fn status_line() -> Option<String> {
     SET.load(Ordering::Relaxed)
         .then(|| "first-demo pmove guard: set pmove before the first demo (#546)".to_string())

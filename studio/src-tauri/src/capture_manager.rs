@@ -11,6 +11,7 @@
 //     async Tauri command never parks the main thread.
 // ============================================================
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -24,47 +25,112 @@ use std::sync::{Arc, Mutex};
 /// real parallelism here.
 const PATCH_CONCURRENCY: usize = 4;
 
-/// Same shape as `PATCH_CONCURRENCY`, for `scan_directory_impl`'s Phase 2 --
-/// each file's parse is independent (no shared mutable state between demos;
-/// `native::warm_analyzer_cache` writes to a per-demo-path cache file, not a
-/// single shared one, so concurrent writes for different demos don't
-/// collide), so it is bounded with a fixed worker pool the same way. See #195.
-///
-/// Two, not four, and deliberately lower than `PATCH_CONCURRENCY`: a parse
-/// holds a whole `Analysis` in memory, which measures roughly 14x the demo's
-/// own size, so concurrency here multiplies something already large. Measured
-/// over a 45-demo corpus (3.2GB, 72MB mean, 105MB largest) with
-/// `native/examples/scan_mem_probe.rs`:
-///
-/// | workers | wall time | peak working set |
-/// | ------- | --------- | ---------------- |
-/// | 1       | 56.2s     | 1529 MB          |
-/// | 2       | 40.8s     | 2414 MB          |
-/// | 4       | 36.0s     | 4574 MB          |
-/// | 8       | 49.7s     | 9157 MB          |
-///
-/// Four buys 1.56x the speed for 3x the memory; two gets 1.38x for 1.6x.
-/// Eight is slower *and* uses 9GB, which is what says the ceiling here is
-/// memory pressure rather than CPU. This is a desktop app that may be running
-/// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
-/// stays at 4 because it streams frames rather than holding a full analysis.
-///
-/// This is the default for the user's own setting (`AppSettings::scan_workers`,
-/// #246): the right number depends on the machine's RAM.
-pub const SCAN_CONCURRENCY: usize = 2;
-
-/// The range the scan worker box accepts (#246), the same as Max Concurrent
-/// Renders. Only the range: nothing clamps to the machine's RAM.
-pub const SCAN_WORKERS_MAX: usize = 8;
-
+use native::capture_engine::clip_verdict::{demo_ordinals, recording_order};
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
 use native::patch::{
-    CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatchJob, PatcherConfig,
-    StreamPatcher, build_batch_queue, build_preview_patch_jobs,
+    CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatcherConfig, StreamPatcher,
+    build_batch_queue,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+
+use crate::clip_verdicts::ClipEvidence;
+use crate::game_process_manager::saved_settings;
+
+/// Every patch job's stage, folded into the one status line a batch shows
+/// (#75). Jobs report from their own worker threads, so each has an atomic
+/// slot: 0 not running, 1 clearing decals, 2 + percent while writing.
+struct PatchProgress {
+    slots: Vec<std::sync::atomic::AtomicU32>,
+    /// Each job's demo, for the line (#952).
+    names: Vec<String>,
+    started: std::time::Instant,
+    /// Milliseconds after `started` of the last throttled emit.
+    last_emit_ms: std::sync::atomic::AtomicU32,
+}
+
+const PATCH_SLOT_IDLE: u32 = 0;
+const PATCH_SLOT_CLEARING: u32 = 1;
+const PATCH_SLOT_WRITING: u32 = 2;
+
+/// What `PatchProgress::summary` says: the line, how many jobs' worth of
+/// work is done (fractional, counting written percent, for the bar), and
+/// whether that number moves: false while every running job is in the decal
+/// pass, which reports no percentage, so the bar slides instead (#952).
+struct PatchSummary {
+    status: String,
+    index: f64,
+    measured: bool,
+}
+
+impl PatchProgress {
+    fn new(names: Vec<String>) -> Self {
+        Self {
+            slots: (0..names.len())
+                .map(|_| std::sync::atomic::AtomicU32::new(PATCH_SLOT_IDLE))
+                .collect(),
+            names,
+            started: std::time::Instant::now(),
+            last_emit_ms: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    /// Records a job's stage. True when the line should be sent now: always
+    /// for a change of stage, and for percentages at most every ~33ms across
+    /// the whole batch, per CLAUDE.md's telemetry throttle.
+    fn set(&self, job: usize, stage: native::patch::PatchStage) -> bool {
+        use std::sync::atomic::Ordering;
+        let value = match stage {
+            native::patch::PatchStage::ClearingDecals => PATCH_SLOT_CLEARING,
+            native::patch::PatchStage::Writing { percent } => PATCH_SLOT_WRITING + percent as u32,
+        };
+        let previous = self.slots[job].swap(value, Ordering::Relaxed);
+        let stage_changed = (previous >= PATCH_SLOT_WRITING) != (value >= PATCH_SLOT_WRITING)
+            || previous == PATCH_SLOT_IDLE;
+        let now = self.started.elapsed().as_millis() as u32;
+        let last = self.last_emit_ms.load(Ordering::Relaxed);
+        if !stage_changed && now.wrapping_sub(last) < 33 {
+            return false;
+        }
+        self.last_emit_ms.store(now, Ordering::Relaxed);
+        true
+    }
+
+    fn finish(&self, job: usize) {
+        self.slots[job].store(PATCH_SLOT_IDLE, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// See `PatchSummary`.
+    fn summary(&self, done: u32) -> PatchSummary {
+        let mut running: Vec<(&str, Option<u8>)> = Vec::new();
+        for (slot, name) in self.slots.iter().zip(&self.names) {
+            match slot.load(std::sync::atomic::Ordering::Relaxed) {
+                PATCH_SLOT_IDLE => {}
+                PATCH_SLOT_CLEARING => running.push((name, None)),
+                v => running.push((name, Some((v - PATCH_SLOT_WRITING).min(100) as u8))),
+            }
+        }
+        let partial: f64 = running
+            .iter()
+            .filter_map(|(_, p)| *p)
+            .map(|p| p as f64 / 100.0)
+            .sum();
+        PatchSummary {
+            status: crate::messages::preparing_status(done, self.slots.len(), &running),
+            index: done as f64 + partial,
+            measured: running.is_empty() || running.iter().any(|(_, p)| p.is_some()),
+        }
+    }
+}
+
+/// A demo's file name for a status line, or the path when it has none.
+fn demo_file_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
 
 // ── IPC payload type ───────────────────────────────────────────────────────────
 
@@ -92,7 +158,7 @@ pub struct CapturePayload {
     /// default rather than failing the batch.
     #[serde(default)]
     pub ffmpeg_capture_codec: String,
-    /// `frame_sequence`, `direct_to_video` or `obs`. Absent on payloads from a
+    /// `frame_sequence`, `direct_to_video`, `obs` or `agr`. Absent on payloads from a
     /// frontend predating the selector, in which case `ffmpeg_capture` above
     /// still decides — see `PatcherConfig::normalise_capture_mode`.
     #[serde(default)]
@@ -103,10 +169,30 @@ pub struct CapturePayload {
     pub obs_port: u16,
     #[serde(default)]
     pub obs_password: String,
+    /// `ObsRecordingQuality`'s id; empty or unknown is the default.
+    #[serde(default)]
+    pub obs_recording_quality: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
+    /// `PatcherConfig::hook_runs_batch`: on unless the payload says otherwise.
+    #[serde(default = "native::patch::types::default_hook_runs_batch")]
+    pub hook_runs_batch: bool,
+    /// The open game to run the batch in instead of launching one (#725),
+    /// from `running_game_for_batch`. Only a Seek Between Clips batch can.
+    #[serde(default)]
+    pub reuse_game_pid: Option<u32>,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "crate::settings_manager::default_keep_game_behind")]
+    pub keep_game_behind: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
+    /// Each streak's durable id (`take_index.js`'s `streakUid`), index-aligned
+    /// with `streaks`, recorded in the manifest (#545).
+    #[serde(default)]
+    pub streak_uids: Vec<String>,
+    /// The project file the batch was started from, when it had one.
+    #[serde(default)]
+    pub project_path: Option<String>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
     pub pre_roll_seconds: f32,
     /// Post-roll padding after each streak (seconds).
@@ -117,6 +203,10 @@ pub struct CapturePayload {
     /// OBS mode's own capture rate — see `PatcherConfig::obs_capture_fps`.
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
+    /// means `native::patch::DEFAULT_AGR_FPS`.
+    #[serde(default)]
+    pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
     pub drives: Vec<String>,
     #[serde(default)]
@@ -153,6 +243,10 @@ pub struct CapturePayload {
     /// Decal ring size the flush pins `r_decals` to. Absent means the default.
     #[serde(default)]
     pub decal_ring_limit: Option<u32>,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    /// Absent means kept.
+    #[serde(default)]
+    pub kill_gaps: native::patch::types::KillGaps,
 }
 
 fn default_initial_delay() -> f32 {
@@ -174,13 +268,27 @@ fn default_resolution_height() -> i32 {
 /// One custom command row — serialisable across the Tauri IPC boundary.
 /// `relation` is a plain string ("Before" | "After") rather than
 /// `CommandRelation` directly so an unrecognised value fails safe (defaults
-/// to `Before` in `config_from_payload`) instead of rejecting the whole
-/// batch payload.
+/// to `Before` in the `From` below) instead of rejecting the whole batch
+/// payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomCommandPayload {
     pub command: String,
     pub relation: String,
     pub offset_seconds: f32,
+}
+
+/// The pipeline's form of a row: anything but "After" is `Before`.
+impl From<&CustomCommandPayload> for CustomCommand {
+    fn from(c: &CustomCommandPayload) -> Self {
+        CustomCommand {
+            command: c.command.clone(),
+            offset: c.offset_seconds,
+            relation: match c.relation.as_str() {
+                "After" => CommandRelation::After,
+                _ => CommandRelation::Before,
+            },
+        }
+    }
 }
 
 /// One highlight streak — serialisable across the Tauri IPC boundary.
@@ -212,6 +320,40 @@ pub struct SerializedStreak {
     /// native patch engine.
     #[serde(default)]
     pub frame_times: Vec<f32>,
+    /// For the clip name (#441): the killer's side, and each kill's victim
+    /// and victim's side. Empty on a demo from a project saved before these
+    /// existed, until it is scanned again.
+    #[serde(default)]
+    pub faction: Option<String>,
+    #[serde(default)]
+    pub victims: Vec<String>,
+    #[serde(default)]
+    pub victim_factions: Vec<String>,
+    /// Whether each kill was a headshot (#1128). Empty on a demo scanned
+    /// before it existed: `scanIsCurrent` rescans it.
+    #[serde(default)]
+    pub headshots: Vec<::analysis::Headshot>,
+    /// What was going on at the flags at each kill (#1132): `while_capping`,
+    /// `flag_defence`, `cleared_flag`. Empty on a demo scanned before it
+    /// existed: `scanIsCurrent` rescans it.
+    #[serde(default)]
+    pub flag_tags: Vec<Vec<::analysis::FlagTag>>,
+    /// The scanned file's size and start hash, checked against the file on
+    /// disk before a batch or preview patches it (#196). Absent from
+    /// projects saved before it existed.
+    #[serde(default)]
+    pub source_key: Option<String>,
+    /// `CaptureStreak::spectated`. Absent from projects saved before it
+    /// existed: such a demo is scanned again (queue_scan.js).
+    #[serde(default)]
+    pub spectated: bool,
+    /// `CaptureStreak::steam_id`.
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// `CaptureStreak::recorded_this_demo`. Absent from projects saved
+    /// before #573, which the frontend tells by it (queue_filters.js).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_this_demo: Option<bool>,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -235,11 +377,50 @@ impl From<SerializedStreak> for CaptureStreak {
             frame_times: std::sync::Arc::new(s.frame_times),
             match_start_tick: s.match_start_tick,
             status: native::patch::types::HighlightStatus::Pending,
+            source_key: s.source_key,
+            spectated: s.spectated,
+            steam_id: s.steam_id,
+            recorded_this_demo: s.recorded_this_demo.unwrap_or(false),
         }
     }
 }
 
 // ── Managed state ──────────────────────────────────────────────────────────────
+
+/// How many of a capture batch's clips are recorded, from the engine's own
+/// console markers (#76). The progress bar used to count game sessions, and a
+/// chained batch is often a single session, so it sat at one end for the
+/// whole capture.
+#[derive(Debug, Default)]
+struct ClipTally {
+    /// Clips on every demo loaded so far, the current one included. This is
+    /// the "X of Y clips total" the notifications show.
+    through_current_demo: u32,
+    /// Clips recorded.
+    done: u32,
+}
+
+impl ClipTally {
+    /// A demo starts: every clip of the demos before it is recorded.
+    fn demo_loading(&mut self, clip_count: u32) {
+        self.done = self.through_current_demo;
+        self.through_current_demo += clip_count;
+    }
+
+    /// Clip `clip_idx` (1-based) of the current demo is next, so the ones
+    /// before it are recorded.
+    fn fast_forward_to(&mut self, clip_idx: u32, clip_count_this_demo: u32) {
+        let before_this_demo = self
+            .through_current_demo
+            .saturating_sub(clip_count_this_demo);
+        self.done = before_this_demo + clip_idx.saturating_sub(1);
+    }
+
+    /// The game session ended: every clip it loaded is recorded.
+    fn session_finished(&mut self) {
+        self.done = self.through_current_demo;
+    }
+}
 
 /// Tauri managed state for the capture subsystem.
 pub struct CaptureManager {
@@ -252,6 +433,9 @@ pub struct CaptureManager {
     /// Recording blocks the most recent batch planned, used to verify takes
     /// against disk once the batch ends.
     pub last_manifest: Arc<Mutex<Option<CaptureManifest>>>,
+    /// Whether the running batch's start has reached the game, for the
+    /// close prompt (#545). Reset to `Preparing` when a batch starts.
+    pub batch_start: Arc<native::game_handoff::BatchStart>,
 }
 
 impl CaptureManager {
@@ -261,12 +445,13 @@ impl CaptureManager {
             cancel_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             last_config: Arc::new(Mutex::new(None)),
             last_manifest: Arc::new(Mutex::new(None)),
+            batch_start: Arc::new(native::game_handoff::BatchStart::default()),
         }
     }
 
     /// Returns `true` if a batch is currently executing.
     pub fn is_running(&self) -> bool {
-        *self.is_running.lock().unwrap_or_else(|p| p.into_inner())
+        *lock_or_recover(&self.is_running)
     }
 }
 
@@ -285,12 +470,15 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
         .collect();
     cfg.capture_fps = payload.capture_fps;
     cfg.obs_capture_fps = payload.obs_capture_fps;
+    cfg.agr_fps = payload.agr_fps;
     cfg.record_start_lead = payload.record_start_lead;
     cfg.record_stop_trail = payload.record_stop_trail;
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
+    cfg.kill_gaps = payload.kill_gaps;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
-    cfg.goldsrc_hooks_dll_path = payload.goldsrc_hooks_dll_path.clone();
+    cfg.goldsrc_hooks_dll_path =
+        crate::updater_manager::allowed_hook_dll(payload.goldsrc_hooks_dll_path.clone());
     cfg.resolution_width = payload.resolution_width;
     cfg.resolution_height = payload.resolution_height;
     cfg.ffmpeg_capture = payload.ffmpeg_capture;
@@ -311,8 +499,13 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
             payload.obs_port
         },
         password: payload.obs_password.clone(),
+        recording_quality: native::patch::ObsRecordingQuality::from_str_id(
+            &payload.obs_recording_quality,
+        ),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
+    cfg.hook_runs_batch = payload.hook_runs_batch;
+    cfg.keep_game_behind = payload.keep_game_behind;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
@@ -321,14 +514,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.custom_commands = payload
         .custom_commands
         .iter()
-        .map(|c| CustomCommand {
-            command: c.command.clone(),
-            offset: c.offset_seconds,
-            relation: match c.relation.as_str() {
-                "After" => CommandRelation::After,
-                _ => CommandRelation::Before,
-            },
-        })
+        .map(CustomCommand::from)
         .collect();
     if let Some(v) = payload.decal_flush {
         cfg.decal_flush = v;
@@ -347,228 +533,6 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg
 }
 
-// ── OBS ────────────────────────────────────────────────────────────────────────
-
-/// What the settings panel shows after a connection test.
-///
-/// Flattens `ObsPreflight` plus the scene list into one round trip, because the
-/// panel needs all of it at once and a second `invoke` would be a second chance
-/// to fail.
-#[derive(Debug, Serialize)]
-pub struct ObsConnectionReport {
-    pub connected: bool,
-    /// Populated when `connected` is false. Already phrased for the user —
-    /// `ObsError`'s `Display` distinguishes a wrong password from a version
-    /// problem, and the two want different actions.
-    pub error: Option<String>,
-    pub obs_version: String,
-    pub websocket_version: String,
-    pub missing_requests: Vec<String>,
-    pub recording: bool,
-    pub streaming: bool,
-    pub record_directory: String,
-    pub canvas: String,
-    pub output: String,
-    pub fps: f64,
-    pub current_scene: String,
-    pub current_profile: String,
-    pub scene_collection: String,
-    pub warnings: Vec<String>,
-}
-
-impl ObsConnectionReport {
-    fn failed(e: impl std::fmt::Display) -> Self {
-        Self {
-            connected: false,
-            error: Some(e.to_string()),
-            obs_version: String::new(),
-            websocket_version: String::new(),
-            missing_requests: Vec::new(),
-            recording: false,
-            streaming: false,
-            record_directory: String::new(),
-            canvas: String::new(),
-            output: String::new(),
-            fps: 0.0,
-            current_scene: String::new(),
-            current_profile: String::new(),
-            scene_collection: String::new(),
-            warnings: Vec::new(),
-        }
-    }
-}
-
-/// Tests the OBS connection, provisions (and switches into) dod-studio' own
-/// profile and scene, and reports everything the settings panel shows.
-///
-/// **Not read-only**, unlike its old contract — this is the "validated" hook
-/// point `obs::provision::ensure_dod_studio_setup` runs from (see that
-/// module's docs): creates/repairs the dod-studio profile, scene and sources
-/// if needed, and switches into them. Refuses first if OBS is already
-/// recording or streaming under whatever the user's own profile is, so this
-/// never mutates live state out from under something unrelated. Called on
-/// every proactive check (mode switch, startup, manual Test Connection
-/// click) as well as before a real batch — see main.js's
-/// `runObsConnectionTest`.
-///
-/// `game_width`/`game_height`/`obs_capture_fps` are what the profile's video
-/// settings get set to.
-#[tauri::command]
-pub async fn obs_test_connection(
-    host: String,
-    port: u16,
-    password: String,
-    game_width: i32,
-    game_height: i32,
-    obs_capture_fps: i32,
-) -> Result<ObsConnectionReport, String> {
-    let resolved_host = if host.is_empty() {
-        "127.0.0.1".to_string()
-    } else {
-        host
-    };
-    let resolved_port = if port == 0 { 4455 } else { port };
-    let url = format!("ws://{resolved_host}:{resolved_port}");
-    tokio::task::spawn_blocking(move || {
-        let mut client = match native::obs::ObsClient::connect(&url, &password) {
-            Ok(c) => c,
-            // A bare socket error ("actively refused it (os error 10061)") makes
-            // the user guess whether that means OBS is closed or just
-            // unreachable. `is_transport` narrows it to "never got past the
-            // socket/handshake" (as opposed to OBS answering and refusing), and
-            // for that case whether the process is even running is a fact we
-            // can just check instead of leaving it to the raw OS text.
-            Err(e) if e.is_transport() => {
-                let msg = if is_obs_process_running() {
-                    format!(
-                        "OBS is running, but dod-studio can't reach it at {resolved_host}:{resolved_port}. Check Tools -> WebSocket Server Settings is enabled and the port matches."
-                    )
-                } else {
-                    "OBS isn't running. Launch it (or use Launch OBS above), then try again.".to_string()
-                };
-                return ObsConnectionReport::failed(msg);
-            }
-            Err(e) => return ObsConnectionReport::failed(e),
-        };
-        if let Err(e) = client.refuse_if_busy() {
-            return ObsConnectionReport::failed(e);
-        }
-        if let Err(e) = native::obs::provision::ensure_dod_studio_setup(
-            &mut client,
-            game_width,
-            game_height,
-            obs_capture_fps,
-            1,
-        ) {
-            return ObsConnectionReport::failed(e);
-        }
-        let preflight = match client.preflight(game_width, game_height) {
-            Ok(p) => p,
-            Err(e) => return ObsConnectionReport::failed(e),
-        };
-        ObsConnectionReport {
-            connected: true,
-            error: None,
-            obs_version: preflight.obs_version,
-            websocket_version: preflight.websocket_version,
-            missing_requests: preflight.missing_requests,
-            recording: preflight.recording,
-            streaming: preflight.streaming,
-            record_directory: preflight.record_directory,
-            canvas: format!("{}x{}", preflight.canvas_width, preflight.canvas_height),
-            output: format!("{}x{}", preflight.output_width, preflight.output_height),
-            fps: preflight.fps,
-            current_scene: preflight.current_scene,
-            current_profile: preflight.current_profile,
-            scene_collection: preflight.scene_collection,
-            warnings: preflight.warnings,
-        }
-    })
-    .await
-    .map_err(crate::messages::obs_connection_test_failed)
-}
-
-/// What a start-up orphan check found.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ObsOrphanReport {
-    /// Whether OBS answered at all. `false` is the ordinary case — OBS is
-    /// simply not running — and the UI says nothing about it.
-    pub reachable: bool,
-    pub recording: bool,
-    pub directory: String,
-    /// Whether the folder OBS is recording into could only be one of ours.
-    pub ours: bool,
-}
-
-/// Asks OBS whether it is still recording a dod-studio take from a previous run.
-///
-/// Read-only, and quiet about failure on purpose: this runs at start-up, where
-/// "OBS is not running" is the normal answer and not something to report.
-///
-/// The case it exists for is the one no `Drop` can cover — a panic (release
-/// builds abort rather than unwind), a hard kill, a `tauri dev` restart, a
-/// power cut. In all of those the process is simply gone and OBS keeps
-/// recording until the disk fills.
-#[tauri::command]
-pub async fn obs_check_orphan(
-    host: String,
-    port: u16,
-    password: String,
-) -> Result<ObsOrphanReport, String> {
-    let cfg = obs_config(host, port, password);
-    tokio::task::spawn_blocking(move || match native::obs::check_orphan(&cfg) {
-        Ok(report) => ObsOrphanReport {
-            reachable: true,
-            recording: report.recording,
-            directory: report.directory,
-            ours: report.ours,
-        },
-        Err(_) => ObsOrphanReport {
-            reachable: false,
-            recording: false,
-            directory: String::new(),
-            ours: false,
-        },
-    })
-    .await
-    .map_err(crate::messages::obs_orphan_check_failed)
-}
-
-/// Stops an orphaned recording and folds its file into the take folder.
-///
-/// Refuses any directory that is not shaped like one of ours, so a user who
-/// was recording something of their own keeps it. Called only after
-/// `obs_check_orphan` has reported `ours`, and asked of the user first.
-#[tauri::command]
-pub async fn obs_recover_orphan(
-    host: String,
-    port: u16,
-    password: String,
-) -> Result<String, String> {
-    let cfg = obs_config(host, port, password);
-    tokio::task::spawn_blocking(move || match native::obs::recover_orphan(&cfg) {
-        Ok(Some(video)) => Ok(video.to_string_lossy().to_string()),
-        Ok(None) => Ok(String::new()),
-        Err(e) => Err(e.to_string()),
-    })
-    .await
-    .map_err(crate::messages::obs_orphan_recovery_failed)?
-}
-
-/// Settings-shaped values from the frontend, with the same defaults the
-/// settings file uses so an empty field means "the usual" rather than "".
-fn obs_config(host: String, port: u16, password: String) -> native::patch::ObsConfig {
-    native::patch::ObsConfig {
-        host: if host.is_empty() {
-            "127.0.0.1".to_string()
-        } else {
-            host
-        },
-        port: if port == 0 { 4455 } else { port },
-        password,
-    }
-}
-
 // ── Take verification ──────────────────────────────────────────────────────────
 
 /// Every recording block a dispatched batch planned, flattened across jobs.
@@ -580,6 +544,32 @@ pub struct CaptureManifest {
     /// once they verify so Render Studio can tell when its own FPS setting
     /// disagrees. See `native::hlcr::take_meta`.
     pub capture_fps: i32,
+    /// `CaptureMode::to_str_id` of the batch. Only AGR changes what the take
+    /// metadata records (#450).
+    #[serde(default)]
+    pub capture_mode: String,
+    /// The rate an AGR batch recorded at; unused for the movie modes.
+    #[serde(default)]
+    pub agr_fps: i32,
+    /// Each payload highlight's durable id (`take_index.js`'s `streakUid`),
+    /// index-aligned with the payload's `streaks`, so a batch Studio stopped
+    /// watching can still be mapped back to its highlights after a restart
+    /// (#545, `batch_catch_up`). Empty in manifests from before it existed.
+    #[serde(default)]
+    pub streak_uids: Vec<String>,
+    /// Each payload highlight's source demo, index-aligned the same way.
+    #[serde(default)]
+    pub streak_sources: Vec<String>,
+    /// The project file the batch was started from, when it had one.
+    #[serde(default)]
+    pub project_path: Option<String>,
+    /// The full settings the batch captured with and their hash (part of
+    /// #1085): written beside each take, sent with `capture_takes_verified`
+    /// for the project's take record, and kept in the manifest file so a
+    /// batch caught up after a restart records the same. `None` in
+    /// manifests from before it existed.
+    #[serde(default)]
+    pub settings: Option<native::hlcr::take_settings::CaptureSettings>,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -596,6 +586,311 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// Rendered while the batch ran and deleted after (Render While
+    /// Capturing, #861): captured, but nothing is left to render.
+    pub rendered: bool,
+    /// What the take folder holds on disk, for the batch results panel (#172).
+    pub bytes: u64,
+    /// The batch ended while this clip recorded (#1081): what's on disk is a
+    /// partial take, so it counts as neither captured nor renderable, and is
+    /// left for the user to delete. `cut_by` says what ended it. Also set for
+    /// a take that stopped writing early (`short_take`).
+    pub cut_short: bool,
+    /// What cut the clip short, when the batch's end did.
+    pub cut_by: Option<CutBy>,
+    /// The take's video stops well before its audio (#1105): FFmpeg
+    /// stopped writing mid-clip. A partial take like a Cancel's, with both
+    /// lengths.
+    pub short_take: Option<native::hlcr::take_length::ShortTake>,
+    /// OBS started recording this many ms after the clip's first frame
+    /// (#1109): the take is missing the clip's opening, so it counts as
+    /// neither captured nor renderable, and is left for the user to delete.
+    pub started_late_ms: Option<u64>,
+    /// What the game said about the clip when it isn't whole (#1401): failed
+    /// (not captured) or shorter than planned (captured, with a warning).
+    pub clip_verdict: Option<native::capture_engine::clip_verdict::ClipVerdict>,
+    /// How many gaps between kills the take recorded sped up (#831), for its
+    /// label in the batch results panel.
+    pub ramped_gaps: usize,
+    /// The batch ended before it got to this clip (#1434): no take, but
+    /// nothing went wrong with it, so it isn't missing.
+    pub not_reached: bool,
+}
+
+/// What ended a batch while a clip was recording: the Last Batch panel and
+/// the activity log name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutBy {
+    /// The user pressed Cancel (#1081).
+    Cancel,
+    /// The game closed or crashed mid-clip.
+    GameClosed,
+    /// The batch stopped on an error with the game still up (a stall, OBS
+    /// lost, an error box): the engine ended the game.
+    Stopped,
+    /// DoD Studio closed while OBS recorded the clip, so nobody stopped the
+    /// recording at the clip's end (#20). Only a catch-up after a restart
+    /// says this.
+    StudioClosed,
+}
+
+impl CutBy {
+    pub(crate) fn log_text(self) -> &'static str {
+        match self {
+            CutBy::Cancel => "was cut short by Cancel",
+            CutBy::GameClosed => "was cut short when the game closed",
+            CutBy::Stopped => "was cut short when the batch stopped",
+            CutBy::StudioClosed => "was still recording in OBS when DoD Studio closed",
+        }
+    }
+
+    /// Why a batch that ended this way never reached its later clips (#1434).
+    pub(crate) fn not_reached_text(self) -> &'static str {
+        match self {
+            CutBy::Cancel => "the batch was cancelled",
+            CutBy::GameClosed => "the game closed",
+            CutBy::Stopped => "the batch stopped",
+            CutBy::StudioClosed => "DoD Studio closed",
+        }
+    }
+}
+
+/// Marks every take whose video stops well before its audio as partial
+/// (#1105): not captured, not renderable, so Finish clips and the take
+/// clean-up leave it alone. Takes with nothing on disk, or whose lengths
+/// can't be read cheaply (OBS, AGR), are left as they are.
+///
+/// With `settle`, a take that looks short is looked at once more after it:
+/// the game is killed the moment the batch ends, and HLAE's FFmpeg may still
+/// be writing the last take's AVI header, which reads as 0 frames until it
+/// is finalised.
+fn mark_short_takes(
+    manifest: &CaptureManifest,
+    verified: &mut [VerifiedBlock],
+    settle: Option<std::time::Duration>,
+) {
+    let judge = |i: usize| {
+        native::hlcr::take_length::short_take(&manifest.blocks[i].take_folder, manifest.capture_fps)
+    };
+    let mut short: Vec<(usize, native::hlcr::take_length::ShortTake)> = verified
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.captured && !v.rendered)
+        .filter_map(|(i, _)| judge(i).map(|s| (i, s)))
+        .collect();
+    if let Some(settle) = settle
+        && !short.is_empty()
+    {
+        std::thread::sleep(settle);
+        short = short
+            .into_iter()
+            .filter_map(|(i, _)| judge(i).map(|s| (i, s)))
+            .collect();
+    }
+    for (i, s) in short {
+        let v = &mut verified[i];
+        v.short_take = Some(s);
+        v.cut_short = true;
+        v.captured = false;
+        v.renderable = false;
+    }
+}
+
+/// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
+/// reported, for a Cancel (#1081).
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Records {
+    started: usize,
+    stopped: usize,
+    /// The demo tick the last `START_RECORD` named: its block's
+    /// `record_start_tick` (#861).
+    last_start_tick: Option<i64>,
+    /// The demo playing, by `DEMO_START`'s 1-based index.
+    demo: Option<u32>,
+    /// The demo the last `START_RECORD` came from.
+    last_start_demo: Option<u32>,
+}
+
+impl Records {
+    /// The demo playing, by `DEMO_START`'s 1-based index; `None` before the
+    /// first one, or without markers.
+    pub(crate) fn demo(&self) -> Option<u32> {
+        self.demo
+    }
+
+    /// The demo the last `START_RECORD` came from.
+    pub(crate) fn last_start_demo(&self) -> Option<u32> {
+        self.last_start_demo
+    }
+
+    /// The demo tick the last `START_RECORD` named.
+    pub(crate) fn last_start_tick(&self) -> Option<i64> {
+        self.last_start_tick
+    }
+
+    /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
+    /// playing mid-clip, and the hook's batch skipped on) is over, so a
+    /// Cancel later in the batch can't count it as still recording.
+    pub(crate) fn demo_started(&mut self, job_idx: u32) {
+        self.stopped = self.stopped.max(self.started);
+        self.demo = Some(job_idx);
+    }
+
+    pub(crate) fn clip_started(&mut self, tick: Option<i64>) {
+        self.started += 1;
+        self.last_start_tick = tick;
+        self.last_start_demo = self.demo;
+    }
+
+    pub(crate) fn clip_stopped(&mut self) {
+        self.stopped += 1;
+    }
+
+    /// A demo started playing, so the batch may have left takes on disk.
+    fn reached_game(&self) -> bool {
+        self.demo.is_some() || self.started > 0
+    }
+}
+
+/// How a batch that reached the game ended, for [`finish_batch`].
+struct BatchEnd<'a> {
+    /// The footer's last line.
+    status: &'a str,
+    /// The manifest file's outcome (#19): "complete", "cancelled" or
+    /// "error". Anything but "planned" keeps the next start's catch-up
+    /// (#545) from checking the batch again.
+    outcome: &'a str,
+    /// The batch failed: the line and toasts say so.
+    error: bool,
+    /// The clip recordings the markers reported, for [`mark_cut_short`].
+    records: Records,
+    cut_by: CutBy,
+    /// What the game and OBS said about each clip (#1109, #1401).
+    clips: ClipEvidence,
+}
+
+impl<'a> BatchEnd<'a> {
+    fn complete() -> Self {
+        BatchEnd {
+            status: "Complete",
+            outcome: "complete",
+            error: false,
+            records: Records::default(),
+            cut_by: CutBy::Cancel,
+            clips: ClipEvidence::default(),
+        }
+    }
+
+    fn cancelled(records: Records) -> Self {
+        BatchEnd {
+            status: "Cancelled",
+            outcome: "cancelled",
+            error: false,
+            records,
+            cut_by: CutBy::Cancel,
+            clips: ClipEvidence::default(),
+        }
+    }
+
+    /// What ended a batch that stopped early; `None` for a complete one,
+    /// whose `cut_by` is only a default.
+    fn ended_by(&self) -> Option<CutBy> {
+        (self.outcome != "complete").then_some(self.cut_by)
+    }
+
+    fn with_clips(self, clips: ClipEvidence) -> BatchEnd<'a> {
+        BatchEnd { clips, ..self }
+    }
+
+    /// The engine stopped the batch with `message`. `game_closed`: the game
+    /// went away by itself rather than being ended by the engine.
+    fn failed(message: &str, records: Records, game_closed: bool) -> BatchEnd<'_> {
+        BatchEnd {
+            status: message,
+            outcome: "error",
+            error: true,
+            records,
+            cut_by: if game_closed {
+                CutBy::GameClosed
+            } else {
+                CutBy::Stopped
+            },
+            clips: ClipEvidence::default(),
+        }
+    }
+}
+
+/// Marks the clip the batch's end cut short (#1081), with what ended it.
+/// With a clip still recording
+/// (more starts than stops), it is the block of the demo playing whose
+/// `record_start_tick` is the tick the last `START_RECORD` named. Without a
+/// demo, the first block from position `stopped` in recording order with that
+/// tick: a demo the hook's batch skipped sends no markers, so the recording
+/// clip can sit further on than the count says (#861's `resolve_block` does
+/// the same). With no tick, or none matching, the block at `stopped`.
+/// Without markers both counts are 0 and nothing changes.
+pub(crate) fn mark_cut_short(
+    manifest: &CaptureManifest,
+    verified: &mut [VerifiedBlock],
+    records: Records,
+    cut_by: CutBy,
+) {
+    if records.started <= records.stopped {
+        return;
+    }
+    let order = recording_order(&manifest.blocks);
+    let demo = demo_ordinals(&manifest.blocks);
+    let by_tick = records.last_start_tick.and_then(|tick| {
+        let starts_at = |i: usize| i64::from(manifest.blocks[i].record_start_tick) == tick;
+        match records.last_start_demo {
+            Some(d) => order.iter().find(|&&i| demo[i] == d && starts_at(i)),
+            None => order.iter().skip(records.stopped).find(|&&i| starts_at(i)),
+        }
+    });
+    let Some(&i) = by_tick.or_else(|| order.get(records.stopped)) else {
+        return;
+    };
+    let block = &mut verified[i];
+    // A cut clip's take is short too: the batch's end is the reason it gives.
+    block.cut_short = block.captured || block.cut_short;
+    if block.cut_short {
+        block.cut_by = Some(cut_by);
+    }
+    block.short_take = None;
+    block.captured = false;
+    block.renderable = false;
+}
+
+/// One OBS drop-rate report as the `capture_obs_drop_rate` event (#172):
+/// shares as percentages, the clip's take folder spelled as the manifest
+/// spells it, so the Last Batch panel can put it on its row.
+fn obs_drop_rate_payload(report: &native::obs::ObsDropReport) -> serde_json::Value {
+    let pct = |share: f64| (share * 1000.0).round() / 10.0;
+    serde_json::json!({
+        "clip": report.clip,
+        "take_folder": report.take_folder.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        "recording": report.recording,
+        "skipped_pct": pct(report.clip_counts.skipped_share()),
+        "missed_pct": pct(report.clip_counts.missed_share()),
+        "skipped": report.clip_counts.output_skipped,
+        "frames": report.clip_counts.output_total,
+        "missed": report.clip_counts.render_skipped,
+        "rendered": report.clip_counts.render_total,
+        "recent_skipped_pct": pct(report.recent.skipped_share()),
+        "recent_missed_pct": pct(report.recent.missed_share()),
+        "lagging": report.lagging,
+        "capture_fps": report.capture_fps,
+    })
+}
+
+/// Everything under `path`, in bytes. 0 for a folder that isn't there.
+fn folder_bytes(path: &Path) -> u64 {
+    native::sys::folder_walk::Walker::new()
+        .files(path)
+        .iter()
+        .map(|file| std::fs::metadata(file).map(|m| m.len()).unwrap_or(0))
+        .sum()
 }
 
 fn take_folder_has_content(path: &Path) -> bool {
@@ -612,31 +907,75 @@ fn take_folder_has_content(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a block's take was rendered and then deleted while the batch ran
+/// (Render While Capturing, #861): its folder keeps only the render history,
+/// which shows a finished render. That take was captured.
+fn rendered_while_capturing(block_folder: &Path) -> bool {
+    native::hlcr::take_meta::read_history(block_folder)
+        .iter()
+        .any(|r| r.outcome == native::hlcr::take_meta::RenderOutcome::Finished)
+}
+
 /// Checks each planned block against disk after a batch ends.
 ///
 /// Two tiers on purpose: "captured" is the loose check that drives status, so
 /// an unanticipated HLAE output layout degrades to a warning rather than
 /// silently marking nothing; "renderable" reuses Render Studio's own admission
 /// predicate so the two views can't disagree without saying so.
-fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
+///
+/// `on_checked(done)` is called as each take's size is read, the last step
+/// and the slow one on a frame sequence's thousands of files (#952).
+fn verify_capture_takes(
+    manifest: &CaptureManifest,
+    on_checked: &mut dyn FnMut(usize),
+) -> Vec<VerifiedBlock> {
+    verify_capture_takes_settling(
+        manifest,
+        Some(std::time::Duration::from_millis(1500)),
+        on_checked,
+    )
+}
+
+/// [`verify_capture_takes`], with the re-check of misses after `settle`, or
+/// none: a batch caught up on after a restart (#545) ended long ago.
+pub(crate) fn verify_capture_takes_settling(
+    manifest: &CaptureManifest,
+    settle: Option<std::time::Duration>,
+    on_checked: &mut dyn FnMut(usize),
+) -> Vec<VerifiedBlock> {
     let mut verified: Vec<VerifiedBlock> = manifest
         .blocks
         .iter()
-        .map(|block| VerifiedBlock {
-            take_key: block.take_key.clone(),
-            take_folder: block.take_folder.to_string_lossy().into_owned(),
-            demo_name: block.demo_name.clone(),
-            block_index: block.block_index,
-            source_streak_indices: block.source_streak_indices.clone(),
-            captured: take_folder_has_content(&block.take_folder),
-            renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+        .map(|block| {
+            let has_content = take_folder_has_content(&block.take_folder);
+            let rendered = !has_content && rendered_while_capturing(&block.take_folder);
+            VerifiedBlock {
+                take_key: block.take_key.clone(),
+                take_folder: block.take_folder.to_string_lossy().into_owned(),
+                demo_name: block.demo_name.clone(),
+                block_index: block.block_index,
+                source_streak_indices: block.source_streak_indices.clone(),
+                captured: has_content || rendered,
+                renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+                rendered,
+                bytes: 0,
+                cut_short: false,
+                cut_by: None,
+                short_take: None,
+                started_late_ms: None,
+                clip_verdict: None,
+                ramped_gaps: block.ramped_gaps,
+                not_reached: false,
+            }
         })
         .collect();
 
     // HLAE is force-killed the moment the exit trigger appears, so a take can
     // still be mid-flush when we first look. Re-check only the misses once.
-    if verified.iter().any(|v| !v.captured) {
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+    if let Some(settle) = settle
+        && verified.iter().any(|v| !v.captured)
+    {
+        std::thread::sleep(settle);
         for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
             if !v.captured {
                 v.captured = take_folder_has_content(&block.take_folder);
@@ -645,6 +984,11 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
                 v.renderable = native::hlcr::scanner::is_renderable_take(&block.take_folder);
             }
         }
+    }
+    mark_short_takes(manifest, &mut verified, settle);
+    for (i, (v, block)) in verified.iter_mut().zip(manifest.blocks.iter()).enumerate() {
+        v.bytes = folder_bytes(&block.take_folder);
+        on_checked(i + 1);
     }
 
     verified
@@ -665,76 +1009,216 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
 ///
 /// Best-effort throughout: a capture that succeeded must never be reported as
 /// failed because a metadata file could not be written.
-fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock]) {
+pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock]) {
     if manifest.capture_fps <= 0 {
         return;
     }
-    let meta = native::hlcr::take_meta::SessionMeta::new(
-        manifest.session_id.clone(),
-        manifest.capture_fps,
-    );
+    let meta = if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::take_meta::SessionMeta::agr(
+            manifest.session_id.clone(),
+            manifest.capture_fps,
+            manifest.agr_fps,
+        )
+    } else {
+        native::hlcr::take_meta::SessionMeta::new(manifest.session_id.clone(), manifest.capture_fps)
+    };
 
     for block in blocks.iter().filter(|b| b.captured) {
         let folder = Path::new(&block.take_folder);
+        // A take rendered while the batch ran (#861) already has a history;
+        // writing the settings keeps it.
+        let meta = native::hlcr::take_meta::SessionMeta {
+            renders: native::hlcr::take_meta::read_history(folder),
+            // What the plan held for this block, so the take's length and
+            // kills can be checked against it (#1084).
+            plan: manifest
+                .blocks
+                .iter()
+                .find(|b| b.take_folder == folder)
+                .and_then(|b| b.plan.clone()),
+            // Everything else the batch captured with (part of #1085).
+            settings: manifest.settings.clone(),
+            ..meta.clone()
+        };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
-            log_markdown(&format!(
-                "[take-verify] could not record capture settings at {} — {}. Render Studio will \
-                 not be able to warn about an FPS mismatch for this take.",
-                folder.display(),
-                e
-            ));
+            log_markdown(
+                &crate::messages::capture::take_verify_settings_not_recorded(folder.display(), e),
+            );
         }
     }
 }
 
-/// Runs verification for the batch that just ended and reports it to the
-/// frontend. Phase 1 is observe-only — nothing consumes this to change a
-/// highlight's status yet.
-/// `outcome` ("complete" / "cancelled") goes into the manifest file (#19).
-fn emit_take_verification(
+/// What `check_takes` found: the `capture_takes_verified` payload and the
+/// counts the batch's last status line gives (#952).
+struct TakeReport {
+    payload: serde_json::Value,
+    captured: usize,
+    total: usize,
+    /// Captured takes shorter than planned (#1401).
+    short: usize,
+}
+
+/// Runs verification for the batch that just ended, with "Checking the
+/// takes: N of M" on the status line while it runs (#952, throttled to
+/// ~33 ms like the patch line). `end.outcome` goes into the manifest file
+/// (#19); `end.records` and `end.cut_by` find the clip the end cut short
+/// ([`mark_cut_short`]). `None` when the batch planned no takes.
+fn check_takes(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
-    outcome: &str,
-) {
+    end: &BatchEnd,
+    rendered_while_capturing: bool,
+) -> Option<TakeReport> {
+    let outcome = end.outcome;
     let manifest = {
-        let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(manifest_slot);
         match guard.as_ref() {
             Some(m) if !m.blocks.is_empty() => m.clone(),
-            _ => return,
+            _ => return None,
         }
     };
 
-    let blocks = verify_capture_takes(&manifest);
+    let total = manifest.blocks.len();
+    let emit_checking = |done: usize| {
+        let _ = app.emit(
+            "capture_status",
+            serde_json::json!({
+                "running": true,
+                "stage": "checking",
+                "index": done,
+                "total": total,
+                "status": crate::messages::checking_takes(done, total),
+            }),
+        );
+    };
+    emit_checking(0);
+    let mut last_emit = std::time::Instant::now();
+    let mut blocks = verify_capture_takes(&manifest, &mut |done| {
+        if done == total || last_emit.elapsed() >= std::time::Duration::from_millis(33) {
+            last_emit = std::time::Instant::now();
+            emit_checking(done);
+        }
+    });
+    mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
+    let short = crate::clip_verdicts::apply(&manifest, &mut blocks, &end.clips);
+    // Only a batch that ended early left clips behind; a complete one
+    // reached them all, and a take it lacks is missing.
+    if outcome != "complete" {
+        let not_reached =
+            crate::unreached_clips::mark_not_reached(&manifest, &mut blocks, &end.records);
+        if not_reached > 0 {
+            log_markdown(&crate::messages::capture::take_verify_not_reached(
+                not_reached,
+                blocks.len(),
+                end.cut_by.not_reached_text(),
+            ));
+        }
+    }
+    for block in blocks.iter().filter(|b| b.cut_short) {
+        let why = match block.short_take {
+            Some(s) => {
+                crate::messages::capture::take_stopped_writing_video(s.video_secs, s.audio_secs)
+            }
+            None => block.cut_by.unwrap_or(end.cut_by).log_text().to_string(),
+        };
+        log_markdown(&crate::messages::capture::take_verify_cut_short(
+            &block.take_key,
+            why,
+            &block.take_folder,
+        ));
+    }
     let captured_count = blocks.iter().filter(|b| b.captured).count();
-    let renderable_count = blocks.iter().filter(|b| b.renderable).count();
+    // A take already rendered and deleted (#861) isn't one Render Studio
+    // missed.
+    let renderable_count = blocks.iter().filter(|b| b.renderable || b.rendered).count();
 
-    log_markdown(&format!(
-        "[take-verify] session {}: {}/{} takes on disk, {} renderable",
-        manifest.session_id,
+    log_markdown(&crate::messages::capture::take_verify_session_summary(
+        &manifest.session_id,
         captured_count,
         blocks.len(),
-        renderable_count
+        renderable_count,
     ));
     for block in &blocks {
-        log_markdown(&format!(
-            "[take-verify] {} captured={} renderable={} at {}",
-            block.take_key, block.captured, block.renderable, block.take_folder
+        log_markdown(&crate::messages::capture::take_verify_block_line(
+            &block.take_key,
+            block.captured,
+            block.renderable,
+            &block.take_folder,
         ));
     }
 
+    // An AGR take's sound goes beside its `.agr` (#450).
+    if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::agr_take::place_batch_sounds(&manifest.blocks);
+    }
     record_capture_settings(&manifest, &blocks);
     crate::manifest_file::write(&manifest, outcome, Some(&blocks));
 
-    let _ = app.emit(
-        "capture_takes_verified",
-        serde_json::json!({
+    Some(TakeReport {
+        payload: serde_json::json!({
             "session_id": manifest.session_id,
             "total_count": blocks.len(),
             "captured_count": captured_count,
             "renderable_count": renderable_count,
             "blocks": blocks,
+            // Both read by the frontend's automatic finish step (#440): it
+            // only finishes a batch that ran to completion, and a frame
+            // sequence has to be encoded at the rate it was captured at.
+            "outcome": outcome,
+            // What ended a batch that stopped early, for its clips it never
+            // reached (#1434).
+            "ended_by": end.ended_by(),
+            "capture_fps": manifest.capture_fps,
+            // The project's record of each take (part of #1085).
+            "capture_settings": manifest.settings,
+            // Render While Capturing (#861) queues every take itself, the
+            // last ones after this goes out, so the finish step stays out.
+            "rendered_while_capturing": rendered_while_capturing,
         }),
-    );
+        captured: captured_count,
+        short,
+        total,
+    })
+}
+
+/// A batch that ran (to its end, until cancelled, or until it failed in the
+/// game) finishes: its takes are checked, then the running flag drops and
+/// the last status line goes out with how many clips landed, then the
+/// check's result. In that order: the footer's last line comes before what
+/// Finish clips (#440) puts on it.
+fn finish_batch(
+    app: &tauri::AppHandle,
+    is_running: &Arc<Mutex<bool>>,
+    manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
+    end: BatchEnd,
+    rendered_while_capturing: bool,
+) {
+    let report = check_takes(app, manifest_slot, &end, rendered_while_capturing);
+    *lock_or_recover(is_running) = false;
+    let mut status = serde_json::json!({
+        "running": false,
+        "status": end.status,
+        "clips_captured": report.as_ref().map(|r| r.captured),
+        "clips_total": report.as_ref().map(|r| r.total),
+        "clips_short": report.as_ref().map(|r| r.short),
+    });
+    if end.error {
+        status["error"] = serde_json::Value::Bool(true);
+    }
+    let _ = app.emit("capture_status", status);
+    if let Some(report) = report {
+        // An OBS capture test's clip (#646) is the test's alone: it must not
+        // mark highlights captured, fill Last Batch or start Finish clips.
+        let test = report.payload["session_id"]
+            .as_str()
+            .is_some_and(crate::obs_test_manager::is_test_session);
+        let event = if test {
+            "obs_test_takes_verified"
+        } else {
+            "capture_takes_verified"
+        };
+        let _ = app.emit(event, report.payload);
+    }
 }
 
 // ── Public command handler ─────────────────────────────────────────────────────
@@ -803,6 +1287,9 @@ pub async fn start_capture_batch_impl(
         return Err(err);
     }
 
+    // ── Guard: an AGR batch needs its own rate (the UI blocks it too) ─────────
+    crate::capture_guards::require_agr_rate(&config_from_payload(&payload))?;
+
     // ── Guard: separate HUD cannot be captured through mirv_movie_ffmpeg ──────
     // HLAE writes blank frames to the HUD stream on the FFmpeg path — measured
     // both ways against one demo, see docs/direct_to_video_capture.md. Capture
@@ -814,7 +1301,7 @@ pub async fn start_capture_batch_impl(
     // leave the manager wedged.
     // ── Guard: reject concurrent batches ──────────────────────────────────────
     {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         if *running {
             return Err(crate::messages::CAPTURE_BATCH_ALREADY_RUNNING.to_string());
         }
@@ -825,16 +1312,37 @@ pub async fn start_capture_batch_impl(
     manager
         .cancel_token
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    manager
+        .batch_start
+        .set(native::game_handoff::StartState::Preparing);
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
-    let patcher_config = config_from_payload(&payload);
+    let mut patcher_config = config_from_payload(&payload);
+    // Configuration > Players' box (#428) is a saved setting, not part of
+    // the batch's payload.
+    patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
+    // Render While Capturing (#861) renders each take as it lands. Only a
+    // batch the hook runs can hold for space, and only deleted takes free
+    // any, so only then may the planner route more than the drives hold now.
+    let render_while_capturing = crate::capture_room_manager::enabled(&app_handle)
+        && patcher_config.capture_mode != native::patch::CaptureMode::Agr;
+    patcher_config.render_while_capturing = render_while_capturing
+        && patcher_config.hook_runs_batch
+        && saved_settings(&app_handle).take_after_finish == "delete";
     {
-        let mut slot = manager
-            .last_config
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut slot = lock_or_recover(&manager.last_config);
         *slot = Some(patcher_config.clone());
     }
+
+    let reuse_game_pid = payload.reuse_game_pid;
+    // For the manifest (#545): which highlight each payload index is.
+    let streak_uids = payload.streak_uids.clone();
+    let streak_sources: Vec<String> = payload
+        .streaks
+        .iter()
+        .map(|s| s.source_demo.clone())
+        .collect();
+    let project_path = payload.project_path.clone().filter(|p| !p.is_empty());
 
     // ── Convert IPC streaks → native CaptureStreak ────────────────────────────
     let raw_streaks: Vec<CaptureStreak> = payload
@@ -844,7 +1352,7 @@ pub async fn start_capture_batch_impl(
         .collect();
 
     if raw_streaks.is_empty() {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         *running = false;
         let _ = app_handle.emit(
             "capture_status",
@@ -860,30 +1368,119 @@ pub async fn start_capture_batch_impl(
     // ── Clone Arcs into the worker closure ────────────────────────────────────
     let is_running_arc = Arc::clone(&manager.is_running);
     let cancel_token_arc = Arc::clone(&manager.cancel_token);
+    let batch_start_arc = Arc::clone(&manager.batch_start);
     let manifest_arc = Arc::clone(&manager.last_manifest);
-    let hlae_path = PathBuf::from(&patcher_config.hlae_path);
     let hl_path = PathBuf::from(&patcher_config.game_path);
 
     let app_handle_clone = app_handle.clone();
 
     // ── Offload blocking I/O to a dedicated thread ────────────────────────────
     tokio::task::spawn_blocking(move || {
-        let (patch_jobs, drive_headroom) = match build_batch_queue(
+        // The first line at once (#952): the steps before the first count
+        // (the unchanged check below, copies beside the game) report none.
+        let _ = app_handle_clone.emit(
+            "capture_status",
+            serde_json::json!({
+                "running": true,
+                "stage": "preparing",
+                "index": 0,
+                "total": 0,
+                "measured": false,
+                "status": crate::messages::GETTING_DEMOS_READY,
+            }),
+        );
+        // A different demo saved under a scanned one's name would take every
+        // highlight tick with it and crash the game minutes in (#196). Stop
+        // before anything is patched.
+        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks)
+            .map_err(crate::messages::failed_to_check_demo_sources)
+        {
+            log_markdown(&crate::messages::capture::capture_error_line(&e));
+            let mut running = lock_or_recover(&is_running_arc);
+            *running = false;
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "error": true,
+                    "status": e
+                }),
+            );
+            return;
+        }
+
+        // #644: with "Only when space is needed", finished takes make room on
+        // the capture drives before build_batch_queue routes blocks to them.
+        // The Capture footer shows each step.
+        if crate::take_cleanup_manager::makes_room(&app_handle_clone) {
+            let need = native::hlcr::take_cleanup::SpaceNeed {
+                targets: patcher_config.capture_directories.clone(),
+                pieces: native::patch::estimate_batch_capture_blocks(&raw_streaks, &patcher_config),
+                headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+            };
+            crate::take_cleanup_manager::make_room(
+                &app_handle_clone,
+                crate::take_cleanup_manager::RoomFor::Capture,
+                need,
+                Some(&cancel_token_arc),
+                |line, done, total| {
+                    let _ = app_handle_clone.emit(
+                        "capture_status",
+                        serde_json::json!({
+                            "running": true,
+                            "status": line,
+                            "index": done,
+                            "total": total
+                        }),
+                    );
+                },
+            );
+            if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut running = lock_or_recover(&is_running_arc);
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "status": crate::messages::CAPTURE_CANCELLED_WHILE_MAKING_ROOM
+                    }),
+                );
+                return;
+            }
+        }
+
+        // Kept for the hook-run route, which places each tick by the kills'
+        // demo-player times (#434). A highlight from a project saved before
+        // those existed gets them from a fresh read of its demo first.
+        let planned_streaks = if patcher_config.hook_runs_batch {
+            let mut raw_streaks = raw_streaks.clone();
+            crate::hook_batch::refresh_viewdemo_times(&app_handle_clone, &mut raw_streaks);
+            raw_streaks
+        } else {
+            Vec::new()
+        };
+        let planned_capture_bytes = if render_while_capturing {
+            native::patch::estimate_batch_capture_bytes(&raw_streaks, &patcher_config)
+        } else {
+            0
+        };
+        let (mut patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
             &std::collections::HashMap::new(),
         ) {
             Ok(v) => v,
             Err(e) => {
-                log::error!("build_batch_queue failed: {}", e);
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                log_markdown(&crate::messages::capture::build_batch_queue_failed(&e));
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
                     serde_json::json!({
                         "running": false,
                         "error": true,
-                        "status": format!("build_batch_queue failed: {}", e)
+                        // The error toast's text; the log line above names the step.
+                        "status": e.to_string()
                     }),
                 );
                 return;
@@ -907,26 +1504,137 @@ pub async fn start_capture_batch_impl(
                     .flat_map(|j| j.blocks.iter().cloned())
                     .collect(),
                 capture_fps: patcher_config.capture_fps,
+                capture_mode: patcher_config.capture_mode.to_str_id().to_string(),
+                agr_fps: patcher_config.effective_agr_fps(),
+                streak_uids,
+                streak_sources,
+                project_path,
+                settings: Some(native::hlcr::take_settings::CaptureSettings::from_config(
+                    &patcher_config,
+                    env!("CARGO_PKG_VERSION"),
+                )),
             };
+            if let Some(settings) = &manifest.settings {
+                log_markdown(&crate::messages::capture::take_settings_recorded(settings));
+            }
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
             crate::manifest_file::write(&manifest, "planned", None);
-            let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut slot = lock_or_recover(&manifest_arc);
             *slot = Some(manifest);
         }
 
         if patch_jobs.is_empty() {
-            log::warn!("build_batch_queue produced no jobs");
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            log_markdown(crate::messages::capture::BUILD_BATCH_QUEUE_NO_JOBS);
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
                 serde_json::json!({
                     "running": false,
-                    "status": "No jobs produced"
+                    "status": crate::messages::capture::STATUS_NO_JOBS
                 }),
             );
             return;
+        }
+
+        // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
+        let crate::trimmed_demos::BatchCopies {
+            copies: trimmed,
+            pins: trim_pins,
+        } = match crate::trimmed_demos::for_batch(
+            &app_handle_clone,
+            &patch_jobs,
+            &patcher_config.game_path,
+            &cancel_token_arc,
+        ) {
+            Ok(batch) => batch,
+            Err(status) => {
+                let mut running = lock_or_recover(&is_running_arc);
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": status
+                    }),
+                );
+                return;
+            }
+        };
+
+        // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
+        let runtime_batch = if patcher_config.hook_runs_batch {
+            match crate::hook_batch::prepare(
+                &patch_jobs,
+                &planned_streaks,
+                &patcher_config,
+                &trimmed,
+            ) {
+                Ok(mut batch) => {
+                    batch.reuse_game = reuse_game_pid;
+                    Some(batch)
+                }
+                // A patched batch starts the game on its first demo, so it
+                // can't run in the open game the frontend picked (#725).
+                Err(why) if reuse_game_pid.is_some() => {
+                    let status = crate::messages::batch_needs_fresh_game(&why);
+                    log_markdown(&crate::messages::capture::batch_not_started_line(&status));
+                    let mut running = lock_or_recover(&is_running_arc);
+                    *running = false;
+                    let _ = app_handle_clone.emit(
+                        "capture_status",
+                        serde_json::json!({
+                            "running": false,
+                            "error": true,
+                            "status": status
+                        }),
+                    );
+                    return;
+                }
+                Err(why) => {
+                    log_markdown(&crate::messages::capture::batch_patched_instead_of_seeking(
+                        why,
+                    ));
+                    // The Commands tab checked these for a seeking batch, which
+                    // runs them all; a patched one puts them in the demo, where
+                    // the game's filter drops some (`cfg_scan::demo_filter_rule`).
+                    let mut commands = patcher_config.init_commands.clone();
+                    commands.extend(
+                        patcher_config
+                            .custom_commands
+                            .iter()
+                            .map(|c| c.command.clone()),
+                    );
+                    if let Some(line) = crate::messages::dropped_when_patched(
+                        &native::patch::cfg_scan::demo_filtered_commands(&commands),
+                    ) {
+                        log_markdown(&line);
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Fast-forwarded gaps need the hook's demo player (#831): a patched
+        // batch records them at real time, and its takes' labels say so.
+        if runtime_batch.is_none() {
+            let kept = native::patch::builder::kill_gaps::keep_gaps(&mut patch_jobs);
+            if kept > 0 {
+                log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
+                // The manifest was written before the route was known, and
+                // its blocks carry the plans the takes are checked against.
+                let mut slot = lock_or_recover(&manifest_arc);
+                if let Some(manifest) = slot.as_mut() {
+                    manifest
+                        .blocks
+                        .iter_mut()
+                        .for_each(native::patch::builder::kill_gaps::keep_block_gaps);
+                }
+            }
         }
 
         // ── Write each job's patched demo before the capture engine copies it ───
@@ -936,21 +1644,73 @@ pub async fn start_capture_batch_impl(
         // before spawn_capture_engine tries to copy patched_demo_path into
         // the game's dod/ directory (it would otherwise fail with "file not
         // found" since output_demo never existed).
-        let total_patch_jobs = patch_jobs.len() as u32;
         // Known upfront from the same per-job block lists build_batch_queue
         // already produced — cheap, and lets the demo-loading notification
         // show "X of Y clips total" without any per-demo lookback.
         let total_batch_clips: u32 = patch_jobs.iter().map(|j| j.blocks.len() as u32).sum();
+        // Each demo with clips, in the order the game plays them: DEMO_START's
+        // 1-based index counts these (the primer job has none), and the
+        // status line names the demo by it (#952).
+        let demo_names: Vec<String> = patch_jobs
+            .iter()
+            .filter(|j| !j.blocks.is_empty())
+            .map(|j| demo_file_name(&j.source_demo))
+            .collect();
+        // What each clip records, in batch order, for the time left (#643).
+        let clip_frames: Vec<i64> = patch_jobs
+            .iter()
+            .flat_map(|j| j.blocks.iter())
+            .map(|b| i64::from(b.record_stop_tick) - i64::from(b.record_start_tick))
+            .collect();
+        // Render While Capturing (#861): follows the batch clip by clip.
+        let capture_room = render_while_capturing.then(|| {
+            let blocks: Vec<native::patch::types::CaptureBlock> = patch_jobs
+                .iter()
+                .flat_map(|j| j.blocks.iter().cloned())
+                .collect();
+            crate::capture_room_manager::CaptureRoom::new(
+                app_handle_clone.clone(),
+                &blocks,
+                planned_capture_bytes,
+                patcher_config.session_id.clone(),
+                patcher_config.capture_fps,
+                patcher_config.capture_mode.to_str_id().to_string(),
+                Arc::clone(&cancel_token_arc),
+                runtime_batch.is_some(),
+            )
+        });
+        let hold = capture_room
+            .as_ref()
+            .map(|room| Arc::clone(&room.hold))
+            .unwrap_or_default();
+        // Every way out before the engine starts ends it too.
+        let mut room_guard = RoomGuard(capture_room.clone());
+        // The hook plays the original demos: nothing to patch or copy.
+        let mut patch_jobs = if runtime_batch.is_some() {
+            Vec::new()
+        } else {
+            patch_jobs
+        };
+        // A patched demo over the entity limit is patched from its trimmed
+        // copy (#207). Its frames are the original's, so every tick holds.
+        for job in &mut patch_jobs {
+            if let Some(copy) = trimmed.get(&job.source_demo) {
+                job.source_demo = copy.to_string_lossy().into_owned();
+            }
+        }
+        let total_patch_jobs = patch_jobs.len() as u32;
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching
         // is no longer instant, but a toast per demo patched would still be
         // noise (see issue #98 discussion).
-        let _ = app_handle_clone.emit(
-            "capture_patching_started",
-            serde_json::json!({
-                "total": total_patch_jobs,
-            }),
-        );
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_started",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
         // Completed-count progress rather than positional index -- jobs
         // finish out of order once patched concurrently, so "which index is
         // running" no longer means anything.
@@ -965,6 +1725,27 @@ pub async fn start_capture_batch_impl(
         // below tell "a peer job's failure forced cancel_token_arc true"
         // apart from a genuine user Cancel, which never sets it.
         let first_error: Mutex<Option<(String, std::io::Error)>> = Mutex::new(None);
+        let progress = PatchProgress::new(
+            patch_jobs
+                .iter()
+                .map(|j| demo_file_name(&j.source_demo))
+                .collect(),
+        );
+        let emit_progress = |app: &tauri::AppHandle, done: u32, in_progress: u32| {
+            let summary = progress.summary(done);
+            let _ = app.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": true,
+                    "stage": "preparing",
+                    "index": summary.index,
+                    "total": total_patch_jobs,
+                    "in_progress": in_progress,
+                    "measured": summary.measured,
+                    "status": summary.status
+                }),
+            );
+        };
 
         std::thread::scope(|scope| {
             let worker_count = PATCH_CONCURRENCY.min(patch_jobs.len()).max(1);
@@ -977,60 +1758,70 @@ pub async fn start_capture_batch_impl(
                 let patch_jobs = &patch_jobs;
                 let patcher_config = &patcher_config;
                 let cancel_token_arc = &cancel_token_arc;
-                scope.spawn(move || loop {
-                    if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= patch_jobs.len() {
-                        break;
-                    }
-                    let job = &patch_jobs[idx];
-                    let started = in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let done_so_far = completed_count.load(std::sync::atomic::Ordering::Relaxed);
-                    let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                        "running": true,
-                        "index": done_so_far,
-                        "total": total_patch_jobs,
-                        "in_progress": started,
-                        "status": format!("Patching {} / {} ({} in progress)", done_so_far, total_patch_jobs, started)
-                    }));
-                    let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
-                        .patch(job, patcher_config, cancel_token_arc);
-                    let still_running = in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
-                    match result {
-                        Ok(()) => {
-                            let done = completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                                "running": true,
-                                "index": done,
-                                "total": total_patch_jobs,
-                                "in_progress": still_running,
-                                "status": format!("Patching {} / {} ({} in progress)", done, total_patch_jobs, still_running)
-                            }));
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                            // Either a real user Cancel, or fallout from a
-                            // peer job's failure just below -- either way
-                            // this job's own output is incomplete.
-                            let _ = std::fs::remove_file(&job.output_demo);
+                let progress = &progress;
+                let emit_progress = &emit_progress;
+                scope.spawn(move || {
+                    loop {
+                        if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
-                        Err(e) => {
-                            {
-                                let mut slot = first_error.lock().unwrap_or_else(|p| p.into_inner());
-                                if slot.is_none() {
-                                    *slot = Some((job.source_demo.clone(), e));
-                                }
+                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= patch_jobs.len() {
+                            break;
+                        }
+                        let job = &patch_jobs[idx];
+                        in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Each stage change, and each percent written (throttled
+                        // across the batch), updates the one status line.
+                        let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
+                            .patch_with_stages(
+                                job,
+                                patcher_config,
+                                cancel_token_arc,
+                                &mut |stage| {
+                                    if progress.set(idx, stage) {
+                                        emit_progress(
+                                            &app_handle_clone,
+                                            completed_count
+                                                .load(std::sync::atomic::Ordering::Relaxed),
+                                            in_flight.load(std::sync::atomic::Ordering::Relaxed),
+                                        );
+                                    }
+                                },
+                            );
+                        progress.finish(idx);
+                        let still_running =
+                            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
+                        match result {
+                            Ok(()) => {
+                                let done = completed_count
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    + 1;
+                                emit_progress(&app_handle_clone, done, still_running);
                             }
-                            // Stop everything else as fast as the existing
-                            // interrupt mechanism allows -- a batch is
-                            // already all-or-nothing (nothing opens the game
-                            // until every job has patched clean), so letting
-                            // peers run to completion after this would only
-                            // waste CPU on jobs the batch is aborting anyway.
-                            cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
-                            break;
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                                // Either a real user Cancel, or fallout from a
+                                // peer job's failure just below -- either way
+                                // this job's own output is incomplete.
+                                let _ = std::fs::remove_file(&job.output_demo);
+                                break;
+                            }
+                            Err(e) => {
+                                {
+                                    let mut slot = lock_or_recover(first_error);
+                                    if slot.is_none() {
+                                        *slot = Some((job.source_demo.clone(), e));
+                                    }
+                                }
+                                // Stop everything else as fast as the existing
+                                // interrupt mechanism allows -- a batch is
+                                // already all-or-nothing (nothing opens the game
+                                // until every job has patched clean), so letting
+                                // peers run to completion after this would only
+                                // waste CPU on jobs the batch is aborting anyway.
+                                cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
                         }
                     }
                 });
@@ -1038,24 +1829,27 @@ pub async fn start_capture_batch_impl(
         });
 
         let was_cancelled = cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed);
-        let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let failure = lock_or_recover(&first_error).take();
 
         if let Some((source_demo, e)) = failure {
-            log::error!("Failed to patch {}: {}", source_demo, e);
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            log_markdown(&crate::messages::capture::patch_failed_line(
+                &source_demo,
+                &e,
+            ));
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
                 serde_json::json!({
                     "running": false,
                     "error": true,
-                    "status": format!("Failed to patch {}: {}", source_demo, e)
+                    "status": crate::messages::capture::patch_failed_status(&source_demo, &e)
                 }),
             );
             return;
         }
         if was_cancelled {
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1067,12 +1861,14 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
-        let _ = app_handle_clone.emit(
-            "capture_patching_finished",
-            serde_json::json!({
-                "total": total_patch_jobs,
-            }),
-        );
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_finished",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
 
         let capture_jobs: Vec<CaptureJob> = patch_jobs
             .into_iter()
@@ -1089,65 +1885,106 @@ pub async fn start_capture_batch_impl(
         let app_emitter = app_handle_clone.clone();
         let is_running_for_panic = Arc::clone(&is_running_arc);
         let app_emitter_for_panic = app_handle_clone.clone();
+        let room = capture_room;
+        let rendered_while_capturing = room.is_some();
+        // The listener ends the room from here on.
+        room_guard.0 = None;
         std::thread::spawn(move || {
+            // Ends Render While Capturing however the listener ends.
+            let _room_guard = RoomGuard(room.clone());
+            // The batch's trimmed copies can't be pruned until it ends (#207).
+            let _trim_pins = trim_pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut total_jobs: u32 = 0;
-                let mut current_idx: u32 = 0;
-                // Running tally of clips captured through and including the
+                // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per
                 // FastForwardToClip), so every fast-forward-to-clip notification
                 // within a demo reports the same "X of Y clips total" the
                 // demo-loading toast itself would have shown. See issue #98.
-                let mut clips_so_far: u32 = 0;
+                let mut clips = ClipTally::default();
+                // Clip recordings, for a Cancel (#1081).
+                let mut records = Records::default();
+                // The game went away by itself before the batch's end.
+                let mut game_closed = false;
+                // What the game and OBS said about each clip (#1109, #1401).
+                let mut clip_evidence = ClipEvidence::default();
+                // A demo by DEMO_START's 1-based index, for the line (#952).
+                let demo_name = |job_idx: u32| {
+                    (job_idx as usize)
+                        .checked_sub(1)
+                        .and_then(|i| demo_names.get(i))
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                // Time left (#643): from when the engine starts, priced by
+                // the clips done so far.
+                let eta = crate::batch_eta::BatchEta::new(clip_frames);
+                let mut started: Option<std::time::Instant> = None;
+                let seconds_left = |started: Option<std::time::Instant>, done: u32| {
+                    let elapsed = started?.elapsed().as_secs_f64();
+                    eta.seconds_left(done, elapsed)
+                };
+                // Every line from here on counts clips (#952): the bar is one
+                // bar for the whole batch, and the frontend places these on
+                // the share after getting the demos ready. `stage` says which
+                // step it is; a step that can't be measured (starting the
+                // game, loading a demo) keeps the count where it was.
+                let emit_step = |stage: &str, done: u32, status: String, left: Option<u64>| {
+                    let _ = app_emitter.emit(
+                        "capture_status",
+                        serde_json::json!({
+                            "running": true,
+                            "stage": stage,
+                            "index": done,
+                            "total": total_batch_clips,
+                            "status": status,
+                            "seconds_left": left,
+                        }),
+                    );
+                };
                 while let Ok(event) = engine_rx.recv() {
                     match event {
-                        EngineEvent::Starting(total) => {
-                            total_jobs = total as u32;
-                            current_idx = 0;
-                            let _ = app_emitter.emit(
-                                "capture_status",
-                                serde_json::json!({
-                                    "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
-                                    "status": "Starting"
-                                }),
+                        EngineEvent::Starting(_) => {
+                            started = Some(std::time::Instant::now());
+                            emit_step(
+                                "starting",
+                                clips.done,
+                                crate::messages::starting_the_game(None, demo_names.len()),
+                                None,
                             );
                         }
-                        EngineEvent::Launching(name) => {
-                            current_idx += 1;
-                            let _ = app_emitter.emit(
-                                "capture_status",
-                                serde_json::json!({
-                                    "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
-                                    "name": name,
-                                    "status": "Launching"
-                                }),
+                        EngineEvent::Launching(_) => {
+                            emit_step(
+                                "starting",
+                                clips.done,
+                                crate::messages::starting_the_game(
+                                    demo_names.first().map(String::as_str),
+                                    demo_names.len(),
+                                ),
+                                None,
                             );
                         }
-                        EngineEvent::Finished(name) => {
-                            let _ = app_emitter.emit(
-                                "capture_status",
-                                serde_json::json!({
-                                    "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
-                                    "name": name,
-                                    "status": "Finished"
-                                }),
-                            );
+                        EngineEvent::Finished(_) => {
+                            // The game closed: the takes are checked next
+                            // (`finish_batch`), which says so on the line.
+                            clips.session_finished();
                         }
                         EngineEvent::DemoLoading(job_idx, total, clip_count) => {
-                            clips_so_far += clip_count;
+                            clips.demo_loading(clip_count);
+                            records.demo_started(job_idx);
+                            let current_demo = demo_name(job_idx);
+                            emit_step(
+                                "loading",
+                                clips.done,
+                                crate::messages::loading_demo(&current_demo),
+                                seconds_left(started, clips.done),
+                            );
                             let _ = app_emitter.emit(
                                 "capture_demo_loading",
                                 serde_json::json!({
                                     "index": job_idx,
                                     "total": total,
                                     "clip_count": clip_count,
-                                    "clips_so_far": clips_so_far,
+                                    "clips_so_far": clips.through_current_demo,
                                     "total_batch_clips": total_batch_clips,
                                 }),
                             );
@@ -1158,6 +1995,20 @@ pub async fn start_capture_batch_impl(
                             clip_idx,
                             clip_count_this_demo,
                         ) => {
+                            clips.fast_forward_to(clip_idx, clip_count_this_demo);
+                            let current_demo = demo_name(job_idx);
+                            if total_batch_clips > 0 {
+                                emit_step(
+                                    "capturing",
+                                    clips.done,
+                                    crate::messages::capturing_clip(
+                                        clips.done + 1,
+                                        total_batch_clips,
+                                        &current_demo,
+                                    ),
+                                    seconds_left(started, clips.done),
+                                );
+                            }
                             let _ = app_emitter.emit(
                                 "capture_fast_forward_to_clip",
                                 serde_json::json!({
@@ -1165,14 +2016,74 @@ pub async fn start_capture_batch_impl(
                                     "demo_total": total,
                                     "clip_index": clip_idx,
                                     "clip_count_this_demo": clip_count_this_demo,
-                                    "clips_so_far": clips_so_far,
+                                    "clips_so_far": clips.through_current_demo,
                                     "total_batch_clips": total_batch_clips,
                                 }),
                             );
                         }
+                        EngineEvent::ObsDropRate(report) => {
+                            // About once a second: no throttle needed.
+                            let _ = app_emitter
+                                .emit("capture_obs_drop_rate", obs_drop_rate_payload(&report));
+                        }
+                        EngineEvent::ClipStarted(tick) => {
+                            records.clip_started(tick);
+                            if let Some(room) = &room {
+                                room.clip_started(tick);
+                            }
+                        }
+                        EngineEvent::ClipRecorded(tick) => {
+                            records.clip_stopped();
+                            if let Some(room) = &room {
+                                room.clip_recorded(tick);
+                            }
+                        }
+                        EngineEvent::Held => {
+                            if let Some(room) = &room {
+                                room.game_held(true);
+                            }
+                        }
+                        EngineEvent::Going => {
+                            if let Some(room) = &room {
+                                room.game_held(false);
+                            }
+                        }
+                        EngineEvent::GameClosed => {
+                            game_closed = true;
+                        }
+                        // Once per change in the game (#1339): no throttle.
+                        EngineEvent::KillfeedLayout(warning) => {
+                            let _ = app_emitter.emit(
+                                "capture_killfeed_layout",
+                                serde_json::json!({ "warning": warning }),
+                            );
+                        }
+                        EngineEvent::ObsStartedLate(late) => {
+                            if let Some(room) = &room {
+                                room.clip_started_late(&late.take_folder);
+                            }
+                            clip_evidence.late_starts.push(late);
+                        }
+                        EngineEvent::ClipReported(clip) => clip_evidence.reports.push(clip),
+                        // A batch that played a demo before it failed has
+                        // takes to check, like a cancelled one: the finished
+                        // ones are real, and the clip recording when it
+                        // stopped is a partial take. Left unchecked, its
+                        // manifest stays "planned" and the next start's
+                        // catch-up (#545) counts that partial take captured.
+                        EngineEvent::Error(msg) if records.reached_game() => {
+                            finish_batch(
+                                &app_emitter,
+                                &is_running_clone,
+                                &manifest_for_listener,
+                                BatchEnd::failed(&msg, records, game_closed)
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
+                                rendered_while_capturing,
+                            );
+                            break;
+                        }
                         EngineEvent::Error(msg) => {
-                            let mut running =
-                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            let mut running = lock_or_recover(&is_running_clone);
                             *running = false;
                             let _ = app_emitter.emit(
                                 "capture_status",
@@ -1185,42 +2096,26 @@ pub async fn start_capture_batch_impl(
                             break;
                         }
                         EngineEvent::AllCompleted => {
-                            let mut running =
-                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                            *running = false;
-                            let _ = app_emitter.emit(
-                                "capture_status",
-                                serde_json::json!({
-                                    "running": false,
-                                    "status": "Complete",
-                                    "index": total_jobs,
-                                    "total": total_jobs
-                                }),
-                            );
-                            emit_take_verification(
+                            finish_batch(
                                 &app_emitter,
+                                &is_running_clone,
                                 &manifest_for_listener,
-                                "complete",
+                                BatchEnd::complete().with_clips(std::mem::take(&mut clip_evidence)),
+                                rendered_while_capturing,
                             );
                             break;
                         }
                         EngineEvent::Cancelled => {
-                            let mut running =
-                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                            *running = false;
-                            let _ = app_emitter.emit(
-                                "capture_status",
-                                serde_json::json!({
-                                    "running": false,
-                                    "status": "Cancelled"
-                                }),
-                            );
                             // A cancelled batch still leaves real finished takes on
                             // disk — verify anyway rather than discarding them.
-                            emit_take_verification(
+                            // The clip it cut short, if any, isn't one (#1081).
+                            finish_batch(
                                 &app_emitter,
+                                &is_running_clone,
                                 &manifest_for_listener,
-                                "cancelled",
+                                BatchEnd::cancelled(records)
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
+                                rendered_while_capturing,
                             );
                             break;
                         }
@@ -1234,20 +2129,15 @@ pub async fn start_capture_batch_impl(
                     .map(|s| s.to_string())
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                log_markdown(&format!(
-                    "[capture] Event listener thread panicked: {}",
-                    msg
-                ));
-                let mut running = is_running_for_panic
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                log_markdown(&crate::messages::capture::listener_panicked_line(&msg));
+                let mut running = lock_or_recover(&is_running_for_panic);
                 *running = false;
                 let _ = app_emitter_for_panic.emit(
                     "capture_status",
                     serde_json::json!({
                         "running": false,
                         "error": true,
-                        "status": format!("Internal error in capture event listener: {}", msg)
+                        "status": crate::messages::capture::listener_panicked_status(&msg)
                     }),
                 );
             }
@@ -1256,960 +2146,30 @@ pub async fn start_capture_batch_impl(
         // Delegate to the promoted library engine
         spawn_capture_engine(
             capture_jobs,
-            Arc::new(hlae_path),
             Arc::new(hl_path),
             engine_tx,
             cancel_token_arc,
             patcher_config,
             drive_headroom,
             obs_take_folders,
+            runtime_batch,
+            batch_start_arc,
+            hold,
         );
     });
 
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializedDemo {
-    pub path: String,
-    pub name: String,
-    pub tickrate: f32,
-    pub is_pov: bool,
-    pub local_player_index: Option<usize>,
-    pub playback_frames: i32,
-    pub streaks: Vec<SerializedStreak>,
-    /// `<size>-<hash>` of the file when it was scanned (see `demo_file_key`).
-    /// A later scan skips this demo while path and key still match. `None`
-    /// for demos from a project saved before the key existed, which are
-    /// simply scanned again.
-    #[serde(default)]
-    pub file_key: Option<String>,
-}
+/// Ends a batch's Render While Capturing (#861) when dropped.
+struct RoomGuard(Option<Arc<crate::capture_room_manager::CaptureRoom>>);
 
-/// A demo already in the queue, as the frontend passes it to a scan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KnownDemo {
-    pub path: String,
-    pub file_key: String,
-}
-
-/// What a scan returns: the demos it parsed, how many it skipped because
-/// they were already in the queue, unchanged on disk, and the identical
-/// copies it skipped without parsing (#21).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanOutcome {
-    pub demos: Vec<SerializedDemo>,
-    pub unchanged: u32,
-    #[serde(default)]
-    pub copies: Vec<ScanCopy>,
-}
-
-/// A scanned file with the same key as a queued demo at another path, or as
-/// another file in the same scan: the same demo under another name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScanCopy {
-    pub path: String,
-    pub same_as: String,
-    /// `same_as` was already in the queue; otherwise it's the copy this scan
-    /// kept.
-    pub queued: bool,
-}
-
-impl From<CaptureStreak> for SerializedStreak {
-    fn from(c: CaptureStreak) -> Self {
-        Self {
-            start_tick: c.start_tick,
-            end_tick: c.end_tick,
-            source_demo: c.source_demo,
-            target_player: c.target_player,
-            kill_count: c.kill_count,
-            timeline_string: c.timeline_string,
-            duration_string: c.duration_string,
-            player_index: c.player_index,
-            kills: c.kills,
-            start_index: c.start_index,
-            end_index: c.end_index,
-            total_demo_frames: c.total_demo_frames,
-            demo_fps: c.demo_fps,
-            viewdemo_times: c.viewdemo_times,
-            // Flatten Arc<Vec<f32>> → Vec<f32> for JSON transport.
-            // The inbound From<SerializedStreak> impl re-wraps it in Arc::new().
-            frame_times: (*c.frame_times).clone(),
-            match_start_tick: c.match_start_tick,
+impl Drop for RoomGuard {
+    fn drop(&mut self) {
+        if let Some(room) = &self.0 {
+            room.finish();
         }
     }
-}
-
-/// Threads for a scan of `total` demos: the user's setting, kept to
-/// 1..=`SCAN_WORKERS_MAX`, and never more than there are demos.
-fn scan_worker_count(workers: usize, total: usize) -> usize {
-    workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
-}
-
-/// The scan status line: how many demos are done out of how many, and one demo
-/// still being parsed, when there is one. With several scan workers,
-/// "the current file" is one of the current files.
-fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
-    match current {
-        Some(name) => format!("Scanning {done} / {total} — {name}"),
-        None => format!("Scanning {done} / {total}"),
-    }
-}
-
-/// True when a progress line may go out at `now_ms`: at most one per ~33 ms
-/// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
-/// `u32::MAX` before the first one.
-fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
-    use std::sync::atomic::Ordering;
-    let last = last_ms.load(Ordering::Relaxed);
-    if last != u32::MAX && now_ms.saturating_sub(last) < 33 {
-        return false;
-    }
-    last_ms
-        .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
-        .is_ok()
-}
-
-/// A demo file's identity for "has this changed since it was scanned": its
-/// size plus an FNV-1a hash of its first 64 KB -- the same key the Demo
-/// Auditor finds duplicates with (`native::utils::demo_hasher`), and the same
-/// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
-/// whole demo, so checking a folder of 50 costs milliseconds.
-fn demo_file_key(path: &Path) -> Option<String> {
-    native::utils::demo_hasher::demo_key_text(path)
-}
-
-/// The demos whose file is still there but is no longer the one that was
-/// scanned: its key (size + first 64 KB) differs from the saved one. Their
-/// highlights are frame numbers in the old file, so they don't line up (#21).
-/// Missing files and demos with no saved key are left out.
-pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
-    demos
-        .iter()
-        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
-        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
-        .map(|d| d.path.clone())
-        .collect()
-}
-
-/// A project demo that is no longer at its saved path, and the file that
-/// looks like it moved there, if one was found (#21).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissingDemo {
-    pub path: String,
-    pub candidate: Option<String>,
-}
-
-/// How deep, and how many entries, the search for a moved demo will walk, so
-/// pointing it at a drive root cannot turn a project load into a hang.
-const LOCATE_MAX_DEPTH: usize = 6;
-const LOCATE_MAX_ENTRIES: usize = 50_000;
-
-/// For every demo in `demos` whose file is gone, looks through `search_dirs`
-/// (recursively, bounded) for a `.dem` with the same `demo_file_key`: the
-/// same size and the same first 64 KB. Only files whose size matches are
-/// read at all, so a folder of hundreds of demos costs one `stat` each.
-///
-/// Breadth-first across all of `search_dirs` together, in the order given:
-/// every folder's own files, then every first-level subfolder, and so on. A
-/// demo moved one folder down is found before the entry budget can be spent
-/// deep inside some large folder listed earlier (a whole `dod/`, say), which
-/// is what a depth-first walk did.
-///
-/// Suggests, never applies: the frontend asks before it moves anything. A
-/// demo with no saved key (a project from before #456) can only be reported
-/// missing.
-pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
-    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
-}
-
-fn locate_missing_demos_within(
-    demos: &[KnownDemo],
-    search_dirs: &[PathBuf],
-    max_entries: usize,
-) -> Vec<MissingDemo> {
-    let mut missing: Vec<MissingDemo> = demos
-        .iter()
-        .filter(|d| !Path::new(&d.path).is_file())
-        .map(|d| MissingDemo {
-            path: d.path.clone(),
-            candidate: None,
-        })
-        .collect();
-    let wanted: Vec<(usize, &str, u64)> = demos
-        .iter()
-        .filter(|d| !Path::new(&d.path).is_file())
-        .enumerate()
-        .filter_map(|(i, d)| {
-            let size = d.file_key.split_once('-')?.0.parse().ok()?;
-            Some((i, d.file_key.as_str(), size))
-        })
-        .collect();
-    if wanted.is_empty() {
-        return missing;
-    }
-
-    let mut visited = std::collections::HashSet::new();
-    let mut entries = 0usize;
-    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
-        search_dirs.iter().map(|d| (d.clone(), 0)).collect();
-    while let Some((dir, depth)) = queue.pop_front() {
-        if !visited.insert(same_path_key(&dir.to_string_lossy())) {
-            continue;
-        }
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read.flatten() {
-            entries += 1;
-            if entries > max_entries {
-                return missing;
-            }
-            let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
-                if depth < LOCATE_MAX_DEPTH {
-                    queue.push_back((path, depth + 1));
-                }
-                continue;
-            }
-            let is_dem = path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("dem"));
-            if !is_dem || !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
-                continue;
-            }
-            let Some(key) = demo_file_key(&path) else {
-                continue;
-            };
-            for (i, wanted_key, _) in &wanted {
-                if missing[*i].candidate.is_none() && key == *wanted_key {
-                    missing[*i].candidate = Some(path.to_string_lossy().to_string());
-                }
-            }
-            if missing.iter().all(|m| m.candidate.is_some()) {
-                return missing;
-            }
-        }
-    }
-    missing
-}
-
-/// Paths compare the way Windows does: case-insensitive, either slash.
-fn same_path_key(path: &str) -> String {
-    path.replace('/', "\\").to_lowercase()
-}
-
-/// Splits `list` into the files still to scan (with their keys, in order),
-/// a count of those skipped because `known` has the same path with the same
-/// key, and the identical copies skipped: files at a path `known` doesn't
-/// have whose key matches a queued demo, or another file in this scan. Of
-/// several new files that are one demo, the one with the shortest name is
-/// kept ("match.dem" over "match - Copy.dem" and "match (2).dem"), whatever
-/// order the scan found them in. Only the key (size + first 64 KB) is read
-/// for the rest, never the demo.
-fn skip_known(
-    list: Vec<PathBuf>,
-    known: &[KnownDemo],
-) -> (Vec<PathBuf>, Vec<Option<String>>, u32, Vec<ScanCopy>) {
-    let known_by_path: std::collections::HashMap<String, &str> = known
-        .iter()
-        .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
-        .collect();
-    let queued_by_key: std::collections::HashMap<&str, &str> = known
-        .iter()
-        .filter(|k| !k.file_key.is_empty())
-        .map(|k| (k.file_key.as_str(), k.path.as_str()))
-        .collect();
-    let name_rank = |path: &Path| {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
-        (name.chars().count(), name)
-    };
-
-    let entries: Vec<(PathBuf, Option<String>)> = list
-        .into_iter()
-        .map(|path| {
-            let key = demo_file_key(&path);
-            (path, key)
-        })
-        .collect();
-    // The copy to keep for each key that no queued demo has.
-    let mut keeper_by_key: std::collections::HashMap<&str, &Path> =
-        std::collections::HashMap::new();
-    for (path, key) in &entries {
-        let Some(key) = key.as_deref() else { continue };
-        if known_by_path.contains_key(&same_path_key(&path.to_string_lossy()))
-            || queued_by_key.contains_key(key)
-        {
-            continue;
-        }
-        keeper_by_key
-            .entry(key)
-            .and_modify(|best| {
-                if name_rank(path) < name_rank(best) {
-                    *best = path;
-                }
-            })
-            .or_insert(path);
-    }
-
-    let mut keep = Vec::with_capacity(entries.len());
-    let mut keys = Vec::with_capacity(entries.len());
-    let mut unchanged = 0;
-    let mut copies = Vec::new();
-    for (path, key) in &entries {
-        let path_text = path.to_string_lossy().into_owned();
-        let queued_key = known_by_path.get(&same_path_key(&path_text));
-        if key.as_deref().is_some_and(|k| queued_key == Some(&k)) {
-            unchanged += 1;
-            continue;
-        }
-        // A queued path that changed on disk is a rescan, never a copy.
-        if queued_key.is_none()
-            && let Some(k) = key.as_deref()
-        {
-            if let Some(same_as) = queued_by_key.get(k) {
-                copies.push(ScanCopy {
-                    path: path_text,
-                    same_as: same_as.to_string(),
-                    queued: true,
-                });
-                continue;
-            }
-            if let Some(keeper) = keeper_by_key
-                .get(k)
-                .filter(|keeper| **keeper != path.as_path())
-            {
-                copies.push(ScanCopy {
-                    path: path_text,
-                    same_as: keeper.to_string_lossy().into_owned(),
-                    queued: false,
-                });
-                continue;
-            }
-        }
-        keep.push(path.clone());
-        keys.push(key.clone());
-    }
-    (keep, keys, unchanged, copies)
-}
-
-/// The paths in `paths` that do not exist on disk, in the order given.
-fn missing_scan_paths(paths: &[String]) -> Vec<String> {
-    paths
-        .iter()
-        .filter(|p| !std::path::Path::new(p).exists())
-        .cloned()
-        .collect()
-}
-
-/// Why the scan could not use `path`, in plain words, from the file itself
-/// rather than the scanner's error text: shorter than a demo header, a header
-/// that isn't `HLDEMO`, or a good header on a demo that fails to parse later.
-/// A failure to open or read the file at all (`Failed to read file: ...`,
-/// e.g. access denied) is already readable and passes through as `reason`.
-fn plain_scan_failure(path: &Path, reason: &str) -> String {
-    // Already readable: the file could not be opened at all, or the (never
-    // firing, #247) HLTV guard refused it.
-    if reason.starts_with("Failed to read file") || reason.starts_with("Unsupported HLTV") {
-        return reason.to_string();
-    }
-    let mut head = [0u8; 8];
-    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    if len < native::patch::DEMO_HEADER_SIZE as u64 {
-        return crate::messages::SCAN_FAIL_TOO_SHORT.to_string();
-    }
-    let read_ok = std::fs::File::open(path)
-        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
-        .is_ok();
-    if !read_ok {
-        return reason.to_string();
-    }
-    if &head != b"HLDEMO\0\0" {
-        return crate::messages::SCAN_FAIL_NOT_A_DEMO.to_string();
-    }
-    crate::messages::SCAN_FAIL_CORRUPT.to_string()
-}
-
-/// The final `scan_progress` event's `skipped` list: `{name, reason}` per demo
-/// the scan could not read, in file-name order (workers finish out of order).
-fn skipped_demo_rows(mut skipped: Vec<(usize, String, String)>) -> Vec<serde_json::Value> {
-    skipped.sort_by_key(|(idx, _, _)| *idx);
-    skipped
-        .into_iter()
-        .map(|(_, name, reason)| serde_json::json!({ "name": name, "reason": reason }))
-        .collect()
-}
-
-pub async fn scan_directory_impl(
-    app_handle: tauri::AppHandle,
-    is_scanning: Arc<std::sync::atomic::AtomicBool>,
-    cancel_token: Arc<std::sync::atomic::AtomicBool>,
-    paths: Vec<String>,
-    known: Vec<KnownDemo>,
-    workers: usize,
-) -> Result<ScanOutcome, String> {
-    // ── Reset state flags ─────────────────────────────────────────────────────
-    cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
-    is_scanning.store(true, std::sync::atomic::Ordering::SeqCst);
-
-    let is_scanning_end = Arc::clone(&is_scanning);
-
-    let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        use native::patch::scan_demo_for_highlights_with_analysis;
-        use tauri::Emitter;
-
-        let mut list = Vec::new();
-        let mut dir_stack = Vec::new();
-
-        // A picked folder deleted since the picker last saw it used to scan to
-        // "0 demos found" with no reason given (#432).
-        let missing = missing_scan_paths(&paths);
-        if !missing.is_empty() {
-            if missing.len() == paths.len() {
-                return Err(crate::messages::scan_path_not_found(&missing[0]));
-            }
-            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
-        }
-
-        // ── Phase 1: collect all .dem file paths ─────────────────────────────
-        for path_str in paths {
-            let path_buf = PathBuf::from(path_str);
-            if path_buf.is_dir() {
-                dir_stack.push(path_buf);
-            } else if path_buf.is_file()
-                && path_buf
-                    .extension()
-                    .map(|ext| ext == "dem")
-                    .unwrap_or(false)
-            {
-                let insert_idx = list
-                    .binary_search_by(|p: &PathBuf| {
-                        p.file_name()
-                            .unwrap_or_default()
-                            .cmp(path_buf.file_name().unwrap_or_default())
-                    })
-                    .unwrap_or_else(|pos| pos);
-                list.insert(insert_idx, path_buf);
-            }
-        }
-
-        while let Some(dir) = dir_stack.pop() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        dir_stack.push(path);
-                    } else if path.is_file()
-                        && path.extension().map(|ext| ext == "dem").unwrap_or(false)
-                    {
-                        let insert_idx = list
-                            .binary_search_by(|p: &PathBuf| {
-                                p.file_name()
-                                    .unwrap_or_default()
-                                    .cmp(path.file_name().unwrap_or_default())
-                            })
-                            .unwrap_or_else(|pos| pos);
-                        list.insert(insert_idx, path);
-                    }
-                }
-            }
-        }
-
-        // Demos already in the queue and unchanged on disk are not parsed
-        // again: re-adding a folder to pick up one new demo used to re-parse
-        // every demo in it, 5-10 s each.
-        let (list, file_keys, unchanged, copies) = skip_known(list, &known);
-
-        let total_files = list.len() as u32;
-
-        // ── Phase 2: parse each .dem file, up to `workers` at once ───
-        // `list` is already sorted by filename (Phase 1's binary-search
-        // insert), so each worker writes its result into a pre-sized slot at
-        // its own original index -- the output comes out in sorted order for
-        // free, with no re-sort needed once concurrent workers finish out of
-        // order.
-        let total = list.len();
-        let slots: Mutex<Vec<Option<SerializedDemo>>> =
-            Mutex::new((0..total).map(|_| None).collect());
-        let next_index = std::sync::atomic::AtomicUsize::new(0);
-        // Completed-count progress rather than positional index -- same
-        // reason the patch loop's `capture_status` event uses one: files
-        // finish out of order once scanned concurrently.
-        let completed = std::sync::atomic::AtomicU32::new(0);
-        let found = std::sync::atomic::AtomicU32::new(0);
-        // Demos that could not be read, as (index, file name, reason). They
-        // used to vanish from the queue with no explanation (#23).
-        let skipped: Mutex<Vec<(usize, String, String)>> = Mutex::new(Vec::new());
-        // Indices being parsed right now, so every progress line names a demo
-        // still in flight rather than one that just finished (#433).
-        let in_flight: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-        // ~33 ms telemetry throttle (CLAUDE.md), as ms since the scan began.
-        // Starts at u32::MAX so the first line always goes out.
-        let scan_started = std::time::Instant::now();
-        let last_emit_ms = std::sync::atomic::AtomicU32::new(u32::MAX);
-        let emit_progress = |done: u32, current: Option<&str>| {
-            let now_ms = scan_started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-            if !progress_emit_due(&last_emit_ms, now_ms) {
-                return;
-            }
-            let _ = app_handle.emit(
-                "scan_progress",
-                serde_json::json!({
-                    "scanned": done,
-                    "found": found.load(std::sync::atomic::Ordering::Relaxed),
-                    "status": scan_status_line(done, total_files, current),
-                    "cancelled": false
-                }),
-            );
-        };
-        std::thread::scope(|scope| {
-            let worker_count = scan_worker_count(workers, total);
-            for _ in 0..worker_count {
-                let cancel_token = &cancel_token;
-                let list = &list;
-                let file_keys = &file_keys;
-                let slots = &slots;
-                let next_index = &next_index;
-                let completed = &completed;
-                let found = &found;
-                let skipped = &skipped;
-                let in_flight = &in_flight;
-                let emit_progress = &emit_progress;
-                let file_name_at = move |i: usize| {
-                    list[i]
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string()
-                };
-                scope.spawn(move || {
-                    loop {
-                        // Honour cancellation before starting the next parse
-                        // (I/O can be slow) -- a parse already in flight is not
-                        // interrupted, same blind spot the patch loop's
-                        // decal-flush pass has (#193).
-                        if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
-                            break;
-                        }
-                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if idx >= total {
-                            break;
-                        }
-                        let file = &list[idx];
-                        let file_name = file
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        // Sent when a demo starts too, not only when one finishes:
-                        // before #433 a one-demo folder showed a bare "Scanning..."
-                        // for the whole parse, since its first finish was its last.
-                        // The first of these also carries the total (`0 / N`).
-                        in_flight
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .push(idx);
-                        emit_progress(
-                            completed.load(std::sync::atomic::Ordering::Relaxed),
-                            Some(&file_name),
-                        );
-
-                        let scanned = scan_demo_for_highlights_with_analysis(file);
-                        if let Err(reason) = &scanned {
-                            log::warn!("Scan skipped {}: {}", file.display(), reason);
-                            skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
-                                idx,
-                                file_name.clone(),
-                                plain_scan_failure(file, reason),
-                            ));
-                        }
-                        let serialized = scanned.ok().map(
-                            |(
-                                (
-                                    tickrate,
-                                    streaks,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    match_start_tick,
-                                    frame_times_arc,
-                                ),
-                                analysis,
-                            )| {
-                                // Pre-warm the analyzer cache with the Analysis
-                                // this scan already computed, so opening this
-                                // demo in the Demo Analyzer afterward hits the
-                                // cache path instead of re-parsing.
-                                // Best-effort/silent, and safe under concurrency:
-                                // keyed per demo path, not one shared cache.
-                                native::warm_analyzer_cache(file, &analysis);
-
-                                let serialized_streaks: Vec<SerializedStreak> = streaks
-                                    .into_iter()
-                                    .map(|mut s| {
-                                        s.match_start_tick = match_start_tick;
-                                        s.frame_times = frame_times_arc.clone();
-                                        SerializedStreak::from(s)
-                                    })
-                                    .collect();
-
-                                SerializedDemo {
-                                    path: file.to_string_lossy().to_string(),
-                                    name: file_name.clone(),
-                                    tickrate,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    streaks: serialized_streaks,
-                                    file_key: file_keys[idx].clone(),
-                                }
-                            },
-                        );
-
-                        if serialized.is_some() {
-                            found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
-
-                        let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        let still_running = {
-                            let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
-                            running.retain(|&i| i != idx);
-                            running.first().copied()
-                        };
-                        let current = still_running.map(file_name_at);
-                        emit_progress(done, current.as_deref());
-                    }
-                });
-            }
-        });
-
-        let results: Vec<SerializedDemo> = slots
-            .into_inner()
-            .unwrap_or_else(|p| p.into_inner())
-            .into_iter()
-            .flatten()
-            .collect();
-        let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
-        let skipped = skipped_demo_rows(skipped.into_inner().unwrap_or_else(|p| p.into_inner()));
-
-        // ── Final progress event (complete or cancelled) ────────────────────
-        let _ = app_handle.emit(
-            "scan_progress",
-            serde_json::json!({
-                "scanned": completed.load(std::sync::atomic::Ordering::Relaxed),
-                "found": results.len() as u32,
-                "status": if was_cancelled { "Cancelled" } else { "Complete" },
-                "cancelled": was_cancelled,
-                "unchanged": unchanged,
-                "skipped": skipped
-            }),
-        );
-
-        Ok(ScanOutcome {
-            demos: results,
-            unchanged,
-            copies,
-        })
-    }))
-    .await;
-
-    is_scanning_end.store(false, std::sync::atomic::Ordering::SeqCst);
-    result
-}
-
-// ── Bookmark Previews (.dodstudio_preview) ─────────────────────────────────────
-//
-// `build_preview_patch_jobs` (native/src/patch/builder.rs) groups a flat list
-// of streaks by `source_demo` and, per demo, injects one `svc_director`
-// STUFFTEXT "bookmark" event per selected highlight (plus MATCH_START/DEMO_END)
-// into a copy of the original saved as `<stem>_preview.dem` — the events show
-// up as named markers when the file is loaded through GoldSrc's `viewdemo` VCR
-// UI. Each output file is marked with a hidden `.dodstudio_preview` sidecar so
-// it's never mistaken for a real recorded demo.
-//
-// Two entry points share this core:
-//   - `launch_demo_preview`   — single demo, launches HLAE via `+viewdemo`
-//     directly against the patched preview once it's on disk.
-//   - `generate_all_previews` — arbitrary demos in one flat streak list (the
-//     grouping above splits them back out), patched to disk only; the user
-//     loads them manually afterwards.
-
-fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
-    use std::fs::OpenOptions;
-    let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x00000002); // FILE_ATTRIBUTE_HIDDEN
-    }
-    options.open(path)?;
-    Ok(())
-}
-
-/// Validates the HLAE/hl.exe paths, ensures `<hl_parent>/dod` exists, and
-/// builds a minimal `PatcherConfig` carrying just the fields
-/// `build_hlae_process` reads (hlae_path/game_path/resolution/
-/// goldsrc_hooks_dll_path). `goldsrc_hooks_dll_path` matters only to callers
-/// that actually launch HLAE (`launch_demo_preview`) — `generate_all_previews`
-/// never spawns a process, so it passes `None` here and it's simply unused.
-fn resolve_preview_env(
-    hlae_path: &str,
-    game_path: &str,
-    goldsrc_hooks_dll_path: Option<String>,
-) -> Result<(PatcherConfig, PathBuf), String> {
-    if hlae_path.trim().is_empty() || game_path.trim().is_empty() {
-        return Err(crate::messages::configure_paths_before("previewing"));
-    }
-    let hlae_p = Path::new(hlae_path);
-    let hl_p = Path::new(game_path);
-    if !hlae_p.is_file() {
-        return Err(crate::messages::HLAE_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
-    }
-    if !hl_p.is_file() {
-        return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
-    }
-
-    let dod_dir = hl_p
-        .parent()
-        .map(|p| p.join("dod"))
-        .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string())?;
-    std::fs::create_dir_all(&dod_dir).map_err(crate::messages::failed_to_create_dod_directory)?;
-
-    let patcher_config = PatcherConfig {
-        hlae_path: hlae_path.to_string(),
-        game_path: game_path.to_string(),
-        goldsrc_hooks_dll_path,
-        ..PatcherConfig::default()
-    };
-    Ok((patcher_config, dod_dir))
-}
-
-/// Builds one bookmark-preview `PatchJob` per source demo present in
-/// `streaks` and patches it — unless a previous run already left a valid
-/// `<stem>_preview.dem` + `.dodstudio_preview` sidecar in place, in which case
-/// that existing file is reused as-is rather than regenerated. Returns the
-/// full job list (every source demo, patched or reused — callers need the
-/// resolved output path either way) alongside how many were freshly patched
-/// this call, for a caller that wants to report "N generated" accurately.
-fn patch_bookmark_previews(
-    streaks: Vec<SerializedStreak>,
-    dod_dir: &Path,
-    patcher_config: &PatcherConfig,
-) -> Result<(Vec<PatchJob>, usize), String> {
-    if streaks.is_empty() {
-        return Err(crate::messages::NO_HIGHLIGHTS_TO_PREVIEW.to_string());
-    }
-    let capture_streaks: Vec<CaptureStreak> =
-        streaks.into_iter().map(CaptureStreak::from).collect();
-    let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
-    if jobs.is_empty() {
-        return Err(crate::messages::FAILED_TO_BUILD_PREVIEW_JOBS.to_string());
-    }
-
-    let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut generated = 0usize;
-    for job in &jobs {
-        let sidecar_path = job
-            .output_demo
-            .with_extension(native::shared::paths::PREVIEW_SIDECAR_EXT);
-        if job.output_demo.is_file() && sidecar_path.is_file() {
-            // Already previewed in an earlier session — the bookmark set is
-            // derived purely from this demo's own highlights, which don't
-            // change between scans, so there's nothing to regenerate.
-            continue;
-        }
-
-        StreamPatcher::new(&job.source_demo, &job.output_demo)
-            .patch(job, patcher_config, &cancel_token)
-            .map_err(|e| crate::messages::failed_to_patch_preview_demo(&job.source_demo, e))?;
-
-        write_hidden_sidecar(&sidecar_path)
-            .map_err(crate::messages::failed_to_write_preview_sidecar)?;
-        generated += 1;
-    }
-    Ok((jobs, generated))
-}
-
-/// Patches the given demo's highlights into a single bookmarked
-/// `<stem>_preview.dem` — reusing one already on disk from an earlier run
-/// instead of regenerating it — and immediately launches HLAE against it via
-/// `+viewdemo <stem>_preview`.
-#[tauri::command]
-pub async fn launch_demo_preview(
-    app: tauri::AppHandle,
-    hlae_path: String,
-    game_path: String,
-    streaks: Vec<SerializedStreak>,
-    goldsrc_hooks_dll_path: Option<String>,
-) -> Result<(), String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) =
-            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
-        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        let job = jobs
-            .first()
-            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
-
-        let preview_stem = job
-            .output_demo
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
-
-        let mut cmd = patcher_config.build_hlae_process(&format!("+viewdemo {}", preview_stem));
-        let launcher = cmd
-            .spawn()
-            .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
-        watch_for_error_dialogs(app, launcher);
-
-        Ok(())
-    }))
-    .await
-}
-
-/// After a preview or Launch Game: reports any error box the game, the HLAE
-/// launcher or its injector shows (`native::sys::dialogs`) as an
-/// `external_error` event, each box once. Report only, unlike a batch: the
-/// user is at the game, so the box stays for them to close. Stops once the
-/// launcher has exited and no game has been running for 5 seconds.
-fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
-    std::thread::spawn(move || {
-        let launcher_pid = launcher.id();
-        let mut launcher_running = true;
-        let mut reported: Vec<isize> = Vec::new();
-        let mut last_game_seen = std::time::Instant::now();
-        let mut sys = native::sys::process::snapshot();
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            if launcher_running && !matches!(launcher.try_wait(), Ok(None)) {
-                launcher_running = false;
-            }
-            native::sys::process::refresh(&mut sys);
-            let game_pids: Vec<u32> = sys
-                .processes()
-                .values()
-                .filter(|p| native::sys::process::is_named(p, &["hl.exe"]))
-                .map(|p| p.pid().as_u32())
-                .collect();
-            let mut launcher_pids: Vec<u32> = sys
-                .processes()
-                .values()
-                .filter(|p| {
-                    native::sys::process::is_named(p, &["injector.exe"])
-                        && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
-                })
-                .map(|p| p.pid().as_u32())
-                .collect();
-            if launcher_running {
-                launcher_pids.push(launcher_pid);
-            }
-            if !game_pids.is_empty() {
-                last_game_seen = std::time::Instant::now();
-            }
-            for dialog in native::sys::dialogs::error_dialogs(&game_pids, &launcher_pids) {
-                if reported.contains(&dialog.window) {
-                    continue;
-                }
-                reported.push(dialog.window);
-                log_markdown(&format!(
-                    "[launch] Error box from PID {}: {}",
-                    dialog.pid,
-                    dialog.full_text()
-                ));
-                let _ = app.emit("external_error", dialog.summary());
-            }
-            if !launcher_running
-                && launcher_pids.is_empty()
-                && last_game_seen.elapsed() > std::time::Duration::from_secs(5)
-            {
-                break;
-            }
-        }
-    });
-}
-
-/// Process ids of every running `hl.exe` -- the games Studio could be talking
-/// to. `hlae.exe` is left out: it is the launcher, not the game.
-fn running_game_pids() -> Vec<u32> {
-    native::sys::process::pids_named(&["hl.exe"])
-}
-
-/// Launch Preview for a game that is already running (#413): patches the
-/// same `<stem>_preview.dem` `launch_demo_preview` would (reusing one already
-/// on disk), then, instead of launching a second game, sends
-/// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
-///
-/// Resolves to the command sent, or `None` when no running game takes
-/// commands -- one Studio didn't start, or with its hooks off -- so the caller
-/// can fall back to the "already running" prompt.
-#[tauri::command]
-pub async fn send_preview_to_running_game(
-    hlae_path: String,
-    game_path: String,
-    streaks: Vec<SerializedStreak>,
-    goldsrc_hooks_dll_path: Option<String>,
-) -> Result<Option<String>, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let pids = running_game_pids();
-        if pids.is_empty() {
-            return Ok(None);
-        }
-        let (patcher_config, dod_dir) =
-            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
-        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        let job = jobs
-            .first()
-            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
-        let preview_stem = job
-            .output_demo
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
-
-        let command = format!("viewdemo {preview_stem}");
-        for pid in pids {
-            match native::sys::game_remote::send_console_commands(
-                pid,
-                std::slice::from_ref(&command),
-            )
-            .map_err(crate::messages::failed_to_send_to_running_game)?
-            {
-                native::sys::game_remote::Sent::Delivered => {
-                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
-                    return Ok(Some(command));
-                }
-                native::sys::game_remote::Sent::NotListening => continue,
-            }
-        }
-        Ok(None)
-    }))
-    .await
-}
-
-/// Patches every demo represented in `streaks` into its own bookmarked
-/// `<stem>_preview.dem` without launching HLAE, skipping any demo that
-/// already has one from an earlier run. Resolves to the number *freshly
-/// generated* this call so the frontend can report an accurate completion
-/// toast rather than re-counting demos that didn't need any work.
-#[tauri::command]
-pub async fn generate_all_previews(
-    hlae_path: String,
-    game_path: String,
-    streaks: Vec<SerializedStreak>,
-) -> Result<usize, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, None)?;
-        let (_jobs, generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        Ok(generated)
-    }))
-    .await
 }
 
 // ── Initial Commands import ──────────────────────────────────────────────────
@@ -2260,7 +2220,7 @@ fn collapse_whitespace_outside_quotes(line: &str) -> String {
 pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+            .map_err(|e| crate::messages::failed_to_read_file(&path, e))?;
         Ok(content
             .lines()
             .map(str::trim)
@@ -2269,306 +2229,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-// ── Standalone Game Launch ──────────────────────────────────────────────────────
-//
-// Boots the GoldSrc engine environment through HLAE without a demo loaded —
-// same `build_hlae_process` plumbing as the preview launchers above, minus
-// any `+playdemo`/`+viewdemo` engine arg. Reads the persisted `AppSettings`
-// (not an IPC payload) since this is a standalone action triggered from the
-// global actions area rather than the per-demo detail pane.
-
-/// Launches HLAE directly against `hl.exe` with no demo loaded, applying the
-/// persisted resolution/HUD configuration from `AppSettings`. Deliberately
-/// does not apply Initial Commands: this button is for quickly opening
-/// HLAE+DoD, not for reproducing a capture batch's config state, and Initial
-/// Commands lack the guaranteed-last-word property here that they have in a
-/// real batch (no demo to STUFFTEXT-inject into, so they would just be raw
-/// command-line args that config.cfg/movie.cfg can still override).
-#[tauri::command]
-pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String> {
-    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let settings = {
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        guard.clone()
-    };
-
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        if settings.hlae_path.trim().is_empty() || settings.hl_path.trim().is_empty() {
-            return Err(crate::messages::configure_paths_before("launching"));
-        }
-        if !Path::new(&settings.hlae_path).is_file() {
-            return Err(crate::messages::HLAE_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
-        }
-        if !Path::new(&settings.hl_path).is_file() {
-            return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
-        }
-
-        let patcher_config = PatcherConfig {
-            hlae_path: settings.hlae_path.clone(),
-            game_path: settings.hl_path.clone(),
-            resolution_width: settings.resolution_width,
-            resolution_height: settings.resolution_height,
-            ffmpeg_capture: settings.ffmpeg_capture,
-            ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
-                &settings.ffmpeg_capture_codec,
-            ),
-            goldsrc_hooks_dll_path: settings.goldsrc_hooks_dll_path.clone(),
-            ..PatcherConfig::default()
-        };
-
-        let mut cmd = patcher_config.build_hlae_process("");
-        let launcher = cmd
-            .spawn()
-            .map_err(crate::messages::failed_to_launch_hlae)?;
-        watch_for_error_dialogs(app, launcher);
-
-        Ok(())
-    }))
-    .await
-}
-
-/// Launches OBS Studio from the configured `obs_exe_path`, spawn-and-forget —
-/// same shape as `launch_standalone_game`, minus the whole HLAE/hl.exe
-/// process-building step, since this just starts the user's own program.
-/// No lifecycle tracking: OBS is the user's software, not ours to manage,
-/// and this button exists only so the user doesn't have to alt-tab to a
-/// shortcut before configuring the connection above it.
-#[tauri::command]
-pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
-    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let obs_exe_path = {
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        guard.obs_exe_path.clone()
-    };
-
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        if obs_exe_path.trim().is_empty() {
-            return Err(crate::messages::CONFIGURE_OBS_PATH_BEFORE_LAUNCHING.to_string());
-        }
-        if !Path::new(&obs_exe_path).is_file() {
-            return Err(crate::messages::OBS_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
-        }
-        let mut cmd = std::process::Command::new(&obs_exe_path);
-        // Without this OBS inherits dod-studio' own CWD instead of its own
-        // install directory, and fails to find its own relative-pathed data
-        // (locale/en-US.ini, etc.) — measured, not theoretical. Same fix
-        // `build_hlae_process` already applies for HLAE/hl.exe.
-        if let Some(parent) = Path::new(&obs_exe_path).parent() {
-            cmd.current_dir(parent);
-        }
-        cmd.spawn().map_err(crate::messages::failed_to_launch_obs)?;
-        Ok(())
-    }))
-    .await
-}
-
-// ── Running Process Guard ───────────────────────────────────────────────────────
-//
-// Launching a fresh HLAE Game Capture preview against a demo while a prior
-// `hl.exe`/`hlae.exe` instance is still alive corrupts the new session (the
-// old instance holds the game's `dod` directory and console). These two
-// commands back the pre-flight "Half-Life Preview Detector" modal: check
-// before launching, and let the user force-kill stragglers instead of
-// hunting them down in Task Manager.
-
-/// The game and its launcher: what Launch Preview and Kill Engine look for.
-const ENGINE_PROCESS_NAMES: &[&str] = &["hl.exe", "hlae.exe"];
-
-/// True if an OBS Studio process is currently running, under any of its
-/// installed binary names. Used to turn a bare "could not connect" into a
-/// deterministic answer instead of asking the user to interpret a raw OS
-/// socket error themselves.
-fn is_obs_process_running() -> bool {
-    native::sys::process::is_running(&["obs64.exe", "obs32.exe", "obs.exe"])
-}
-
-/// True if any `hl.exe` or `hlae.exe` process is currently running.
-#[tauri::command]
-pub fn check_engine_processes() -> bool {
-    native::sys::process::is_running(ENGINE_PROCESS_NAMES)
-}
-
-/// Steam's state before a game launch: "not_running", "signed_out" or
-/// "ready". `hl.exe` started without Steam exits straight away, reported
-/// only as "Failed to initalize authentication interface".
-#[tauri::command]
-pub async fn steam_state() -> Result<String, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
-        Ok(native::sys::steam::state().as_str().to_string())
-    }))
-    .await
-}
-
-/// Starts Steam from where it recorded its own install. Steam outlives
-/// DoD Studio, so the child is not tracked.
-#[tauri::command]
-pub fn start_steam() -> Result<(), String> {
-    let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
-    std::process::Command::new(exe)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
-}
-
-/// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
-#[tauri::command]
-pub fn kill_engine_processes() -> Result<(), String> {
-    let sys = native::sys::process::snapshot();
-    for process in sys.processes().values() {
-        if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
-            log::warn!("Failed to kill engine process pid={}", process.pid());
-        }
-    }
-    Ok(())
-}
-
-// ── Clear Previews audit (orphaned *_preview.dem sweep) ────────────────────────
-//
-// Bookmark previews (see the block comment above `patch_bookmark_previews`)
-// pile up in `<hl>/dod` across capture sessions when `auto_clear_previews`
-// is off. These two commands back the "Clear Previews" audit modal: scan for
-// leftovers and let the user purge them on confirmation. A file only counts
-// as an orphaned preview if it still carries its hidden `.dodstudio_preview`
-// sidecar — the same marker `patch_bookmark_previews` stamps on every file
-// it generates — so a real demo that happens to end in `_preview.dem` is
-// never swept up.
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PreviewFileSummary {
-    pub demo_path: String,
-    pub sidecar_path: String,
-    pub file_name: String,
-    pub size_bytes: u64,
-    pub modified_unix_secs: f64,
-}
-
-/// Resolves the `dod` directory to sweep, accepting either an `hl.exe` path
-/// or the `dod` directory itself (mirrors `resolve_preview_env`'s
-/// hl.exe-relative resolution, but tolerates being pointed at the folder
-/// directly since the frontend may pass either).
-fn resolve_dod_dir_for_sweep(game_dir: &str) -> Result<PathBuf, String> {
-    let p = Path::new(game_dir);
-    if p.is_file() {
-        return p
-            .parent()
-            .map(|parent| parent.join("dod"))
-            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string());
-    }
-    if p.is_dir() {
-        let is_dod_dir = p
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase() == "dod")
-            .unwrap_or(false);
-        if is_dod_dir {
-            return Ok(p.to_path_buf());
-        }
-        return Ok(p.join("dod"));
-    }
-    Err(crate::messages::game_directory_not_found(game_dir))
-}
-
-/// Sweeps `<hl>/dod` for orphaned bookmark-preview demos and reports them
-/// (with combined demo + sidecar size) for the audit modal.
-#[tauri::command]
-pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileSummary>, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let dod_dir = resolve_dod_dir_for_sweep(&game_dir)?;
-        if !dod_dir.is_dir() {
-            return Ok(Vec::new());
-        }
-
-        let entries =
-            std::fs::read_dir(&dod_dir).map_err(crate::messages::failed_to_read_dod_directory)?;
-
-        let mut results = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let file_name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            if !file_name.to_lowercase().ends_with("_preview.dem") {
-                continue;
-            }
-
-            let Some(sidecar_path) = native::shared::paths::preview_sidecar(&path) else {
-                continue;
-            };
-
-            let demo_meta = match std::fs::metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let sidecar_size = std::fs::metadata(&sidecar_path)
-                .map(|m| m.len())
-                .unwrap_or(0);
-            let modified_unix_secs = demo_meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0);
-
-            results.push(PreviewFileSummary {
-                demo_path: path.to_string_lossy().to_string(),
-                sidecar_path: sidecar_path.to_string_lossy().to_string(),
-                file_name,
-                size_bytes: demo_meta.len() + sidecar_size,
-                modified_unix_secs,
-            });
-        }
-
-        results.sort_by(|a, b| a.file_name.cmp(&b.file_name));
-        Ok(results)
-    }))
-    .await
-}
-
-/// Deletes the given orphaned preview demos and their `.dodstudio_preview`
-/// sidecars. `file_paths` must be `demo_path` values as reported by
-/// `scan_orphaned_previews` — anything not ending in `_preview.dem` is
-/// skipped rather than deleted. Returns the count of demo files removed; a
-/// missing sidecar does not fail the entry.
-#[tauri::command]
-pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let mut deleted: u32 = 0;
-        for demo_path in file_paths {
-            let path = PathBuf::from(&demo_path);
-            let file_name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if !file_name.to_lowercase().ends_with("_preview.dem") {
-                continue;
-            }
-
-            let sidecar_path = native::shared::paths::preview_sidecar(&path);
-            let demo_removed = std::fs::remove_file(&path).is_ok();
-            if let Some(sidecar_path) = sidecar_path {
-                let _ = std::fs::remove_file(&sidecar_path);
-            }
-
-            if demo_removed {
-                deleted += 1;
-            }
-        }
-        Ok(deleted)
-    }))
-    .await
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -2577,299 +2238,251 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+    use native::patch::PatchStage;
 
+    /// The drop-rate event carries percentages to one decimal and the take
+    /// folder as the batch planned it (#172).
     #[test]
-    fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
-        let dir = Scratch::new("plain_scan_failure");
-        let short = dir.path().join("short.dem");
-        let text = dir.path().join("text.dem");
-        let corrupt = dir.path().join("corrupt.dem");
-        std::fs::write(&short, b"hello").unwrap();
-        std::fs::write(&text, vec![b'x'; 2048]).unwrap();
-        let mut demo = b"HLDEMO\0\0".to_vec();
-        demo.resize(2048, 0xAB);
-        std::fs::write(&corrupt, demo).unwrap();
-
-        let r = "Failed to read demo header: failed to fill whole buffer";
-        assert_eq!(
-            plain_scan_failure(&short, r),
-            crate::messages::SCAN_FAIL_TOO_SHORT
-        );
-        assert_eq!(
-            plain_scan_failure(&text, "Failed to parse demo: x"),
-            crate::messages::SCAN_FAIL_NOT_A_DEMO
-        );
-        assert_eq!(
-            plain_scan_failure(&corrupt, "Failed to parse demo: x"),
-            crate::messages::SCAN_FAIL_CORRUPT
-        );
-        let io = "Failed to read file: Access is denied. (os error 5)";
-        assert_eq!(plain_scan_failure(&corrupt, io), io);
+    fn obs_drop_rate_payload_rounds_and_names_the_take() {
+        let report = native::obs::ObsDropReport {
+            clip: 2,
+            take_folder: Some(std::path::PathBuf::from(r"D:\raw\b1")),
+            recording: false,
+            clip_counts: native::obs::FrameCounters {
+                output_total: 1200,
+                output_skipped: 407,
+                render_total: 1200,
+                render_skipped: 3,
+            },
+            recent: native::obs::FrameCounters::default(),
+            lagging: true,
+            capture_fps: 120,
+        };
+        let p = obs_drop_rate_payload(&report);
+        assert_eq!(p["skipped_pct"], 33.9);
+        assert_eq!(p["missed_pct"], 0.3);
+        assert_eq!(p["take_folder"], r"D:\raw\b1");
+        assert_eq!(p["recording"], false);
+        assert_eq!(p["lagging"], true);
+        assert_eq!(p["recent_skipped_pct"], 0.0);
     }
-
+    /// Render While Capturing (#861) deletes a take once its clip renders,
+    /// before the batch ends: the block still counts as captured, isn't one
+    /// Render Studio missed, and writing the capture settings keeps its
+    /// render history.
     #[test]
-    fn skipped_demos_are_reported_in_file_order_with_their_reason() {
-        let rows = skipped_demo_rows(vec![
-            (5, "b.dem".into(), "Failed to parse demo: eof".into()),
-            (2, "a.dem".into(), "Failed to read file: denied".into()),
-        ]);
-        assert_eq!(rows[0]["name"], "a.dem");
-        assert_eq!(rows[0]["reason"], "Failed to read file: denied");
-        assert_eq!(rows[1]["name"], "b.dem");
-    }
+    fn a_take_rendered_and_deleted_while_capturing_verifies_as_captured() {
+        use native::hlcr::take_meta::{self, RenderAttempt, RenderOutcome, SessionMeta};
+        let scratch = Scratch::new("rendered_while_capturing");
+        let block = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b0");
+        std::fs::create_dir_all(&block).unwrap();
+        let attempt = RenderAttempt {
+            started_unix_ms: 1,
+            stream: "all".into(),
+            codec: "prores".into(),
+            custom_codec_args: String::new(),
+            fps: 120,
+            outcome: RenderOutcome::Finished,
+            output_path: "D:/clips/a.mov".into(),
+            output_size_bytes: Some(10),
+            error: None,
+        };
+        let meta = SessionMeta {
+            renders: vec![attempt.clone()],
+            ..SessionMeta::new(String::new(), 0)
+        };
+        take_meta::write(&block, &meta).unwrap();
+        let empty = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_02_b0");
+        std::fs::create_dir_all(&empty).unwrap();
 
-    #[test]
-    fn the_scan_uses_the_worker_setting_within_its_range() {
-        assert_eq!(scan_worker_count(5, 100), 5);
-        assert_eq!(scan_worker_count(0, 100), 1);
-        assert_eq!(scan_worker_count(20, 100), SCAN_WORKERS_MAX);
-        // Never more threads than demos.
-        assert_eq!(scan_worker_count(8, 3), 3);
-        assert_eq!(scan_worker_count(4, 0), 1);
-    }
-
-    #[test]
-    fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
-        assert_eq!(
-            scan_status_line(0, 1, Some("a.dem")),
-            "Scanning 0 / 1 — a.dem"
-        );
-        assert_eq!(scan_status_line(1, 1, None), "Scanning 1 / 1");
-    }
-
-    #[test]
-    fn scan_progress_is_throttled_to_one_line_per_33_ms() {
-        let last = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let manifest = CaptureManifest {
+            session_id: "session_1".into(),
+            blocks: [&block, &empty]
+                .iter()
+                .map(|folder| native::patch::types::CaptureBlock {
+                    demo_name: "d".into(),
+                    block_index: 0,
+                    drive_index: 0,
+                    take_folder: folder.to_path_buf(),
+                    take_key: String::new(),
+                    source_streak_indices: vec![],
+                    start_tick: 0,
+                    end_tick: 1,
+                    record_start_tick: 0,
+                    record_stop_tick: 1,
+                    ramped_gaps: 0,
+                    plan: None,
+                })
+                .collect(),
+            capture_fps: 120,
+            capture_mode: String::new(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+            settings: None,
+        };
+        let verified = verify_capture_takes(&manifest, &mut |_| {});
+        assert!(verified[0].captured && verified[0].rendered);
+        assert!(!verified[0].renderable);
         assert!(
-            progress_emit_due(&last, 0),
-            "the first line always goes out"
-        );
-        assert!(!progress_emit_due(&last, 20));
-        assert!(progress_emit_due(&last, 33));
-        assert!(!progress_emit_due(&last, 40));
-    }
-
-    #[test]
-    fn a_known_unchanged_demo_is_skipped_and_a_changed_one_is_not() {
-        let scratch = Scratch::new("skip_known");
-        let a = scratch.path().join("a.dem");
-        let b = scratch.path().join("b.dem");
-        let c = scratch.path().join("c.dem");
-        std::fs::write(&a, b"HLDEMO aaaa").unwrap();
-        std::fs::write(&b, b"HLDEMO bbbb").unwrap();
-        std::fs::write(&c, b"HLDEMO cccc").unwrap();
-        let key_b_before = demo_file_key(&b).unwrap();
-        std::fs::write(&b, b"HLDEMO bbbb, re-recorded").unwrap();
-
-        let known = vec![
-            // Same file, different case and slashes: still a match.
-            KnownDemo {
-                path: a.to_string_lossy().to_uppercase().replace('\\', "/"),
-                file_key: demo_file_key(&a).unwrap(),
-            },
-            // Changed on disk since it was queued: scanned again.
-            KnownDemo {
-                path: b.to_string_lossy().into_owned(),
-                file_key: key_b_before,
-            },
-        ];
-        let (keep, keys, unchanged, copies) = skip_known(vec![a, b.clone(), c.clone()], &known);
-
-        assert_eq!(unchanged, 1);
-        assert_eq!(keep, vec![b.clone(), c.clone()]);
-        assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
-        assert!(copies.is_empty());
-    }
-
-    /// A copy of a queued demo, and a second copy within the scan, are
-    /// reported without being kept for parsing. Within the scan the shorter
-    /// name is kept even though it sorts after its copy.
-    #[test]
-    fn identical_copies_are_skipped_before_parsing() {
-        let scratch = Scratch::new("skip_copies");
-        let queued = scratch.path().join("queued.dem");
-        let copy = scratch.path().join("queued copy.dem");
-        let fresh = scratch.path().join("fresh.dem");
-        let fresh_copy = scratch.path().join("fresh - Copy.dem");
-        std::fs::write(&queued, b"HLDEMO the queued one").unwrap();
-        std::fs::write(&copy, b"HLDEMO the queued one").unwrap();
-        std::fs::write(&fresh, b"HLDEMO a new one").unwrap();
-        std::fs::write(&fresh_copy, b"HLDEMO a new one").unwrap();
-        let known = vec![KnownDemo {
-            path: queued.to_string_lossy().into_owned(),
-            file_key: demo_file_key(&queued).unwrap(),
-        }];
-
-        let (keep, _, unchanged, copies) = skip_known(
-            vec![
-                // "fresh - Copy.dem" sorts first (' ' < '.'), as the scan's
-                // list is.
-                copy.clone(),
-                fresh_copy.clone(),
-                fresh.clone(),
-                queued.clone(),
-            ],
-            &known,
+            !verified[1].captured && !verified[1].rendered,
+            "nothing there"
         );
 
-        assert_eq!(keep, vec![fresh.clone()]);
-        assert_eq!(unchanged, 1);
-        assert_eq!(
-            copies,
-            vec![
-                ScanCopy {
-                    path: copy.to_string_lossy().into_owned(),
-                    same_as: queued.to_string_lossy().into_owned(),
-                    queued: true,
-                },
-                ScanCopy {
-                    path: fresh_copy.to_string_lossy().into_owned(),
-                    same_as: fresh.to_string_lossy().into_owned(),
-                    queued: false,
-                },
-            ]
-        );
+        record_capture_settings(&manifest, &verified);
+        let kept = take_meta::read_for_take(&block).unwrap();
+        assert_eq!(kept.capture_fps, 120);
+        assert_eq!(kept.renders, vec![attempt]);
     }
 
+    /// The plan a block was built with is written beside its take (#1084),
+    /// where the take checks read it back.
     #[test]
-    fn a_moved_demo_is_found_by_its_key_in_a_subfolder() {
-        let scratch = Scratch::new("locate_moved");
-        let old = scratch.path().join("old");
-        let new = scratch.path().join("archive").join("2026");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::create_dir_all(&new).unwrap();
-        let moved = old.join("match.dem");
-        let kept = old.join("kept.dem");
-        std::fs::write(&moved, b"HLDEMO the moved one").unwrap();
-        std::fs::write(&kept, b"HLDEMO still here").unwrap();
-        let key = demo_file_key(&moved).unwrap();
-        std::fs::rename(&moved, new.join("renamed.dem")).unwrap();
-        // Same size, different content: must not be taken for it.
-        std::fs::write(new.join("decoy.dem"), b"HLDEMO the moved two").unwrap();
-
-        let demos = vec![
-            KnownDemo {
-                path: moved.to_string_lossy().into_owned(),
-                file_key: key,
-            },
-            KnownDemo {
-                path: kept.to_string_lossy().into_owned(),
-                file_key: demo_file_key(&kept).unwrap(),
-            },
-        ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
-
-        assert_eq!(found.len(), 1, "only the missing demo is reported");
-        assert_eq!(found[0].path, moved.to_string_lossy());
-        assert_eq!(
-            found[0].candidate.as_deref(),
-            Some(new.join("renamed.dem").to_string_lossy().as_ref())
-        );
-    }
-
-    /// A big folder listed first (a whole `dod/`) must not use up the entry
-    /// budget before a demo one folder down from its old place is reached:
-    /// the live failure that broke #477's test.
-    #[test]
-    fn a_nearby_move_is_found_even_behind_a_big_folder() {
-        let scratch = Scratch::new("locate_budget");
-        let big = scratch.path().join("big");
-        let mut deep = big.clone();
-        for level in 0..4 {
-            deep = deep.join(format!("level{level}"));
-            std::fs::create_dir_all(&deep).unwrap();
-            for i in 0..20 {
-                std::fs::write(deep.join(format!("f{i}.txt")), b"x").unwrap();
-            }
+    fn a_blocks_plan_is_recorded_beside_its_take() {
+        use native::hlcr::take_meta;
+        use native::hlcr::take_plan::TakePlan;
+        let scratch = Scratch::new("plan_recorded");
+        let planned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b0");
+        let unplanned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b1");
+        for folder in [&planned, &unplanned] {
+            std::fs::create_dir_all(folder.join("take0000")).unwrap();
+            std::fs::write(folder.join("take0000").join("sound.wav"), b"x").unwrap();
         }
-        let project = scratch.path().join("project");
-        std::fs::create_dir_all(project.join("subfolder")).unwrap();
-        let moved = project.join("match.dem");
-        std::fs::write(&moved, b"HLDEMO moved one level down").unwrap();
-        let key = demo_file_key(&moved).unwrap();
-        std::fs::rename(&moved, project.join("subfolder").join("match.dem")).unwrap();
+        let plan = TakePlan {
+            length_secs: 12.5,
+            kill_offsets_secs: vec![4.0, 9.0],
+            sped_up: Vec::new(),
+        };
+        let manifest = CaptureManifest {
+            session_id: "session_1".into(),
+            blocks: [(&planned, Some(plan.clone())), (&unplanned, None)]
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(block_index, (folder, plan))| native::patch::types::CaptureBlock {
+                        demo_name: "d".into(),
+                        block_index,
+                        drive_index: 0,
+                        take_folder: folder.to_path_buf(),
+                        take_key: String::new(),
+                        source_streak_indices: vec![],
+                        start_tick: 0,
+                        end_tick: 1,
+                        record_start_tick: 0,
+                        record_stop_tick: 1,
+                        ramped_gaps: 0,
+                        plan,
+                    },
+                )
+                .collect(),
+            capture_fps: 300,
+            capture_mode: String::new(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+            settings: None,
+        };
+        let verified = verify_capture_takes(&manifest, &mut |_| {});
+        record_capture_settings(&manifest, &verified);
+        assert_eq!(take_meta::read_for_take(&planned).unwrap().plan, Some(plan));
+        assert_eq!(take_meta::read_for_take(&unplanned).unwrap().plan, None);
+    }
 
-        let demos = vec![KnownDemo {
-            path: moved.to_string_lossy().into_owned(),
-            file_key: key,
-        }];
-        // 30 entries: the big tree has 84, the project folder 1, then its
-        // subfolder 1. Depth-first from `big` spent them all first.
-        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+    fn names(n: usize) -> Vec<String> {
+        (1..=n).map(|i| format!("demo{i}.dem")).collect()
+    }
+
+    #[test]
+    fn the_getting_ready_line_names_each_demo_in_plain_words() {
+        let progress = PatchProgress::new(names(3));
+        let s = progress.summary(0);
+        assert_eq!(s.status, "Getting demos ready: 0 of 3");
+        assert!(s.measured);
+
+        // The decal pass reports no percentage: the demo is named, nothing
+        // says "decals", and the bar slides.
+        progress.set(0, PatchStage::ClearingDecals);
+        let s = progress.summary(0);
+        assert_eq!(s.status, "Getting demos ready: 1 of 3 (demo1.dem)");
+        assert!(!s.measured);
+
+        progress.set(0, PatchStage::Writing { percent: 40 });
+        let s = progress.summary(0);
+        assert_eq!(s.status, "Getting demos ready: 1 of 3 (demo1.dem, 40%)");
+        assert!((s.index - 0.4).abs() < 1e-9);
+        assert!(s.measured);
+
+        progress.set(1, PatchStage::ClearingDecals);
+        progress.set(2, PatchStage::Writing { percent: 60 });
         assert_eq!(
-            found[0].candidate.as_deref(),
-            Some(
-                project
-                    .join("subfolder")
-                    .join("match.dem")
-                    .to_string_lossy()
-                    .as_ref()
-            )
+            progress.summary(0).status,
+            "Getting demos ready: 0 of 3 done, 3 at once (50% on average)"
         );
-    }
 
-    #[test]
-    fn a_demo_replaced_in_place_is_changed_and_an_untouched_one_is_not() {
-        let scratch = Scratch::new("changed_demos");
-        let same = scratch.path().join("same.dem");
-        let replaced = scratch.path().join("replaced.dem");
-        std::fs::write(&same, b"HLDEMO the scanned file").unwrap();
-        std::fs::write(&replaced, b"HLDEMO the scanned file, too").unwrap();
-        let demos = vec![
-            KnownDemo {
-                path: same.to_string_lossy().into_owned(),
-                file_key: demo_file_key(&same).unwrap(),
-            },
-            KnownDemo {
-                path: replaced.to_string_lossy().into_owned(),
-                file_key: demo_file_key(&replaced).unwrap(),
-            },
-            KnownDemo {
-                path: scratch
-                    .path()
-                    .join("gone.dem")
-                    .to_string_lossy()
-                    .into_owned(),
-                file_key: "1-00".into(),
-            },
-        ];
-        std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
+        progress.finish(0);
+        progress.finish(2);
         assert_eq!(
-            changed_demos(&demos),
-            vec![replaced.to_string_lossy().into_owned()]
+            progress.summary(2).status,
+            "Getting demos ready: 3 of 3 (demo2.dem)"
         );
+        progress.finish(1);
+        assert_eq!(progress.summary(3).status, "Getting demos ready: 3 of 3");
     }
 
     #[test]
-    fn a_missing_demo_with_no_key_or_no_match_is_reported_without_a_candidate() {
-        let scratch = Scratch::new("locate_none");
-        std::fs::write(scratch.path().join("other.dem"), b"HLDEMO other").unwrap();
-        let gone = scratch.path().join("gone.dem");
-        let demos = vec![
-            KnownDemo {
-                path: gone.to_string_lossy().into_owned(),
-                file_key: String::new(),
-            },
-            KnownDemo {
-                path: scratch
-                    .path()
-                    .join("gone2.dem")
-                    .to_string_lossy()
-                    .into_owned(),
-                file_key: "999-0000000000000000".to_string(),
-            },
-        ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
-        assert_eq!(found.len(), 2);
-        assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
+    fn the_capture_steps_read_in_plain_words() {
+        use crate::messages::{capturing_clip, checking_takes, loading_demo, starting_the_game};
+        assert_eq!(starting_the_game(None, 3), "Starting the game…");
+        assert_eq!(
+            starting_the_game(Some("anzio.dem"), 3),
+            "Starting the game for anzio.dem (demo 1 of 3)"
+        );
+        assert_eq!(
+            starting_the_game(Some("anzio.dem"), 1),
+            "Starting the game for anzio.dem"
+        );
+        assert_eq!(loading_demo("anzio.dem"), "Loading anzio.dem…");
+        assert_eq!(
+            capturing_clip(3, 12, "anzio.dem"),
+            "Capturing clip 3 of 12 (anzio.dem)"
+        );
+        assert_eq!(capturing_clip(3, 12, ""), "Capturing clip 3 of 12");
+        assert_eq!(checking_takes(12, 12), "Checking the takes: 12 of 12");
     }
 
     #[test]
-    fn missing_scan_paths_names_only_the_paths_that_are_gone() {
-        let scratch = Scratch::new("missing_scan_paths");
-        let here = scratch.path().to_string_lossy().to_string();
-        let gone = scratch.path().join("deleted").to_string_lossy().to_string();
-        assert_eq!(missing_scan_paths(&[here, gone.clone()]), vec![gone]);
+    fn percentages_are_throttled_but_stage_changes_are_not() {
+        let progress = PatchProgress::new(names(1));
+        assert!(progress.set(0, PatchStage::ClearingDecals));
+        assert!(progress.set(0, PatchStage::Writing { percent: 0 }));
+        // Within 33ms of the last send.
+        assert!(!progress.set(0, PatchStage::Writing { percent: 1 }));
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        assert!(progress.set(0, PatchStage::Writing { percent: 2 }));
+    }
+
+    #[test]
+    fn a_take_folders_size_counts_its_subfolders() {
+        let dir = Scratch::new("take_folder_bytes");
+        std::fs::create_dir_all(dir.path().join("hud")).unwrap();
+        std::fs::write(dir.path().join("sound.wav"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("hud").join("00000.tga"), vec![0u8; 50]).unwrap();
+        assert_eq!(folder_bytes(dir.path()), 150);
+        assert_eq!(folder_bytes(&dir.path().join("missing")), 0);
     }
 
     fn sample_payload() -> CapturePayload {
@@ -2886,13 +2499,20 @@ mod tests {
             obs_host: String::new(),
             obs_port: 0,
             obs_password: String::new(),
+            obs_recording_quality: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: false,
+            reuse_game_pid: None,
+            keep_game_behind: true,
             streaks: Vec::new(),
+            streak_uids: Vec::new(),
+            project_path: None,
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,
             capture_directories: vec!["D:/capture".to_string()],
             capture_fps: 300,
             obs_capture_fps: 120,
+            agr_fps: 0,
             drives: vec!["D:/capture".to_string(), "E:/capture".to_string()],
             record_start_lead: 0.0,
             record_stop_trail: 0.0,
@@ -2917,6 +2537,7 @@ mod tests {
             ],
             decal_flush: None,
             decal_ring_limit: None,
+            kill_gaps: Default::default(),
         }
     }
 
@@ -2949,6 +2570,44 @@ mod tests {
     }
 
     #[test]
+    fn test_config_from_payload_carries_agr_mode_and_its_fps() {
+        let mut payload = sample_payload();
+        payload.capture_mode = "agr".to_string();
+        payload.agr_fps = 60;
+        let cfg = config_from_payload(&payload);
+        assert_eq!(cfg.capture_mode, native::patch::CaptureMode::Agr);
+        assert_eq!(cfg.effective_agr_fps(), 60);
+        assert!(!cfg.ffmpeg_capture);
+
+        // Absent from an older frontend, or 0 (an empty box): AGR's own 30,
+        // never Capture FPS.
+        let mut value = serde_json::to_value(sample_payload()).unwrap();
+        value.as_object_mut().unwrap().remove("agr_fps");
+        let payload: CapturePayload = serde_json::from_value(value).unwrap();
+        assert_eq!(payload.capture_fps, 300);
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+        let mut payload = sample_payload();
+        payload.agr_fps = 0;
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_default_agr_fps() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/agr_rate.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const DEFAULT_AGR_FPS = {};",
+            native::patch::DEFAULT_AGR_FPS
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/agr_rate.js must say `{line}`"
+        );
+    }
+
+    #[test]
     fn test_config_from_payload_decal_flush_overrides_only_when_sent() {
         // Absent means "leave the pipeline default alone", so a frontend that
         // knows nothing about decals still gets the flush.
@@ -2971,7 +2630,7 @@ mod tests {
         let payload = sample_payload();
         let cfg = config_from_payload(&payload);
         // Capture Output's first entry is the sole source of primary_media_dir —
-        // there's no separate "Primary Media Dir" field anymore (removed 2026-08-17).
+        // there's no separate "Primary Media Dir" field.
         assert_eq!(cfg.primary_media_dir, Some(PathBuf::from("D:/capture")));
     }
 
@@ -3094,7 +2753,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_filename_is_no_longer_refused_in_init_commands() {
-        // Re-tiered 2026-09-05: inert in Initial Commands (see
+        // Inert in Initial Commands (see
         // cfg_scan::NOOP_IN_INIT_COMMANDS), only dangerous once scheduled.
         let err = first_banned_command_error(&["mirv_movie_filename foo".to_string()], &[]);
         assert!(err.is_none(), "{:?}", err);
@@ -3168,5 +2827,384 @@ mod tests {
     fn clean_commands_are_not_refused() {
         let err = first_banned_command_error(&["sensitivity 3".to_string()], &[]);
         assert!(err.is_none());
+    }
+
+    #[test]
+    fn the_clip_tally_counts_recorded_clips_across_demos() {
+        let mut clips = ClipTally::default();
+        clips.demo_loading(3);
+        clips.fast_forward_to(1, 3);
+        assert_eq!((clips.done, clips.through_current_demo), (0, 3));
+        clips.fast_forward_to(3, 3);
+        assert_eq!(clips.done, 2);
+
+        // The next demo: all three of the first are recorded.
+        clips.demo_loading(2);
+        assert_eq!((clips.done, clips.through_current_demo), (3, 5));
+        clips.fast_forward_to(2, 2);
+        assert_eq!(clips.done, 4);
+
+        clips.session_finished();
+        assert_eq!(clips.done, 5);
+    }
+
+    fn cut_short_manifest(order: &[(&str, usize)]) -> CaptureManifest {
+        CaptureManifest {
+            session_id: "s".into(),
+            blocks: order
+                .iter()
+                .map(|&(demo, block_index)| native::patch::types::CaptureBlock {
+                    demo_name: demo.into(),
+                    block_index,
+                    drive_index: 0,
+                    take_folder: std::path::PathBuf::from(format!("{demo}_b{block_index}")),
+                    take_key: format!("s/{demo}_b{block_index}"),
+                    source_streak_indices: vec![],
+                    start_tick: 0,
+                    end_tick: 0,
+                    // Every demo's clips start at the same ticks, so a tick
+                    // alone can't tell two demos' blocks apart.
+                    record_start_tick: 100 * (block_index as i32 + 1),
+                    record_stop_tick: 0,
+                    ramped_gaps: 0,
+                    plan: None,
+                })
+                .collect(),
+            capture_fps: 300,
+            capture_mode: "frames".into(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+            settings: None,
+        }
+    }
+
+    fn on_disk(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
+        manifest
+            .blocks
+            .iter()
+            .map(|b| VerifiedBlock {
+                take_key: b.take_key.clone(),
+                take_folder: b.take_folder.to_string_lossy().into_owned(),
+                demo_name: b.demo_name.clone(),
+                block_index: b.block_index,
+                source_streak_indices: vec![],
+                captured: true,
+                renderable: true,
+                rendered: false,
+                bytes: 1,
+                cut_short: false,
+                cut_by: None,
+                short_take: None,
+                started_late_ms: None,
+                clip_verdict: None,
+                ramped_gaps: 0,
+                not_reached: false,
+            })
+            .collect()
+    }
+
+    /// Marker counts with no ticks (a marker that names none).
+    fn counts(started: usize, stopped: usize) -> Records {
+        Records {
+            started,
+            stopped,
+            ..Records::default()
+        }
+    }
+
+    #[test]
+    fn blocks_are_put_in_recording_order_demo_by_demo() {
+        // Blocks out of `block_index` order still come out in it.
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        assert_eq!(recording_order(&manifest.blocks), vec![1, 2, 0, 4, 3]);
+    }
+
+    /// #1081: Cancel while the third clip recorded leaves a partial take,
+    /// which is not a captured clip.
+    #[test]
+    fn the_clip_a_cancel_cut_short_is_not_captured() {
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, counts(3, 2), CutBy::Cancel);
+        let cut: Vec<_> = blocks.iter().map(|b| (b.captured, b.cut_short)).collect();
+        // Recording order a0, a1, a2: a2 (manifest position 0) was recording.
+        assert_eq!(
+            cut,
+            vec![
+                (false, true),
+                (true, false),
+                (true, false),
+                (true, false),
+                (true, false)
+            ]
+        );
+        assert!(!blocks[0].renderable);
+
+        // Cancelled between clips, or with no markers read: nothing changes.
+        for (started, stopped) in [(2, 2), (0, 0)] {
+            let mut blocks = on_disk(&manifest);
+            mark_cut_short(
+                &manifest,
+                &mut blocks,
+                counts(started, stopped),
+                CutBy::Cancel,
+            );
+            assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+        }
+        // A clip cut short before it wrote anything is just missing.
+        let mut blocks = on_disk(&manifest);
+        blocks[3].captured = false;
+        mark_cut_short(&manifest, &mut blocks, counts(5, 4), CutBy::Cancel);
+        assert!(!blocks[3].captured && !blocks[3].cut_short);
+        assert_eq!(blocks[3].cut_by, None);
+    }
+
+    /// The game closing mid-clip cuts it short like a Cancel, and the row
+    /// says the game closed: the same clip, a different reason.
+    #[test]
+    fn a_clip_the_game_closing_cut_short_is_not_captured_and_says_why() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::GameClosed);
+        assert!(!blocks[1].captured && !blocks[1].renderable && blocks[1].cut_short);
+        assert_eq!(blocks[1].cut_by, Some(CutBy::GameClosed));
+        assert!(
+            blocks
+                .iter()
+                .enumerate()
+                .all(|(i, b)| i == 1 || (b.captured && b.cut_by.is_none()))
+        );
+        let row = serde_json::to_value(&blocks[1]).unwrap();
+        assert_eq!(row["cut_by"], "game_closed");
+    }
+
+    /// A batch that failed in the game checks its takes, under an outcome
+    /// the next start's catch-up (#545) leaves alone; one that failed before
+    /// a demo played has nothing to check.
+    #[test]
+    fn a_batch_that_failed_in_the_game_is_ended_like_a_cancel() {
+        let mut records = Records::default();
+        assert!(!records.reached_game(), "nothing played yet");
+        records.demo_started(1);
+        assert!(records.reached_game());
+
+        let closed = BatchEnd::failed("hl.exe ended", records, true);
+        assert_eq!(
+            (closed.outcome, closed.error, closed.cut_by),
+            ("error", true, CutBy::GameClosed)
+        );
+        assert_ne!(closed.outcome, "planned");
+        let stalled = BatchEnd::failed("stalled", records, false);
+        assert_eq!(stalled.cut_by, CutBy::Stopped);
+        let cancelled = BatchEnd::cancelled(records);
+        assert_eq!((cancelled.error, cancelled.cut_by), (false, CutBy::Cancel));
+    }
+
+    /// #1434: only a batch that stopped early says what ended it.
+    #[test]
+    fn a_complete_batch_names_nothing_as_what_ended_it() {
+        assert_eq!(BatchEnd::complete().ended_by(), None);
+        assert_eq!(
+            BatchEnd::cancelled(Records::default()).ended_by(),
+            Some(CutBy::Cancel)
+        );
+        assert_eq!(
+            BatchEnd::failed("x", Records::default(), true).ended_by(),
+            Some(CutBy::GameClosed)
+        );
+    }
+
+    /// A demo the hook's batch skipped sends no markers (#861), so the count
+    /// falls behind: the tick the last `START_RECORD` named finds the clip.
+    #[test]
+    fn the_cut_short_clip_is_found_by_its_tick_after_a_skipped_demo() {
+        let mut manifest = cut_short_manifest(&[("a", 1), ("a", 0), ("b", 1), ("b", 0)]);
+        manifest.blocks[2].record_start_tick = 1200;
+        manifest.blocks[3].record_start_tick = 1100;
+        // Demo a skipped: b0 recorded whole, b1 (tick 1200) was recording.
+        let records = Records {
+            started: 2,
+            stopped: 1,
+            last_start_tick: Some(1200),
+            ..Records::default()
+        };
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, true, false]);
+    }
+
+    /// Two demos' clips can start at the same tick: the search starts at the
+    /// count, never before it.
+    #[test]
+    fn a_tick_an_earlier_demo_shares_does_not_pick_its_clip() {
+        let manifest = cut_short_manifest(&[("a", 1), ("a", 0), ("b", 1), ("b", 0)]);
+        // a0 and a1 recorded whole; b0 (tick 100, like a0) was recording.
+        let records = Records {
+            started: 3,
+            stopped: 2,
+            last_start_tick: Some(100),
+            ..Records::default()
+        };
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A take at `folder` as HLAE writes a frame sequence: `frames` BMPs in
+    /// `take0000/all`, and `audio_secs` of 8-bit mono 1 kHz audio beside them.
+    fn bmp_take(folder: &Path, frames: usize, audio_secs: u32) {
+        let take = folder.join("take0000");
+        let stream = take.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        for i in 0..frames {
+            std::fs::write(stream.join(format!("{i:05}.bmp")), b"bmp").unwrap();
+        }
+        let data = audio_secs * 1000;
+        let mut wav = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+        for field in [16u32, 1 | (1 << 16), 1000, 1000, 1 | (8 << 16)] {
+            wav.extend_from_slice(&field.to_le_bytes());
+        }
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data.to_le_bytes());
+        wav.resize(wav.len() + data as usize, 0);
+        std::fs::write(take.join("sound.wav"), wav).unwrap();
+    }
+
+    /// #1105: a take whose video FFmpeg stopped writing mid-clip, while the
+    /// game wrote the audio to the end. It is a partial take, like a
+    /// Cancel's: not captured, not renderable, so nothing renders or deletes
+    /// it.
+    #[test]
+    fn a_take_that_stopped_writing_early_is_not_captured() {
+        let scratch = Scratch::new("short_take_1105");
+        let whole = scratch.path().join("chain_01_b0");
+        let short = scratch.path().join("chain_01_b1");
+        let obs = scratch.path().join("chain_01_b2");
+        // 10 fps: the whole take has 3.0 s of video to 3 s of audio, the
+        // short one 0.5 s to 3 s.
+        bmp_take(&whole, 30, 3);
+        bmp_take(&short, 5, 3);
+        let obs_stream = obs.join("take0000").join("all");
+        std::fs::create_dir_all(&obs_stream).unwrap();
+        std::fs::write(obs_stream.join("video.mp4"), b"mp4").unwrap();
+        let mut manifest = cut_short_manifest(&[("chain_01", 0), ("chain_01", 1), ("chain_01", 2)]);
+        manifest.capture_fps = 10;
+        for (block, folder) in manifest.blocks.iter_mut().zip([&whole, &short, &obs]) {
+            block.take_folder = folder.to_path_buf();
+        }
+
+        let verified = verify_capture_takes_settling(&manifest, None, &mut |_| {});
+        assert!(verified[0].captured && verified[0].renderable && !verified[0].cut_short);
+        assert!(!verified[1].captured && !verified[1].renderable && verified[1].cut_short);
+        assert_eq!(
+            verified[1].short_take,
+            Some(native::hlcr::take_length::ShortTake {
+                video_secs: 0.5,
+                audio_secs: 3.0
+            })
+        );
+        // An OBS take's length isn't read: it isn't judged.
+        assert!(verified[2].captured && !verified[2].cut_short);
+    }
+
+    /// A clip Cancel cut short is short too; the reason it gives is Cancel.
+    #[test]
+    fn a_short_take_cancel_cut_gives_cancel_as_the_reason() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1)]);
+        let mut blocks = on_disk(&manifest);
+        blocks[1].captured = false;
+        blocks[1].renderable = false;
+        blocks[1].cut_short = true;
+        blocks[1].short_take = Some(native::hlcr::take_length::ShortTake {
+            video_secs: 1.0,
+            audio_secs: 9.0,
+        });
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::Cancel);
+        assert!(blocks[1].cut_short && !blocks[1].captured);
+        assert_eq!(blocks[1].short_take, None);
+        // A short take Cancel didn't touch keeps its own reason.
+        let mut blocks = on_disk(&manifest);
+        blocks[0].captured = false;
+        blocks[0].cut_short = true;
+        blocks[0].short_take = Some(native::hlcr::take_length::ShortTake {
+            video_secs: 1.0,
+            audio_secs: 9.0,
+        });
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::Cancel);
+        assert!(blocks[0].cut_short && blocks[0].short_take.is_some());
+        assert!(blocks[1].cut_short && blocks[1].short_take.is_none());
+    }
+
+    /// A take still being finished when the batch ends looks short at first:
+    /// with a settle it is looked at again, and a whole one is captured.
+    #[test]
+    fn a_take_finished_during_the_settle_is_not_short() {
+        let scratch = Scratch::new("short_take_settle_1105");
+        let folder = scratch.path().join("chain_01_b0");
+        bmp_take(&folder, 5, 3);
+        let mut manifest = cut_short_manifest(&[("chain_01", 0)]);
+        manifest.capture_fps = 10;
+        manifest.blocks[0].take_folder = folder.clone();
+        let stream = folder.join("take0000").join("all");
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            for i in 5..30 {
+                std::fs::write(stream.join(format!("{i:05}.bmp")), b"bmp").unwrap();
+            }
+        });
+        let verified = verify_capture_takes_settling(
+            &manifest,
+            Some(std::time::Duration::from_millis(500)),
+            &mut |_| {},
+        );
+        writer.join().unwrap();
+        assert!(verified[0].captured && verified[0].short_take.is_none());
+    }
+
+    /// A demo that ended or stopped playing mid-clip leaves a `START_RECORD`
+    /// with no `STOP_RECORD`, and the hook's batch goes on to the next demo:
+    /// a Cancel there between clips must not mark a whole clip cut short.
+    #[test]
+    fn a_clip_an_earlier_demo_left_recording_is_not_cut_short_by_a_later_cancel() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        records.demo_started(1);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // a1 starts, then demo a stops playing.
+        records.clip_started(Some(200));
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // Cancelled between b0 and b1.
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
+        assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+
+        // Cancelled while b1 recorded: b1, not anything in demo a.
+        records.clip_started(Some(200));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A skipped demo sends no markers, and its clip may start at the tick
+    /// the recording one does: the demo `DEMO_START` named decides.
+    #[test]
+    fn a_skipped_demo_sharing_the_tick_does_not_take_the_cut() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        // Demo a skipped before it played: b0 recording when cancelled.
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, true, false]);
     }
 }

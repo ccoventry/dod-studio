@@ -15,30 +15,61 @@
   <div id="analyzer-tree"></div>
   <table id="analyzer-demo-table"><tbody id="analyzer-demo-tbody"></tbody></table>
   <div id="analyzer-tab-content"></div>
+  <div id="analyzer-player-status"></div>
 
   <script type="module">
     const folders = {
       'D:\\': ['D:\\Program Files (x86)', 'D:\\Users'],
       'D:\\Program Files (x86)': ['D:\\Program Files (x86)\\Steam'],
       'D:\\Program Files (x86)\\Steam': [],
-      'D:\\Users': ['D:\\Users\\chris'],
-      'D:\\Users\\chris': [],
+      'D:\\Users': ['D:\\Users\\name'],
+      'D:\\Users\\name': [],
     };
+    // Demos by folder: names only, as browse_directory lists them.
+    const demos = { 'D:\\Users\\name': ['a.dem', 'x.dem'] };
     const entry = (path) => ({ name: path.split('\\').filter(Boolean).pop() || path, path, demo_count: 0 });
+    const demo = (dir, name) => ({ name, path: `${dir}\\${name}`, size_bytes: 1, modified_unix_secs: 0, map_name: null, demo_type: 'POV' });
     window.__unreadable = new Set();
+    window.__cachedPlayers = new Set();
+    window.__cloud = new Set();
+    // A folder in __held waits for window.__release[path]() before it lists:
+    // a cloud folder nobody has opened.
+    window.__held = new Set();
+    window.__release = {};
+    // read_demo_heads waits for window.__releaseHeads() while __holdHeads.
+    window.__holdHeads = false;
+    const heads = (paths) => paths.map((path) => ({ path, map_name: 'dod_anzio', demo_type: 'POV' }));
+    const listing = (path) => ({ path, parent: null, subdirs: folders[path].map(entry), demos: (demos[path] || []).map((n) => demo(path, n)) });
     window.__mockInvokeHandlers = {
       browse_directory: ({ path }) => {
         if (path === null) return { path: null, parent: null, subdirs: [entry('D:\\')], demos: [] };
         if (!(path in folders) || window.__unreadable.has(path)) {
           return Promise.reject(new Error(`cannot read ${path}`));
         }
-        return { path, parent: null, subdirs: folders[path].map(entry), demos: [] };
+        if (window.__held.has(path)) {
+          return new Promise((resolve) => { window.__release[path] = () => resolve(listing(path)); });
+        }
+        return listing(path);
       },
+      read_demo_heads: ({ paths }) => {
+        if (!window.__holdHeads) return heads(paths);
+        return new Promise((resolve) => { window.__releaseHeads = () => resolve(heads(paths)); });
+      },
+      index_demo_players: () => 0,
+      // #992: demos in __cachedPlayers have their players; __cloud ones sit on
+      // a cloud drive with no cache entry; the rest need a read.
+      lookup_demo_players: ({ paths }) => ({
+        found: paths.filter((p) => window.__cachedPlayers.has(p)).map((path) => ({ path, demoType: 'POV', players: [{ id: 'PLAYER_1', name: 'm00cat' }] })),
+        to_read: paths.filter((p) => !window.__cachedPlayers.has(p) && !window.__cloud.has(p)),
+        in_cloud: paths.filter((p) => !window.__cachedPlayers.has(p) && window.__cloud.has(p)),
+      }),
+      analyze_demo_full: () => new Promise(() => {}),
       default_browse_dir: () => null,
       scan_demo_folders: () => [],
     };
-    const { initAnalyzerPane } = await import('/src/analyzer_pane.js');
+    const { initAnalyzerPane, openAnalyzerDemo } = await import('/src/analyzer_pane.js');
     initAnalyzerPane({ getPinnedFolders: () => [], getDemoFolderHistory: () => [] });
+    window.__openDemo = openAnalyzerDemo;
     window.__harnessReady = true;
   </script>
 </body>

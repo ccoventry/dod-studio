@@ -91,6 +91,9 @@ mod voice_data;
 mod voice_init;
 mod weapon_anim;
 
+/// `svc_sound`'s message number.
+const SVC_SOUND: u8 = 6;
+
 pub trait Doer {
     fn id(&self) -> u8;
     fn parse(i: &[u8], aux: AuxRefCell) -> Result<Self>
@@ -139,6 +142,17 @@ impl NetMessage {
                 Ok((i, NetMessage::UserMessage(res)))
             }
         }
+    }
+
+    /// [`NetMessage::parse`], but an `svc_sound` is stepped over and comes
+    /// back as `None` ([`crate::types::MessageDataParseMode::ParseWithoutSounds`]).
+    pub fn parse_unless_sound(i: &[u8], aux: AuxRefCell) -> Result<Option<NetMessage>> {
+        if let Some((&SVC_SOUND, rest)) = i.split_first() {
+            let (i, ()) = SvcSound::skip(rest)?;
+            return Ok((i, None));
+        }
+        let (i, message) = NetMessage::parse(i, aux)?;
+        Ok((i, Some(message)))
     }
 
     pub fn write(&self, aux: AuxRefCell) -> ByteVec {
@@ -207,7 +221,7 @@ impl EngineMessage {
             3 => wrap!(SvcEvent, i, aux),
             4 => wrap!(SvcVersion, i, aux),
             5 => wrap!(SvcSetView, i, aux),
-            6 => wrap_box!(SvcSound, i, aux),
+            SVC_SOUND => wrap_box!(SvcSound, i, aux),
             7 => wrap!(SvcTime, i, aux),
             8 => wrap!(SvcPrint, i, aux),
             9 => wrap!(SvcStuffText, i, aux),

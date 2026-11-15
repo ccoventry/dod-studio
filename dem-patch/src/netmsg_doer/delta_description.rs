@@ -57,12 +57,7 @@ impl Doer for SvcDeltaDescription {
                 );
             };
 
-            decoder.push(DeltaDecoderS {
-                name: name.to_owned(),
-                bits,
-                divisor,
-                flags,
-            });
+            decoder.push(DeltaDecoderS::new(name.to_vec(), bits, divisor, flags));
         }
 
         // A read that ran past the end of this message's bytes means the

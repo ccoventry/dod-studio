@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!--
+  themed_confirm.js opened from inside another modal (#356): the real
+  stylesheet, the confirm modal, and an "outer" modal declared after it in the
+  DOM, as #clear-previews-modal is in index.html.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>themed_confirm.js nested harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 420px; padding: 20px;">
+      <h2 id="themed-confirm-title">Confirm</h2>
+      <p id="themed-confirm-message"></p>
+      <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <button id="themed-confirm-ok-btn">Confirm</button>
+        <button id="themed-confirm-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="outer-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 640px; padding: 20px;">
+      <button id="outer-delete-btn">Delete 2 Selected</button>
+    </div>
+  </div>
+
+  <button id="open-outer-btn">Open the outer modal</button>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initThemedConfirm, themedConfirm } from '/src/themed_confirm.js';
+
+    initThemedConfirm();
+
+    document.querySelector('#open-outer-btn').addEventListener('click', () => {
+      document.querySelector('#outer-modal').style.display = 'flex';
+    });
+    document.querySelector('#outer-delete-btn').addEventListener('click', async () => {
+      const result = await themedConfirm('Delete 2 previews?');
+      document.querySelector('#result').textContent = String(result);
+    });
+
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

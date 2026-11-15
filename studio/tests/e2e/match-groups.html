@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for the Master Queue's Group by dropdown (#685, #823:
+  queue_match_groups.js and queue_group_by.js with master_pane.js): the queue
+  table, the dropdown and the scan status line. See tests/e2e/README.md for
+  the general shape. The test sets the `queue_match_groups` mock before
+  calling __regroup().
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>queue_group_by.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="demo-search-input" />
+  <select id="master-group-by-select">
+    <option value="none">None</option>
+    <option value="match">Match</option>
+    <option value="player">Player</option>
+    <option value="map">Map</option>
+    <option value="folder">Folder</option>
+    <option value="date">Date</option>
+    <option value="type">Demo type</option>
+  </select>
+  <span id="scan-status">Status: Ready</span>
+  <table id="master-demo-table"><tbody id="master-demo-table-body"></tbody></table>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList, getVisibleDemos } from '/src/master_pane.js';
+    import { createQueueMatchGroups } from '/src/queue_match_groups.js';
+    import { createQueueGroupBy, isGroupedByMatch } from '/src/queue_group_by.js';
+
+    const extra = {
+      'h2_pov.dem': { map_name: 'dod_anzio', is_pov: true, recorder_id: 'PLAYER_2', recorder_name: 'Brain', streaks: [{}, {}] },
+      'other.dem': { map_name: 'dod_avalanche', is_pov: true, recorder_id: 'PLAYER_1', recorder_name: 'm00cat', streaks: [{}] },
+      'h1_hltv.dem': { map_name: 'dod_anzio', is_pov: false, recorder_id: null, streaks: [{}, {}, {}] },
+      'h1_pov.dem': { map_name: 'dod_anzio', is_pov: true, recorder_id: 'PLAYER_1', recorder_name: 'm00cat', streaks: [] },
+    };
+    const demos = Object.keys(extra).map((name) => ({
+      name, path: `C:\\demos\\${name}`, ...extra[name],
+    }));
+    initMasterPane();
+    const render = () => renderMasterList(demos, null, () => {});
+    const { regroup } = createQueueMatchGroups({ getDemos: () => demos, renderQueue: render, parseMissingByDefault: isGroupedByMatch });
+    createQueueGroupBy({ getDemos: () => demos, renderQueue: render, regroupMatches: (opts) => regroup(opts) });
+    render();
+    window.__demos = demos;
+    window.__regroup = (opts) => regroup(opts);
+    window.__visible = () => getVisibleDemos().map((d) => d.name);
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

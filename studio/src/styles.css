@@ -46,8 +46,8 @@ html {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
   line-height: 1.4;
-  color: #d0d0d0;
-  background-color: #121212;
+  color: var(--text);
+  background-color: var(--bg-dark);
 
   --bg-dark: #121212;
   --bg-panel: #1e1e1e;
@@ -58,6 +58,117 @@ html {
   --primary-accent: #2b5c8f;
   --primary-hover: #3772b0;
   --text-muted: #888888;
+  --text: #d0d0d0;
+
+  /* Colour tokens: every colour the UI paints, by role (#49). A theme sets these. */
+  /* Text */
+  --text-strong: #ffffff;
+  --text-emphasis: #eeeeee;
+  --text-bright: #e0e0e0;
+  --text-soft: #dddddd;
+  --text-secondary: #cccccc;
+  --text-subtle: #aaaaaa;
+  --text-quiet: #999999;
+  --text-faint: #666666;
+  --text-dim: #555555;
+  --text-on-light: #111111;
+  /* Surfaces */
+  --surface-black: #000000;
+  --surface-sunken: #141414;
+  --surface-well: #161616;
+  --surface-inset: #1a1a1a;
+  --surface-subrow: #1b1b1b;
+  --surface-row: #1c1c1c;
+  --surface-control: #222222;
+  --surface-raised: #2a2a2a;
+  --surface-menu: #2b2c30;
+  --surface-hover: #383838;
+  --surface-active: #444444;
+  /* Borders */
+  --border-faint: #282828;
+  --border-soft: #333333;
+  --border-mid: #444444;
+  /* Accent and info blues */
+  --accent-line: #4a82bd;
+  --info: #4a86c5;
+  --link: #4a90e2;
+  --accent-alt: #4a90d9;
+  --info-bright: #2196f3;
+  --info-light: #64b5f6;
+  --focus: #64a0ff;
+  --info-border: #2f4a68;
+  --purple: #ce93d8;
+  --cyan: #26c6da;
+  --sky: #7ec8e3;
+  /* Success greens */
+  --ok: #4caf50;
+  --ok-setup: #4caf7a;
+  --ok-light: #66bb6a;
+  --ok-lighter: #81c784;
+  --ok-update: #5fb85f;
+  --ok-bright: #8ade75;
+  --ok-steady: #7fc77f;
+  --ok-pattern: #3ea86b;
+  --ok-pattern-dim: #2f6b47;
+  --ok-border: #2e5a42;
+  --ok-vivid: #22c55e;
+  --ok-keep: #8fd18f;
+  /* Errors */
+  --danger: #f44336;
+  --danger-light: #ef5350;
+  --danger-bright: #ef4444;
+  --danger-hot: #ff5555;
+  --danger-soft: #e07a5f;
+  --danger-coral: #ff6b6b;
+  --danger-rose: #e57373;
+  --danger-chat: #dc3232;
+  --danger-pale: #ff9999;
+  /* Warnings */
+  --warn: #ffb74d;
+  --warn-gold: #fbbf24;
+  --warn-amber: #d9a441;
+  --warn-orange: #ffa726;
+  --warn-deep: #ff9800;
+  --warn-sand: #e0b050;
+  --warn-ochre: #e0a040;
+  --warn-border: #6b5226;
+  --warn-salmon: #ff8a5c;
+  --warn-yellow: #ffdd00;
+  --warn-lime: #d5e34f;
+  --warn-note: #f0c060;
+  --warn-note-bg: #2a2410;
+  --warn-note-border: #b58900;
+  --warn-note-text: #e8dcb0;
+  --warn-cancelled: #ffeb3b;
+  --warn-mark: #ffd54f;
+  --system-tag: #c89650;
+  /* Translucent overlays */
+  --shade-30: rgba(0, 0, 0, 0.3);
+  --shade-40: rgba(0, 0, 0, 0.4);
+  --shade-50: rgba(0, 0, 0, 0.5);
+  --shade-60: rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.8);
+  --wash-03: rgba(255, 255, 255, 0.03);
+  --wash-04: rgba(255, 255, 255, 0.04);
+  --wash-05: rgba(255, 255, 255, 0.05);
+  --wash-06: rgba(255, 255, 255, 0.06);
+  --wash-08: rgba(255, 255, 255, 0.08);
+  --wash-12: rgba(255, 255, 255, 0.12);
+  --wash-15: rgba(255, 255, 255, 0.15);
+  --text-on-dark-55: rgba(255, 255, 255, 0.55);
+  --wash-70: rgba(255, 255, 255, 0.7);
+  --accent-wash-35: rgba(43, 92, 143, 0.35);
+  --accent-wash-30: rgba(43, 92, 143, 0.3);
+  --ok-update-wash-12: rgba(95, 184, 95, 0.12);
+  --ok-update-wash-25: rgba(95, 184, 95, 0.25);
+  --warn-gold-wash-12: rgba(251, 191, 36, 0.12);
+  --warn-gold-wash-15: rgba(251, 191, 36, 0.15);
+  --warn-gold-line: rgba(251, 191, 36, 0.4);
+  --info-light-wash: rgba(100, 181, 246, 0.12);
+  --purple-wash: rgba(206, 147, 216, 0.12);
+  --focus-line: rgba(100, 160, 255, 0.5);
+  --focus-wash: rgba(100, 160, 255, 0.08);
+  --keep-wash: rgba(90, 200, 120, 0.1);
 }
 
 body {
@@ -65,7 +176,7 @@ body {
   width: 100vw;
   overflow: hidden;
   background: var(--bg-dark);
-  color: #d0d0d0;
+  color: var(--text);
   user-select: none;
 }
 
@@ -81,7 +192,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
   padding: 4px 12px;
   height: 52px;
@@ -104,7 +215,7 @@ body {
 }
 
 .brand-title {
-  color: #ffffff;
+  color: var(--text-strong);
   font-size: 17px;
   white-space: nowrap;
 }
@@ -116,8 +227,8 @@ body {
 }
 
 .nav-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -127,8 +238,8 @@ body {
 
 .nav-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as
@@ -136,8 +247,8 @@ body {
    top-level tab's blue background flips to the generic hover gray. */
 .nav-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .nav-actions {
@@ -167,7 +278,7 @@ body {
 
 .menu-dropdown-btn {
   background: transparent;
-  color: #aaaaaa;
+  color: var(--text-subtle);
   border: 1px solid transparent;
   border-radius: 2px;
   padding: 4px 8px;
@@ -180,16 +291,33 @@ body {
 
 .menu-dropdown-btn:hover,
 .menu-dropdown.open .menu-dropdown-btn {
-  background: #222222;
+  background: var(--surface-control);
   border-color: var(--border-color);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
-.menu-update-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #5fb85f;
+/* The menu bar's update button (#868), beside Help: seen without opening a
+   menu, quiet enough to leave while you work. */
+.update-chip {
+  align-self: center;
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--ok-update);
+  background: var(--ok-update-wash-12);
+  border: 1px solid var(--ok-update);
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.update-chip:hover {
+  background: var(--ok-update-wash-25);
+  color: var(--text-strong);
+}
+
+.update-chip[hidden] {
+  display: none;
 }
 
 .menu-dropdown-panel {
@@ -207,7 +335,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shade-40);
   z-index: 500;
   flex-direction: column;
   padding: 4px;
@@ -229,7 +357,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   background: transparent;
-  color: #d0d0d0;
+  color: var(--text);
   border: none;
   border-radius: 2px;
   padding: 6px 10px;
@@ -241,7 +369,7 @@ body {
 
 .menu-dropdown-item:hover {
   background: var(--primary-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .menu-shortcut-hint {
@@ -250,7 +378,164 @@ body {
 }
 
 .menu-dropdown-item:hover .menu-shortcut-hint {
-  color: #e0e0e0;
+  color: var(--text-bright);
+}
+
+/* File → Open Recent (#935): a submenu that opens beside its row on hover. */
+.menu-submenu {
+  position: relative;
+  cursor: default;
+}
+
+.menu-submenu-panel {
+  display: none;
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  width: max-content;
+  min-width: 220px;
+  max-width: 520px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--shade-40);
+  z-index: 501;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.menu-submenu:hover .menu-submenu-panel,
+.menu-submenu:focus-within .menu-submenu-panel {
+  display: flex;
+}
+
+.menu-dropdown-item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  background: transparent;
+}
+
+/* Held by a running batch (batch_guard.js, #1085): not `disabled`, which the
+   queue's footer and Load's dialog wait set for their own reasons. */
+.batch-held {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A file/folder dialog is on its way (dialog_wait.js): the busy cursor
+   everywhere, over each element's own cursor, until the dialog returns. */
+html.picking-path,
+html.picking-path * {
+  cursor: progress !important;
+}
+
+/* ...and when it is slow to appear, this notice until it does. */
+#file-dialog-notice {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10000;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px var(--shade-50);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+#file-dialog-notice[hidden] {
+  display: none;
+}
+
+.recent-project-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.recent-project-folder {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-project-item:hover .recent-project-folder {
+  color: var(--text-bright);
+}
+
+/* A file that's gone: dimmed, still clickable to remove it. */
+.recent-project-item.missing .recent-project-name {
+  color: var(--text-muted);
+}
+
+/* Rescan Recent Sessions (#938): one row per session, its demos and time. */
+.rescan-recent-content {
+  max-width: 560px;
+  padding: 20px;
+}
+
+.rescan-recent-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.rescan-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.rescan-recent-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rescan-recent-detail {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.rescan-recent-skip {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Skipped, or nothing to rescan (file gone): dimmed, still listed. */
+.rescan-recent-row.skipped .rescan-recent-name,
+.rescan-recent-row.unavailable .rescan-recent-name {
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.rescan-recent-total,
+.rescan-recent-step {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rescan-recent-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
 }
 
 .session-file-indicator {
@@ -260,6 +545,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Room for "Made with a newer DoD Studio" after the file name (#1085). */
+.session-file-indicator.newer-project {
+  max-width: 420px;
 }
 
 /* Notification settings tab (issue #98) — two columns where they fit,
@@ -316,7 +606,7 @@ body {
 .info-icon:hover,
 .info-icon:focus-visible {
   opacity: 1;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* Custom tooltip for .info-icon — see info_tooltip.js and #164. Position is
@@ -330,8 +620,8 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  color: #d0d0d0;
+  box-shadow: 0 2px 8px var(--shade-40);
+  color: var(--text);
   font-size: 11px;
   line-height: 1.4;
   pointer-events: none;
@@ -342,7 +632,7 @@ body {
 }
 
 .setting-label.active {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -364,7 +654,7 @@ body {
 .setting-switch-slider {
   position: absolute;
   inset: 0;
-  background: #444444;
+  background: var(--surface-active);
   border-radius: 10px;
   transition: background 0.15s;
 }
@@ -376,7 +666,7 @@ body {
   height: 13px;
   left: 2px;
   top: 2px;
-  background: #ffffff;
+  background: var(--text-strong);
   border-radius: 50%;
   transition: transform 0.15s;
 }
@@ -424,13 +714,21 @@ body {
   gap: 10px;
 }
 
+/* Left pane takes 40% by default (the queue is a short list; the tables on
+   the right are what's read, #47). capture-split-handle resizes it, and the
+   minimums keep both tables usable. */
 #pane-workspace {
-  border-right: 1px solid var(--border-color);
-  background: #161616;
+  flex: 0 0 40%;
+  min-width: 380px;
+  /* A saved split wider than a smaller window allows stops short of the details
+     pane's minimum instead of clipping it (min-width wins when both can't fit). */
+  max-width: calc(100% - 530px);
+  background: var(--surface-well);
 }
 
 #pane-details-config {
-  background: #1a1a1a;
+  min-width: 520px;
+  background: var(--surface-inset);
 }
 
 /* egui Panel Styling */
@@ -447,10 +745,47 @@ body {
   padding-bottom: 6px;
 }
 
+/* The Master Demo Queue's filters, a row of their own under its toolbar (#127). */
+.queue-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.queue-filter-row-label {
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.queue-filter-tracked-only {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/* Dimmed while no highlight is ticked anywhere (#127). */
+.queue-filter-tracked-only.is-disabled {
+  opacity: 0.45;
+}
+
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-strong);
+}
+
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analyzer-cache-bar {
+  width: 120px;
 }
 
 .flex-between {
@@ -494,15 +829,20 @@ body {
   margin-bottom: 8px;
 }
 
+/* display: flex above would otherwise beat the hidden attribute. */
+.row-inputs[hidden], .input-row[hidden] {
+  display: none;
+}
+
 .input-row label {
   min-width: 150px;
   font-weight: 500;
-  color: #cccccc;
+  color: var(--text-secondary);
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
-  color: #ffffff;
+  color: var(--text-strong);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 8px;
@@ -510,8 +850,13 @@ input[type="text"], input[type="number"], select {
   outline: none;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus {
   border-color: var(--primary-accent);
+}
+
+/* The map search: wide enough for a pattern, placeholder included. */
+#hd-maps-search {
+  min-width: 18em;
 }
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
@@ -533,7 +878,8 @@ input[type="number"] {
 /* Custom dropdown chevron — the global `appearance: none` reset (top of this
    file) strips the native arrow with nothing to replace it, so every
    <select> otherwise looks indistinguishable from a plain text field. */
-select {
+select,
+input.search-select-input {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23aaaaaa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 8px center;
@@ -542,9 +888,87 @@ select {
   cursor: pointer;
 }
 
+/* searchable_select.js: a dropdown you can type into. The box looks like a
+   <select>; the list opens under it like the native one. */
+.search-select {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input:focus {
+  cursor: text;
+}
+
+.search-select-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--shade-50);
+  font-size: 12px;
+}
+
+.search-select-option,
+.search-select-empty {
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-select-option {
+  cursor: pointer;
+  color: var(--text-strong);
+}
+
+.search-select-option.active {
+  background: var(--primary-accent);
+}
+
+.search-select-option.picked {
+  font-weight: 600;
+}
+
+.search-select-empty {
+  color: var(--text-muted);
+}
+
+/* A row's own button (install_picker.js's Hide), at its end. */
+.search-select-option:has(.search-select-action) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-select-action {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  flex: none;
+}
+
+/* A row that does something rather than being picked. */
+.search-select-option.command {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 button {
-  background: #2a2a2a;
-  color: #dddddd;
+  background: var(--surface-raised);
+  color: var(--text-soft);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -553,9 +977,9 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #383838;
+  background: var(--surface-hover);
   border-color: var(--border-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 button:disabled {
@@ -565,12 +989,21 @@ button:disabled {
 
 button.primary-btn {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 button.primary-btn:hover:not(:disabled) {
   background: var(--primary-hover);
+}
+
+/* A button that deletes, recycles, overwrites or throws work away: red
+   text and border, as Clear All and Move to Recycle Bin are. The themed
+   confirm's OK takes it only for those (#880); every other confirm is
+   primary-btn. */
+button.danger-btn {
+  color: var(--danger-hot);
+  border-color: var(--danger-hot);
 }
 
 /* A text box's clear button (clearable_input.js, #529): an × at its
@@ -600,7 +1033,7 @@ button.primary-btn:hover:not(:disabled) {
 /* Outranks the global button:hover:not(:disabled) background. */
 .clearable-x:hover:not(:disabled) {
   background: transparent;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* Master Demo Queue Table */
@@ -618,15 +1051,15 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 #master-demo-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
 }
 
-/* Every centered <td> column in this table (checkbox, Highlights, Pending,
-   Captured, Rendered, Actions — master_pane.js) needs its <th> centered too,
+/* Every centered <td> column in this table (checkbox, Highlights, Selected,
+   Status, Review, Actions — master_pane.js) needs its <th> centered too,
    or a header/body mismatch that's invisible while the column is barely
    wider than its content visibly drifts apart once the table stretches
    wider than that content (e.g. a maximized window) and the extra slack
@@ -634,15 +1067,55 @@ button.primary-btn:hover:not(:disabled) {
    one column left out on purpose — its <td> is left-aligned too. */
 #master-demo-table th.col-center {
   text-align: center;
+  /* The count columns take only what they need, so the Demo File column gets
+     the rest instead of cutting names while space is free (#46). */
+  width: 1%;
+  white-space: nowrap;
 }
 
 #master-demo-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 #master-demo-table tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash-04);
+}
+
+/* Status and Review: coloured counts joined by slashes (queue_counts.js);
+   the header's legend shows the same letters in the same colours. */
+#master-demo-table td.queue-counts-cell {
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+#master-demo-table .count-legend {
+  font-size: 10px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+#master-demo-table .count-slash {
+  color: var(--text-dim);
+}
+
+/* The totals row under the header (queue_totals.js): each total under its
+   column, set apart from the demos' rows below it. */
+#master-demo-table tr.queue-totals-row td {
+  font-weight: 600;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border-color);
+}
+
+#master-demo-table tr.queue-totals-row td.col-center {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#master-demo-table tr.queue-totals-row td.queue-totals-name {
+  color: var(--text-subtle);
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of
@@ -653,16 +1126,53 @@ button.primary-btn:hover:not(:disabled) {
   font-size: 0.8em;
   white-space: normal;
   word-break: break-word;
+  /* Wide enough that a timeline line isn't broken mid-number beside Notes (#46). */
+  min-width: 7em;
 }
 
 .table-row-selected {
-  background: rgba(43, 92, 143, 0.3) !important;
+  background: var(--accent-wash-30) !important;
 }
 
 .table-empty {
   text-align: center;
   color: var(--text-muted);
   padding: 16px !important;
+}
+
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 /* Configuration Tabs */
@@ -675,8 +1185,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .config-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -684,16 +1194,16 @@ button.primary-btn:hover:not(:disabled) {
 
 .config-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .config-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .config-tab-content {
@@ -799,7 +1309,7 @@ button.primary-btn:hover:not(:disabled) {
 /* The two fixed kill anchors (0.0s and the illustrative streak end) stand
    out from the four fields' derived offsets around them. */
 .timing-diagram-anchor td {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -811,7 +1321,7 @@ button.primary-btn:hover:not(:disabled) {
 #pinned-action-bar {
   display: flex;
   align-items: flex-start;
-  background: #161616;
+  background: var(--surface-well);
   border-top: 1px solid var(--border-color);
   padding: 6px 12px;
   min-height: 40px;
@@ -902,11 +1412,40 @@ button.primary-btn:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
+/* OBS mode's live drop rate (#172), under the status line. */
+#obs-drop-rate {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#obs-drop-rate[hidden] {
+  display: none;
+}
+
+#obs-drop-rate.lagging {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* The kill feed's even layout can't draw (#1339), under the status line. */
+#killfeed-layout-warning {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+#killfeed-layout-warning[hidden] {
+  display: none;
+}
+
 #export-pool-free-indicator,
 #render-footer-pool-free,
 #footer-audit-summary {
   font-weight: bold;
-  color: #4caf50;
+  color: var(--ok);
   font-size: 12px;
 }
 
@@ -938,7 +1477,7 @@ button.primary-btn:hover:not(:disabled) {
 .progress-bar-container {
   width: 100%;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-raised);
   border-radius: 2px;
   overflow: hidden;
   margin-top: 6px;
@@ -948,6 +1487,44 @@ button.primary-btn:hover:not(:disabled) {
   height: 100%;
   background: var(--primary-accent);
   transition: width 0.2s ease-in-out;
+}
+
+/* Working, with nothing to measure against yet (the Duplicates audit's
+   first folder walk): a short block slides across instead of a width. */
+.progress-bar-container.indeterminate .progress-bar-fill {
+  width: 30% !important;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(333%); }
+}
+
+/* A job's steps so far, with the block sliding over the running step's
+   share only (step_bar.js, #956). */
+.progress-bar-container.step-bar {
+  position: relative;
+}
+
+.progress-bar-step {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.progress-bar-step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: var(--primary-accent);
+  opacity: 0.6;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
 }
 
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
@@ -982,11 +1559,11 @@ button.primary-btn:hover:not(:disabled) {
 
 .list-editor-browse-btn:hover,
 .list-editor-move-btn:hover:not(:disabled) {
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .list-editor-remove-btn:hover {
-  color: #ef4444;
+  color: var(--danger-bright);
 }
 
 .list-editor-move-btn:disabled {
@@ -998,6 +1575,10 @@ button.primary-btn:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.demo-link-console {
+  user-select: text;
 }
 
 /* Small inline scan/audit-in-progress indicator */
@@ -1023,11 +1604,18 @@ button.primary-btn:hover:not(:disabled) {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--scrim);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* A confirmation opens on top of whichever modal asked for it (#356). With
+   every .modal at 1000, DOM order decided, and a modal declared after this
+   one (Clear Previews) covered the confirm it opened. */
+#themed-confirm-modal {
+  z-index: 1100;
 }
 
 .modal-content {
@@ -1072,13 +1660,13 @@ button.primary-btn:hover:not(:disabled) {
   gap: 4px;
   flex-shrink: 0;
   padding: 8px 12px;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
 }
 
 .capture-detail-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1086,8 +1674,8 @@ button.primary-btn:hover:not(:disabled) {
 
 .capture-detail-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Matches button.primary-btn:hover's own override below — the generic
@@ -1096,8 +1684,8 @@ button.primary-btn:hover:not(:disabled) {
    the active tab's blue background would flip to the generic hover gray. */
 .capture-detail-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* ── Demo Analyzer ─────────────────────────────────────────────────────────── */
@@ -1112,8 +1700,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1121,16 +1709,16 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .analyzer-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .analyzer-tab-content {
@@ -1145,9 +1733,15 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
 }
 
+/* Under "Analyzing demo… 40%" while a demo opens (analyzer_loading.js). */
+.analyzer-loading-bar {
+  max-width: 320px;
+  margin: -12px auto 0;
+}
+
 .analyzer-heading {
   font-size: 15px;
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 10px;
 }
 
@@ -1157,7 +1751,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-section-title {
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 4px;
   margin-bottom: 6px;
@@ -1184,7 +1778,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-kv-table .kv-value {
   padding: 3px 0;
-  color: #eee;
+  color: var(--text-emphasis);
 }
 
 .analyzer-kv-table thead th {
@@ -1201,8 +1795,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
@@ -1212,13 +1806,13 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 .scoreboard-group-header td {
   padding-top: 10px;
   font-weight: 700;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .scoreboard-spacer-row td {
@@ -1227,23 +1821,64 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .scoreboard-player-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--wash-05);
 }
 
 .analyzer-total-row td {
   border-top: 1px solid var(--border-color);
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .analyzer-warning-banner {
-  background: rgba(251, 191, 36, 0.12);
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  color: #fbbf24;
+  background: var(--warn-gold-wash-12);
+  border: 1px solid var(--warn-gold-line);
+  color: var(--warn-gold);
   border-radius: 3px;
   padding: 8px 12px;
   font-size: 12px;
   margin-bottom: 10px;
+}
+
+/* #217: a demo that recorded more than one map, above every analyzer tab. */
+.analyzer-multimap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.analyzer-multimap-banner[hidden] {
+  display: none;
+}
+
+.analyzer-multimap-text {
+  flex: 1 1 320px;
+}
+
+/* Already split: a quiet line, not a warning. */
+.analyzer-multimap-banner.analyzer-multimap-quiet {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-dim);
+  cursor: help;
+}
+
+/* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
+.split-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.split-progress .progress-bar-container {
+  margin-top: 0;
+}
+
+.split-progress-text {
+  font-size: 0.9em;
+  color: var(--text-muted);
 }
 
 .analyzer-toolbar {
@@ -1264,7 +1899,7 @@ button.primary-btn:hover:not(:disabled) {
 .analyzer-hero-name {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .analyzer-hero-sub {
@@ -1274,7 +1909,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-hero-links a {
-  color: #4a90e2;
+  color: var(--link);
   text-decoration: underline;
 }
 
@@ -1286,7 +1921,281 @@ button.primary-btn:hover:not(:disabled) {
   padding-top: 8px;
   border-top: 1px solid var(--border-color);
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-secondary);
+}
+
+/* #207: a demo this install's game can't play. #920: one with no camera data. */
+.entity-limit-badge,
+.no-camera-badge {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: help;
+}
+
+/* #217: a queued demo with more than one map; the badge is the Split button. */
+.multimap-split-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--warn-gold);
+  background: transparent;
+  border: 1px solid var(--warn-gold);
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:hover:not(:disabled) {
+  background: var(--warn-gold-wash-15);
+}
+
+.multimap-split-progress {
+  min-width: 160px;
+  flex-shrink: 0;
+  font-weight: normal;
+}
+
+.multimap-split-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* #15: a queued demo damaged partway; the badge is the Repair button. */
+.damaged-repair-hint {
+  gap: 4px;
+}
+
+.damaged-repair-hint[hidden] {
+  display: none;
+}
+
+.damaged-repair-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--danger-light);
+  background: transparent;
+  border: 1px solid var(--danger-light);
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:disabled:not([data-splitting]),
+.analyzer-multimap-split:disabled[title] {
+  cursor: not-allowed;
+}
+
+.damaged-repair-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.analyzer-damage-repair,
+.analyzer-damage-cannot-repair,
+.analyzer-damage-already-split {
+  margin-left: 8px;
+}
+
+.repair-table td {
+  vertical-align: top;
+}
+
+.repair-result-cell .repair-progress {
+  min-width: 200px;
+}
+
+.repair-result {
+  margin-left: 6px;
+}
+
+.multimap-hint {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* A multi-map demo whose maps were already split next to it: quiet, not a warning. */
+.multimap-split-note {
+  font-size: 0.75em;
+  font-weight: normal;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.multimap-hint [hidden] {
+  display: none;
+}
+
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Last Batch (#172). */
+.batch-results {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--wash-03);
+}
+
+.batch-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-results-close {
+  padding: 0 6px;
+}
+
+.batch-results-summary {
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.batch-results-error {
+  color: var(--danger-light);
+}
+
+.batch-results-wrap {
+  max-height: 220px;
+}
+
+.batch-results-row-missing td:first-child,
+.batch-results-row-failed td:first-child {
+  color: var(--danger-light);
+}
+
+.batch-results-row-unrenderable td:first-child,
+.batch-results-row-cut_short td:first-child,
+.batch-results-row-late td:first-child,
+.batch-results-row-short td:first-child,
+.batch-results-row-short_plan td:first-child {
+  color: var(--warn);
+}
+
+/* Not a problem: the batch ended before it got there (#1434). */
+.batch-results-row-not_reached td:first-child {
+  color: var(--text-muted);
+}
+
+.batch-results-row-ok td:first-child {
+  color: var(--ok-light);
+}
+
+.batch-results-obs-lagging {
+  color: var(--warn);
+}
+
+/* The Commands tab's type-ahead (#215). */
+.command-suggest {
+  position: absolute;
+  z-index: 1200;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px var(--shade-40);
+  font-size: 12px;
+}
+
+.command-suggest-item {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.command-suggest-item.active,
+.command-suggest-item:hover {
+  background: var(--wash-08);
+}
+
+.command-suggest-name {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.command-suggest-meta {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.command-suggest-refused .command-suggest-name {
+  color: var(--danger-light);
+  text-decoration: line-through;
+}
+
+.command-suggest-refused .command-suggest-meta,
+.command-suggest-warned .command-suggest-meta {
+  color: var(--warn);
+}
+
+.command-suggest-noop .command-suggest-name {
+  opacity: 0.6;
 }
 
 /* #192: the Flags tab. */
@@ -1310,7 +2219,7 @@ button.primary-btn:hover:not(:disabled) {
   align-items: center;
   margin-top: 8px;
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .analyzer-copy-btn {
@@ -1343,7 +2252,7 @@ button.primary-btn:hover:not(:disabled) {
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   margin-top: 4px;
 }
 
@@ -1366,7 +2275,7 @@ button.primary-btn:hover:not(:disabled) {
   display: inline-block;
   width: 60px;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-raised);
   border-radius: 2px;
   overflow: hidden;
   vertical-align: middle;
@@ -1379,12 +2288,12 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-progress-label {
   font-size: 10.5px;
-  color: #999;
+  color: var(--text-quiet);
   margin-left: 4px;
 }
 
 .killstreak-subrow td {
-  color: #999;
+  color: var(--text-quiet);
   border-bottom: none;
 }
 
@@ -1441,13 +2350,13 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-killmap circle {
-  stroke: #000;
+  stroke: var(--surface-black);
   stroke-width: 1.5;
   cursor: default;
 }
 
 .analyzer-killmap circle:hover {
-  stroke: #fff;
+  stroke: var(--text-strong);
   stroke-width: 2.5;
 }
 
@@ -1500,7 +2409,7 @@ button.primary-btn:hover:not(:disabled) {
 .analyzer-chat-log {
   max-height: 60vh;
   overflow-y: auto;
-  background: #141414;
+  background: var(--surface-sunken);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 6px 10px;
@@ -1513,7 +2422,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .chat-timestamp {
-  color: #666;
+  color: var(--text-faint);
   font-family: monospace;
   margin-right: 4px;
 }
@@ -1541,14 +2450,15 @@ button.primary-btn:hover:not(:disabled) {
   min-height: 0;
 }
 
-/* Drag handle between the Explorer sidebar and the main column — JS-driven
-   (analyzer_pane.js) rather than native CSS `resize` so width can persist
+/* Drag handle between two panels (Explorer sidebar / main column, Capture
+   Studio's two panes, the Analyzer's Demos / report) — JS-driven
+   (split_resize.js) rather than native CSS `resize` so the size can persist
    to settings.json the same way every other layout preference does. Sized
    to the standard 10px .content-pane gap (see #pane-demo-analyzer above)
    with a thin 1px line centered inside it, rather than an extra bar on top
    of that gap — keeps the resting look identical to every other split in
    the app, only revealing itself as interactive on hover/drag. */
-.analyzer-resize-handle {
+.split-handle {
   width: 10px;
   flex-shrink: 0;
   cursor: col-resize;
@@ -1556,17 +2466,40 @@ button.primary-btn:hover:not(:disabled) {
   justify-content: center;
 }
 
-.analyzer-resize-handle::before {
+.split-handle::before {
   content: "";
   width: 1px;
   align-self: stretch;
   background: var(--border-color);
 }
 
-.analyzer-resize-handle:hover::before,
-.analyzer-resize-handle.resizing::before {
+.split-handle:hover::before,
+.split-handle.resizing::before {
   width: 2px;
   background: var(--primary-accent);
+}
+
+/* The horizontal variant sits in the column's 10px gaps (-10px margins give
+   back the handle's own height), so the resting look is the usual gap. */
+.split-handle-row {
+  width: auto;
+  height: 10px;
+  margin: -10px 0;
+  cursor: row-resize;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.split-handle-row::before {
+  width: auto;
+  height: 1px;
+  align-self: stretch;
+}
+
+.split-handle-row:hover::before,
+.split-handle-row.resizing::before {
+  width: auto;
+  height: 2px;
 }
 
 .analyzer-main-column {
@@ -1642,12 +2575,12 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .quicklink-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--wash-06);
 }
 
 .quicklink-row.selected {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .quicklink-pin-btn {
@@ -1701,12 +2634,12 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .tree-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash-04);
 }
 
 .tree-row.selected .tree-label {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .tree-toggle {
@@ -1732,7 +2665,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .tree-children {
   margin-left: 13px;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 1px solid var(--wash-06);
   padding-left: 4px;
 }
 
@@ -1756,7 +2689,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-explorer-settings summary:hover {
-  color: #dddddd;
+  color: var(--text-soft);
 }
 
 .settings-checkbox-row {
@@ -1797,7 +2730,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-table th[data-sort]:hover {
-  color: #dddddd;
+  color: var(--text-soft);
 }
 
 .analyzer-demo-row {
@@ -1805,12 +2738,12 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-demo-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--wash-06);
 }
 
 .analyzer-demo-row.selected {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .text-muted {
@@ -1819,7 +2752,7 @@ button.primary-btn:hover:not(:disabled) {
 
 /* Keyboard Navigation Highlight */
 tr.keyboard-selected {
-  outline: 1px solid #4a90e2;
+  outline: 1px solid var(--link);
   outline-offset: -1px;
   background-color: transparent !important;
 }
@@ -1831,7 +2764,14 @@ tr.keyboard-selected {
   margin: -4px 0 6px 0;
   padding-left: 2px;
   font-size: 0.85em;
-  color: #ffa726;
+  color: var(--warn-orange);
+}
+
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
 }
 
 /* HD Textures page (#372). */
@@ -1857,11 +2797,44 @@ tr.keyboard-selected {
   padding: 5px 12px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: var(--warn);
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hd-style-coverage,
+.hd-outdated,
+.hd-gl-max-size-low {
+  color: var(--warn);
+}
+
+.hd-style-maps summary {
+  cursor: pointer;
+}
+
+.hd-style-maps-groups p {
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-progress {
+  width: 100%;
 }
 
 #hd-status-table th {
-  color: #aaaaaa;
+  color: var(--text-subtle);
   font-weight: 600;
   border-bottom-color: var(--border-color);
 }
@@ -1918,3 +2891,1973 @@ tr.keyboard-selected {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* Demo Auditor tabs (#624): one per tool, under the shared folder picker. */
+.auditor-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.auditor-tab-btn {
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.auditor-tab-btn.active {
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* Split Maps (#624). */
+.split-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  max-width: 80ch;
+}
+
+.split-recursive-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.split-demo {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.split-demo-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.split-demo-name {
+  overflow-wrap: anywhere;
+}
+
+.split-demo-meta {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+/* The app's table style (analyzer-table), sized to its content. */
+.split-maps.analyzer-table {
+  width: auto;
+  min-width: 420px;
+  margin: 8px 0;
+}
+
+.split-maps th {
+  position: static;
+}
+
+.split-map-num,
+.split-map-when {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.split-done td {
+  opacity: 0.75;
+}
+
+.split-map-done {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.split-done-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid var(--ok-update);
+  border-radius: 10px;
+  color: var(--ok-update);
+}
+
+.split-short td {
+  opacity: 0.6;
+}
+
+/* The result goes under the button, not beside it. */
+.split-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.split-result {
+  font-size: 0.9em;
+}
+
+.split-written {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.split-reveal {
+  margin-left: 6px;
+  font-size: 0.85em;
+}
+
+/* ── Overviews page (#371) ─────────────────────────────────────────────── */
+#pane-overviews {
+  flex: 1;
+  min-height: 0;
+}
+
+.ov-layout {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.ov-side {
+  width: 250px;
+  flex: 0 0 250px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ov-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ov-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ov-canvas-wrap {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#ov-canvas {
+  image-rendering: auto;
+  cursor: crosshair; /* overviews_pane.js sets it by what a click would do */
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
+.ov-sp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-sp-colours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-sp-colours label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ov-sp-colours input[type='color'] {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+}
+
+#ov-sp-reset {
+  align-self: flex-start;
+}
+
+.ov-zoom {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.ov-zoom button {
+  min-width: 28px;
+}
+
+#ov-zoom-fit {
+  min-width: 52px;
+}
+
+.ov-tools-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ov-mode.active,
+#ov-clear-colour-btn.active {
+  outline: 2px solid var(--primary-accent);
+}
+
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-field.ov-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-subtitle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+
+.ov-map-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.ov-map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.ov-map-row span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-map-row.active {
+  background: var(--bg-input);
+}
+
+.ov-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.ov-badge-ours {
+  color: var(--ok-bright);
+  border-color: var(--ok-bright);
+}
+
+.ov-badge-edited {
+  color: var(--warn-lime);
+  border-color: var(--warn-lime);
+}
+
+.ov-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.ov-swatch {
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--surface-black);
+  border-radius: 3px;
+}
+
+.ov-recent-row,
+.ov-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-colour-row {
+  justify-content: space-between;
+}
+
+.ov-recent {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-height: 20px;
+  align-items: center;
+}
+
+#ov-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+}
+
+.ov-recent .ov-swatch {
+  width: 20px;
+  height: 20px;
+}
+
+.ov-swatch.active {
+  outline: 2px solid var(--text-strong);
+}
+
+.ov-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.ov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-label-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ov-label-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-flag-row {
+  display: flex;
+  gap: 4px;
+}
+
+/* A Show checkbox with a reset beside it (the map title). */
+.ov-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-credit-row {
+  margin-left: 20px;
+}
+
+.ov-check-row .ov-flag-reset {
+  padding: 0 6px;
+  line-height: 1.3;
+}
+
+.ov-flag-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-label-row.active input {
+  outline: 1px dashed var(--warn-yellow);
+}
+
+.ov-add-label {
+  align-self: flex-start;
+}
+
+/* A map's scene being built: what and how far, where the map will be. */
+.ov-building {
+  width: min(360px, 80%);
+  text-align: center;
+}
+
+/* The side panel scrolls, which clips an outline drawn outside the button. */
+.ov-add-label.active {
+  outline-offset: -2px;
+}
+
+/* One line of code beside its Copy button. */
+.hd-code-inline {
+  margin: 0;
+  min-width: 16em;
+}
+
+.hd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The style comparison sheet: 1:1 pixels in a scrolling box, or fitted. */
+.hd-preview-wrap {
+  margin-top: 8px;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  background: var(--surface-black);
+}
+
+.hd-preview-wrap img {
+  display: block;
+  cursor: zoom-out;
+  image-rendering: pixelated;
+}
+
+.hd-preview-fit img {
+  width: 100%;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
+}
+
+/* The map list: every map in dod\maps, ticked when the list picks it. */
+.hd-maps-mode {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 6px;
+}
+
+/* The list's lines as chips, across and down. */
+.hd-map-patterns {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.hd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+
+.hd-chip-name {
+  font-family: monospace;
+}
+
+.hd-chip-count {
+  color: var(--text-muted);
+}
+
+.hd-pattern-unused {
+  border-color: var(--warn-amber);
+}
+
+.hd-pattern-unused .hd-chip-count {
+  color: var(--warn-amber);
+}
+
+.hd-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.hd-chip-x:hover {
+  color: var(--text-strong);
+}
+
+/* Clicking a map's box that a pattern picked points at the pattern's chip. */
+.hd-chip-flash {
+  animation: hd-chip-flash 1.2s ease-out;
+}
+
+@keyframes hd-chip-flash {
+  0%, 60% { background: var(--ok-pattern-dim); border-color: var(--hd-tick-pattern); }
+  100% { background: var(--bg-input); border-color: var(--border-color); }
+}
+
+/* A map a pattern picked: its tick and its mark in the pattern colour,
+   against the browser's blue for a map with its own line. The legend beside
+   "Picked only" is two drawn ticks in the same two colours. */
+:root {
+  --hd-tick-own: var(--primary-accent);
+  --hd-tick-pattern: var(--ok-pattern);
+}
+
+/* Outranks the global input[type="checkbox"] accent rule at the top. */
+input[type="checkbox"].hd-box-pattern {
+  accent-color: var(--hd-tick-pattern);
+}
+
+.hd-map-via {
+  color: var(--hd-tick-pattern);
+  margin-left: -3px;
+  flex-shrink: 0;
+}
+
+.hd-map-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-map-legend .hd-tick + span {
+  margin-right: 8px;
+}
+
+.hd-tick {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  text-align: center;
+  line-height: 13px;
+  font-size: 11px;
+  color: var(--text-strong);
+}
+
+.hd-tick::after {
+  content: "\2713";
+}
+
+.hd-tick-own {
+  background: var(--hd-tick-own);
+}
+
+.hd-tick-pattern {
+  background: var(--hd-tick-pattern);
+}
+
+.hd-map-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  column-gap: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.hd-map-list li {
+  min-width: 0;
+}
+
+.hd-map-list label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+  min-width: 0;
+}
+
+.hd-map-name {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hd-map-list .hd-miss-detail {
+  margin-left: auto;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.hd-map-list.hd-map-list-off label {
+  opacity: 0.75;
+}
+
+/* Misses view: one collapsible block per map. */
+.hd-miss-map {
+  border-top: 1px solid var(--border-faint);
+  padding: 6px 0;
+}
+
+.hd-miss-map summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.hd-miss-heading {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+
+.hd-miss-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-miss-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0;
+}
+
+.hd-miss-type {
+  min-width: 90px;
+  color: var(--text-muted);
+}
+
+.hd-miss-detail {
+  color: var(--text-muted);
+}
+
+/* Highlight Details' Notes (#605): notes are clip descriptions of a sentence
+   or two, so the column takes the room and the box wraps; drag its corner
+   to make it bigger. A class, not a column position, so a new column doesn't
+   move the width onto the wrong one. */
+#detail-streaks-table th.col-notes {
+  width: 30%;
+}
+
+/* Clip names are long (demo, player, kills), so the Clip Name column grows
+   with the row instead of staying at the input's minimum (#46). */
+#detail-streaks-table th.col-clip-name {
+  width: 25%;
+}
+
+#detail-streaks-table td.streak-duration {
+  white-space: nowrap;
+}
+
+/* What was going on at the flags at the highlight's kills (#1132,
+   flag_tags.js): small chips after the kill count. */
+.flag-tag-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 0.75em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.streak-notes-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 200px;
+  min-height: 3.2em;
+  resize: both;
+  padding: 2px 4px;
+  background: var(--surface-inset);
+  color: var(--text-strong);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Demo Auditor: Rename Demos (#469). */
+.rename-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rename-label {
+  min-width: 90px;
+}
+
+.rename-template {
+  flex: 1;
+  font-family: monospace;
+}
+
+.rename-errors {
+  margin: 2px 0 4px;
+  color: var(--danger-light);
+}
+
+/* One row per placeholder group: its label, then its chips (#469), under
+   both name templates (#751, placeholder_chips.js). */
+.placeholder-chips {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 4px 0 8px;
+  font-size: 0.85em;
+}
+
+.placeholder-chip-group-label {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  text-align: right;
+}
+
+.placeholder-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.placeholder-chip {
+  padding: 1px 6px;
+  font-family: monospace;
+  font-size: 1em;
+}
+
+/* A placeholder the focused template's demo type doesn't have. */
+.placeholder-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The Master Queue grouped by match (#685): one header line per match. */
+#master-demo-table .queue-match-header td {
+  padding: 6px 8px 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--wash-03);
+  cursor: default;
+}
+
+/* The list: the shared .analyzer-table look, with fixed columns so the two
+   names share the width evenly and a long one ends in … (full on hover). */
+.rename-table {
+  table-layout: fixed;
+}
+
+.rename-table .rename-col-check {
+  width: 34px;
+}
+
+.rename-table .rename-col-type {
+  width: 64px;
+}
+
+.rename-table th.rename-center,
+.rename-table td.rename-center {
+  text-align: center;
+}
+
+.rename-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-table tbody tr:hover {
+  background: var(--wash-04);
+}
+
+.rename-table tr.rename-unticked td {
+  opacity: 0.45;
+}
+
+#rename-table td.rename-new {
+  color: var(--ok-lighter);
+}
+
+#rename-table td.rename-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+#rename-table td.rename-numbered {
+  color: var(--warn);
+}
+
+.rename-type {
+  display: inline-block;
+  min-width: 36px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.rename-type-pov {
+  color: var(--info-light);
+  background: var(--info-light-wash);
+}
+
+.rename-type-hltv {
+  color: var(--purple);
+  background: var(--purple-wash);
+}
+
+/* ── Setup window and checklist card (#599) ─────────────────────────────── */
+.setup-modal-content {
+  max-width: 600px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.setup-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* One bar per step: grey to come, blue now, green done. */
+.setup-steps {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.setup-steps li {
+  flex: 1 1 70px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-steps li::before {
+  content: "";
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-accent);
+}
+
+.setup-steps li.done::before { background: var(--ok-setup); }
+.setup-steps li.now::before { background: var(--info); }
+.setup-steps li.now { color: var(--text-strong); }
+
+.setup-content {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+}
+
+.setup-content p {
+  margin: 0;
+}
+
+.setup-footer {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.setup-footer-spacer {
+  flex: 1;
+}
+
+/* "Skip setup for now": a link, not a button, so Next stays the obvious one. */
+button.setup-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  padding: 4px 0;
+}
+
+button.setup-skip:hover:not(:disabled) {
+  background: none;
+  color: var(--text-strong);
+}
+
+.setup-note {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.setup-note.info { border-color: var(--info-border); }
+.setup-note.warn { border-color: var(--warn-border); color: var(--warn); }
+.setup-note.ok { border-color: var(--ok-border); }
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setup-path-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.setup-path {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 5px 8px;
+  /* A long path wraps at its folder separators (setup_window.js adds a
+     <wbr> after each), never behind a scrollbar. */
+  overflow-wrap: anywhere;
+}
+
+.setup-path-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-path.empty {
+  color: var(--text-muted);
+  font-family: inherit;
+  font-style: italic;
+}
+
+.setup-path .setup-free {
+  color: var(--text-muted);
+  font-family: inherit;
+  margin-left: 8px;
+}
+
+.setup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.setup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.setup-dot.ok { background: var(--ok-setup); }
+.setup-dot.warn { background: var(--warn); }
+.setup-dot.bad { background: var(--danger); }
+
+.setup-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-accent);
+  white-space: nowrap;
+}
+
+.setup-chip.info { border-color: var(--info); color: var(--info); }
+.setup-chip.ok { border-color: var(--ok-setup); color: var(--ok-setup); }
+.setup-chip.warn { border-color: var(--warn); color: var(--warn); }
+
+.setup-btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
+}
+
+.setup-muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The Highlights tab's card. */
+.setup-card {
+  margin: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-accent);
+  border-radius: 3px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-card[hidden] {
+  display: none;
+}
+
+.setup-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+
+.setup-card-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.setup-meter {
+  flex: 1 1 100px;
+  height: 6px;
+  background: var(--surface-menu);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.setup-meter i {
+  display: block;
+  height: 100%;
+  background: var(--info);
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.setup-row.done {
+  opacity: 0.7;
+}
+
+.setup-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.setup-tick {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-on-light);
+  box-sizing: border-box;
+}
+
+.setup-tick.ok { background: var(--ok-setup); }
+.setup-tick.todo { border: 1.5px solid var(--warn); }
+.setup-tick.opt { border: 1.5px dashed var(--border-accent); }
+
+
+.setup-row-text {
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* Configuration > Players (#428): one row per player -- name, spray,
+   crosshair, remove x -- and the crosshair tile picker under it. */
+.players-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 6px;
+}
+
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.players-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.players-use-as {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.players-nameplate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.players-nameplate-pick {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
+.players-nameplate-pick.missing {
+  color: var(--warn-ochre);
+}
+
+.players-nameplate-clear {
+  padding: 0 4px;
+}
+
+.players-head {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.players-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.players-crosshair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.players-crosshair select {
+  min-width: 0;
+  max-width: 160px;
+}
+
+.players-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.players-tile-preview {
+  width: 24px;
+  height: 24px;
+  background: repeating-conic-gradient(var(--border-accent) 0% 25%, var(--border-soft) 0% 50%) 50% / 8px 8px;
+  border-radius: 3px;
+}
+
+.players-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 4px 12px;
+}
+
+.players-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 48px);
+  grid-template-rows: repeat(4, 48px);
+  width: 192px;
+  height: 192px;
+  background: repeating-conic-gradient(var(--border-accent) 0% 25%, var(--border-soft) 0% 50%) 50% / 16px 16px;
+}
+
+.players-grid-image {
+  position: absolute;
+  inset: 0;
+  width: 192px;
+  height: 192px;
+  pointer-events: none;
+}
+
+.players-cell {
+  position: relative;
+  border: 1px solid var(--wash-15);
+  background: transparent;
+  color: var(--text-on-dark-55);
+  font-size: 10px;
+  text-align: left;
+  vertical-align: top;
+  padding: 2px 3px;
+  cursor: pointer;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.players-grid-numbers .players-cell {
+  color: var(--text-strong);
+  font-size: 13px;
+  text-align: center;
+}
+
+.players-cell:hover {
+  border-color: var(--accent-alt);
+}
+
+.players-cell.selected {
+  border: 2px solid var(--accent-alt);
+  color: var(--text-strong);
+}
+
+.players-picker-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+.players-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.players-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.players-x:hover {
+  color: var(--text-strong);
+}
+
+/* The HLTV box's "Players I pick" (#828): the lists that add a player or a
+   team stay together; the picked players, as chips with an x, take a line
+   of their own at the end of the toolbar, so more chips never move the
+   lists (#845). */
+.review-hltv-pick {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/* Fixed widths: a list sized to its longest name narrows as players are
+   picked out of it, and the lists after it shift. */
+#review-hltv-add-player {
+  width: 200px;
+}
+
+#review-hltv-add-team {
+  width: 160px;
+}
+
+.review-hltv-pick[hidden],
+.review-hltv-chips[hidden] {
+  display: none;
+}
+
+.review-hltv-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.review-hltv-chips-row {
+  flex-basis: 100%;
+}
+
+.review-hltv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+
+/* Picked, but no highlight in the queue's HLTV demos right now. */
+.review-hltv-chip-away {
+  opacity: 0.5;
+}
+
+.review-hltv-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.review-hltv-chip-x:hover {
+  color: var(--text-strong);
+}
+
+.review-hltv-none {
+  color: var(--text-muted);
+}
+
+/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+.audit-folder-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.audit-folder-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.audit-folder-path {
+  word-break: break-all;
+}
+
+/* All drives walks every fixed drive, so the list doesn't apply: dimmed, not hidden. */
+.audit-folder-list.dimmed {
+  opacity: 0.45;
+}
+
+/* Dropping demos from Windows (#530): both zones show while dragging, the
+   one under the pointer more. */
+.drop-zone-active {
+  outline: 2px dashed var(--focus-line);
+  outline-offset: -2px;
+}
+
+.drop-zone-hover {
+  outline: 2px solid var(--focus);
+  background: var(--focus-wash);
+}
+
+.audit-all-drives, .scan-subfolders {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* Duplicates (#844): a group's header row stands out from its files, and the
+   row buttons are the compact kind the render list uses. */
+.audit-table .audit-group-row td {
+  background: var(--surface-row);
+  border-top: 1px solid var(--border-color);
+}
+
+.audit-table .group-toggle-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.audit-table .audit-file-path {
+  word-break: break-all;
+}
+
+/* A loose demo an archive (.zip, .7z, .rar) holds a copy of (#929). */
+.audit-backup-chip {
+  font-size: 0.8em;
+  padding: 0 7px;
+  border: 1px solid var(--info);
+  border-radius: 10px;
+  color: var(--info);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.audit-table th:nth-child(1) { width: 32px; }
+.audit-table th:nth-child(2) { width: 210px; }
+.audit-table th:nth-child(3) { width: 90px; }
+.audit-table th:nth-child(5) { width: 200px; }
+
+.audit-table .audit-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3),
+.audit-table td:last-child {
+  white-space: nowrap;
+}
+
+.audit-table td:last-child button {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.audit-status-current {
+  font-size: 0.9em;
+  word-break: break-all;
+}
+
+/* Setup's Make a movie copy dialog (#939), movie_copy_ui.js. Over the Setup
+   window, under a themed confirm. */
+#movie-copy-modal {
+  z-index: 1050;
+}
+
+.movie-copy-content {
+  max-width: 520px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.movie-copy-content h2 {
+  margin: 0;
+}
+
+.movie-copy-content .setup-footer {
+  padding: 10px 0 0;
+}
+
+.movie-copy-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.movie-copy-status {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-height: 1em;
+}
+
+/* Command profiles (#911): a built-in profile's mark beside the picker, and
+   the one-time notice about a kept copy under the row. */
+.profile-builtin-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.profile-builtin-chip[hidden],
+.profile-notice[hidden] {
+  display: none;
+}
+
+.profile-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
+}
+
+/* Take pictures (#1069): the Render tab's thumbnail, its hover and the
+   contact sheet. 16:9, the shape every capture here is. */
+.rj-thumb {
+  display: block;
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  cursor: zoom-in;
+}
+
+.rj-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.take-preview-hover {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  border: 1px solid var(--border-accent);
+  background: var(--bg-panel);
+  box-shadow: 0 4px 16px var(--shade-60);
+}
+
+.take-preview-hover img {
+  display: block;
+  width: 480px;
+  max-width: 50vw;
+  height: auto;
+}
+
+.take-sheet-content {
+  max-width: 1200px;
+  padding: 20px;
+}
+
+.take-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.take-sheet-grid figure {
+  margin: 0;
+}
+
+.take-sheet-grid img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+}
+
+.take-sheet-grid figcaption {
+  font-size: 0.85em;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+/* Take checks (#1084): the chip under a take's picture and the list on
+   its contact sheet. */
+.rj-check {
+  font-size: 0.8em;
+  line-height: 1.2;
+  margin-top: 2px;
+  cursor: help;
+}
+
+.rj-check:empty {
+  display: none;
+}
+
+.rj-check-ok {
+  color: var(--ok);
+}
+
+.rj-check-warn {
+  color: var(--warn-amber);
+  font-weight: 600;
+}
+
+.rj-check-busy,
+.rj-check-failed {
+  opacity: 0.6;
+}
+
+.take-sheet-checks h3 {
+  margin: 12px 0 4px;
+  font-size: 1em;
+}
+
+.take-sheet-checks ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.take-check-warn {
+  color: var(--warn-amber);
+}
+
+.take-check-note {
+  opacity: 0.8;
+}
+
+.take-check-cause {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+/* What's new (#1013): release notes drawn by whats_new.js. */
+.whats-new-content {
+  max-width: 720px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.whats-new-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 6px;
+}
+
+.whats-new-scroll > h3 {
+  margin: 12px 0 6px;
+  font-size: 14px;
+}
+
+.whats-new-scroll > h3:first-child {
+  margin-top: 4px;
+}
+
+.whats-new-status {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+}
+
+.release-notes {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.release-notes h4 {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--text-strong);
+}
+
+.release-notes h5 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.release-notes ul {
+  margin: 2px 0 6px;
+  padding-left: 18px;
+}
+
+.release-notes li {
+  margin: 2px 0;
+}
+
+.release-notes code {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.release-notes-empty {
+  color: var(--text-muted);
+}
+
+.release-notes-more,
+.whats-new-version {
+  margin: 6px 0;
+}
+
+.release-notes-more > summary,
+.whats-new-version > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.whats-new-version > summary {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.whats-new-version-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.whats-new-version-date {
+  font-size: 12px;
+}
+
+.whats-new-version > .release-notes {
+  padding: 4px 0 8px 14px;
+}
+
+.update-modal-notes {
+  margin-top: 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+}
+
+.update-modal-notes h3 {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+/* A flex summary loses the browser's own triangle, so it draws one. */
+.whats-new-version > summary::before {
+  content: '▸';
+  color: var(--text-muted);
+}
+
+.whats-new-version[open] > summary::before {
+  content: '▾';
+}
+
+/* OBS capture test (#646, obs_capture_test.js). */
+.obs-test-controls {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.obs-test-panel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-card);
+  max-width: 760px;
+}
+
+.obs-test-panel[hidden],
+.obs-test-table[hidden],
+#obs-test-bar[hidden] {
+  display: none;
+}
+
+.obs-test-step {
+  color: var(--text-muted);
+  min-height: 1.2em;
+}
+
+.obs-test-result {
+  white-space: pre-line;
+  margin-top: 6px;
+  user-select: text;
+}
+
+.obs-test-result[data-kind="steady"] { color: var(--ok-steady); }
+.obs-test-result[data-kind="borderline"] { color: var(--warn-sand); }
+.obs-test-result[data-kind="not_steady"],
+.obs-test-result[data-kind="error"] { color: var(--danger-soft); }
+
+.obs-test-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.obs-test-table th,
+.obs-test-table td {
+  padding: 2px 10px 2px 0;
+  text-align: left;
+}
+
+.obs-test-table tr[data-level="steady"] td:nth-child(2) { color: var(--ok-steady); }
+.obs-test-table tr[data-level="borderline"] td:nth-child(2) { color: var(--warn-sand); }
+.obs-test-table tr[data-level="not_steady"] td:nth-child(2) { color: var(--danger-soft); }
+
+#obs-test-apply-btn {
+  margin-top: 8px;
+}
+
+/* Status chip at the end of a Capture Output row (#25). */
+.output-row-status {
+  flex-shrink: 0;
+  margin-left: 6px;
+  /* One width for every chip, so the buttons before it line up row to row. */
+  width: 9.5em;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.output-row-status[hidden] { display: none; }
+.output-row-status-ok { color: var(--ok-light); }
+.output-row-status-note { color: var(--text-muted); }
+.output-row-status-bad { color: var(--danger-light); }
+
+/* Right-click menu (#1111): same look as the File / Help dropdowns. */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--shade-40);
+  outline: none;
+}
+
+.context-menu-item {
+  padding: 6px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+
+.context-menu-item:hover,
+.context-menu-item.active {
+  background: var(--primary-accent);
+  color: var(--text-strong);
+}
+
+.context-menu-item.danger {
+  color: var(--danger-light);
+}
+
+.context-menu-item.danger:hover,
+.context-menu-item.danger.active {
+  color: var(--text-strong);
+}
+
+.context-menu-item.dimmed {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.context-menu-item.dimmed:hover {
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
+}
+
+/* The queue row a menu is open on, and the row the keyboard is on. */
+#master-demo-table-body tr.context-target,
+#master-demo-table-body tr:focus-visible {
+  outline: 1px solid var(--primary-accent);
+  outline-offset: -1px;
+}
+
+/* A field whose value cannot be used (#25): red border and the reason on a line under it. */
+input.field-invalid { border-color: var(--danger-light); }
+.field-error-line {
+  font-size: 0.85em;
+  color: var(--danger-light);
+  margin-top: 2px;
+}
+.field-error-line[hidden] { display: none; }
+.control-group:has(> .field-error-line) { flex-wrap: wrap; }
+.control-group > .field-error-line { flex-basis: 100%; }
+
+/* A Capture Output row whose path cannot be used (#25): red field and the reason under it. */
+.list-editor-row.output-row-invalid { flex-wrap: wrap; }
+.output-row-invalid input { border-color: var(--danger-light); }
+/* Its text style is .field-error-line (field_error.js); this only spans the row. */
+.output-row-detail { flex-basis: 100%; }

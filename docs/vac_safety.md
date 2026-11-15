@@ -12,26 +12,45 @@ injected, what protects each one, and what is still open. It doesn't try to
 say whether any particular action would or wouldn't get an account banned. The
 rules below are deliberately cautious.
 
+Everything DoD Studio does happens offline: the game it starts plays demos and
+never joins a server, and as Valve describes VAC, it acts when a game connects
+to a VAC-secured server. Valve publishes that rule, not what VAC checks or when
+it bans, so everything here is best effort, and what happens once you connect
+from a game with the DLL loaded is outside the project's control. You use DoD
+Studio at your own risk: a banned account is yours to carry, not the project's
+(the README's "Use at your own risk" section, and the MIT licence's no-warranty
+clause). Valve's own page is the authority, Valve Anti-Cheat (VAC) System on
+Steam Support: <https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74>
+
 ## The rules
 
-1. **Keep a separate copy of Half-Life just for movies.** Copy the whole
-   `Half-Life` folder from `steamapps\common` to a new folder (for example
-   `Half-Life - Movies`) and point DoD Studio at that copy's `hl.exe`. Play
-   online only with Steam's own install, and never point DoD Studio at it.
-2. **Only play demos in the movie copy.** Never join a server with it, not even
-   a friend's or an insecure one. If HLAE's "You are about to connect to a
-   server" warning appears, answer **No**.
-3. **Never inject the hook DLL by hand into a game you play online with.**
-   `inject.exe` (below) skips every safeguard DoD Studio has.
+1. **Only play demos in a game DoD Studio started.** Never join a game server
+   from it, not even a friend's or an insecure one. The one exception is
+   watching through an HLTV proxy, which the hook DLL checks and allows (see
+   below). If HLAE's "You are about to connect to a server" warning appears
+   for anything else, answer **No**. To play online, close the game and start
+   Day of Defeat from Steam, without DoD Studio.
+2. **Never load the hook DLL by hand into a game you then play online with.**
+   An injector of your own, into a running game, skips every safeguard DoD
+   Studio has (below).
+
+**Recommended, not required: a separate copy of the `dod` folder for movies.**
+Setup's **Make a movie copy...** button copies the `dod` folder in
+`steamapps\common\Half-Life` to a new one (for example `dod_movies`) and picks
+it as the Game Folder. By hand, copy the `dod` folder the same way, or copy the
+whole `Half-Life` folder to a new folder (for example `Half-Life - Movies`) and
+point DoD Studio at that copy's `hl.exe`. Either keeps movie-only edits (configs, models, sprites, sounds, `.res` files) out
+of the game you play online. It is not a VAC safeguard: what matters is what is
+loaded into the game when it joins a server, whichever folder it runs from.
 
 ## Every way the game is started
 
 | Route | What starts `hl.exe` | What loads into it | Protection today |
 | --- | --- | --- | --- |
-| Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | HLAE's connect warning; `-insecure` |
+| Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | the hook DLL's connect refusal (when ours is found); HLAE's connect warning; `-insecure` |
 | Launch Preview | `launch_demo_preview` → `build_hlae_process` | same | same |
-| Launch Game (HLAE) | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
-| `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | none: no HLAE, so no connect warning |
+| Launch Game | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
+| HLAE's launch line (manual testing, `goldsrc-hooks/README.md`) | the user, through HLAE's `-customLoader` | HLAE's hook plus ours, both given as `-hookDllPath` | the hook DLL's connect refusal; HLAE's connect warning; `-insecure` if the user puts it on the line, as the README's example does |
 
 Every DoD Studio launch goes through the one function,
 `native/src/patch/types.rs`'s `build_hlae_process`. It always starts the game
@@ -70,12 +89,67 @@ compatible with Secure servers.` What exactly it blocks when the game tries to
 join a secure server as a client hasn't been tested, so treat it as a second
 line of defence, not a guarantee.
 
-### The hook DLL loaded without HLAE
+### No injector ships with the hook DLL (#784)
 
-`inject.exe` loads `dodstudio_goldsrc_hooks.dll` into whatever process ID it is
-given. There is no HLAE in that session, so no connect warning, and the DLL
-itself does not check where it is. That is the one route with no protection at
-all. Its README and the tool itself now say so.
+The DLL is loaded only through DoD Studio or HLAE's custom loader
+(`-customLoader -hookDllPath`), which both load it before `hl.exe` runs its
+first instruction. Loaded into a game that is already running, it is too late:
+`client.dll`'s `Initialize` has already run, so the DLL installs nothing, its
+connect refusal (below) included (checked on both builds, #784). That game
+would have our code loaded, no HLAE warning and no protection at all, so the
+repo builds no tool that does it. `goldsrc-hooks/README.md` gives HLAE's
+launch line as the way to load the DLL without DoD Studio.
+
+## The hook DLL refuses to join a server, except an HLTV proxy (#451)
+
+Built from option 1 of the proposals below (decided in the 2026-09-28 review,
+D2). While `dodstudio_goldsrc_hooks.dll` is loaded it wraps the engine's own
+`connect`, `listen`, `retry` and `reconnect` commands, through the SDK's
+command-list functions (no per-build address, both builds), and refuses to
+join anything but an HLTV proxy. The console says why, and the hook log gets a
+`connect_guard: refused ...` line. It is a stop, not a question, and it doesn't
+depend on HLAE's hook.
+
+**HLTV proxies can be joined** (the user's call, 2026-10-05: watching a match
+through HLTV is the one online use wanted with the DLL loaded). Before a
+`connect <address>` or `listen <address>` goes through, the DLL sends the
+address the standard server-info query (`A2S_INFO`) off the game thread, for up
+to 2 seconds. It joins only when the answer says **both** "HLTV proxy" (server
+type `p`) **and** "VAC off". A game server, a proxy that reports VAC on, an
+address that doesn't answer, or one with anything but plain `host:port`
+characters is refused, with the reason in the console. HLAE still asks "You are
+about to connect to a server" on top of that; answer Yes for the proxy.
+
+Read from both builds of `proxy.dll`: the proxy answers the query with type `p`
+and writes its VAC byte as a constant 0, so today every HLTV proxy passes and
+the VAC check is there in case a proxy ever reports otherwise. A proxy that
+isn't relaying a game answers nothing, so it can't be joined.
+
+Read from both `hw.dll`s: every way the game joins a server ends in the
+`connect` command. `retry` queues `connect <last server>` (or `listen`), and
+so do a server's redirect and a Steam join request; the server browser's Join
+button queues `connect <address>` (`ServerBrowser.dll`). So refusing `connect`
+covers the server browser too, though that hasn't been tried live.
+
+What is still allowed:
+
+- **`connect local`**, which is how `map` joins the game's own listen server.
+  No one else can be on it.
+- **`retry`**, always: it only queues `connect` or `listen` for the last
+  address, and that is checked like any other.
+- **`reconnect` after `connect local` or an HLTV proxy.** A `changelevel` on
+  your own map sends `reconnect`.
+- **`reconnect` while a demo plays.** There it joins nothing, so it is left as
+  the engine has it.
+
+Limits:
+
+- A `+connect` on the game's launch line runs before the DLL has wrapped
+  anything. DoD Studio never puts one there.
+- If the DLL can't find `connect` in the engine's command list, nothing is
+  refused, and it says so in the console and the log.
+- `GOLDSRC_HOOKS_ALLOW_CONNECT=1`, set before the game starts, turns it off,
+  for someone who knowingly tests on their own server. The log says so.
 
 ## Warnings added (#373)
 
@@ -83,34 +157,27 @@ all. Its README and the tool itself now say so.
 - **Configuration → Paths:** a warning under *Half-Life Executable* when the
   chosen `hl.exe` is in Steam's own `steamapps\common\Half-Life` folder, which
   is normally the copy people play online with.
-- **`goldsrc-hooks/README.md`, manual testing:** never inject into a game you
-  play online with; this route skips HLAE's warning.
-- **`inject.exe`** prints the same warning every time it runs.
+- **`goldsrc-hooks/README.md`, manual testing:** never load the DLL into a
+  game you play online with, and load it only through HLAE's launch line.
 - **`goldsrc-hooks/tools/hd/README.md`:** the HD images are plain files, but
-  the hook that loads them is the ban risk, so build them into the movie copy.
+  the hook that loads them is the ban risk, so only use them in a game DoD
+  Studio started.
 
-## Proposed, not built: a hard stop
+## Proposed: a hard stop
 
-These change behaviour, so they are for review before anyone builds them.
+These change behaviour, so they were for review before anyone built them.
+Option 1 is built (see above); 2 to 4 are not.
 
-1. **The hook DLL refuses `connect`.** `goldsrc-hooks` already registers
-   console commands. It could wrap the engine's own `connect` handler the way
-   HLAE does and refuse outright, with a console message, rather than asking.
-   This covers `inject.exe` sessions and a failed HLAE hook. The cost: a
-   deliberate connect to a local test server would need an opt-out, for
-   example a `GOLDSRC_HOOKS_ALLOW_CONNECT=1` environment variable.
+1. **The hook DLL refuses `connect`.** Built in #451.
 2. **The hook DLL only activates when DoD Studio started the game.**
    `build_hlae_process` would set an environment variable (say
    `DODSTUDIO_LAUNCHED=1`) and the DLL would install nothing without it. This
    stops the DLL from ever acting in a session DoD Studio didn't start. Manual
-   testing with `inject.exe` would then need that variable set before starting
-   `hl.exe`, the same way its other variables already are.
+   testing through HLAE's launch line would then need that variable set before
+   starting HLAE, the same way its other variables already are.
 3. **Refuse to launch Steam's own install.** Turn the Configuration warning
    into a block that needs a one-time "I understand" to get past. Stronger,
    but it would also stop someone who knowingly keeps only one install for
    demo work and never plays online.
 4. **A one-time notice on first launch** explaining the separate-copy rule,
    stored in settings once acknowledged.
-
-Option 1 is the one that closes the only unprotected route (`inject.exe`) and
-the silent-failure case, without getting in the way of normal use.

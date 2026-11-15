@@ -1,12 +1,12 @@
 //! The analyzer cache every reader of a demo shares: Studio's Demo Analyzer,
 //! its Master Queue scan and highlight scanner, and the in-game hook DLL's
-//! Killstreaks tab (#565). One JSON file per demo,
+//! Highlights tab (#565). One JSON file per demo,
 //! `<root>/v<SCHEMA_VERSION>/<fnv1a of the canonical path>.json`, valid while
 //! the demo's size and modified time match what it records. `<root>` is
 //! `%APPDATA%\dod-studio\analyzer_cache`; callers pass it in, so this crate
 //! needs no app-data lookup of its own.
 //!
-//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`]: who is
+//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`](crate::cache::DemoPlayers): who is
 //! in the demo and who recorded it, a few hundred bytes, so a list of
 //! hundreds of demos can be filtered by player without loading whole analyses
 //! (#437, #174).
@@ -14,15 +14,24 @@
 //! Studio and the DLL can be built from different commits. A schema bump puts
 //! each in its own `v<N>` folder, so a mismatch costs a re-analysis, never a
 //! misread.
+//!
+//! A miss in the current folder looks in the older ones: an entry there for
+//! the demo as it is now is upgraded ([`migrations`]), saved in the current
+//! folder and used, instead of parsing the demo again. The older folder is
+//! left as it is, for an older build still reading it.
 
 use crate::Analysis;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+pub mod migrations;
+
 /// Bump whenever `AnalyzerState`/`Player`/related computed fields change, so
 /// caches written by an older schema are treated as a miss instead of
-/// silently deserializing with new fields missing/defaulted.
-pub const SCHEMA_VERSION: u32 = 5;
+/// silently deserializing with new fields missing/defaulted. When the new
+/// fields can be worked out from an old entry, add a step to
+/// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
+pub const SCHEMA_VERSION: u32 = 16;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -76,20 +85,30 @@ pub fn stamp(demo_path: &Path) -> Option<(u64, u64)> {
 
 /// Where `demo_path`'s entry lives under `root`.
 pub fn entry_path(root: &Path, demo_path: &Path) -> Option<PathBuf> {
-    let canonical = std::fs::canonicalize(demo_path).ok()?;
-    let hash = fnv1a(canonical.to_string_lossy().as_bytes());
-    Some(
-        root.join(format!("v{SCHEMA_VERSION}"))
-            .join(format!("{hash:016x}.json")),
-    )
+    Some(version_dir(root, SCHEMA_VERSION).join(entry_name(demo_path)?))
 }
 
+/// The folder schema `version`'s entries live in.
+fn version_dir(root: &Path, version: u32) -> PathBuf {
+    root.join(format!("v{version}"))
+}
+
+/// The file name of `demo_path`'s entry, the same in every `v<N>` folder.
+fn entry_name(demo_path: &Path) -> Option<String> {
+    let canonical = std::fs::canonicalize(demo_path).ok()?;
+    // The same hash `hl_demo_auditor` named every entry with before this
+    // module existed (`native` tests that the names stay).
+    let hash = crate::fnv1a::fnv1a_hash(canonical.to_string_lossy().as_bytes());
+    Some(format!("{hash:016x}.json"))
+}
+
+/// One entry: the demo file's stamp when it was analysed, and the analysis.
 #[derive(serde::Deserialize)]
-struct Entry {
-    size_bytes: u64,
-    modified_unix_secs: u64,
-    file_info: FileInfo,
-    analysis: Analysis,
+pub struct Entry {
+    pub size_bytes: u64,
+    pub modified_unix_secs: u64,
+    pub file_info: FileInfo,
+    pub analysis: Analysis,
 }
 
 #[derive(serde::Serialize)]
@@ -100,13 +119,249 @@ struct EntryRef<'a> {
     analysis: &'a Analysis,
 }
 
-/// `demo_path`'s cached analysis, if there is one for the file as it is now.
+/// `demo_path`'s cached analysis, if there is one for the file as it is now:
+/// in the current folder, or else upgraded from an older one ([`upgrade`]).
 pub fn load(root: &Path, demo_path: &Path) -> Option<(FileInfo, Analysis)> {
-    let (size_bytes, modified_unix_secs) = stamp(demo_path)?;
-    let bytes = std::fs::read(entry_path(root, demo_path)?).ok()?;
-    let entry: Entry = serde_json::from_slice(&bytes).ok()?;
-    (entry.size_bytes == size_bytes && entry.modified_unix_secs == modified_unix_secs)
-        .then_some((entry.file_info, entry.analysis))
+    let stamp = stamp(demo_path)?;
+    let name = entry_name(demo_path)?;
+    let current = std::fs::read(version_dir(root, SCHEMA_VERSION).join(&name))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Entry>(&bytes).ok())
+        .filter(|entry| (entry.size_bytes, entry.modified_unix_secs) == stamp);
+    match current {
+        Some(entry) => Some((entry.file_info, entry.analysis)),
+        None => upgrade_named(root, &name, stamp).ok(),
+    }
+}
+
+/// How an entry starts: its stamp is its first two keys.
+fn stamp_prefix((size_bytes, modified_unix_secs): (u64, u64)) -> String {
+    format!("{{\"size_bytes\":{size_bytes},\"modified_unix_secs\":{modified_unix_secs},")
+}
+
+/// Whether the entry at `path` is for a file with this stamp, from its first
+/// few hundred bytes rather than the whole entry (megabytes).
+fn starts_with_stamp(path: &Path, stamp: (u64, u64)) -> bool {
+    use std::io::Read;
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = Vec::with_capacity(200);
+    if file.take(200).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    head.starts_with(stamp_prefix(stamp).as_bytes())
+}
+
+/// Whether `demo_path` has an entry for the file as it is now, without
+/// reading the whole entry. For ordering work, e.g. listing the cached demos
+/// of a folder before the ones that need a parse. Only the current folder
+/// counts: an older entry still needs its upgrade ([`has_older_entry`]).
+pub fn is_fresh(root: &Path, demo_path: &Path) -> bool {
+    let (Some(stamp), Some(path)) = (stamp(demo_path), entry_path(root, demo_path)) else {
+        return false;
+    };
+    starts_with_stamp(&path, stamp)
+}
+
+/// Why a demo's entry was not upgraded from an older schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotUpgraded {
+    /// No folder a step upgrades from holds an entry for the file as it is.
+    NoOlderEntry,
+    /// There is one, but a step can't upgrade it ([`migrations::Upgrade`]).
+    NeedsReparse(&'static str),
+}
+
+/// The older schemas an entry can be upgraded from, newest first.
+fn upgradable_versions() -> impl Iterator<Item = u32> {
+    (1..SCHEMA_VERSION)
+        .rev()
+        .filter(|v| migrations::upgrades_from(*v))
+}
+
+/// Whether an older folder a step upgrades from holds an entry for
+/// `demo_path` as it is now, from each candidate's first few hundred bytes.
+pub fn has_older_entry(root: &Path, demo_path: &Path) -> bool {
+    let (Some(stamp), Some(name)) = (stamp(demo_path), entry_name(demo_path)) else {
+        return false;
+    };
+    upgradable_versions().any(|v| starts_with_stamp(&version_dir(root, v).join(&name), stamp))
+}
+
+/// Upgrades `demo_path`'s entry from the newest older folder that has one for
+/// the file as it is now, saves it in the current folder (best-effort, like
+/// [`store`]) and returns it. The older entry stays where it is.
+pub fn upgrade(root: &Path, demo_path: &Path) -> Result<(FileInfo, Analysis), NotUpgraded> {
+    let (Some(stamp), Some(name)) = (stamp(demo_path), entry_name(demo_path)) else {
+        return Err(NotUpgraded::NoOlderEntry);
+    };
+    upgrade_named(root, &name, stamp)
+}
+
+fn upgrade_named(
+    root: &Path,
+    name: &str,
+    stamp: (u64, u64),
+) -> Result<(FileInfo, Analysis), NotUpgraded> {
+    let prefix = stamp_prefix(stamp);
+    let (version, bytes) = upgradable_versions()
+        .find_map(|v| {
+            let bytes = std::fs::read(version_dir(root, v).join(name)).ok()?;
+            bytes.starts_with(prefix.as_bytes()).then_some((v, bytes))
+        })
+        .ok_or(NotUpgraded::NoOlderEntry)?;
+    let entry = upgrade_entry_bytes(version, &bytes).map_err(NotUpgraded::NeedsReparse)?;
+    if (entry.size_bytes, entry.modified_unix_secs) != stamp {
+        return Err(NotUpgraded::NoOlderEntry);
+    }
+    let _ = write_entry(
+        &version_dir(root, SCHEMA_VERSION).join(name),
+        stamp,
+        &entry.file_info,
+        &entry.analysis,
+    );
+    Ok((entry.file_info, entry.analysis))
+}
+
+/// `bytes`, an entry schema `from` wrote, upgraded to the current schema in
+/// memory. Writes nothing, so a dry run can try it on a real cache. `Err` is
+/// why it needs a re-parse instead.
+pub fn upgrade_entry_bytes(from: u32, bytes: &[u8]) -> Result<Entry, &'static str> {
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| "the entry is not valid JSON")?;
+    let Some(analysis) = entry.get_mut("analysis") else {
+        return Err("the entry has no analysis");
+    };
+    if let migrations::Upgrade::NeedsReparse(why) = migrations::upgrade(from, analysis) {
+        return Err(why);
+    }
+    serde_json::from_value(entry).map_err(|_| "the upgraded entry does not load")
+}
+
+/// The order to read a list of demos in, by index: the ones with a fresh
+/// entry first (milliseconds each, so a count jumps to "cached of total" at
+/// once), in list order; then the rest, largest file first, so the last
+/// parses running on several workers are small ones and no worker sits idle
+/// behind one big demo at the end. Results go back in list order; only the
+/// work order changes.
+pub fn work_order(fresh: &[bool], sizes: &[u64]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..fresh.len()).collect();
+    order.sort_by_key(|&i| {
+        let size = sizes.get(i).copied().unwrap_or(0);
+        if fresh[i] {
+            (0, 0)
+        } else {
+            (1, u64::MAX - size)
+        }
+    });
+    order
+}
+
+/// How a scan reads a list of demos: which ones the cache has, each file's
+/// size, and the [`work_order`]. List Demos, Cache all and the Master Queue
+/// scan all build it here so their order can't drift apart (#687).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkPlan {
+    /// Per demo, in list order: [`is_fresh`].
+    pub fresh: Vec<bool>,
+    /// Per demo, in list order: the file's size, 0 when it can't be read.
+    pub sizes: Vec<u64>,
+    /// Indices into the list, in the order to read them.
+    pub order: Vec<usize>,
+}
+
+impl WorkPlan {
+    /// Checks each demo against the cache under `root`: 200 bytes of entry
+    /// per demo, so a whole folder takes a fraction of a second.
+    pub fn new<P: AsRef<Path>>(root: &Path, demos: &[P]) -> Self {
+        let fresh = demos.iter().map(|d| is_fresh(root, d.as_ref())).collect();
+        let sizes = demos
+            .iter()
+            .map(|d| std::fs::metadata(d).map_or(0, |m| m.len()))
+            .collect();
+        Self::from_parts(fresh, sizes)
+    }
+
+    pub fn from_parts(fresh: Vec<bool>, sizes: Vec<u64>) -> Self {
+        let order = work_order(&fresh, &sizes);
+        Self {
+            fresh,
+            sizes,
+            order,
+        }
+    }
+
+    /// Demos the cache has.
+    pub fn cached(&self) -> usize {
+        self.fresh.iter().filter(|f| **f).count()
+    }
+
+    /// The bytes of the demos that need a parse. Progress divides the parse
+    /// time so far by the bytes parsed for its time left: demo sizes vary too
+    /// much (5 MB tests, 90 MB matches) for a time per demo.
+    pub fn bytes_to_parse(&self) -> u64 {
+        self.fresh
+            .iter()
+            .zip(&self.sizes)
+            .filter(|(fresh, _)| !**fresh)
+            .map(|(_, size)| size)
+            .sum()
+    }
+}
+
+/// What reading `demo_path` through the cache will take, from the stat and
+/// the first few hundred bytes of each candidate entry; the demo itself is
+/// never opened. `None` when the demo can't be read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheState {
+    /// A current entry for the file as it is now ([`is_fresh`]).
+    Current,
+    /// An older entry a step upgrades ([`has_older_entry`]). The upgrade can
+    /// still ask for a re-parse, which only the whole entry shows.
+    Upgradable,
+    /// Neither, or the demo changed since: a full parse of this many bytes.
+    NeedsParse(u64),
+}
+
+pub fn cache_state(root: &Path, demo_path: &Path) -> Option<CacheState> {
+    let size = std::fs::metadata(demo_path).ok()?.len();
+    Some(if is_fresh(root, demo_path) {
+        CacheState::Current
+    } else if has_older_entry(root, demo_path) {
+        CacheState::Upgradable
+    } else {
+        CacheState::NeedsParse(size)
+    })
+}
+
+/// What a rescan of a list of demos has to do (#937): how many the cache has,
+/// how many it upgrades, and how many need a full parse, and their bytes. A
+/// demo that can't be read is in none of them: the scan skips it at once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct RescanEstimate {
+    pub cached: u32,
+    pub upgradable: u32,
+    pub to_parse: u32,
+    pub bytes_to_parse: u64,
+}
+
+impl RescanEstimate {
+    pub fn new<P: AsRef<Path>>(root: &Path, demos: &[P]) -> Self {
+        let mut estimate = Self::default();
+        for demo in demos {
+            match cache_state(root, demo.as_ref()) {
+                Some(CacheState::Current) => estimate.cached += 1,
+                Some(CacheState::Upgradable) => estimate.upgradable += 1,
+                Some(CacheState::NeedsParse(bytes)) => {
+                    estimate.to_parse += 1;
+                    estimate.bytes_to_parse += bytes;
+                }
+                None => {}
+            }
+        }
+        estimate
+    }
 }
 
 /// Saves `analysis` as `demo_path`'s entry, and returns where. Best-effort:
@@ -121,8 +376,18 @@ pub fn store(
     file_info: &FileInfo,
     analysis: &Analysis,
 ) -> Option<PathBuf> {
-    let (size_bytes, modified_unix_secs) = stamp(demo_path)?;
     let path = entry_path(root, demo_path)?;
+    write_entry(&path, stamp(demo_path)?, file_info, analysis)?;
+    Some(path)
+}
+
+/// Writes an entry and its players file at `path`.
+fn write_entry(
+    path: &Path,
+    (size_bytes, modified_unix_secs): (u64, u64),
+    file_info: &FileInfo,
+    analysis: &Analysis,
+) -> Option<()> {
     std::fs::create_dir_all(path.parent()?).ok()?;
     let json = serde_json::to_vec(&EntryRef {
         size_bytes,
@@ -131,9 +396,9 @@ pub fn store(
         analysis,
     })
     .ok()?;
-    write_whole(&path, &json)?;
-    let _ = write_players(&path, size_bytes, modified_unix_secs, analysis);
-    Some(path)
+    write_whole(path, &json)?;
+    let _ = write_players(path, size_bytes, modified_unix_secs, analysis);
+    Some(())
 }
 
 /// Writes `bytes` beside `path` and renames it over, so no reader meets a
@@ -181,9 +446,7 @@ struct PlayersEntry {
     demo: DemoPlayers,
 }
 
-fn steam_id_of(id: &str) -> Option<String> {
-    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
-}
+use crate::player::steam_id_of;
 
 /// The players an analysis saw, recorder first, then by name.
 pub fn players_in(analysis: &Analysis) -> DemoPlayers {
@@ -243,6 +506,74 @@ pub fn load_players(root: &Path, demo_path: &Path) -> Option<DemoPlayers> {
         .then_some(entry.demo)
 }
 
+/// The demo files with an entry in the current schema's folder (each entry's
+/// `file_info.path`, sorted), for a list of everything Studio has analysed.
+/// Read from each entry's first bytes: an entry can be megabytes, and the
+/// file info sits right after the stamp.
+pub fn cached_demo_paths(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(version_dir(root, SCHEMA_VERSION)) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".json") && n.matches('.').count() == 1)
+        })
+        .filter_map(|path| head_file_info(&path).map(|info| info.path))
+        .filter(|path| !path.is_empty())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// How much of an entry [`head_file_info`] reads: the stamp and the file
+/// info are within it.
+const HEAD_BYTES: u64 = 4096;
+
+fn head_file_info(entry: &Path) -> Option<FileInfo> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(HEAD_BYTES as usize);
+    std::fs::File::open(entry)
+        .ok()?
+        .take(HEAD_BYTES)
+        .read_to_end(&mut head)
+        .ok()?;
+    file_info_in(&head)
+}
+
+/// The `file_info` object in an entry's first bytes; `None` when it is cut
+/// off or not there.
+fn file_info_in(head: &[u8]) -> Option<FileInfo> {
+    let key = b"\"file_info\":";
+    let at = head.windows(key.len()).position(|w| w == key)? + key.len();
+    let mut de = serde_json::Deserializer::from_slice(&head[at..]);
+    let info: FileInfo = serde::Deserialize::deserialize(&mut de).ok()?;
+    Some(info)
+}
+
+#[cfg(test)]
+mod cached_paths_tests {
+    use super::*;
+
+    #[test]
+    fn the_file_info_comes_out_of_an_entrys_first_bytes() {
+        let head = br#"{"size_bytes":12,"modified_unix_secs":34,"file_info":{"created_at":{"secs_since_epoch":5,"nanos_since_epoch":0},"name":"x.dem","path":"D:\\demos\\x.dem","size_bytes":12},"analysis":{"cut off"#;
+        assert_eq!(
+            file_info_in(head).map(|info| info.path).as_deref(),
+            Some("D:\\demos\\x.dem")
+        );
+        assert!(
+            file_info_in(&head[..80]).is_none(),
+            "cut off inside the file info"
+        );
+        assert!(file_info_in(b"{}").is_none());
+    }
+}
+
 /// Writes the players file of every entry under `root` that has none yet
 /// (entries saved before players files existed), and returns how many it
 /// wrote. Reads each such entry whole, once.
@@ -282,17 +613,6 @@ pub fn fill_missing_players(root: &Path) -> usize {
         }
     }
     written
-}
-
-/// The same FNV-1a as `hl_demo_auditor::fnv1a_hash`, which named every entry
-/// written before this module existed (`native` tests that the two agree).
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
 }
 
 #[cfg(test)]
@@ -337,16 +657,222 @@ mod tests {
         assert_eq!(fill_missing_players(&root), 0);
 
         // A different size: the entry no longer describes the file.
+        assert!(is_fresh(&root, &demo));
         std::fs::write(&demo, b"a longer demo than before").unwrap();
         assert!(load(&root, &demo).is_none());
+        assert!(!is_fresh(&root, &demo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writes `analysis` (JSON) as `demo`'s entry in schema `version`'s
+    /// folder, stamped `stamp`.
+    fn write_old(root: &Path, version: u32, demo: &Path, stamp: (u64, u64), analysis: &str) {
+        let info = serde_json::to_string(&FileInfo::of(demo).unwrap()).unwrap();
+        let dir = version_dir(root, version);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(entry_name(demo).unwrap()),
+            format!(
+                "{}\"file_info\":{info},\"analysis\":{analysis}}}",
+                stamp_prefix(stamp)
+            ),
+        )
+        .unwrap();
+    }
+
+    /// An empty analysis as v7 wrote it: without #743's objective totals.
+    fn empty_v7() -> String {
+        let mut value = serde_json::to_value(Analysis::default()).unwrap();
+        let objectives = value["state"]["objectives"].as_object_mut().unwrap();
+        objectives.remove("blocks_unattributed");
+        objectives.remove("attempts_abandoned");
+        value.to_string()
+    }
+
+    #[test]
+    fn a_miss_upgrades_an_older_entry_and_leaves_the_old_one() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
+        let dir = scratch("upgrade");
+        let demo = dir.join("x.dem");
+        std::fs::write(&demo, b"not really a demo").unwrap();
+        let root = dir.join("cache");
+        let now = stamp(&demo).unwrap();
+        assert!(!has_older_entry(&root, &demo));
+        assert_eq!(upgrade(&root, &demo).err(), Some(NotUpgraded::NoOlderEntry));
+
+        write_old(&root, 7, &demo, now, &empty_v7());
+        assert!(has_older_entry(&root, &demo));
+        assert!(!is_fresh(&root, &demo));
+        let (info, _) = load(&root, &demo).unwrap();
+        assert_eq!(info.name, "x.dem");
+        // Saved in the current folder, players file and all; v7 untouched.
+        assert!(is_fresh(&root, &demo));
+        assert!(load_players(&root, &demo).is_some());
+        assert!(
+            version_dir(&root, 7)
+                .join(entry_name(&demo).unwrap())
+                .exists()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_older_entry_that_cannot_be_upgraded_is_a_miss() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
+        let dir = scratch("no_upgrade");
+        let demo = dir.join("x.dem");
+        std::fs::write(&demo, b"not really a demo").unwrap();
+        let root = dir.join("cache");
+        let now = stamp(&demo).unwrap();
+
+        // v8 never shipped, so no step starts there.
+        write_old(&root, 8, &demo, now, &empty_v7());
+        assert!(!has_older_entry(&root, &demo));
+        assert!(load(&root, &demo).is_none());
+
+        // An entry for the file as it was before it changed.
+        write_old(&root, 7, &demo, (now.0 + 1, now.1), &empty_v7());
+        assert!(!has_older_entry(&root, &demo));
+        assert_eq!(upgrade(&root, &demo).err(), Some(NotUpgraded::NoOlderEntry));
+
+        // Current, but not what v7 writes.
+        write_old(&root, 7, &demo, now, r#"{"state":{"players":"nobody"}}"#);
+        assert!(has_older_entry(&root, &demo));
+        assert!(matches!(
+            upgrade(&root, &demo),
+            Err(NotUpgraded::NeedsReparse(_))
+        ));
+        // Truncated mid-write by something else.
+        write_old(&root, 7, &demo, now, r#"{"state":{"#);
+        assert!(matches!(
+            upgrade(&root, &demo),
+            Err(NotUpgraded::NeedsReparse(_))
+        ));
+        assert!(load(&root, &demo).is_none());
+        assert!(!is_fresh(&root, &demo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn work_order_reads_cached_demos_first_then_the_largest_parse() {
+        // 0: 5 MB uncached, 1: cached, 2: 90 MB uncached, 3: cached, 4: 40 MB uncached.
+        let fresh = [false, true, false, true, false];
+        let sizes = [5, 80, 90, 10, 40];
+        assert_eq!(work_order(&fresh, &sizes), [1, 3, 2, 4, 0]);
+        // Same-size parses keep list order.
+        assert_eq!(work_order(&[false, false], &[7, 7]), [0, 1]);
+        assert!(work_order(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_work_plan_counts_the_cached_demos_and_the_bytes_to_parse() {
+        let plan = WorkPlan::from_parts(vec![false, true, false], vec![5, 80, 90]);
+        assert_eq!(plan.order, [1, 2, 0]);
+        assert_eq!(plan.cached(), 1);
+        assert_eq!(plan.bytes_to_parse(), 95);
+
+        let dir = scratch("plan");
+        let root = dir.join("cache");
+        let (cached, uncached) = (dir.join("a.dem"), dir.join("b.dem"));
+        std::fs::write(&cached, b"cached demo").unwrap();
+        std::fs::write(&uncached, b"a demo never analysed").unwrap();
+        store(
+            &root,
+            &cached,
+            &FileInfo::of(&cached).unwrap(),
+            &Analysis::default(),
+        )
+        .unwrap();
+        let plan = WorkPlan::new(&root, &[&uncached, &cached]);
+        assert_eq!(plan.fresh, [false, true]);
+        assert_eq!(plan.sizes, [21, 11]);
+        assert_eq!(plan.order, [1, 0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rescan_estimate_sorts_demos_by_what_the_cache_holds() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
+        let dir = scratch("estimate");
+        let root = dir.join("cache");
+        let [current, older, changed, never, unreadable_upgrade] =
+            ["current", "older", "changed", "never", "eight"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&current, b"cached demo").unwrap();
+        std::fs::write(&older, b"cached by v7").unwrap();
+        std::fs::write(&changed, b"changed since").unwrap();
+        std::fs::write(&never, b"a demo never analysed").unwrap();
+        std::fs::write(&unreadable_upgrade, b"v8 never shipped").unwrap();
+        store(
+            &root,
+            &current,
+            &FileInfo::of(&current).unwrap(),
+            &Analysis::default(),
+        )
+        .unwrap();
+        write_old(&root, 7, &older, stamp(&older).unwrap(), &empty_v7());
+        // An entry for the file as it was: both folders miss it.
+        let was = stamp(&changed).unwrap();
+        write_old(&root, 7, &changed, (was.0 + 1, was.1), &empty_v7());
+        write_old(&root, SCHEMA_VERSION, &changed, (was.0 + 1, was.1), "{}");
+        // No step starts at v8, so its entry is a parse.
+        write_old(
+            &root,
+            8,
+            &unreadable_upgrade,
+            stamp(&unreadable_upgrade).unwrap(),
+            &empty_v7(),
+        );
+
+        assert_eq!(cache_state(&root, &current), Some(CacheState::Current));
+        assert_eq!(cache_state(&root, &older), Some(CacheState::Upgradable));
+        assert_eq!(
+            cache_state(&root, &changed),
+            Some(CacheState::NeedsParse(13))
+        );
+        assert_eq!(cache_state(&root, &dir.join("gone.dem")), None);
+
+        let estimate = RescanEstimate::new(
+            &root,
+            &[
+                &current,
+                &older,
+                &changed,
+                &never,
+                &unreadable_upgrade,
+                &dir.join("gone.dem"),
+            ],
+        );
+        assert_eq!(
+            estimate,
+            RescanEstimate {
+                cached: 1,
+                upgradable: 1,
+                to_parse: 3,
+                bytes_to_parse: 13 + 21 + 16,
+            }
+        );
+        assert_eq!(
+            RescanEstimate::new::<&Path>(&root, &[]),
+            RescanEstimate::default()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_demo_with_no_entry_is_not_fresh() {
+        let dir = scratch("fresh");
+        let demo = dir.join("y.dem");
+        std::fs::write(&demo, b"never analysed").unwrap();
+        assert!(!is_fresh(&dir.join("cache"), &demo));
+        assert!(!is_fresh(&dir.join("cache"), &dir.join("missing.dem")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn only_a_17_digit_id_is_a_steam_id() {
         assert_eq!(
-            steam_id_of("76561197977930126"),
-            Some("76561197977930126".to_string())
+            steam_id_of("76561197975574370"),
+            Some("76561197975574370".to_string())
         );
         assert_eq!(steam_id_of("PLAYER_2761379"), None);
         assert_eq!(steam_id_of("CONNECTION_4"), None);
@@ -355,15 +881,9 @@ mod tests {
     /// The layout PR #486's `native::player_index` reads and writes.
     #[test]
     fn the_players_file_is_486s_layout() {
-        let json = r#"{"size_bytes":1,"modified_unix_secs":2,"demo":{"demo_type":"POV","players":[{"id":"76561197977930126","steam_id":"76561197977930126","name":"chris","recorder":true}]}}"#;
+        let json = r#"{"size_bytes":1,"modified_unix_secs":2,"demo":{"demo_type":"POV","players":[{"id":"76561197975574370","steam_id":"76561197975574370","name":"chris","recorder":true}]}}"#;
         let entry: PlayersEntry = serde_json::from_str(json).unwrap();
         assert!(entry.demo.players[0].recorder);
         assert_eq!(serde_json::to_string(&entry).unwrap(), json);
-    }
-
-    #[test]
-    fn fnv1a_matches_the_published_test_vectors() {
-        assert_eq!(fnv1a(b""), 0xcbf29ce484222325);
-        assert_eq!(fnv1a(b"a"), 0xaf63dc4c8601ec8c);
     }
 }

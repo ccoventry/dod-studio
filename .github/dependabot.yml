@@ -1,0 +1,15 @@
+# Keeps the workflows' action versions current (2026-10-07 audit found them
+# 2-3 majors behind). Actions only: cargo and npm updates stay manual, since
+# each needs a build and often a live test.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    # Every PR targets dev (CLAUDE.md); main only takes dev releases.
+    target-branch: dev
+    schedule:
+      interval: monthly
+    # One PR for all action bumps instead of one per action.
+    groups:
+      actions:
+        patterns: ["*"]

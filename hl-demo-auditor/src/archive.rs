@@ -1,0 +1,399 @@
+//! Demos inside `.zip`, `.7z` and `.rar` files (#929), read and never
+//! changed: nothing is extracted to disk, and an archive is never written or
+//! deleted. An archive is a backup: the Duplicates audit marks a loose demo
+//! it holds as backed up ([`crate::backup`]) and never groups the two, so no
+//! loose demo is offered for deletion because of it. [`with_archive_entry`]
+//! streams an entry out for a byte-for-byte check (#983 checks the backups
+//! it writes with it).
+//!
+//! Only `.dem` entries count. An archive inside an archive is not opened.
+//! The types and functions keep the `zip` names they had when zip was the
+//! only kind (`ZipRef`, `ZipDemoEntry`): they hold any of the three.
+
+use crate::{ContentHashes, Fnv1a, KEY_BYTES};
+use std::fs;
+use std::io::{BufReader, Read};
+use std::path::{Path, PathBuf};
+
+#[cfg(all(windows, feature = "rar"))]
+mod rar;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod sevenz;
+
+/// The kinds of archive this build reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Zip,
+    #[cfg(not(target_arch = "wasm32"))]
+    SevenZ,
+    #[cfg(all(windows, feature = "rar"))]
+    Rar,
+}
+
+fn kind(path: &Path) -> Option<Kind> {
+    let ext = path.extension()?.to_str()?;
+    if ext.eq_ignore_ascii_case("zip") {
+        return Some(Kind::Zip);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if ext.eq_ignore_ascii_case("7z") {
+        return Some(Kind::SevenZ);
+    }
+    #[cfg(all(windows, feature = "rar"))]
+    if ext.eq_ignore_ascii_case("rar") {
+        return Some(Kind::Rar);
+    }
+    None
+}
+
+/// Whether `path` names an archive this build looks inside: `.zip`, `.7z`
+/// and (on Windows, with the `rar` feature) `.rar`.
+pub fn is_archive(path: &Path) -> bool {
+    kind(path).is_some()
+}
+
+/// The `.dem` entries `archive` lists; nothing is decompressed. An error
+/// when it can't be read as the archive its extension names. An entry named
+/// twice is listed once; one that can't be read (encrypted, split across
+/// volumes) carries an error.
+pub fn list_archive_demos(archive: &Path) -> Result<Vec<ZipDemoEntry>, String> {
+    match kind(archive) {
+        Some(Kind::Zip) => list_zip_demos(archive),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::list(archive),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::list(archive),
+        None => Err(NOT_READ.to_string()),
+    }
+}
+
+const NOT_READ: &str = "it is not an archive this build reads";
+
+/// Each of `names` in `archive` read in full, opening the archive once.
+pub fn hash_archive_entries(
+    archive: &Path,
+    names: &[String],
+) -> Vec<Result<ContentHashes, String>> {
+    match kind(archive) {
+        Some(Kind::Zip) => hash_zip_entries(archive, names),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::hash_entries(archive, names),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::hash_entries(archive, names),
+        None => names.iter().map(|_| Err(NOT_READ.to_string())).collect(),
+    }
+}
+
+/// `f` with entry `name` of `archive` opened for reading, decompressed as it
+/// is read, and the size the archive gives it. Reading it to its end also
+/// checks its CRC where the archive stores one: a corrupt entry fails there.
+pub fn with_archive_entry<T>(
+    archive: &Path,
+    name: &str,
+    f: impl FnOnce(&mut dyn Read, u64) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    match kind(archive) {
+        Some(Kind::Zip) => with_zip_entry(archive, name, f),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::with_entry(archive, name, f),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::with_entry(archive, name, f),
+        None => Err(std::io::Error::other(NOT_READ)),
+    }
+}
+
+/// Between an archive's path and an entry's name wherever one is shown,
+/// e.g. `C:\demos\pack.zip › match/a.dem`.
+pub const SEPARATOR: &str = " \u{203a} ";
+
+/// One demo inside a zip.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ZipRef {
+    /// The archive, canonical as the walk names loose demos.
+    pub zip: PathBuf,
+    /// The entry's name as the archive stores it (`/` between folders).
+    pub entry: String,
+}
+
+impl ZipRef {
+    /// `<archive path> › <entry name>`.
+    pub fn display(&self) -> String {
+        format!("{}{SEPARATOR}{}", self.zip.display(), self.entry)
+    }
+
+    /// [`Self::display`] for a message: the archive's path through
+    /// [`crate::shown_path`].
+    pub fn shown(&self) -> String {
+        format!("{}{SEPARATOR}{}", crate::shown_path(&self.zip), self.entry)
+    }
+}
+
+/// A zip's `.dem` entry as its central directory lists it, plus what the
+/// audit learned reading it ([`crate::KeyCache`] keeps both).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ZipDemoEntry {
+    pub name: String,
+    pub size: u64,
+    pub crc32: u32,
+    /// Set when the archive stores no CRC-32 for the entry (a 7z entry
+    /// without one, a rar entry hashed with BLAKE2 instead): `crc32` is then
+    /// meaningless, and only reading the entry says what it holds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_crc: bool,
+    /// Once the entry was read in full: its key, tail and whole-file hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hashes: Option<ContentHashes>,
+    /// Why it can't be read (encrypted, corrupt): it is left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+fn is_demo_name(name: &str) -> bool {
+    name.len() > 4
+        && name.is_char_boundary(name.len() - 4)
+        && name[name.len() - 4..].eq_ignore_ascii_case(".dem")
+}
+
+fn open(zip: &Path) -> Result<zip::ZipArchive<BufReader<fs::File>>, String> {
+    let file = fs::File::open(zip).map_err(|e| e.to_string())?;
+    zip::ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())
+}
+
+/// The `.dem` entries `zip` lists, from its central directory and each
+/// entry's local header; nothing is decompressed. An error when it isn't a
+/// zip that can be read. An entry named twice is listed once; an encrypted
+/// one carries an error.
+fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
+    let mut archive = open(zip)?;
+    let mut demos: Vec<ZipDemoEntry> = Vec::new();
+    for i in 0..archive.len() {
+        let Some(name) = archive.name_for_index(i).map(str::to_owned) else {
+            continue;
+        };
+        if !is_demo_name(&name) || demos.iter().any(|d| d.name == name) {
+            continue;
+        }
+        let entry = match archive.by_index_raw(i) {
+            Ok(file) if file.is_dir() => continue,
+            Ok(file) => ZipDemoEntry {
+                size: file.size(),
+                crc32: file.crc32(),
+                no_crc: false,
+                hashes: None,
+                error: file
+                    .encrypted()
+                    .then(|| "it is encrypted (needs a password)".to_string()),
+                name,
+            },
+            Err(e) => ZipDemoEntry {
+                size: 0,
+                crc32: 0,
+                no_crc: false,
+                hashes: None,
+                error: Some(e.to_string()),
+                name,
+            },
+        };
+        demos.push(entry);
+    }
+    Ok(demos)
+}
+
+/// `f` with entry `name` of `zip` opened for reading, decompressed as it is
+/// read, and the size the archive gives it. Reading it to its end also checks
+/// its CRC-32: a corrupt entry fails there.
+fn with_zip_entry<T>(
+    zip: &Path,
+    name: &str,
+    f: impl FnOnce(&mut dyn Read, u64) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let mut archive = open(zip).map_err(std::io::Error::other)?;
+    let mut file = archive.by_name(name).map_err(std::io::Error::other)?;
+    let size = file.size();
+    f(&mut file, size)
+}
+
+/// [`ContentHashes`] built up from an entry's bytes as they arrive, for
+/// readers that hand over chunks rather than a [`Read`] (rar).
+pub(crate) struct ContentHasher {
+    size: u64,
+    head_end: u64,
+    tail_start: u64,
+    offset: u64,
+    head: Fnv1a,
+    tail: Fnv1a,
+    full: Fnv1a,
+}
+
+impl ContentHasher {
+    /// For an entry of `size` bytes.
+    pub(crate) fn new(size: u64) -> Self {
+        ContentHasher {
+            size,
+            head_end: size.min(KEY_BYTES),
+            tail_start: if size > KEY_BYTES {
+                size - KEY_BYTES
+            } else {
+                u64::MAX
+            },
+            offset: 0,
+            head: Fnv1a::new(),
+            tail: Fnv1a::new(),
+            full: Fnv1a::new(),
+        }
+    }
+
+    pub(crate) fn update(&mut self, chunk: &[u8]) {
+        let offset = self.offset;
+        let end = offset + chunk.len() as u64;
+        if offset < self.head_end {
+            self.head
+                .update(&chunk[..(self.head_end.min(end) - offset) as usize]);
+        }
+        if end > self.tail_start {
+            self.tail
+                .update(&chunk[(self.tail_start.saturating_sub(offset)) as usize..]);
+        }
+        self.full.update(chunk);
+        self.offset = end;
+    }
+
+    /// The hashes, or an error when the entry gave more or fewer bytes than
+    /// its size.
+    pub(crate) fn finish(self) -> std::io::Result<ContentHashes> {
+        if self.offset != self.size {
+            return Err(std::io::Error::other(format!(
+                "it holds {} bytes, not the {} it should",
+                self.offset, self.size
+            )));
+        }
+        Ok(ContentHashes {
+            size: self.size,
+            head: self.head.finish(),
+            tail: if self.size > KEY_BYTES {
+                self.tail.finish()
+            } else {
+                0
+            },
+            full: self.full.finish(),
+        })
+    }
+}
+
+/// [`ContentHashes`] of everything `reader` gives, which must be `size`
+/// bytes: the same hashes [`crate::content_hashes`] finds in a file.
+pub fn hashes_from_reader(reader: &mut dyn Read, size: u64) -> std::io::Result<ContentHashes> {
+    let mut hasher = ContentHasher::new(size);
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    hasher.finish()
+}
+
+/// Each of `names` in `zip` read in full, opening the archive once.
+fn hash_zip_entries(zip: &Path, names: &[String]) -> Vec<Result<ContentHashes, String>> {
+    let mut archive = match open(zip) {
+        Ok(archive) => archive,
+        Err(e) => return names.iter().map(|_| Err(e.clone())).collect(),
+    };
+    names
+        .iter()
+        .map(|name| {
+            let mut file = archive.by_name(name).map_err(|e| e.to_string())?;
+            let size = file.size();
+            hashes_from_reader(&mut file, size).map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Writes a zip at `path` with `entries` (name, bytes, deflated?).
+    pub(crate) fn write_zip(path: &Path, entries: &[(&str, &[u8], bool)]) {
+        let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        for (name, bytes, deflate) in entries {
+            let method = if *deflate {
+                zip::CompressionMethod::Deflated
+            } else {
+                zip::CompressionMethod::Stored
+            };
+            let options = zip::write::SimpleFileOptions::default().compression_method(method);
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("auditor_zip_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn only_dem_entries_are_listed_with_their_sizes_and_crcs() {
+        let dir = scratch("list");
+        let zip = dir.join("pack.zip");
+        write_zip(
+            &zip,
+            &[
+                ("a.dem", b"stored demo", false),
+                ("sub/B.DEM", b"deflated demo, deflated demo", true),
+                ("readme.txt", b"not a demo", true),
+                ("inner.zip", b"PK not opened", false),
+            ],
+        );
+        let demos = list_zip_demos(&zip).unwrap();
+        let names: Vec<_> = demos.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["a.dem", "sub/B.DEM"]);
+        assert_eq!(demos[0].size, 11);
+        assert_eq!(demos[1].size, 28);
+        assert!(demos.iter().all(|d| d.error.is_none() && d.crc32 != 0));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_entrys_hashes_match_the_same_bytes_on_disk() {
+        let dir = scratch("hashes");
+        let bytes: Vec<u8> = (0..(3 * KEY_BYTES as usize + 77))
+            .map(|i| (i * 13 % 251) as u8)
+            .collect();
+        let loose = dir.join("loose.dem");
+        fs::write(&loose, &bytes).unwrap();
+        let zip = dir.join("pack.zip");
+        write_zip(&zip, &[("s.dem", &bytes, false), ("d.dem", &bytes, true)]);
+        let on_disk = crate::content_hashes(&loose).unwrap();
+        let found = hash_zip_entries(&zip, &["s.dem".into(), "d.dem".into(), "gone.dem".into()]);
+        assert_eq!(found[0], Ok(on_disk));
+        assert_eq!(found[1], Ok(on_disk));
+        assert!(found[2].is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_zip_is_an_error() {
+        let dir = scratch("corrupt");
+        let zip = dir.join("broken.zip");
+        fs::write(&zip, b"PK\x03\x04 this is not really a zip").unwrap();
+        assert!(list_zip_demos(&zip).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_demo_name_needs_the_extension() {
+        assert!(is_demo_name("a.dem"));
+        assert!(is_demo_name("x/Y.DeM"));
+        assert!(!is_demo_name(".dem"));
+        assert!(!is_demo_name("a.dem.zip"));
+        assert!(!is_demo_name("démo"));
+    }
+}

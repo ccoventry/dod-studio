@@ -35,8 +35,6 @@
 //! way back through the UI and a folder that usually needs administrator rights
 //! to edit by hand. See `docs/direct_to_video_capture.md`.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 
 const FFMPEG_DIR: &str = "ffmpeg";
@@ -49,6 +47,9 @@ const HOOK_DLL: &str = "AfxHookGoldSrc.dll";
 
 /// The header `link` writes, and the marker `authored_by_us` looks for.
 const AUTHORED_MARKER: &str = "Written by dod-studio";
+/// The header builds before the rename to DoD Studio (#260) wrote: a file
+/// carrying it is ours just the same (#357).
+const AUTHORED_MARKER_BEFORE_RENAME: &str = "Written by dod-tools";
 
 /// What HLAE would find if it looked right now.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -255,7 +256,7 @@ pub fn detect(hlae_exe: &Path) -> HlaeFfmpeg {
 /// untouchable, makes the first link permanent and leaves no way to re-point
 /// HLAE after changing the app's FFmpeg.
 fn authored_by_us(body: &str) -> bool {
-    body.contains(AUTHORED_MARKER)
+    body.contains(AUTHORED_MARKER) || body.contains(AUTHORED_MARKER_BEFORE_RENAME)
 }
 
 /// Points HLAE at `ffmpeg_exe` by writing `ffmpeg.ini`.
@@ -475,6 +476,14 @@ fn search_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Whether a file's name says FFmpeg: its stem has `ffmpeg` in it, any case.
+/// `ffplay.exe` and `ffprobe.exe` don't.
+fn named_like_ffmpeg(exe: &Path) -> bool {
+    exe.file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase().contains("ffmpeg"))
+        .unwrap_or(false)
+}
+
 /// Whether an executable is actually FFmpeg, by asking it.
 ///
 /// "It exists" is not the same question. `ffplay.exe` and `ffprobe.exe` ship in
@@ -483,15 +492,26 @@ fn search_path(name: &str) -> Option<PathBuf> {
 /// that spawns the wrong program and records nothing, which is the same silent
 /// failure this whole module exists to prevent.
 ///
-/// The name is not enough either — a renamed `ffmpeg.exe` is still FFmpeg, and
-/// something else named `ffmpeg.exe` is still not. So it is asked: every FFmpeg
-/// tool prints `<toolname> version ...` as its first line, which distinguishes
-/// them from each other as well as from anything that is not FFmpeg at all.
+/// The name is not enough either — something else named `ffmpeg.exe` is still
+/// not FFmpeg. So it is asked: every FFmpeg tool prints `<toolname> version
+/// ...` as its first line, which distinguishes them from each other as well as
+/// from anything that is not FFmpeg at all.
+///
+/// Asking means starting it, though, and this runs on whatever the user
+/// picked: `HLAE.exe` picked by mistake opened HLAE. So only a file whose name
+/// says FFmpeg (`ffmpeg.exe`, `ffmpeg-7.1.exe`) is started; anything else is
+/// refused by name without running.
 ///
 /// Returns the version banner on success, so a caller can show what it found.
 pub fn verify_is_ffmpeg(exe: &Path) -> Result<String, String> {
     if !exe.is_file() {
         return Err(crate::messages::not_a_file(exe.display()));
+    }
+    if !named_like_ffmpeg(exe) {
+        let name = exe.file_name().map(|n| n.to_string_lossy().into_owned());
+        return Err(crate::messages::not_named_ffmpeg(
+            name.as_deref().unwrap_or_default(),
+        ));
     }
 
     let mut cmd = std::process::Command::new(exe);
@@ -621,21 +641,22 @@ fn parse_ini_path(body: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("dod_hlae_ffmpeg_{}", name));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("scratch");
-        dir
+    /// Per-process, so two `cargo test` runs on one machine don't clear each
+    /// other's folders mid-test.
+    fn scratch(name: &str) -> Scratch {
+        Scratch::new(format!("hlae_ffmpeg_{name}"))
     }
 
     /// An HLAE install: the exe, and the `ffmpeg` folder its readme lives in.
-    fn install(name: &str) -> PathBuf {
+    /// Hold the `Scratch` for the whole test; dropping it removes the install.
+    fn install(name: &str) -> (Scratch, PathBuf) {
         let root = scratch(name);
         std::fs::create_dir_all(root.join(FFMPEG_DIR)).expect("ffmpeg dir");
         let exe = root.join("HLAE.exe");
         std::fs::write(&exe, b"").expect("exe");
-        exe
+        (root, exe)
     }
 
     fn a_real_ffmpeg(dir: &Path) -> PathBuf {
@@ -648,7 +669,7 @@ mod tests {
     fn the_working_install_shape_is_reported_as_missing() {
         // What is actually on this machine: an ffmpeg folder holding nothing
         // but the readme. It looks set up and is not.
-        let hlae = install("missing");
+        let (_dir, hlae) = install("missing");
         std::fs::write(
             hlae.parent()
                 .unwrap()
@@ -668,8 +689,19 @@ mod tests {
     }
 
     #[test]
+    fn an_ini_written_before_the_rename_is_still_ours() {
+        // #357: `link` wrote "Written by dod-tools" before #260; such a file
+        // must still be offered for re-linking.
+        assert!(authored_by_us(
+            "; Written by dod-tools: points HLAE at FFmpeg\n[Ffmpeg]\nPath=C:\\x\\ffmpeg.exe\n"
+        ));
+        assert!(authored_by_us("; Written by dod-studio\n"));
+        assert!(!authored_by_us("[Ffmpeg]\nPath=C:\\x\\ffmpeg.exe\n"));
+    }
+
+    #[test]
     fn a_bundled_binary_needs_nothing_and_is_never_offered_an_ini() {
-        let hlae = install("bundled");
+        let (_dir, hlae) = install("bundled");
         let bin = hlae.parent().unwrap().join(FFMPEG_DIR).join("bin");
         std::fs::create_dir_all(&bin).expect("bin");
         std::fs::write(bin.join("ffmpeg.exe"), b"").expect("exe");
@@ -684,7 +716,7 @@ mod tests {
     fn a_bundled_binary_wins_over_an_ini() {
         // HLAE finds the binary without consulting the ini, so reporting the
         // ini would describe something that has no effect on anything.
-        let hlae = install("both");
+        let (_dir, hlae) = install("both");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         let bin = folder.join("bin");
         std::fs::create_dir_all(&bin).expect("bin");
@@ -702,7 +734,7 @@ mod tests {
     fn a_stale_ini_reads_as_linked_but_not_usable() {
         // The case a "configured / not configured" boolean would hide: HLAE has
         // an answer, and the answer is wrong.
-        let hlae = install("stale");
+        let (_dir, hlae) = install("stale");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         std::fs::write(
             folder.join(INI_NAME),
@@ -723,7 +755,7 @@ mod tests {
 
     #[test]
     fn linking_writes_an_ini_hlae_can_read_back() {
-        let hlae = install("link");
+        let (_dir, hlae) = install("link");
         let ffmpeg = a_real_ffmpeg(hlae.parent().unwrap());
 
         let ini = write_link(&hlae, &ffmpeg).expect("link");
@@ -747,7 +779,7 @@ mod tests {
     fn an_existing_ini_is_refused_not_overwritten() {
         // HLAE is shared with Source work. Repointing it silently would break
         // somebody else's workflow to fix ours.
-        let hlae = install("refuse");
+        let (_dir, hlae) = install("refuse");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         let original = "[Ffmpeg]\nPath=D:\\someone-elses\\ffmpeg.exe\n";
         std::fs::write(folder.join(INI_NAME), original).expect("ini");
@@ -764,7 +796,7 @@ mod tests {
 
     #[test]
     fn linking_refuses_an_ffmpeg_that_is_not_there() {
-        let hlae = install("no_ffmpeg");
+        let (_dir, hlae) = install("no_ffmpeg");
         let err = link(&hlae, Path::new("C:/nowhere/ffmpeg.exe")).expect_err("must refuse");
         assert!(matches!(err, LinkError::NoSuchFfmpeg { .. }), "{:?}", err);
     }
@@ -844,7 +876,7 @@ mod tests {
         // Elevation buys permission to write, not permission to clobber. If it
         // skipped these checks, the never-overwrite rule would have a hole in
         // it that only opens on the machines where the button is most useful.
-        let hlae = install("elevated_refuse");
+        let (_dir, hlae) = install("elevated_refuse");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         let original = "[Ffmpeg]\nPath=D:\\someone-elses\\ffmpeg.exe\n";
         std::fs::write(folder.join(INI_NAME), original).expect("ini");
@@ -871,7 +903,7 @@ mod tests {
         // The ordering matters: raising a UAC prompt to install a program that
         // cannot record would be worse than not offering at all, and the ini
         // must be untouched either way.
-        let hlae = install("elevated_not_ffmpeg");
+        let (_dir, hlae) = install("elevated_not_ffmpeg");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         let not_ffmpeg = a_real_ffmpeg(hlae.parent().unwrap()); // a zero-byte stand-in
 
@@ -890,7 +922,7 @@ mod tests {
     #[test]
     fn elevation_refuses_an_ffmpeg_that_is_not_there_before_prompting() {
         // No point raising a UAC prompt to copy a file that does not exist.
-        let hlae = install("elevated_no_ffmpeg");
+        let (_dir, hlae) = install("elevated_no_ffmpeg");
         let err = link_elevated(&hlae, Path::new("C:/nowhere/ffmpeg.exe")).expect_err("refuse");
         assert!(matches!(err, LinkError::NoSuchFfmpeg { .. }), "{:?}", err);
     }
@@ -936,7 +968,7 @@ mod tests {
         // Without this the first link is permanent: change the app's FFmpeg and
         // HLAE stays pointed at the old one, with no way back through the UI and
         // a folder that usually needs administrator rights to edit by hand.
-        let hlae = install("relink");
+        let (_dir, hlae) = install("relink");
         let first = a_real_ffmpeg(hlae.parent().unwrap());
         write_link(&hlae, &first).expect("first link");
         assert!(
@@ -966,7 +998,7 @@ mod tests {
         // to lose. A zero-length file is the case that actually turns up, from
         // an interrupted write or a hand-created placeholder.
         for body in ["", "\n\n", "; notes to self\n", "[Ffmpeg]\n"] {
-            let hlae = install("contentless");
+            let (_dir, hlae) = install("contentless");
             let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
             std::fs::write(folder.join(INI_NAME), body).expect("ini");
 
@@ -992,7 +1024,7 @@ mod tests {
     fn a_file_without_our_header_is_still_untouchable() {
         // The distinction the rewrite rule rests on. Somebody else's file is
         // left alone however much we would like to correct it.
-        let hlae = install("not_ours");
+        let (_dir, hlae) = install("not_ours");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
         let theirs = "[Ffmpeg]\nPath=D:\\theirs\\ffmpeg.exe\n";
         std::fs::write(folder.join(INI_NAME), theirs).expect("ini");
@@ -1023,6 +1055,23 @@ mod tests {
         // the name is not the test.
         assert!(verify_is_ffmpeg(&fake).is_err());
         assert!(verify_is_ffmpeg(&dir.join("absent.exe")).is_err());
+    }
+
+    #[test]
+    fn a_program_not_named_ffmpeg_is_refused_without_running_it() {
+        let dir = scratch("verify_not_named");
+        // A real program would start if it were run: this one is a stand-in,
+        // so the test is that the refusal names it and never gets to running.
+        for name in ["HLAE.exe", "ffplay.exe", "setup.exe"] {
+            let exe = dir.join(name);
+            std::fs::write(&exe, b"MZ").expect("write");
+            let why = verify_is_ffmpeg(&exe).expect_err(name);
+            assert!(why.contains(name), "{why}");
+            assert!(why.contains("wasn't started"), "{why}");
+        }
+        assert!(named_like_ffmpeg(Path::new("C:/tools/ffmpeg.exe")));
+        assert!(named_like_ffmpeg(Path::new("C:/tools/FFmpeg-7.1.exe")));
+        assert!(!named_like_ffmpeg(Path::new("C:/tools/ffprobe.exe")));
     }
 
     #[test]
@@ -1065,7 +1114,7 @@ mod tests {
 
     #[test]
     fn an_install_carrying_the_hook_dll_has_nothing_to_say() {
-        let hlae = install("hook_present");
+        let (_dir, hlae) = install("hook_present");
         std::fs::write(hlae.parent().unwrap().join(HOOK_DLL), b"").expect("dll");
         assert_eq!(missing_hook_dll(&hlae), None);
     }
@@ -1074,7 +1123,7 @@ mod tests {
     fn an_executable_with_no_hook_dll_beside_it_is_reported() {
         // The wrong exe picked in a file dialog, or a folder that is not an
         // HLAE install at all.
-        let hlae = install("hook_absent");
+        let (_dir, hlae) = install("hook_absent");
         let missing = missing_hook_dll(&hlae).expect("nothing beside it");
         assert!(missing.ends_with(HOOK_DLL), "{}", missing.display());
     }
@@ -1085,7 +1134,7 @@ mod tests {
         // install is broken anyway, because antivirus quarantined the DLL or
         // somebody deleted it. The capture would fail either way, so the check
         // that matters is whether the file the pipeline passes is there.
-        let hlae = install("hook_quarantined");
+        let (_dir, hlae) = install("hook_quarantined");
         let dll = hlae.parent().unwrap().join(HOOK_DLL);
         std::fs::write(&dll, b"").expect("dll");
         assert_eq!(missing_hook_dll(&hlae), None);

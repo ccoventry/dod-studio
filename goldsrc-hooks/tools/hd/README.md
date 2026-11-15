@@ -1,8 +1,8 @@
 # HD asset build scripts
 
-These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod\dodstudio_hd\`, which you can delete to go back to stock.
+These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, sprites (world sprites and, since #728, the HUD's own: kill-feed and weapon icons, scopes, hint icons, HLTV icons; crosshairs stay stock; since #841 the kill-feed weapon icons are drawn from the weapon models instead of upscaled), decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
 
-The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
+The hook turns itself on when it finds a `dodstudio_hd` folder; `ds_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
 **DoD Studio can run these scripts for you:** its HD Textures page downloads the upscaler, uses your own Python if it has NumPy, Pillow and SciPy (or fetches a private copy for DoD Studio's own use), and has a Build button with progress and Cancel. It runs exactly these scripts, so both routes make the same files, and a build started in one carries on in the other. The steps below are for the command line.
 
@@ -29,22 +29,22 @@ The first installs three Python packages. The second downloads the upscaler (abo
 python build_all.py ultrasharp
 ```
 
-This finds your DoD install by itself (the one DoD Studio launches) and fills `dod\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
+This finds your DoD install by itself (the one DoD Studio launches) and fills `dod_addon\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
 
-**5. Start the game from DoD Studio.** That's it: DoD Studio's hook DLL sees the new `dodstudio_hd` folder and turns HD on by itself. In game, `dodstudio_debug_status` in the console shows how many textures were replaced.
+**5. Start the game from DoD Studio.** That's it: DoD Studio's hook DLL sees the new `dodstudio_hd` folder and turns HD on by itself. In game, `ds_debug_status` in the console shows how many textures were replaced.
 
 To switch it off or on, use the console or a line in `movie.cfg`:
 
 ```
-dodstudio_hd_enabled 0
-dodstudio_hd_enabled 1
+ds_hd_enabled 0
+ds_hd_enabled 1
 ```
 
-A change applies to what loads next: walls, detail textures and skies from the next demo, models and sprites already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
+A change applies to what loads next: walls, detail textures and skies from the next demo, models, sprites and decals already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
 
 ### More examples
 
-**Build another style too** (then pick it with `dodstudio_hd_style remacri` in `movie.cfg`):
+**Build another style too** (then pick it with `ds_hd_style remacri` in `movie.cfg`):
 
 ```
 python build_all.py remacri
@@ -71,8 +71,8 @@ python build_all.py --game "C:\Program Files (x86)\Steam\steamapps\common\Half-L
 **You downloaded a new custom map** called `dod_mymap`:
 
 ```
-python world_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\world\ultrasharp" dod_mymap
-python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sky\ultrasharp" dod_mymap
+python world_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\world\ultrasharp" dod_mymap
+python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\sky\ultrasharp" dod_mymap
 ```
 
 (`python build_all.py ultrasharp` does the same, for every map that's new.)
@@ -80,8 +80,8 @@ python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\
 **You have a custom weapon model or sprite** somewhere on your PC:
 
 ```
-python models_hd.py  "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\models\ultrasharp" "C:\Users\me\Downloads\v_garand.mdl"
-python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sprites\ultrasharp" "C:\Users\me\Downloads\muzzleflash1.spr"
+python models_hd.py  "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\models\ultrasharp" "C:\Users\me\Downloads\v_garand.mdl"
+python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\sprites\ultrasharp" "C:\Users\me\Downloads\muzzleflash1.spr"
 ```
 
 **See the styles side by side** before choosing one; this writes `compare.png` here, which you can open:
@@ -90,7 +90,7 @@ python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\do
 python compare.py compare.png
 ```
 
-**Go back to stock:** put `dodstudio_hd_enabled 0` in `movie.cfg`, or delete the `dod\dodstudio_hd` folder.
+**Go back to stock:** put `ds_hd_enabled 0` in `movie.cfg`, or delete the `dod_addon\dodstudio_hd` folder.
 
 ## What you need
 
@@ -122,6 +122,8 @@ The scripts write into the Half-Life folder that DoD Studio launches. They look 
 2. the `hl.exe` DoD Studio is set to launch
 3. the only Steam install with a `dod` folder (if you have several, you'll be asked to pick one)
 
+The mod folder inside it is `dod` unless `HD_GAME_FOLDER` or DoD Studio's **Game Folder** setting names another (`dod_movies`, #402); DoD Studio sets `HD_GAME_FOLDER` on every build. The HD files then go in that folder's `_addon` sibling (`dod_movies_addon`).
+
 Build into your **movie copy** of Half-Life, the one DoD Studio launches. The HD files are plain images and harmless on their own, but they only show up when DoD Studio's hook DLL is loaded into the game, and that DLL must never be loaded into the copy you play online with. See [`docs/vac_safety.md`](../../../docs/vac_safety.md).
 
 ## Build everything
@@ -137,43 +139,58 @@ python build_all.py --types sprites,sky   only some types
 - **`blend`** is made from `x4plus` and `plain` (50/50), so build those first. The default order does.
 - **`--also <another Half-Life folder>`** also builds that install's models and sprites. Use it if you keep a stock install next to a modded one: its versions get HD copies too, so they're ready if you ever copy them over. Files are matched by their pixels, so both versions can share one folder.
 - **`--extra-models <folder>`** adds any other folder of `.mdl` files.
+- **`--cap 2048`** (or `4096`) builds bigger files where there is anything to gain; see below.
 
 ## Only the maps you use
 
 Map textures and skies are the bulk of the build, and a public-server map you never film is wasted time and disk. To build only some maps:
 
-1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod\dodstudio_hd` folder (e.g. `...\Half-Life\dod\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
+1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod_addon\dodstudio_hd` folder (e.g. `...\Half-Life\dod_addon\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
 2. List the maps, one per line. `*` matches anything and `?` one character, like a Windows folder search: `dod_railroad2*` covers every railroad2 build. A name without them matches only that map.
 
-`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
+`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites, decals and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
 
-A map left out simply shows its original textures in game, and `dodstudio_debug_hd_misses` lists it.
+A map left out simply shows its original textures in game, and `ds_debug_hd_misses` lists it.
+
+## Bigger than 1024
+
+Every file is built at 4x its original, up to 1024 a side. Two things decide whether you ever see more than that.
+
+**What the game shows.** `gl_max_size` in the game caps every texture, HD or not, and the game's own default is 256, which shrinks every HD file back down. `movie.cfg` needs `gl_max_size 1024` for the usual files (DoD Studio's HD page shows that line for you to copy; it never writes your configs), `2048` or `4096` for bigger ones. The hook lets the engine take up to 4096x4096; the stock engine stops at 512x1024.
+
+**What is built.** `--cap 2048` (`--cap 4096`, or "Largest size" on DoD Studio's HD page) raises the ceiling on the 4x. That only changes files whose 4x is over 1024: detail textures (most are 512 a side, so 1024 becomes 2048), a few large map textures and model skins. Map textures are mostly 128 or 256 to begin with, so they end at 512 or 1024 whatever the cap. A file already built smaller than the new cap makes it is built again; nothing else is touched. Detail textures stop at 2048 and skies at 1024 whatever the cap: the game allocates their buffers afresh on every load, so the hook keeps those small.
+
+Before building everything at 2048, try one map (`hd_maps.txt`) and play a demo on it. A 2048 file is 16 MB uncompressed, four times a 1024 one, and the game is a 32-bit program: a map with many large textures at 2048 can run it out of memory where 1024 was fine.
 
 ## Upscale your own files
 
 Each type's script takes an output folder and what to build. Put the output in the style you use, or in `overrides`, which wins over any style:
 
 ```
-set OUT=C:\...\Half-Life\dod\dodstudio_hd
+set OUT=C:\...\Half-Life\dod_addon\dodstudio_hd
 
 python world_hd.py   %OUT%\world\ultrasharp   dod_mymap dod_othermap
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\v_mycustomgun.mdl
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\a\folder\of\models
 python sprites_hd.py %OUT%\sprites\ultrasharp C:\path\to\mysprite.spr
+python decals_hd.py  %OUT%\decals\ultrasharp  C:\path\to\decals.wad
 python detail_hd.py  %OUT%\detail\ultrasharp  C:\path\to\folder\of\detail\tgas
 python sky_hd.py     %OUT%\sky\ultrasharp     dod_mymap
 ```
 
 Set `HD_STYLE` to build a style other than `ultrasharp` (for example `set HD_STYLE=remacri`). Run any script with no arguments for its usage.
 
+Every script upscales 250 files at a time and writes each batch before starting the next, so a stopped build keeps what it finished. `HD_BATCH` changes the batch size (for example `set HD_BATCH=100`). Each extra batch costs about a second to restart the upscaler.
+
 **Replacing one texture by hand.** Name it the way the hook expects and drop it into `overrides`:
 
 - **Map textures:** `<name>_<hash>.tga`
 - **Model skins:** `<skin name>_<hash>.tga`
-- **Sprites:** `<sprite>_<frame>_<hash>.tga`
+- **Sprites:** `<sprite>_<frame>_<hash>.tga`, HUD atlases included (`weapons1_0_<hash>.tga`, `hud_icons_0_<hash>.tga`); the game draws a HUD sprite at the size `hud.txt` says whatever the file's size, so the file just needs the same layout at a multiple of the original
+- **Decals:** `<name>_<hash>.tga`, where the name's first character is the one the game uses, not the wad's: `{` for a cut-out decal (its palette ends in pure blue), `}` for every other (`}scorch1`, `{shot5`)
 - **Detail textures and skies:** the same names as in `gfx\detail` and `gfx\env`
 
-The easiest way to get the right name is to build the texture once with any style and copy the file name. In game, `dodstudio_debug_hd_misses` also names the file a texture would need.
+The easiest way to get the right name is to build the texture once with any style and copy the file name. In game, `ds_debug_hd_misses` also names the file a texture would need.
 
 ## Picking a style
 
@@ -183,13 +200,17 @@ python compare.py compare.png
 
 This makes one sheet with the original and every built style side by side, for a few sample textures, model skins, sprites, detail textures and a sky. Pass your own samples to compare something specific; run it with no arguments for the format.
 
-In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
+To see your own maps instead of the fixed samples, `--map dod_anzio` takes that map's most detailed textures that have an HD file, plus its sky, and `--auto` picks a few of your maps for you. `--styles ultrasharp,plain` keeps the sheet to the styles you're choosing between. DoD Studio's HD Textures page makes the same sheet under **Compare styles**.
+
+In game, `ds_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
 
 ## Make your own style
 
 The game loads whatever style folder you name, so you can make as many as you like without touching any code:
 
-1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
+DoD Studio's HD Textures page has a form for this (Your own styles) that writes the same file. By hand:
+
+1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod_addon\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:
 
    ```
@@ -204,7 +225,7 @@ The game loads whatever style folder you name, so you can make as many as you li
    python build_all.py crisp
    ```
 
-   Then put `dodstudio_hd_style crisp` in `movie.cfg` and restart the game. `python compare.py compare.png` includes your styles too.
+   Then put `ds_hd_style crisp` in `movie.cfg` and restart the game. `python compare.py compare.png` includes your styles too.
 
 **Other AI models.** Anything in ncnn format works (a `.param` + `.bin` pair): drop the two files into `realesrgan\models\` and name the file in a line. [Upscayl's custom models](https://github.com/upscayl/custom-models) has dozens ready to use. Models from [OpenModelDB](https://openmodeldb.info/) come as `.pth` or `.safetensors`, and [chaiNNer](https://chainner.app/) can convert them to ncnn. Use 4x models: the scripts expect 4x.
 
@@ -214,7 +235,7 @@ Style names are lowercase letters, digits, `-` and `_`, because they become fold
 
 ## Where your lists live
 
-`hd_maps.txt` and `my_styles.txt` belong to one game install, so they live in its `dod\dodstudio_hd` folder rather than here. A second install (a stock one next to a movie one) keeps its own, and updating or re-downloading DoD Studio never touches them. Deleting `dodstudio_hd` deletes them too. `HD_MAPS` and `HD_MY_STYLES` point at a file anywhere else.
+`hd_maps.txt` and `my_styles.txt` belong to one game install, so they live in its `dod_addon\dodstudio_hd` folder rather than here. A second install (a stock one next to a movie one) keeps its own, and updating or re-downloading DoD Studio never touches them. Deleting `dodstudio_hd` deletes them too. `HD_MAPS` and `HD_MY_STYLES` point at a file anywhere else.
 
 Lists saved in this folder by an older version still work while the install has none of its own: the build says so at the top of `build_all.log`, with the path to move each one to.
 
@@ -225,7 +246,8 @@ Lists saved in this folder by an older version still work while the install has 
 | `build_all.py` | runs everything below, for each style |
 | `world_hd.py` | map textures (embedded in the BSP or from its wads) |
 | `models_hd.py` | model skins |
-| `sprites_hd.py` | world sprite frames (HUD sprites are never replaced, so they're skipped) |
+| `sprites_hd.py` | sprite frames, world and HUD (`--no-hud` leaves the HUD atlases out) |
+| `decals_hd.py` | decals from `decals.wad` (players' sprays can't be built: they arrive with the demo) |
 | `detail_hd.py` | detail textures |
 | `sky_hd.py` | skybox faces |
 | `compare.py` | the style comparison sheet |
@@ -233,8 +255,12 @@ Lists saved in this folder by an older version still work while the install has 
 | `styles.py` | the style list and the upscaler call |
 | `my_styles.example.txt` | template for your own styles (copy it to `dodstudio_hd\my_styles.txt`) |
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
-| `goldsrc.py` | BSP, WAD, model and sprite readers |
+| `goldsrc.py` | BSP, WAD, decal, model and sprite readers |
+| `studiomodel.py` | studio model (`.mdl` v10) reader: bones, rest pose, meshes, skins (`test_studiomodel.py` tests it) |
+| `killfeed_icons.py` | kill-feed weapon icons rendered from the weapon models into the HD `weapons*` sheets (#841); `sprites_hd.py` runs it after the sheets (`--no-icons` skips it; for now the app's bundled copy of these scripts skips it too, `HOLD_KILLFEED_ICONS`, #1157). The upscaled sheet is kept beside each one it changes as `<file>.tga.bak`, and `dodstudio_hd\killfeed_icons.json` records which sheets are done. `--review <folder>` writes comparison sheets (`test_killfeed_icons.py` tests it). `--even` builds the atlas `ds_hud_deathmsg layout even` draws from instead (#1022): every icon in a box 26 rows tall and only as wide as its art (`trim_box`), its HD frames (`dodstudio_killfeed_<n>_<hash>.tga`) into the style's sprites folder, `sprites\dodstudio_killfeed.spr` and `.txt` into `dod_addon` (`--sprite-dir` elsewhere); it leaves the sheets, and so the default layout, alone. `sprites_hd.py` runs it after the sheets' icons (under a minute) |
+| `killfeed_composites.py` | the kill-feed icons with no weapon model to render whole (#1088), for `killfeed_icons.py`: the skull from Half-Life's bone gibs, the bayonet close-ups cut from the K98 and Enfield renders, the butt stroke (the killer's rifle stock and the victim's head, its helmet flying off; four variants in the even atlas, picked per line by the hook), (`test_killfeed_composites.py` tests it); the mortars are rendered from `p_mortar.mdl` like any weapon |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
+| `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
 
 The file name hash is FNV-1a over the original's 8-bit pixels and its 768-byte palette. It must stay byte-for-byte identical to `texture_hires.rs`, or the hook won't find the files.

@@ -70,14 +70,16 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod snapshot_motion;
+mod sprint_turn;
 mod trace;
 
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
-    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
-    third_person_stem,
+    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, MELEE_SEQUENCES,
+    classify_body_sequence, deploy_state_from_body_sequence, find_deployable_weapon,
+    is_grenade_viewmodel, model_stem, third_person_stem,
 };
 pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
@@ -91,7 +93,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
+/// The animation part of `ds_spec_match_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),
@@ -104,7 +106,7 @@ pub static LEVEL: AtomicI32 = AtomicI32::new(0);
 pub const LEVEL_OFF: i32 = 0;
 pub const LEVEL_MAX: i32 = 1;
 
-/// What each value is, for `dodstudio_debug_status` and the startup line.
+/// What each value is, for `ds_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -118,6 +120,61 @@ pub fn level() -> i32 {
 
 pub fn enabled() -> bool {
     level() > LEVEL_OFF
+}
+
+/// Whether the match-POV fixes may act now: the switch is on and no POV demo
+/// is playing.
+///
+/// A POV demo is the player's own recording, so there is nothing to match,
+/// and every fix can only disagree with it (#613). That includes the stretch
+/// its recorder spends dead and watching someone in-eye: that is what they saw
+/// live, recorded. Live play and HLTV demos are unchanged.
+pub fn active() -> bool {
+    enabled() && !pov_demo_playing()
+}
+
+/// Whether a POV demo is playing now (see [`active`]). Also what
+/// `spectator_deathcam` stands down for.
+pub fn pov_demo_playing() -> bool {
+    engine::engfuncs().is_some_and(playing_pov_demo)
+}
+
+/// Look-ahead (#1154): whether the demo file has the spectated player's
+/// body leaving `sprint_*` within `snapshot_motion`'s look-ahead of his
+/// newest snapshot, while it is `sprint_*` now. False without a timeline.
+fn body_leaves_sprint_soon(spectated: &ClEntityS, body: &str) -> bool {
+    if !body.starts_with("sprint_") || spectated.model.is_null() {
+        return false;
+    }
+    let newest = spectated.curstate.msg_time;
+    let Some(timeline) = crate::lookahead::timeline(f64::from(newest)) else {
+        return false;
+    };
+    timeline
+        .body_changes(
+            spectated.index,
+            newest,
+            snapshot_motion::LET_GO_LOOK_AHEAD_SECONDS,
+        )
+        .iter()
+        .any(|&(_, sequence)| {
+            sequence_label(spectated.model, usize::from(sequence))
+                .is_some_and(|label| !label.starts_with("sprint_"))
+        })
+}
+
+/// A demo is playing and the engine is not connected as a spectator.
+/// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
+/// a POV one: the hook log of the #613 session shows it false from that
+/// demo's first frame, and `apply()` has always gated on it.
+fn playing_pov_demo(engfuncs: &engine::ClEngineFuncsPartial) -> bool {
+    let api = engfuncs.p_demo_api;
+    let playing_back = !api.is_null() && unsafe { ((*api).is_playingback)() } != 0;
+    is_pov_demo(playing_back, unsafe { (engfuncs.is_spectate_only)() } != 0)
+}
+
+fn is_pov_demo(playing_back: bool, spectate_only: bool) -> bool {
+    playing_back && !spectate_only
 }
 
 /// Whether the viewmodel on screen is the weapon the spectated player is
@@ -295,7 +352,7 @@ fn just_drew(now: f64) -> bool {
 /// and its animation index means nothing on the new one -- a K98's fire
 /// played on the Luger he quick-switched to looks like the Luger firing.
 pub fn allow_event_weapon_animation(sequence: i32) -> bool {
-    if !enabled() || crate::spectator_target::in_eye_target().is_none() {
+    if !active() || crate::spectator_target::in_eye_target().is_none() {
         return true;
     }
     if !just_drew(engine::client_time()) {
@@ -332,6 +389,16 @@ pub(crate) fn current_viewmodel_entity() -> i32 {
     CURRENT_SPECTATED.load(Ordering::Relaxed)
 }
 static CURRENT_DEPLOY_STATE: AtomicI32 = AtomicI32::new(-1);
+
+/// Drops what `apply()` last published for `on_weapon_fired`, once there is no
+/// spectated view to publish. Left standing, a POV demo watched after an HLTV
+/// one played the old viewmodel's "shoot" index on the new gun whenever the
+/// player with the old entity number fired: on an STG44, a reload (#613).
+fn forget_published_view() {
+    CURRENT_SPECTATED.store(-1, Ordering::Relaxed);
+    CURRENT_VIEWMODEL.store(std::ptr::null_mut(), Ordering::Relaxed);
+    CURRENT_DEPLOY_STATE.store(-1, Ordering::Relaxed);
+}
 /// Last bipod state actually read off a "bu"/"bd" model, carried across the
 /// stance variants that do not encode one. Cleared on a player switch, since
 /// it says nothing about the next person.
@@ -422,7 +489,8 @@ pub fn install() {
 /// Called from `fire_sounds`' `EV_PlaySound` hook, on the engine thread, same as
 /// `apply()`.
 pub fn on_weapon_fired(entity_index: i32) {
-    if !enabled() {
+    // A POV demo plays its own recorded animations (#613).
+    if !active() {
         return;
     }
 
@@ -475,7 +543,9 @@ pub fn apply() {
     // that leaves the last answer standing is the viewmodel mismatch below,
     // which is a flicker inside such a view, not the end of one.
     let no_view = || {
+        forget_published_view();
         crate::spectator_crosshair::set_pov_hides(None);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -501,6 +571,7 @@ pub fn apply() {
             }
         });
         crate::spectator_crosshair::set_pov_hides(reason);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -717,7 +788,7 @@ pub fn apply() {
                     // have fired, and its draw plays below.
                     unsafe {
                         crate::debug::report(
-                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                            "anim_fix: spectated player fired just as they switched -- the previous gun's round, the draw plays instead",
                         )
                     };
                 }
@@ -753,6 +824,14 @@ pub fn apply() {
                     play_viewmodel_animation(
                         animation_lookup_sequence("reload", state, viewmodel_model),
                         "spectated player reloaded",
+                        state,
+                        viewmodel_model,
+                    );
+                }
+                Some(BodyAction::Melee) => {
+                    play_viewmodel_animation(
+                        animation_lookup_any(MELEE_SEQUENCES, state, viewmodel_model),
+                        "spectated player stabbed or swung his rifle",
                         state,
                         viewmodel_model,
                     );
@@ -809,6 +888,25 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
+    sprint_turn::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        spectated.curstate.origin.x,
+        spectated.curstate.origin.y,
+    );
+    snapshot_motion::note_body_ahead(body_leaves_sprint_soon(
+        spectated,
+        body_label.as_deref().unwrap_or(""),
+    ));
+    snapshot_motion::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        [
+            spectated.curstate.origin.x,
+            spectated.curstate.origin.y,
+            spectated.curstate.origin.z,
+        ],
+        body_label.as_deref().unwrap_or(""),
+        spectated.curstate.movetype,
+    );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),
         gait: gait_label.as_deref().unwrap_or(""),
@@ -816,8 +914,22 @@ pub fn apply() {
         held_stem: model_stem(&held_name),
     };
     crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
+    // The gap POV's red crosshair would have (#308).
+    crate::spectator_crosshair_gap::note_watched(&crate::spectator_crosshair_gap::Watched {
+        entity: viewmodel_index,
+        viewmodel: &viewmodel_name,
+        deployed: crosshair_rule::is_deployed(pov_view.body),
+        time: f64::from(spectated.curstate.msg_time),
+        origin: [
+            spectated.curstate.origin.x,
+            spectated.curstate.origin.y,
+            spectated.curstate.origin.z,
+        ],
+    });
     // After hidden_because, which keeps the prone timer current.
-    crate::spectator_gun::set_lowered(crosshair_rule::gun_lowered(&pov_view, now));
+    let lowered = crosshair_rule::gun_lowered_code(&pov_view, now);
+    crate::spectator_gun::set_lowered(lowered != 0);
+    crate::gun_log::note_spec_reason(lowered);
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);
@@ -1015,7 +1127,7 @@ pub(crate) mod tests {
     /// survivable while the statics only held pointers; it stopped being so
     /// once the level became a thing tests deliberately vary.
     ///
-    /// `pub(crate)`: `commands.rs`'s own test also stores into `LEVEL`
+    /// `pub(crate)`: `commands/status.rs`'s test also stores into `LEVEL`
     /// directly (issue #321) and needs this same lock, not a second one --
     /// two independent mutexes would serialise each module's tests against
     /// themselves but not against each other, which is exactly the race
@@ -1031,8 +1143,9 @@ pub(crate) mod tests {
 
     /// Resets state and holds the lock for the caller's lifetime.
     ///
-    /// Turns the fix on, because it defaults to *off* and most tests below
-    /// would otherwise be asserting against a disabled fix.
+    /// Turns the fix on, because `LEVEL` starts at *off* (the game's default
+    /// is stored at startup by `lib.rs`) and most tests below would otherwise
+    /// be asserting against a disabled fix.
     #[must_use = "the guard must outlive the test, or the statics are not actually reserved"]
     fn reset_settle_state() -> std::sync::MutexGuard<'static, ()> {
         let guard = lock_statics();
@@ -1043,7 +1156,7 @@ pub(crate) mod tests {
         guard
     }
 
-    /// Every option in range needs its own description -- `dodstudio_debug_status`
+    /// Every option in range needs its own description -- `ds_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {
@@ -1074,5 +1187,45 @@ pub(crate) mod tests {
         assert!(!enabled());
 
         LEVEL.store(LEVEL_MAX, Ordering::Relaxed);
+    }
+
+    /// Only a POV demo stands the fixes down (#613): an HLTV demo is played
+    /// back spectate-only, and live play, spectating or not, plays nothing back.
+    #[test]
+    fn only_a_pov_demo_counts_as_one() {
+        assert!(is_pov_demo(true, false));
+        assert!(!is_pov_demo(true, true), "HLTV demo");
+        assert!(!is_pov_demo(false, true), "live through an HLTV proxy");
+        assert!(!is_pov_demo(false, false), "live play");
+    }
+
+    /// #613: an HLTV demo published entity 13 and its viewmodel, then a POV
+    /// demo ran with nobody spectated. Each round entity 13 fired in the POV
+    /// demo played the old viewmodel's "shoot" index on the new gun. A frame
+    /// with no spectated view now forgets them, so the fire trigger has no one
+    /// to match.
+    #[test]
+    fn a_frame_with_no_spectated_view_forgets_the_last_one() {
+        let _statics = reset_settle_state();
+        // A real `model_t`-shaped value, in case a regression gets as far as
+        // reading the viewmodel's name.
+        let mut model: ModelSPartial = unsafe { std::mem::zeroed() };
+        CURRENT_SPECTATED.store(13, Ordering::Relaxed);
+        CURRENT_VIEWMODEL.store(&mut model, Ordering::Relaxed);
+        CURRENT_DEPLOY_STATE.store(0, Ordering::Relaxed);
+        let fires_before = LAST_FIRE_PLAYED.load(Ordering::Relaxed);
+        let played_before = ANIMATIONS_PLAYED.load(Ordering::Relaxed);
+
+        // No engine under test: `apply()` stops at its first check, as it
+        // does at `IsSpectateOnly()` in a POV demo.
+        apply();
+
+        assert_eq!(CURRENT_SPECTATED.load(Ordering::Relaxed), -1);
+        assert!(CURRENT_VIEWMODEL.load(Ordering::Relaxed).is_null());
+        assert_eq!(CURRENT_DEPLOY_STATE.load(Ordering::Relaxed), -1);
+
+        on_weapon_fired(13);
+        assert_eq!(LAST_FIRE_PLAYED.load(Ordering::Relaxed), fires_before);
+        assert_eq!(ANIMATIONS_PLAYED.load(Ordering::Relaxed), played_before);
     }
 }

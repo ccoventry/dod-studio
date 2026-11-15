@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 //! Parsers, mappers, and other utilities for reading data structures in Day of Defeat demo files.
 
 #![allow(dead_code)]
@@ -6,7 +8,7 @@ use nom::{
     IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take, take_until},
-    combinator::{all_consuming, eof, fail, opt, success},
+    combinator::{all_consuming, eof, fail, map_opt, opt, success},
     error::context,
     multi::{length_count, many0},
     number::complete::{le_f32, le_i8, le_i16, le_i32, le_u8, le_u16},
@@ -15,6 +17,12 @@ use nom::{
 use std::convert::Infallible;
 use std::str::from_utf8;
 use std::time::Duration;
+
+pub mod map_entities;
+pub mod map_sounds;
+
+#[cfg(test)]
+mod tests;
 
 pub enum Error {
     ParserError,
@@ -217,6 +225,17 @@ impl Weapon {
             Self::MillsBomb | Self::Mk2Grenade | Self::StickGrenade
         )
     }
+
+    /// A rocket launcher: its round can kill after its shooter has died.
+    pub fn is_rocket(&self) -> bool {
+        matches!(self, Self::Bazooka | Self::Panzerschreck | Self::Piat)
+    }
+
+    /// A weapon whose shot flies on its own, grenades and rockets, so its
+    /// kill can come after its shooter's death (#664, #1091).
+    pub fn is_projectile(&self) -> bool {
+        self.is_grenade() || self.is_rocket()
+    }
 }
 
 /// Ammunition used by a [Weapon].
@@ -393,10 +412,43 @@ pub struct ClCorpse {
 ///     CObjectCapture::area_SendStatus = {m_iAreaIndex, -1, sz_HudIcon}
 ///     CObjectCapture::area_SetIndex = {m_iAreaIndex, -1, sz_HudIcon}
 /// ```
+///
+/// What the status byte means, from `dod.so` and `client.so` (#1132): the
+/// message goes to one player (`MSG_ONE`), so a POV demo carries it for its
+/// recorder alone and an HLTV demo only the icons and the reset.
 #[derive(Debug)]
 pub struct ClientAreas {
     pub icon_index: u8,
+    pub status: ClientAreaStatus,
     pub hud_icon: Option<String>,
+}
+
+/// The second byte of [ClientAreas].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientAreaStatus {
+    /// 0: the player left the area (`HandleSignals`).
+    Left,
+    /// 1: the player is touching an area their team can capture, sent on
+    /// every touch while they stand in it (`SetClientAreaIcon`).
+    Inside,
+    /// 2: every area is cleared, at a round reset (`LevelChangeResets`).
+    ClearAll,
+    /// 255 (-1 as a byte): the area's HUD icon name follows.
+    Icon,
+    /// Any other value.
+    Other(u8),
+}
+
+impl From<u8> for ClientAreaStatus {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::Left,
+            1 => Self::Inside,
+            2 => Self::ClearAll,
+            255 => Self::Icon,
+            other => Self::Other(other),
+        }
+    }
 }
 
 /// - Length: 1
@@ -614,12 +666,6 @@ pub struct PlayersIn {
     pub required_players_to_capture: u8,
 }
 
-/// - Length: 3
-pub struct ProgUpdate {
-    pub area_index: u8,
-    pub team: Team,
-}
-
 /// Sent when the POV has completed a reload.
 ///
 /// Reloading a weapon will emit:
@@ -790,7 +836,7 @@ pub struct StartProg {
     pub cap_duration: Duration, // u16
 }
 
-/// - Length: 4
+/// - Length: 6
 #[derive(Debug)]
 pub struct StartProgF {
     pub area_index: u8,
@@ -1191,6 +1237,7 @@ fn client_areas(i: &[u8]) -> IResult<&[u8], ClientAreas> {
         i,
         ClientAreas {
             icon_index,
+            status: ClientAreaStatus::from(flags),
             hud_icon,
         },
     ))
@@ -1656,7 +1703,10 @@ fn show_menu(i: &[u8]) -> IResult<&[u8], ShowMenu> {
 }
 
 fn start_prog_f(i: &[u8]) -> IResult<&[u8], StartProgF> {
-    all_consuming((le_u8, team, le_f32.map(Duration::from_secs_f32)))
+    // `try_`: a negative, NaN or huge f32 in a corrupt demo is a parse error,
+    // not a panic (which aborts a release build, #225).
+    let cap_duration = map_opt(le_f32, |s| Duration::try_from_secs_f32(s).ok());
+    all_consuming((le_u8, team, cap_duration))
         .map(|(area_index, team, cap_duration)| StartProgF {
             area_index,
             team,

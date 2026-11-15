@@ -1,4 +1,4 @@
-//! `dodstudio_debug_log_spectator_target` — logs `CHudSpectator`'s own idea of who
+//! `ds_debug_log_spectator_target` — logs `CHudSpectator`'s own idea of who
 //! is being followed side by side with the entity the engine actually
 //! renders a first-person viewmodel for, whenever either one changes.
 //!
@@ -13,8 +13,8 @@
 //! `spec_next`/`spec_prev` and the auto-director's `DRC_CMD_EVENT` handling
 //! all read and write.
 //!
-//! A from-scratch static pass tonight (chasing #206 after #269's survey
-//! found the mode global's real writer, `CHudSpectator::SetMode`)
+//! A from-scratch static pass (chasing #206 after #269's survey
+//! found the mode global's real writer, `CHudSpectator::SetModes`)
 //! exhaustively found **every** site in `client.dll` that writes
 //! `g_iUser2` -- a whole-image byte search, not a guess -- and every one of
 //! the seven is either gated on the auto-director cvar (`DRC_CMD_EVENT`,
@@ -33,17 +33,18 @@
 //! cheaply, the next time someone can reproduce the wander live: if
 //! `g_iUser2` stays constant while the viewmodel entity keeps changing, the
 //! engine hypothesis is confirmed and `client.dll` patching is the wrong
-//! layer to work in.
+//! layer to work in. #206 itself has since been fixed by `spectator_follow`
+//! (`ds_spec_lock`); this stays as a diagnostic.
 //!
 //! ## Caveats
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodstudio_spec_match_pov` is on. Turn that on too
+//! only has fresh data while `ds_spec_match_pov` is on. Turn that on too
 //! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!
-//! This module's `poll` runs from `commands.rs`'s per-frame *prologue*,
+//! This module's `poll` runs from `commands/poll.rs`'s per-frame *prologue*,
 //! which fires before `anim_fix::apply()` (the crate's one per-frame
 //! callback slot) on the same frame -- so the viewmodel-entity value it logs
 //! is `apply()`'s *previous* frame's result, up to one frame stale. Good
@@ -61,7 +62,7 @@ use crate::engine;
 /// `docs/goldsrc_client_dll_survey.md` §10.
 const MODE_RVA: usize = 0xe8_8d4;
 /// `g_iUser2` -- the followed player's entity index, or 0 when none is set.
-/// Exhaustively confirmed tonight as the only global the seven writers in
+/// Exhaustively confirmed as the only global the seven writers in
 /// `client.dll` ever touch for this purpose.
 const TARGET_RVA: usize = 0xe8_8d8;
 
@@ -96,7 +97,7 @@ pub fn mode() -> Option<i32> {
     read_i32(engine::client_module_base()?, MODE_RVA)
 }
 
-/// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two
+/// Called once per frame from `commands/poll.rs`'s per-frame prologue. Cheap: two
 /// pointer reads and three atomic loads when off, which is the common case.
 pub fn poll() {
     if !LOG.load(Ordering::Relaxed) {
@@ -143,8 +144,8 @@ mod tests {
     #[test]
     fn offsets_are_four_bytes_apart() {
         // g_iUser1 and g_iUser2 are adjacent dwords -- confirmed independently
-        // across CHudSpectator::Reset, ::SetMode and the DRC_CMD_EVENT
-        // handler tonight, not just asserted once.
+        // across CHudSpectator::Reset, ::SetModes and the DRC_CMD_EVENT
+        // handler, not just asserted once.
         assert_eq!(TARGET_RVA - MODE_RVA, 4);
     }
 }

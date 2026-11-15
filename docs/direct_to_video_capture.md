@@ -1,28 +1,27 @@
 # Direct-to-Video Capture (`mirv_movie_ffmpeg`)
 
-> **Status 2026-08-28 — shipped and verified in game. Merged to `dev` in PR #68.**
-> Tracks [#42](https://github.com/ccoventry/dod-studio/issues/42), which stays open for what remains.
+> **Status 2026-10-07 — shipped and verified in game. Merged to `dev` in PR #68.**
+> [#42](https://github.com/ccoventry/dod-studio/issues/42) is closed.
 >
-> **Working end to end:** capture through `mirv_movie_ffmpeg`, take verification, Render Studio
-> scanning and rendering, frame counts and render progress from the AVI header, a lossless capture
-> codec dropdown, and **Separate HUD in both capture modes** — including a real HUD alpha matte,
-> which needed `-afxForceAlpha8 1` (see "Separate HUD does not survive `mirv_movie_ffmpeg`" below;
-> that section title is now historical, the fault is fixed).
+> **Working end to end:** capture through `mirv_movie_ffmpeg` (Video capture mode), take verification,
+> Render Studio scanning and rendering, frame counts and render progress from the AVI header, and a
+> lossless capture codec dropdown. The Separate HUD checkbox was removed in PR #214: the
+> `-afxForceAlpha8 1` launch flag is now sent on every launch, so a HUD alpha stream still works if
+> `mirv_movie_separate_hud 1` is typed into Initial Commands (see "Separate HUD does not survive
+> `mirv_movie_ffmpeg`" below; those sections stay as the measurements behind that decision).
 >
 > **Still open:** the stream-copy fast path — remuxing instead of re-encoding for the simple
 > non-HUD case, which was the headline win — is not built; every take still goes through a full
-> render. Capture-time codec throughput is unmeasured. The launch-flag set is not bisected
-> ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
+> render. Capture-time codec throughput is unmeasured. The launch-flag set is bisected down to
+> `-afxForceAlpha8 1` ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
 >
 > Read `docs/goldsrc_dod_quirks.md` and `docs/hlae_protocols.md` first — the engine and HLAE facts
 > this rests on are recorded there and must not be re-derived.
 >
-> The sibling direction, OBS as an alternate capture method, is
-> [#65](https://github.com/ccoventry/dod-studio/issues/65) and is next. Scoped 2026-08-28 as a
-> lower-quality convenience option rather than a replacement, with **Separate HUD explicitly out**.
-> It still has to answer how a non-BMP capture artefact flows through take verification, Render
-> Studio's admission predicate and export routing — questions this document already answers for the
-> FFmpeg path, and whose answers likely transfer. Written up in `docs/obs_alternate_capture.md`.
+> The sibling direction, OBS as an alternate capture method, shipped too
+> ([#65](https://github.com/ccoventry/dod-studio/issues/65), closed; `native/src/obs/`), as a
+> lower-quality convenience option rather than a replacement, with Separate HUD out. How it
+> answered the take-verification and Render Studio questions is in `docs/obs_alternate_capture.md`.
 
 ---
 
@@ -207,10 +206,9 @@ to trade quality for speed.
   and re-encoding the result.
 - **`studio/src-tauri/src/capture_manager.rs`** — `take_folder_has_content` and
   `VerifiedBlock`'s two tiers, if the output layout changes shape.
-- **`native/src/hlcr/take_meta.rs`** — records the capture FPS per take and warns when a render
-  interprets it at a different rate. A video take should carry the same record and the existing
-  `[render-fps-mismatch]` check keeps working unchanged. *Note: that module lands with
-  `feature/decal-flush-r-and-d`, not on `dev` — so it is not present on this branch yet.*
+- **`native/src/hlcr/take_meta.rs`** — records the capture FPS per take, and a frame-sequence render
+  reads the frames at that rate (`render_fps`, Render Settings' Source FPS only without one). A
+  video take carries the same record; its own file has its rate, so the render reads no FPS for it.
 
 ---
 
@@ -244,7 +242,7 @@ capture that runs and produces no video.
 
 ---
 
-## Staging
+## Staging (historical: steps 1 to 4 shipped, step 5 and the measuring in step 6 did not)
 
 1. **Answer the four unknowns with one capture.** A single clip, `-c:v rawvideo`, everything else
    left alone. Record exactly where the video lands, whether `sound.wav` is beside it, whether a
@@ -262,7 +260,7 @@ capture that runs and produces no video.
 
 ---
 
-## Open questions
+## Open questions (as of the design; the stream-copy and wall-clock ones are still open)
 
 - **Does it help capture wall-clock, or only disk?** Assumed, unmeasured. Worth knowing before it
   is described to anyone as a speed feature.
@@ -306,7 +304,7 @@ overlay should do and a useful sanity signal that the streams are what they clai
 **`nb_frames` is in the container.** The scanner reports `frame_count: 0` for video takes because
 `count_bmps` finds no bitmaps, and that gap blocks both the render progress percentage and any move
 to HLCR-style frame-count pairing. FFprobe reads 1218 straight off the stream, so the number is
-available without decoding — see `docs/render_studio_hlcr_parity.md`.
+available without decoding — see `docs/archive/render_studio_hlcr_parity.md`.
 
 ### Separate HUD does not survive `mirv_movie_ffmpeg`
 
@@ -359,7 +357,7 @@ without the flag — which is what made it look like the flag was being ignored 
 This is invisible to static analysis: the binary's string table gives you the switch names but cannot
 tell you which ones consume an argument. Reading `Launcher.cs` is what settled it.
 
-The set now sent, on every `-customLoader` launch:
+The fix sent this set on every `-customLoader` launch:
 
     -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1
 
@@ -372,8 +370,15 @@ Measured after the fix — `hudalpha` frame 600, same clip:
 
 A real matte: white on the kill feed, weapon icons and objective boxes, black everywhere else.
 `-afxOptimizeCaptureVis` is deliberately still not sent — a visibility optimisation, unrelated to
-alpha — and the set has not been bisected to find the minimum; `-32bpp` in particular is untested on
-its own, though a framebuffer without 32-bit colour has no alpha bits to force.
+alpha.
+
+**Only `-afxForceAlpha8 1` is sent now** ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
+A bisect on the pre-Anniversary build captured the same 30 demo frames with `mirv_movie_separate_hud 1`
+once per flag removed: without `-gl`, `-32bpp` or `-afxRenderMode standard`, `hudalpha` (0 / 255 /
+mean 6.2), `hudcolor` and `all` measured the same, with the same frame count and capture time; without
+`-afxForceAlpha8 1`, `hudalpha` went flat 255. The engine already runs OpenGL with a 32-bit
+framebuffer, and `standard` is HLAE's default render mode, so the other three were never doing
+anything. The flags are HLAE's, read the same way on both engine builds.
 
 ### Ungated, 2026-09-08
 
@@ -409,3 +414,32 @@ Separate HUD both on and off. The same build, same codec, same settings capture
 direct-to-video. Untested whether it also crashes in frame-sequence mode. Note it has a
 `_forcehltv` twin of identical byte size but different content, which suggests it was already
 known to need working around.
+
+## Anti-aliasing comes from the NVIDIA driver, not the engine (measured 2026-10-26)
+
+Both `hw.dll` builds draw into their own framebuffer object with 4x MSAA, a sample count hard-coded in
+the `glRenderbufferStorageMultisampleEXT` call (PRE `hw+0x4dd72`, Anniversary `hw+0x24f016`), and blit
+the resolved image to the window. `-nomsaa` turns the MSAA off and `-nofbo` the whole framebuffer.
+HLAE turns the framebuffer off itself (its changelog: "HLAE now adds -nofbo to the launch options"),
+so under HLAE the game draws to the window's own buffer **with no anti-aliasing at all**: frames from a
+plain launch, `-nomsaa` and `-nofbo` are byte-identical, with hard staircase edges.
+
+Because the game draws to the window's buffer, the driver's override applies, and HLAE's frames carry it.
+Measured on both builds at 2560x1440 (an RTX 3070 Ti), the same free-camera frames each launch:
+
+| NVIDIA Control Panel, hl.exe's program settings | Effect on HLAE frames |
+|---|---|
+| Antialiasing - Mode: Override, Setting: 4x, 8xQ or 32x | Geometry and viewmodel edges smooth (1-2% of pixels change, all on edges); 4x, 8xQ and 32x look alike; 32x also lifts the whole frame by about 0.6/255 |
+| Setting: 16x | No edge smoothing on this GPU (CSAA is gone), yet pixels shift |
+| Mode: Enhance the application setting | Nothing: the game asks for no AA under HLAE |
+| Antialiasing - Transparency (multisample, 4x supersample, sparse grid) | Alpha-tested leaves and fences stay jagged in every mode; 4x supersample blurs grass and loses the edge AA; **8x sparse grid makes the kill feed and HUD disappear** |
+| FXAA | Nothing in HLAE's frames (applied when the frame is shown, after HLAE has read it) |
+| Texture filtering - Quality: High quality, LOD bias clamp, 16x AF override | Nothing visible; `gl_ansio 16` already gives 16x AF |
+
+The cost is nil: a `timedemo` ran at 227 fps without AA and 229-230 fps with 8xQ or 32x (the game is
+CPU-bound), and a 10 s, 300 fps utvideo capture took 17.6-18.6 s either way. Kill-feed text is drawn
+as 2D sprites, so AA leaves it untouched.
+
+So: Override + 8xQ on hl.exe's profile, Transparency off, FXAA off. The game window can't be bigger
+than the desktop, so supersampling (DSR) only works fullscreen or with the desktop itself at the DSR
+resolution; it is untested here.

@@ -1,5 +1,5 @@
 //! Serves Studio's analysis pipe (#565) without the app, for testing the
-//! game's Killstreaks tab against it:
+//! game's Highlights tab against it:
 //!
 //!     set DOD_STUDIO_LOG_DIR=<scratch dir>
 //!     cargo run -p native --release --example analysis_server_probe -- [seconds]

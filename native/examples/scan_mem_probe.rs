@@ -1,7 +1,7 @@
 //! What does parsing demos N-at-a-time actually cost in memory?
 //!
 //! Written to settle `SCAN_CONCURRENCY` for #195/#212. The scan loop in
-//! `capture_manager::scan_directory_impl` parses each demo with a fixed worker
+//! `scan_manager::scan_directory_impl` parses each demo with a fixed worker
 //! pool, and the obvious question -- does four workers cost four times the
 //! peak? -- is not answerable by reading the code, because the answer depends
 //! on how big an `Analysis` is relative to the demo that produced it.

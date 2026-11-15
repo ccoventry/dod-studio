@@ -25,4 +25,17 @@
 		"labelText"		""
 		"textAlignment"		"west"
 	}
+	"LoadStrip"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"LoadStrip"
+		"xpos"		"8"
+		"ypos"		"2"
+		"wide"		"540"
+		"tall"		"18"
+		"visible"		"0"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+	}
 }

@@ -2,7 +2,7 @@
 //! of the screen while spectating, in a demo or live, and everything drawn on
 //! them -- with a cvar, on screen, without a capture running (issue #328).
 //!
-//! `dodstudio_hide_spectator_bars 1` hides the whole spectator panel: the
+//! `ds_spec_hide_bars 1` hides the whole spectator panel: the
 //! bands, the score, timer and player name on them, the DUCK menu row and the
 //! inset outline. An earlier version had a second cvar for the bands alone,
 //! with the text left floating; nobody wanted that, and it went.
@@ -58,20 +58,20 @@
 //! A redirect of `CDoDSpectatorGUI`'s and `CBottomBar`'s "`SetVisible`"
 //! vtable slot, live-tested twice in 2026-09 and never called. Slot 8 of a
 //! vgui2 `Panel` is `OnChildAdded`; `SetVisible` is slot 29, and neither
-//! class paints the bands anyway. `docs/goldsrc_spectator_bars.md` keeps
+//! class paints the bands anyway. `docs/archive/goldsrc_spectator_bars_rnd.md` keeps
 //! that history.
 
 // The hook itself is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 /// Hides the spectator panel: the bands and everything on them.
-pub const NAME: &str = console_name!("hide_spectator_bars");
+pub const NAME: &str = console_name!("spec_hide_bars");
 
 /// `IPanel` (`VGUI_Panel007`) vtable slots, 0-based; slot 0 is the virtual
 /// destructor. The same in both builds' `vgui2.dll`.
@@ -92,7 +92,7 @@ const WRAPPER_CLASS: &str = ".?AVVPanelWrapper@@";
 /// and the menu row are all its children, so not painting it hides them all.
 const FRAME: &[u8] = b"SpectatorGUI";
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static HIDE: AtomicBool = AtomicBool::new(false);
 
 /// The stock functions, captured at install.
@@ -100,13 +100,8 @@ static STOCK_PAINT_TRAVERSE: AtomicUsize = AtomicUsize::new(0);
 static GET_NAME: AtomicUsize = AtomicUsize::new(0);
 /// Set once install has been tried and refused, so it is tried and logged once.
 static INSTALL_FAILED: AtomicBool = AtomicBool::new(false);
-/// Paints skipped so far, for `dodstudio_debug_status`.
+/// Paints skipped so far, for `ds_debug_status`.
 static SKIPPED: AtomicU32 = AtomicU32::new(0);
-
-/// Called once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 fn installed() -> bool {
     STOCK_PAINT_TRAVERSE.load(Ordering::Acquire) != 0
@@ -301,11 +296,9 @@ mod hook {
 /// Reads the cvar and installs the filter the first time it is on. Called
 /// every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if HIDE.swap(wanted, Ordering::Relaxed) != wanted {
         let state = if wanted { "1 (hidden)" } else { "0 (shown)" };
         unsafe { crate::debug::report(&format!("spectator_bars: {NAME} = {state}")) };
@@ -326,7 +319,7 @@ pub fn poll() {
     unsafe { crate::debug::report(&report) };
 }
 
-/// One `dodstudio_debug_status` line, once the cvar has been turned on.
+/// One `ds_debug_status` line, once the cvar has been turned on.
 pub fn status_line() -> Option<String> {
     if INSTALL_FAILED.load(Ordering::Relaxed) {
         return Some(format!(

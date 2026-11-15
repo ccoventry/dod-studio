@@ -1,6 +1,6 @@
 //! Does an injected snapshot hold as many entities as the stream expects? (#224)
 //!
-//! `snapshot_inject` rebuilds the client's entity table by replaying every
+//! `analysis::repair` (once the `snapshot_inject` probe) rebuilds the client's entity table by replaying every
 //! update before a join. Nothing so far checks the *size* of what it produces,
 //! and it can be short without any of the other tests noticing: the demo still
 //! parses, no packet is discarded, and the analyzer still reads it.

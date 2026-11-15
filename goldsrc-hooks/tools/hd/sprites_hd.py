@@ -1,25 +1,45 @@
-"""HD world sprites: dodstudio_hd/sprites/<style>/<sprite>_<frame>_<hash>.tga.
+"""HD sprites: dodstudio_hd/sprites/<style>/<sprite>_<frame>_<hash>.tga.
 
-For every frame of every world sprite (muzzle flashes, explosions, smoke...),
-keyed by (<sprite>_<frame>, FNV-1a-32 of the frame's pixels + the sprite's
-palette) exactly as texture_hires.rs computes it:
+For every frame of every sprite -- world sprites (muzzle flashes, explosions,
+smoke...) and HUD sprites (the hud.txt atlases, crosshairs, scopes, HLTV
+icons; #728) alike, since the engine loads both with one loader under one
+name -- keyed by (<sprite>_<frame>, FNV-1a-32 of the frame's pixels + the
+sprite's palette) exactly as texture_hires.rs computes it:
 
   normal / additive  palette -> RGB, reflect-pad, 4x in the style
   alphtest           cut-outs filled first; alpha from the original mask
   indexalpha         the palette index *is* the alpha: upscaled as a greyscale
                      image; RGB is palette[255], all the engine ever draws
+  crosshair sheets   not built: the hook draws them stock (CROSSHAIR below)
 
-then Lanczos to the power-of-two target (4x, capped at 1024/side). Fully
+then Lanczos to the power-of-two target (4x, capped at HD_CAP a side, 1024
+by default). Fully
 transparent frames (blanked-out sprites) are skipped: nothing to upscale.
 
-HUD sprites (crosshairs, weapon icons, scopes...) are skipped too: the game
-draws them pixel for pixel, so texture_hires never replaces them.
+The alphtest fill matters most for the HUD atlases, which are dozens of
+icons on one transparent (index 255, usually blue or magenta) sheet. Every
+transparent pixel takes the colour of its nearest opaque pixel, so the key
+colour is gone before the upscaler sees anything, each icon's edge colours
+continue outward past its edge, and between two icons the two fills meet
+halfway across the gap -- in pixels the original mask then cuts away. An
+opaque pixel is never changed, so no icon's colour reaches another icon.
+The transparent pixels keep those fill colours under alpha 0 in the output
+on purpose: the engine's mip chain averages RGBA naively, so a black or
+blue fill would darken every icon's edge in the smaller levels.
 
-usage: python sprites_hd.py <out_dir> [<source> ...]
+Then, for the game's own sprites, the kill-feed weapon icons are rendered
+from the weapon models into the weapons sheets just made
+(killfeed_icons.py, #841); icons with no model keep the upscale. Then the
+atlas `ds_hud_deathmsg layout even` draws from (killfeed_icons.py --even,
+#1022): its HD frames here, its sprite and table in <game>_addon/sprites.
+
+usage: python sprites_hd.py <out_dir> [--no-hud] [--no-icons] [<source> ...]
   source: a .spr file, a folder of them, or a .txt list of .spr paths.
-  With none, every world sprite of the game (dod/ shadowing valve/), plus
-  those of any HD_ALSO install.
-env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK
+  With none, every sprite of the game (dod/ shadowing valve/), plus those of
+  any HD_ALSO install, and the kill-feed icons.
+  --no-hud: leave out the HUD sprites (as every build before #728 did).
+  --no-icons: keep the upscaled kill-feed icons (and build no even atlas).
+env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK, HD_BATCH
 """
 import glob, os, re, sys
 import numpy as np
@@ -30,15 +50,34 @@ import hdcommon as C
 import styles as S
 from goldsrc import SPR_ALPHTEST, SPR_INDEXALPHA, Sprite
 
-# Drawn by the HUD, never as a world sprite. Names from every sprites/*.txt
-# HUD layout are added to these at run time.
+# Drawn by the HUD, never as a world sprite: what --no-hud leaves out. Names
+# from every sprites/*.txt HUD layout are added to these at run time.
 HUD = re.compile(r"^(320|640|1clip_|1hud_|1rockets|clip_|crosshair|customogxhair|customxhair|dodcross"
                  r"|hud_|scope_|weapons\d|hint_|hltv_icons|number_)")
+
+# Crosshair sheets are pixel art: 1-3 px bars drawn at 1:1. The HD hook
+# leaves them stock (texture_hires.rs, is_crosshair_sheet): an HD copy has
+# nothing to add at 1:1, and the mipmapped one drew fainter than stock on PRE
+# and ignored gl_spriteblend 0 (#733). So they are not built.
+CROSSHAIR = re.compile(r"^(crosshair|customogxhair|customxhair|dodcross)")
+
+# Temporary: the kill-feed icons from the weapon models, and the even layout's
+# atlas, stay out of releases until the WSOD25 movie shows them first (#1157).
+# The app's bundled copy (hd-scripts) keeps the upscaled icons; the repo's
+# copy, which `tauri dev` and hand runs use, still paints them. #1157 deletes
+# this and its check. Studio's HD page reads this line and the folder rule
+# below to stay quiet while it holds (native::hd::outdated, #1155): keep it
+# `HOLD_KILLFEED_ICONS = True|False`, or change both.
+HOLD_KILLFEED_ICONS = True
+
+
+def killfeed_icons_held(script_dir=os.path.dirname(os.path.abspath(__file__))):
+    return HOLD_KILLFEED_ICONS and os.path.basename(script_dir) == "hd-scripts"
 
 
 def hud_layout_names(game):
     names = set()
-    for g in ("dod", "valve"):
+    for g in (C.game_folder(), "valve"):
         for txt in glob.glob(os.path.join(game, g, "sprites", "*.txt")):
             for line in open(txt, encoding="latin1"):
                 cols = line.split()
@@ -52,17 +91,18 @@ def is_hud(path, hud):
     return base in hud or bool(HUD.match(base))
 
 
-def world_sprites(installs):
-    """Every non-HUD sprite of each install, dod/ shadowing valve/ at the
-    same relative path, as the engine's search path does."""
-    hud = hud_layout_names(installs[0])
+def game_sprites(installs, with_hud=True):
+    """Every sprite of each install, dod/ shadowing valve/ at the same
+    relative path, as the engine's search path does; `with_hud=False`
+    leaves out the HUD ones."""
+    hud = set() if with_hud else hud_layout_names(installs[0])
     found = {}
     for hl in installs:
-        for g in ("dod", "valve"):
+        for g in (C.game_folder(), "valve"):
             root = os.path.join(hl, g, "sprites")
             for f in glob.glob(os.path.join(root, "**", "*.spr"), recursive=True):
                 rel = os.path.relpath(f, root).lower().replace("\\", "/")
-                if not is_hud(f, hud):
+                if with_hud or not is_hud(f, hud):
                     found.setdefault((hl, rel), f)
     return sorted(found.values())
 
@@ -80,15 +120,20 @@ def pad_amount(n):
 
 
 def main():
-    if len(sys.argv) < 2:
+    flags = {"--no-hud", "--no-icons"}
+    args = [a for a in sys.argv[1:] if a not in flags]
+    with_hud = "--no-hud" not in sys.argv[1:]
+    with_icons = with_hud and "--no-icons" not in sys.argv[1:]
+    if not args:
         sys.exit(__doc__)
-    out_dir, sources = sys.argv[1], sys.argv[2:]
+    out_dir, sources = args[0], args[1:]
     style = S.style_from_env()
     os.makedirs(out_dir, exist_ok=True)
     work = C.work_dir("sprites_" + style)
 
-    files = [f for s in sources for f in sprite_files(s)] or world_sprites([C.game_root()] + C.extra_installs())
+    files = [f for s in sources for f in sprite_files(s)] or game_sprites([C.game_root()] + C.extra_installs(), with_hud)
     jobs = {}
+    crosshairs = 0
     for f in files:
         try:
             spr = Sprite(f)
@@ -99,16 +144,21 @@ def main():
             print(f"skipped {f}: {spr.numcolors} colours, format {spr.tex_format}")
             continue
         base = C.file_stem_name(os.path.splitext(os.path.basename(f))[0])
+        if CROSSHAIR.match(base.lower()):
+            crosshairs += 1
+            continue  # the hook draws these stock
         for n, w, h, idx in spr.frames:
             if spr.tex_format == SPR_ALPHTEST and idx.count(255) == len(idx):
                 continue  # a blanked-out frame: nothing to upscale
             key = f"{base}_{n}_{C.fnv1a32(idx, spr.palette):08x}"
-            if not os.path.exists(os.path.join(out_dir, key + ".tga")):
+            if not C.built(os.path.join(out_dir, key + ".tga"), C.pot(w * 4), C.pot(h * 4)):
                 jobs.setdefault(key, (spr.tex_format, w, h, idx, spr.palette))
-    print(f"{len(jobs)} sprite frames to build")
+    print(f"{crosshairs} crosshair sheet(s) left stock; {len(jobs)} sprite frames to build")
 
     masks = {}
-    for key, (fmt, w, h, idx, pal) in jobs.items():
+
+    def prepare(key, job):
+        fmt, w, h, idx, pal = job
         ind = np.frombuffer(idx, np.uint8).reshape(h, w)
         if fmt == SPR_INDEXALPHA:
             rgb = np.repeat(ind[:, :, None], 3, axis=2)
@@ -117,7 +167,7 @@ def main():
         if fmt == SPR_ALPHTEST:
             mask = ind == 255
             if mask.all():
-                continue
+                return None
             if mask.any():
                 _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
                 rgb = rgb[iy, ix]
@@ -125,15 +175,10 @@ def main():
         py, px = pad_amount(h), pad_amount(w)
         mode = "reflect" if min(h, w) > 1 else "edge"
         pad = np.pad(rgb, ((py, py), (px, px), (0, 0)), mode=mode)
-        Image.fromarray(pad).save(os.path.join(work, "in", key + ".png"))
+        return Image.fromarray(pad)
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
-
-    done = 0
-    for key, (fmt, w, h, idx, pal) in jobs.items():
-        src = os.path.join(work, "out", key + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        fmt, w, h, idx, pal = job
         tw, th = C.pot(w * 4), C.pot(h * 4)
         py, px = pad_amount(h), pad_amount(w)
         # The padded frame scaled so the original part is exactly tw x th.
@@ -145,12 +190,37 @@ def main():
             img = Image.new("RGBA", (tw, th), tuple(pal[765:768]) + (255,))
             img.putalpha(alpha)
         elif key in masks:
-            alpha = Image.fromarray(masks[key].astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
+            alpha = Image.fromarray(masks.pop(key).astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
         C.save_output(img, os.path.join(out_dir, key + ".tga"))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} sprite frame replacement(s) to {out_dir}")
+    if with_icons and not sources:
+        killfeed_icons(out_dir)
+
+
+def killfeed_icons(out_dir):
+    """The kill-feed icons from the weapon models (#841), then the atlas
+    `ds_hud_deathmsg layout even` draws from (#1022; under a minute). A
+    failure there leaves the upscaled icons, or the game's layout, never
+    fails the sprites step."""
+    if killfeed_icons_held():
+        print("kill-feed icons from the models: not in this release, the upscaled ones stay", flush=True)
+        return
+    try:
+        import killfeed_icons as K
+        n = K.build(out_dir)
+        print(f"painted {n} kill-feed icon(s) from the weapon models", flush=True)
+    except Exception as e:  # noqa: BLE001 -- the upscaled sheets are already written
+        print(f"kill-feed icons skipped, the upscaled ones stay: {type(e).__name__}: {e}", flush=True)
+        return
+    try:
+        n = K.build_even(out_dir)
+        print(f"{n} kill-feed icon(s) in the even layout's atlas", flush=True)
+    except Exception as e:  # noqa: BLE001 -- the sheets are written; layout even then keeps the game's layout
+        print(f"the even layout's atlas skipped: {type(e).__name__}: {e}", flush=True)
 
 
 if __name__ == "__main__":

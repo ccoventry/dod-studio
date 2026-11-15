@@ -1,4 +1,4 @@
-//! The DoD Studio window's Killstreaks tab (#565): every kill streak in the
+//! The DoD Studio window's Highlights tab (#565): every kill streak in the
 //! demo that is playing, found by the same analysis Studio runs.
 //!
 //! ## Where the analysis comes from
@@ -6,8 +6,10 @@
 //! The analyzer cache Studio shares (`analysis::cache`, under
 //! `%APPDATA%\dod-studio\analyzer_cache`): a demo Studio's Demo Analyzer or
 //! Master Queue scan already read, or one shown here before, is there and
-//! takes a few milliseconds. Anything else is analysed here, on a thread of its
-//! own at below-normal priority, and saved there, for Studio and the next time.
+//! takes a few milliseconds. Anything else is analysed by DoD Studio itself
+//! when it is running (its analysis pipe, `studio_pipe`), else here, on a thread of its own at
+//! below-normal priority; either way it is saved there, for Studio and the
+//! next time.
 //!
 //! Only on request (the tab asks while it is showing), never because a demo
 //! started: captures play demos too, and an analysis would take CPU from the
@@ -16,7 +18,7 @@
 //! ## Times
 //!
 //! A streak's time is its first kill's on the `viewdemo` bar, the units
-//! `dodstudio_seek_to` takes (`analysis`' `viewdemo_offset`).
+//! `ds_demo_seek_to` takes (`analysis`' `viewdemo_offset`).
 
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -25,13 +27,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-/// Every life with a kill is listed; the tab's Min kills box narrows the
-/// list, so nothing is hidden by a number fixed here.
+/// Every life with a kill is listed: one kill is a highlight too.
 pub const MIN_KILLS: usize = 1;
 /// Go jumps this long before a streak's first kill.
 pub const LEAD_IN_SECS: f32 = 5.0;
 
-/// One row of the Killstreaks tab.
+/// One row of the Highlights tab.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Streak {
     pub player: String,
@@ -43,11 +44,11 @@ pub struct Streak {
     /// The last kill's, the same way.
     pub last_kill: f32,
     /// Each kill's weapon, and from the second on the time since the one
-    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Capture page's
+    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Highlights page's
     /// Details column (`CaptureStreak::update_visuals`).
     pub details: String,
-    /// The player's number (entity index, what `dodstudio_spec_target`
-    /// takes), when they were still in the game at the demo's end.
+    /// The player's number (entity index, what `ds_spec_target`
+    /// takes) when they scored these kills.
     pub player_number: Option<u8>,
 }
 
@@ -86,7 +87,7 @@ impl Streak {
         })
     }
 
-    /// From the first kill to the last, as the Capture page's Dur. column
+    /// From the first kill to the last, as the Highlights page's Dur. column
     /// shows it.
     pub fn duration_text(&self) -> String {
         gap_text(self.last_kill - self.first_kill)
@@ -107,102 +108,58 @@ pub struct Found {
     pub hltv: bool,
     /// A POV demo's recording player, whose streaks alone are listed.
     pub recorder: Option<String>,
+    /// For a demo damaged partway, where it stopped being read (#811):
+    /// "Damaged demo: read up to 2:05, ...". The streaks are those before it.
+    pub damage: Option<String>,
 }
 
-/// One player's kills, as [`select`] takes them.
-pub struct PlayerKills {
-    pub name: String,
-    pub number: Option<u8>,
-    pub recorder: bool,
-    /// Each streak's kills: (bar time, weapon).
-    pub streaks: Vec<Vec<(f32, String)>>,
-}
-
-/// The streaks to list, earliest first: in a POV demo only the recording
-/// player's (the only ones its footage follows), in an HLTV demo
-/// everyone's. A POV demo whose recorder can't be told lists everyone's.
-pub fn select(players: Vec<PlayerKills>, hltv: bool) -> Found {
-    let recorder = (!hltv)
-        .then(|| players.iter().find(|p| p.recorder).map(|p| p.name.clone()))
-        .flatten();
-    let mut streaks: Vec<Streak> = players
-        .iter()
-        .filter(|p| recorder.is_none() || p.recorder)
-        .flat_map(|p| {
-            p.streaks.iter().filter_map(|kills| {
-                Streak::new(&p.name, kills).map(|s| Streak {
-                    player_number: p.number,
-                    ..s
+/// The streaks to list, earliest first: the highlights
+/// `analysis::highlights` keeps (#573, D18: a POV demo's recorder's, an HLTV
+/// demo's everyone's), the same ones the Highlights page lists. Each carries the
+/// number its player had when the kills happened, so a player who left
+/// before the demo ended still has one for Go to spectate (#706). Weapon
+/// names are `analysis`' own, the Highlights page's: built-in English when the
+/// game's folder has no `localizations`.
+pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
+    let found = analysis::highlights::highlights(analysis);
+    let mut streaks: Vec<Streak> = found
+        .shown()
+        .filter_map(|highlight| {
+            let kills: Vec<(f32, String)> = highlight
+                .kills
+                .iter()
+                .map(|kill| {
+                    (
+                        kill.viewdemo_secs,
+                        analysis::weapon_display_name(&kill.weapon),
+                    )
                 })
+                .collect();
+            Streak::new(&highlight.player, &kills).map(|s| Streak {
+                player_number: highlight.number(),
+                ..s
             })
         })
         .collect();
     streaks.sort_by(|a, b| a.first_kill.total_cmp(&b.first_kill));
     Found {
         streaks,
-        hltv,
-        recorder,
+        hltv: found.hltv,
+        recorder: found.recorder,
+        damage: analysis.demo_info.damage.as_ref().map(|d| d.summary()),
     }
 }
 
-/// Every listable streak in `analysis` ([`select`]).
-pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
-    let hltv = analysis.demo_info.demo_type == "HLTV";
-    let recorder_slot = analysis.state.pov_player_index;
-    let players = analysis
-        .state
-        .players
-        .iter()
-        .map(|player| {
-            let slot = match player.connection {
-                analysis::Connection::Connected { client_id } => Some(client_id),
-                _ => None,
-            };
-            PlayerKills {
-                name: player.name.clone(),
-                // The analysis counts slots from 0, entity numbers from 1.
-                number: slot.and_then(|s| s.checked_add(1)),
-                recorder: !hltv && slot.is_some() && slot == recorder_slot,
-                streaks: player
-                    .kill_streaks
-                    .iter()
-                    .map(|streak| {
-                        streak
-                            .kills
-                            .iter()
-                            .map(|(time, weapon, _)| {
-                                (time.viewdemo_offset.as_secs_f32(), weapon_name(weapon))
-                            })
-                            .collect()
-                    })
-                    .collect(),
-            }
-        })
-        .collect();
-    select(players, hltv)
+/// The tab's line once the streaks are found: `text`, then for a damaged
+/// demo where it stopped being read (#811).
+pub fn with_damage(text: String, found: &Found) -> String {
+    match &found.damage {
+        Some(damage) => format!("{damage} {text}"),
+        None => text,
+    }
 }
 
-/// Studio's English weapon names. `analysis::weapon_display_name` reads them
-/// from a `localizations` folder it looks for beside the running program,
-/// which in the game is `hl.exe`'s: there is none there.
-const WEAPON_NAMES: &str = include_str!("../../localizations/dod_studio_english.txt");
-
-/// A weapon's name as Studio shows it (`"weapon.<name>"` keys are the
-/// weapon's own name in lower case), or that name itself.
-fn weapon_name(weapon: &analysis::Weapon) -> String {
-    let own = format!("{weapon:?}");
-    let key = format!("\"weapon.{}\"", own.to_ascii_lowercase());
-    WEAPON_NAMES
-        .lines()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix(&key)?;
-            Some(rest.trim().trim_matches('"').to_string())
-        })
-        .filter(|name| !name.is_empty())
-        .unwrap_or(own)
-}
-
-/// A span of time as `m:ss`, rounded to the second, as the Capture page
+/// A span of time as `m:ss`, rounded to the second, as the Highlights page
 /// shows its gaps and durations.
 fn gap_text(secs: f32) -> String {
     let secs = secs.max(0.0).round() as u64;
@@ -324,6 +281,19 @@ pub fn status() -> Option<(u64, Status, u32)> {
     ))
 }
 
+/// The current analysis' progress (0 to 100) while it runs, `Some(None)`
+/// when none runs, or `None` while the worker is saving its result. Cheaper
+/// than [`status`] for the loading strip (#797), which asks every frame: it
+/// never copies the streaks found.
+pub fn loading_percent() -> Option<Option<u32>> {
+    let job = JOB.try_lock().ok()?;
+    Some(
+        job.as_ref()
+            .filter(|j| matches!(j.status, Status::Loading))
+            .map(|_| PERCENT.load(Ordering::Acquire)),
+    )
+}
+
 /// The streaks, and where they came from (for the log).
 fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     let root = cache_root();
@@ -334,8 +304,20 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
         return Ok((streaks_of(&analysis), "from the analyzer cache"));
     }
     // DoD Studio, when it runs, analyses it in its own (64-bit) process.
+    // When it saved the result for another cache version than this DLL reads
+    // (#684), the result is in a folder this DLL never looks in: say so, and
+    // analyse in the game instead when the demo fits.
+    let mut mismatch = None;
     match ask_studio(path, generation) {
-        Some(Ok(())) => {
+        Some(Ok(Some(theirs))) if theirs != analysis::cache::SCHEMA_VERSION => {
+            let why = version_mismatch(theirs, analysis::cache::SCHEMA_VERSION);
+            log(&format!(
+                "{}: {why} Analysing in the game instead.",
+                path.display()
+            ));
+            mismatch = Some(why);
+        }
+        Some(Ok(_)) => {
             return root
                 .as_deref()
                 .and_then(|root| analysis::cache::load(root, path))
@@ -344,7 +326,14 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
                     "DoD Studio read it, but its result is not in the cache".to_string()
                 });
         }
-        Some(Err(why)) => return Err(format!("DoD Studio could not read it: {why}")),
+        // An older Studio sends the parse error with its byte dump; the
+        // Highlights tab has one line for it.
+        Some(Err(why)) => {
+            return Err(format!(
+                "DoD Studio could not read it: {}",
+                analysis::integrity::parse_error_reason(&why)
+            ));
+        }
         None => {}
     }
     let size = std::fs::metadata(path)
@@ -363,10 +352,12 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
             free >> 20,
             largest >> 20
         ));
-        return Err(
+        // With the versions apart, opening it in Studio wouldn't help: the
+        // DLL is what needs changing.
+        return Err(mismatch.unwrap_or_else(|| {
             "too big to read inside the game. Open it once in DoD Studio's Demo Analyzer, and it shows here"
-                .to_string(),
-        );
+                .to_string()
+        }));
     }
     log(&format!("analysing {}", path.display()));
     let bytes = std::fs::read(path).map_err(|e| format!("could not read the demo: {e}"))?;
@@ -392,36 +383,70 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     ))
 }
 
-/// DoD Studio's analysis pipe; must match `native::sys::analysis_server::
-/// PIPE_NAME` to the character.
-const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
+/// One line of DoD Studio's answer (`native::sys::analysis_server`'s
+/// protocol).
+#[derive(Debug, PartialEq)]
+enum Reply {
+    Progress(u32),
+    /// The analyzer cache version Studio saved the result in.
+    Cache(u32),
+    Done,
+    Failed(String),
+    /// Anything else, ignored, so a later Studio can add lines.
+    Other,
+}
+
+fn parse_reply(line: &str) -> Reply {
+    let line = line.trim_end_matches('\r');
+    if let Some(percent) = line.strip_prefix("progress ") {
+        percent
+            .trim()
+            .parse::<u32>()
+            .map_or(Reply::Other, |p| Reply::Progress(p.min(100)))
+    } else if let Some(version) = line.strip_prefix("cache v") {
+        version.trim().parse().map_or(Reply::Other, Reply::Cache)
+    } else if line == "done" {
+        Reply::Done
+    } else if let Some(why) = line.strip_prefix("failed ") {
+        Reply::Failed(why.to_string())
+    } else {
+        Reply::Other
+    }
+}
+
+/// What the Highlights tab says when DoD Studio saved a demo for another
+/// analyzer cache version than this DLL reads.
+fn version_mismatch(studio: u32, ours: u32) -> String {
+    format!(
+        "DoD Studio saved it for analyzer cache v{studio}, but this hook DLL reads v{ours}: use a hook DLL built from the same version as DoD Studio."
+    )
+}
 
 /// Asks DoD Studio to analyse `path` into the analyzer cache, following its
-/// progress. `None` when Studio isn't running (nothing serves the pipe).
-fn ask_studio(path: &Path, generation: u64) -> Option<Result<(), String>> {
+/// progress. `None` when Studio isn't running (nothing serves the pipe);
+/// otherwise the cache version Studio saved it for, when it says (a Studio
+/// from before #684 doesn't).
+fn ask_studio(path: &Path, generation: u64) -> Option<Result<Option<u32>, String>> {
     use std::io::{BufRead, BufReader, Write};
-    let mut pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(STUDIO_PIPE)
-        .ok()?;
+    let mut pipe = crate::studio_pipe::connect().ok()?;
     log(&format!("asking DoD Studio to analyse {}", path.display()));
     let request = format!("analyze {}\n", path.to_string_lossy());
     if let Err(e) = pipe.write_all(request.as_bytes()) {
         return Some(Err(format!("could not ask: {e}")));
     }
+    let mut cache = None;
     for line in BufReader::new(pipe).lines() {
         let Ok(line) = line else { break };
-        if let Some(percent) = line.strip_prefix("progress ") {
-            if let Ok(percent) = percent.trim().parse::<u32>()
-                && GENERATION.load(Ordering::Acquire) == generation
-            {
-                PERCENT.store(percent.min(100), Ordering::Release);
+        match parse_reply(&line) {
+            Reply::Progress(percent) => {
+                if GENERATION.load(Ordering::Acquire) == generation {
+                    PERCENT.store(percent, Ordering::Release);
+                }
             }
-        } else if line == "done" {
-            return Some(Ok(()));
-        } else if let Some(why) = line.strip_prefix("failed ") {
-            return Some(Err(why.to_string()));
+            Reply::Cache(version) => cache = Some(version),
+            Reply::Done => return Some(Ok(cache)),
+            Reply::Failed(why) => return Some(Err(why)),
+            Reply::Other => {}
         }
     }
     Some(Err("DoD Studio stopped answering".to_string()))
@@ -505,59 +530,61 @@ mod tests {
         list.iter().map(|(t, w)| (*t, w.to_string())).collect()
     }
 
-    fn player(name: &str, number: u8, recorder: bool, first: f32) -> PlayerKills {
-        PlayerKills {
-            name: name.to_string(),
-            number: Some(number),
-            recorder,
-            streaks: vec![kills(&[(first, "K98"), (first + 2.0, "K98")])],
-        }
+    /// #811: a demo cut short lists the highlights before the cut, and the
+    /// tab's line says where it stopped; an intact one's line is unchanged.
+    #[test]
+    fn a_damaged_demo_says_where_it_stopped() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let intact = streaks_of(&analysis::Analysis::try_from_bytes(&bytes).unwrap());
+        assert_eq!(intact.damage, None);
+        assert_eq!(
+            with_damage("3 highlights.".into(), &intact),
+            "3 highlights."
+        );
+
+        let cut = analysis::Analysis::try_from_bytes(&bytes[..bytes.len() / 2]).unwrap();
+        let found = streaks_of(&cut);
+        assert!(found.streaks.len() <= intact.streaks.len());
+        let line = with_damage("3 highlights.".into(), &found);
+        assert!(
+            line.starts_with("Damaged demo: read up to ") && line.ends_with(" 3 highlights."),
+            "{line}"
+        );
     }
 
+    /// Whose highlights are listed is `analysis::highlights`' rule, tested
+    /// there; here, that the tab lists exactly those, earliest first, with
+    /// each player's number and Studio's weapon names.
     #[test]
-    fn a_pov_demo_lists_only_the_recorders_streaks() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 10.0),
-                player("brain", 5, true, 20.0),
-            ],
-            false,
+    fn the_tab_lists_the_highlights_analysis_keeps() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
         );
-        assert_eq!(found.recorder.as_deref(), Some("brain"));
-        assert_eq!(found.streaks.len(), 1);
-        assert_eq!(found.streaks[0].player, "brain");
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let analysis = analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = analysis::highlights::highlights(&analysis);
+        let found = streaks_of(&analysis);
+
         assert!(!found.hltv);
-    }
-
-    #[test]
-    fn an_hltv_demo_lists_everyone_with_their_numbers() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 30.0),
-                player("brain", 5, false, 20.0),
-            ],
-            true,
+        assert_eq!(found.recorder, highlights.recorder);
+        assert!(!found.streaks.is_empty());
+        assert_eq!(found.streaks.len(), highlights.shown().count());
+        for streak in &found.streaks {
+            assert_eq!(Some(&streak.player), found.recorder.as_ref());
+            assert!(streak.player_number.is_some());
+            assert!(!streak.weapons.is_empty());
+        }
+        assert!(
+            found
+                .streaks
+                .windows(2)
+                .all(|w| w[0].first_kill <= w[1].first_kill)
         );
-        assert!(found.hltv && found.recorder.is_none());
-        let names: Vec<_> = found
-            .streaks
-            .iter()
-            .map(|s| (s.player.as_str(), s.player_number))
-            .collect();
-        assert_eq!(names, [("brain", Some(5)), ("milo", Some(3))]);
-    }
-
-    #[test]
-    fn a_pov_demo_without_a_known_recorder_lists_everyone() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 10.0),
-                player("brain", 5, false, 20.0),
-            ],
-            false,
-        );
-        assert_eq!(found.streaks.len(), 2);
-        assert!(found.recorder.is_none());
     }
 
     #[test]
@@ -595,16 +622,16 @@ mod tests {
     }
 
     #[test]
-    fn the_studio_pipe_is_the_one_studio_serves() {
-        let server = include_str!("../../native/src/sys/analysis_server.rs");
-        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
-    }
-
-    #[test]
     fn weapons_have_studios_names() {
-        assert_eq!(weapon_name(&analysis::Weapon::StickGrenade), "Stick");
-        assert_eq!(weapon_name(&analysis::Weapon::Mp40), "MP40");
-        assert_eq!(weapon_name(&analysis::Weapon::K98), "K98");
+        assert_eq!(
+            analysis::weapon_display_name(&analysis::Weapon::StickGrenade),
+            "Stick"
+        );
+        assert_eq!(
+            analysis::weapon_display_name(&analysis::Weapon::Mp40),
+            "MP40"
+        );
+        assert_eq!(analysis::weapon_display_name(&analysis::Weapon::K98), "K98");
     }
 
     #[test]
@@ -647,5 +674,33 @@ mod tests {
         for streak in streaks.streaks.iter().take(5) {
             println!("{streak:?}");
         }
+    }
+
+    #[test]
+    fn studio_replies_parse_line_by_line() {
+        assert_eq!(parse_reply("progress 42"), Reply::Progress(42));
+        assert_eq!(parse_reply("progress 250\r"), Reply::Progress(100));
+        assert_eq!(parse_reply("cache v7"), Reply::Cache(7));
+        assert_eq!(parse_reply("done"), Reply::Done);
+        assert_eq!(parse_reply("done\r"), Reply::Done);
+        assert_eq!(
+            parse_reply("failed no such demo"),
+            Reply::Failed("no such demo".to_string())
+        );
+        // Unknown or garbled lines are skipped, so either side can add lines.
+        assert_eq!(parse_reply("cache vX"), Reply::Other);
+        assert_eq!(parse_reply("progress"), Reply::Other);
+        assert_eq!(parse_reply("hello v2"), Reply::Other);
+    }
+
+    #[test]
+    fn a_version_mismatch_names_both_versions_and_the_fix() {
+        let text = version_mismatch(7, 6);
+        assert!(text.contains("analyzer cache v7"), "{text}");
+        assert!(text.contains("reads v6"), "{text}");
+        assert!(
+            text.contains("hook DLL built from the same version"),
+            "{text}"
+        );
     }
 }

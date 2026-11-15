@@ -2,6 +2,18 @@
 // Sorting the Render Studio job table, and the batch's overall progress
 // (#40). Pure, so it can be tested on its own.
 
+/**
+ * A render job's status, as `render_manager.rs` sends it. Comparison keys, not
+ * display text: the table shows them as they are.
+ */
+export const JOB_STATUS = Object.freeze({
+  QUEUED: 'Queued',
+  RENDERING: 'Rendering',
+  FINISHED: 'Finished',
+  ERROR: 'Error',
+  CANCELLED: 'Cancelled',
+});
+
 /** The columns a header click can sort by, and how each compares. */
 const SORT_KEYS = {
   name: (j) => String(j.name || '').toLowerCase(),
@@ -13,7 +25,13 @@ const SORT_KEYS = {
 };
 
 /** Sorting by Status groups the batch the way it's worked through. */
-const STATUS_ORDER = { Rendering: 0, Queued: 1, Error: 2, Cancelled: 3, Finished: 4 };
+const STATUS_ORDER = {
+  [JOB_STATUS.RENDERING]: 0,
+  [JOB_STATUS.QUEUED]: 1,
+  [JOB_STATUS.ERROR]: 2,
+  [JOB_STATUS.CANCELLED]: 3,
+  [JOB_STATUS.FINISHED]: 4,
+};
 
 export const SORTABLE_COLUMNS = Object.keys(SORT_KEYS);
 
@@ -49,11 +67,11 @@ export function nextSort(current, column) {
  * left to count.
  */
 export function batchProgress(jobs) {
-  const counted = jobs.filter((j) => j.status !== 'Cancelled');
+  const counted = jobs.filter((j) => j.status !== JOB_STATUS.CANCELLED);
   if (!counted.length) return null;
   const sum = counted.reduce((total, j) => {
-    if (j.status === 'Finished' || j.status === 'Error') return total + 100;
-    if (j.status === 'Rendering') return total + Math.min(100, Math.max(0, Number(j.progress) || 0));
+    if (j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR) return total + 100;
+    if (j.status === JOB_STATUS.RENDERING) return total + Math.min(100, Math.max(0, Number(j.progress) || 0));
     return total;
   }, 0);
   return Math.round(sum / counted.length);

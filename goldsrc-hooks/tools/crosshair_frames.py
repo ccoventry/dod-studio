@@ -10,7 +10,7 @@ Three uses, all on a folder of PNG frames recorded at a fixed rate (HLAE's
 
     crosshair_frames.py hook <hook log> <frames dir>
         A spectated (HLTV) recording against the hook's own account. With
-        `dodstudio_debug_log_weapon_model 1` the hook logs a line each time
+        `ds_debug_log_weapon_model 1` the hook logs a line each time
         it decides the player's own view would hide or draw the crosshair;
         this counts the frames that agree. The log must hold one run only:
         cut it from the last "remote: listening" line.

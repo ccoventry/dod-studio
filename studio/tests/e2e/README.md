@@ -1,9 +1,14 @@
 # Frontend e2e tests
 
-Playwright, run in headless Chromium against a minimal test harness
-(`render-studio.html`) — not the real app shell. Tauri's IPC (`invoke`/`listen`)
-is mocked (`mocks/`, wired in via `../vite.config.e2e.js`), so `render_pane.js`
-and `ipc_bridge.js` run completely unmodified with no Rust backend at all.
+Playwright, run in headless Chromium against minimal test harnesses — not the
+real app shell. Each `*.spec.js` loads its own `*.html` harness, usually the
+one of the same name beside it (`render-studio.html`, `setup.html`, ...).
+The one exception is `app-boot.spec.js`, which boots the real `index.html` and
+`main.js` to check main.js's startup wiring (#683).
+Tauri's IPC (`invoke`/`listen`) is mocked (`mocks/`, wired in via
+`../vite.config.e2e.js`), so the pane modules under test and `ipc_bridge.js`
+run completely unmodified with no Rust backend at all. Pure-logic unit tests
+are separate: `npm run test:unit` (vitest, `src/*.test.js`).
 
 ## Run it
 
@@ -13,6 +18,16 @@ npm run test:e2e
 
 Playwright starts `npm run dev:e2e` (Vite on port 5183, using
 `vite.config.e2e.js`'s IPC aliasing) itself and tears it down after.
+
+## Page errors fail the test
+
+Specs import `test`/`expect` from `./fixtures.js`, not `@playwright/test`. Its
+auto fixture fails any test whose page throws or leaves a promise rejection
+unhandled, except what `ALLOWED_PAGE_ERRORS` lists (each entry says why).
+The IPC mock answers an unstubbed command with `undefined`; `DEFAULT_HANDLERS`
+in `mocks/tauri-core.js` gives the boot-time commands an empty answer instead.
+A test that boots `index.html` and is not about the first-run Setup window
+saves `setup_dismissed: true`, or that window covers the page.
 
 ## What this covers
 
@@ -30,8 +45,8 @@ real app.
 - Real Rust command execution, real `run_render_job`/scanner behavior — that's
   `cargo test -p native` (see `native/src/hlcr/*.rs`'s own test modules).
 - The real native window, real file dialogs, real filesystem access.
-- Anything outside Render Studio — the harness only wires up what
-  `render_pane.js` touches.
+- Any pane without a harness here — each harness only wires up what its
+  module touches.
 
 For that level of coverage, the fallback is still a real
 `npm run tauri dev` session and manual clicking, or investing further in a
@@ -40,7 +55,7 @@ what this is — see the PR that introduced this suite for the tradeoff).
 
 ## Adding a fixture the harness doesn't have yet
 
-`render-studio.html` only carries the DOM elements `render_pane.js` currently
-queries. If a change to that file starts querying a new element id, add it to
-the harness too — `grep "querySelector('#" src/render_pane.js` finds the
-full current list.
+Each harness carries only the DOM elements its module queries. If a change
+starts querying a new element id, add it to that module's harness too —
+for example `grep "querySelector('#" src/render_pane.js` finds the full current
+list for `render-studio.html`.

@@ -1,4 +1,4 @@
-//! `dodstudio_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
+//! `ds_spec_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
 //! during playback -- "You're watching HLTV. Visit www.valvesoftware.com",
 //! and any line a proxy operator sends with `msg` -- without patching the
 //! demo (issue #30).
@@ -35,14 +35,14 @@
 //! And a message already on screen when the cvar is turned on stays until it
 //! fades on its own; only the ones after that are dropped.
 //!
-//! Default 0, like every other `dodstudio_` switch.
+//! Default 0, like every other `ds_` switch.
 
-use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
-pub const NAME: &str = console_name!("hide_hltv_messages");
+pub const NAME: &str = console_name!("spec_hide_hltv_messages");
 
 /// `hltv.h`'s `DRC_CMD_MESSAGE`.
 const DRC_CMD_MESSAGE: u8 = 6;
@@ -53,19 +53,12 @@ const DRC_CMD_MESSAGE: u8 = 6;
 /// `native::patch::build_director_message` writes.
 const TEXT_OFFSET: usize = 30;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// How many messages have been dropped this session.
 static DROPPED: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    // Safety: a cvar the engine registered for us, alive for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    CVAR.on()
 }
 
 /// Whether a director message buffer, as `HUD_DirectorMessage` receives it,
@@ -107,7 +100,7 @@ pub fn should_drop(buf: &[u8]) -> bool {
     true
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let on = enabled();
     let dropped = DROPPED.load(Ordering::Relaxed);

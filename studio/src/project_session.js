@@ -1,0 +1,568 @@
+// project_session.js
+// The project file: Save / Load / New Session, the unsaved-changes prompt and
+// the session indicator in the header. Moved out of main.js (#683), which
+// owns the queue, the take index and the Teams list; they're reassigned
+// there, so they're reached through getters and setters rather than held.
+
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
+import { whileDialogOpens } from './dialog_wait.js';
+import { defaultProjectsDir, readProjectFile, logFrontendEvent } from './ipc_bridge.js';
+import {
+  projectSavedLine, projectOpenedLine, projectFailedLine, projectUpdatedLine, projectNewerLine,
+  projectNeedsCopyLine, NEW_SESSION_LINE, rendersSavedOnOpenLine,
+} from './project_log.js';
+import {
+  openProjectText, buildProjectFile, saveProjectFile, isNewerProject, canSaveOver, ProjectFileError,
+} from './project_file.js';
+import { updateSummary } from './project_migrations.js';
+import { updateStreakVisuals } from './detail_pane.js';
+import { clearCheckedPaths } from './master_pane.js';
+import { switchNavTab } from './nav.js';
+import { streakUid, pruneTakeIndex, markTakesRendered } from './take_index.js';
+import { attachCaptures, capturesToSave } from './take_record.js';
+import { attachRenders, rendersToSave } from './take_renders.js';
+import { createProjectRenders } from './project_renders.js';
+import { emptyProjectTeams, normalizeProjectTeams } from './project_teams.js';
+import { refreshTeamsPane } from './teams_pane.js';
+import { projectFolders } from './project_paths.js';
+import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
+import { showToast } from './toast.js';
+import { STRINGS } from './strings.js';
+import { projectSaveDialogOptions, projectCopyDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
+import { createProjectOpenProgress } from './project_open_progress.js';
+import { fileNameOf } from './path_display.js';
+
+/** How long the toasts that say where a backup went, or what a newer file's
+ *  save means, stay up: long enough to read a whole path. */
+const UPDATE_TOAST_MS = 12000;
+
+/**
+ * @param {object} app  What this needs from main.js:
+ *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
+ *   loadDemos(demos) make a loaded project's demos the queue and show them,
+ *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
+ *   checkMissingDemos(projectPath, scanPaths, { onSearched }) from
+ *   project_demos.js, `onSearched` called once its folder search is done,
+ *   offerRescan() from project_rescan.js, and getReviewSettings()/
+ *   setReviewSettings(raw), the Review box's HLTV pick (#828,
+ *   review_hltv_picker.js), and onProjectFile(path), told each file opened
+ *   or saved (File → Open Recent, #935). offerConvert(path) asks to switch a
+ *   loaded `.json` project to `.dodstudio` and resolves its new path or null
+ *   (project_convert.js, #528); onProjectRenamed(oldPath, newPath) is told
+ *   when it did. refuseDuringBatch() from batch_guard.js says why a project
+ *   can't be replaced now and returns true. onStatusChange() redraws the
+ *   tables after highlights' status changed without a click (#1345).
+ */
+export function createProjectSession({
+  getDemos,
+  replaceDemos,
+  loadDemos,
+  getTakeIndex,
+  setTakeIndex,
+  getProjectTeams,
+  setProjectTeams,
+  checkMissingDemos,
+  offerRescan = async () => false,
+  getReviewSettings = () => undefined,
+  setReviewSettings = () => {},
+  onProjectFile = () => {},
+  offerConvert = async () => null,
+  onProjectRenamed = () => {},
+  refuseDuringBatch = () => false,
+  onStatusChange = () => {},
+}) {
+  // The project session file last loaded or saved in this window, if any —
+  // once set, "Save Session" writes straight back to it instead of asking
+  // Save-As every time (matches Ctrl+S's behavior in every other app).
+  let currentSessionPath = null;
+  // What the open file said of itself (project_file.js): its format, and the
+  // keys only a newer build knows, written back on save. Null for a project
+  // that didn't come from a file.
+  let openedFile = null;
+  // True from opening a newer build's file until the first save says what
+  // happens to its new settings.
+  let newerNoticePending = false;
+  // Counts markProjectDirty() calls, so a save can tell a change that landed
+  // while it wrote from one it has in the file.
+  let changeCount = 0;
+  // True whenever project state (scanned demos, takeIndex, scanPaths) has
+  // changed since the last successful save or load — gates the "unsaved
+  // changes" prompt on window close. Cleared by saveProjectSession() and
+  // Load Session; set by markProjectDirty() at every mutation site.
+  let hasUnsavedChanges = false;
+  // "Opening the project…", then the search for its missing demos, on the
+  // queue's line (#958).
+  const openProgress = createProjectOpenProgress();
+
+  /** Every highlight's durable uid across every currently-scanned demo — the
+   *  "still exists" set pruneTakeIndex() checks the take index against on save. */
+  function collectAllUids() {
+    const uids = [];
+    getDemos().forEach(demo => {
+      (demo.streaks || []).forEach(streak => uids.push(streakUid(demo.path, streak)));
+    });
+    return uids;
+  }
+
+  // Whether saveProjectSession() would actually have something to write: a
+  // non-empty queue is always savable, but so is an emptied one once a
+  // session file exists to write it back to — clearing everything is a
+  // real, meaningful change relative to that file, not a no-op.
+  function hasSavableProject() {
+    return getDemos().length > 0 || !!currentSessionPath;
+  }
+
+  // Whether closing, reloading, loading or starting a new session should ask
+  // first. Gated on hasSavableProject() too, matching saveProjectSession()'s
+  // own guard — without it, clearing a *fresh, never-saved* queue to empty
+  // then closing would show the prompt but "Save & Close" would just hit the
+  // "Nothing to save" toast and leave the modal stuck open. Emptying a queue
+  // that *did* come from a loaded session is still real, savable work
+  // (writes the now-empty project back), so that case still prompts.
+  function needsSavePrompt() {
+    return hasUnsavedChanges && hasSavableProject();
+  }
+
+  function updateSessionFileIndicator() {
+    const el = document.querySelector('#session-file-indicator');
+    if (!el) return;
+    const dirtySuffix = hasUnsavedChanges ? ' • unsaved' : '';
+    const newer = currentSessionPath && isNewerProject(openedFile);
+    el.classList.toggle('newer-project', !!newer);
+    if (newer) {
+      const S = STRINGS.PROJECT_FILE;
+      el.textContent = `${fileNameOf(currentSessionPath)}${dirtySuffix} • ${S.MADE_WITH_NEWER}`;
+      el.title = `${currentSessionPath}\n${canSaveOver(openedFile) ? S.NEWER_TITLE : S.NEEDS_COPY_TITLE}`;
+    } else if (currentSessionPath) {
+      const filename = fileNameOf(currentSessionPath) || currentSessionPath;
+      el.textContent = filename + dirtySuffix;
+      el.title = currentSessionPath;
+    } else {
+      el.textContent = STRINGS.NAV.NO_SESSION_LOADED + dirtySuffix;
+      el.title = '';
+    }
+  }
+
+  // Marks Capture Studio's project state as changed since the last save —
+  // called at every mutation site for currentScannedDemos/takeIndex/
+  // scanPaths. Gates the close-window "unsaved changes" prompt.
+  function markProjectDirty() {
+    changeCount += 1;
+    hasUnsavedChanges = true;
+    updateSessionFileIndicator();
+  }
+
+  // The project's record of its rendered videos (#1264): kept current as
+  // renders finish, and filled from the take folders when a project opens.
+  const projectRenders = createProjectRenders({ getTakeIndex, markDirty: markProjectDirty });
+  projectRenders.startRecording();
+
+  // Where this save writes. A project that needs a newer build to save over
+  // it has only Save a copy, so a quiet save has nowhere to go and is refused:
+  // null. Otherwise null is a cancelled dialog. Once a session's been loaded
+  // or saved once in this window, it keeps writing back to that same file
+  // instead of asking Save-As again. A first save is `.dodstudio`; a project
+  // opened from `.json` keeps saving to that `.json` (#528,
+  // project_file_type.js).
+  async function saveTarget(quiet) {
+    if (!canSaveOver(openedFile)) {
+      if (quiet) {
+        logFrontendEvent(projectNeedsCopyLine(currentSessionPath));
+        return null;
+      }
+      return whileDialogOpens(() => save(projectCopyDialogOptions(currentSessionPath)));
+    }
+    return currentSessionPath || whileDialogOpens(async () =>
+      save(projectSaveDialogOptions(await defaultProjectsDir())));
+  }
+
+  // The first save in a newer format: the one-time summary, in the log
+  // always and as a toast unless saving quietly. The take check reads the
+  // disk, so it runs once the save is safely done.
+  async function reportUpdate(filePath, takeIndex, backup, quiet) {
+    const summary = await updateSummary(getDemos(), takeIndex);
+    logFrontendEvent(projectUpdatedLine(filePath, summary, backup));
+    if (!quiet) showToast(STRINGS.PROJECT_FILE.updatedToast(summary, backup), 'success', UPDATE_TOAST_MS);
+  }
+
+  // Writes the project to `path`, and when that can't be done offers Save a
+  // copy, since nothing else lets the user save elsewhere and the work would
+  // stay stuck in memory. Resolves `{ filePath, raised }`, or null when the
+  // copy is cancelled. A quiet save has nobody to ask: it throws.
+  async function writeOrOfferCopy(path, projectFile, quiet) {
+    try {
+      return { filePath: path, raised: await saveProjectFile(path, projectFile) };
+    } catch (err) {
+      if (quiet || !(err instanceof ProjectFileError)) throw err;
+      logFrontendEvent(projectFailedLine('save the project', path, err.message));
+      showToast(err.message, 'error', UPDATE_TOAST_MS);
+      const copy = await whileDialogOpens(() => save(projectCopyDialogOptions(path)));
+      if (!copy) return null;
+      return { filePath: copy, raised: await saveProjectFile(copy, projectFile) };
+    }
+  }
+
+  // Save Project Session — also called from the Clear All modal's "Save
+  // Session First" action, so it lives here as a plain function rather than
+  // only inline in the button's click handler. Returns whether it actually
+  // wrote a file (false on "nothing to save" or a cancelled Save-As dialog).
+  // `quiet`: no toasts and no move to the top of Open Recent, for Rescan
+  // Recent Sessions saving each one in turn (#938).
+  async function saveProjectSession({ quiet = false } = {}) {
+    if (!hasSavableProject()) {
+      if (!quiet) showToast(STRINGS.MAIN.NOTHING_TO_SAVE, 'info');
+      return false;
+    }
+    // Already matches what's on disk — skip the write and the misleading
+    // "saved" toast, but still report success so callers that gate on the
+    // return value (Clear All's Save-First, the close-window prompt) treat
+    // this the same as an actual save rather than a failure.
+    if (!hasUnsavedChanges) {
+      if (!quiet) showToast(STRINGS.MAIN.ALREADY_SAVED, 'info');
+      return true;
+    }
+    try {
+      const target = await saveTarget(quiet);
+      if (!target) return false;
+      const changesInThisSave = changeCount;
+
+      // No HLAE or hl.exe path: those are this PC's settings, not the
+      // project's, and a project carrying them switched them on every open.
+      const prunedTakes = pruneTakeIndex(getTakeIndex(), collectAllUids());
+      const projectFile = buildProjectFile({
+        // The folders this project's demos are in, not the app-wide pinned
+        // list (that is every folder ever added, nothing to do with the
+        // project). Read back only to look for demos that have moved (#21).
+        scanPaths: projectFolders(getDemos()),
+        demos: getDemos(),
+        // Pruned against what's actually still scanned so the index
+        // doesn't accumulate uids for demos removed from the project.
+        takeIndex: prunedTakes,
+        // How each take was captured (#439), beside the index so a build
+        // from before it still reads takeIndex as bare uid lists.
+        takeCaptures: capturesToSave(prunedTakes),
+        // Every video rendered for the project (#1264), beside the index
+        // for the same reason; left out until the first render.
+        takeRenders: rendersToSave(prunedTakes),
+        teams: getProjectTeams(),
+        // Whose highlights an HLTV demo's review plays (#828).
+        review: getReviewSettings(),
+        // Kept for older-file/older-version compatibility — nothing on the
+        // reading side branches on it any more (Quick-Clip mode is gone).
+        mode: 'workspace'
+      }, openedFile);
+      const written = await writeOrOfferCopy(target, projectFile, quiet);
+      if (!written) return false;
+      const { filePath, raised } = written;
+      currentSessionPath = filePath;
+      // A mark that landed during the write isn't in the file.
+      hasUnsavedChanges = changeCount !== changesInThisSave;
+      updateSessionFileIndicator();
+      logFrontendEvent(projectSavedLine(filePath, getDemos().length));
+      if (!quiet) {
+        showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
+        if (newerNoticePending) showToast(STRINGS.PROJECT_FILE.NEWER_SAVED_TOAST, 'info', UPDATE_TOAST_MS);
+        newerNoticePending = false;
+        onProjectFile(filePath);
+      }
+      // The save is done: a failed summary mustn't report it as failed.
+      if (raised) {
+        await reportUpdate(filePath, prunedTakes, raised.backup, quiet)
+          .catch((err) => logFrontendEvent(projectFailedLine('summarise the update of', filePath, err)));
+      }
+      return true;
+    } catch (err) {
+      console.error("Save project error:", err);
+      logFrontendEvent(projectFailedLine('save the project', currentSessionPath, err));
+      if (!quiet) showToast(err instanceof ProjectFileError ? err.message : STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
+      return false;
+    }
+  }
+
+  document.querySelector('#save-project-btn')?.addEventListener('click', () => saveProjectSession());
+
+  // Loading replaces currentScannedDemos/takeIndex wholesale — same
+  // data-loss risk as closing the window, so it gets the same prompt
+  // before that happens, reusing the same modal. False on Cancel; 'save'
+  // already wrote the file inside the modal's Save button handler, and
+  // 'discard' loads over it either way.
+  async function confirmReplaceProject() {
+    if (refuseDuringBatch()) return false;
+    if (!needsSavePrompt()) return true;
+    return !!(await requestUnsavedChangesConfirmation());
+  }
+
+  // Set from Load Session's click or Open Recent until the unsaved-changes
+  // prompt and the dialog are done, so a second Ctrl+O in that wait stacks
+  // no second prompt or dialog. Cleared before the load itself, which can
+  // run a rescan for minutes and shows its own progress (#958).
+  let choosing = false;
+  const loadProjectBtn = document.querySelector('#load-project-btn');
+
+  // Load Project Session. The button is disabled until the dialog returns;
+  // pickPath shows the wait while it comes, the projects folder lookup
+  // included.
+  loadProjectBtn?.addEventListener('click', async () => {
+    if (choosing) return;
+    choosing = true;
+    loadProjectBtn.disabled = true;
+    let selected = null;
+    try {
+      if (!(await confirmReplaceProject())) return;
+      selected = await pickPath({
+        field: 'project.open',
+        current: currentSessionPath,
+        fallback: () => defaultProjectsDir(),
+        multiple: false,
+        filters: PROJECT_OPEN_FILTERS,
+      });
+    } catch (err) {
+      console.error("Load project error:", err);
+      showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
+      return;
+    } finally {
+      choosing = false;
+      loadProjectBtn.disabled = false;
+    }
+    if (selected) await loadProjectFile(selected);
+  });
+
+  /** Opens the project at `path` as Load Session would once its file is
+   *  picked, unsaved-changes prompt first (File → Open Recent, #935).
+   *  Resolves whether it opened; false while Load Session's prompt or
+   *  dialog is up. */
+  async function openProject(path) {
+    if (choosing) return false;
+    choosing = true;
+    let confirmed;
+    try {
+      confirmed = await confirmReplaceProject();
+    } finally {
+      choosing = false;
+    }
+    return confirmed ? loadProjectFile(path) : false;
+  }
+
+  // The renders the take folders hold that the project doesn't (#1264): their
+  // highlights become Rendered, and when they are the only change since the
+  // open, they're saved with it, so a project opens saved instead of asking
+  // about changes nobody made (#1345). Any other change since the open (a
+  // relocated demo, an edit made meanwhile) leaves it all unsaved: those are
+  // the user's to save. A quiet open (Rescan Recent Sessions) saves itself.
+  async function pickUpRendersOnOpen(path, quiet) {
+    let marked = 0;
+    const { result, saved } = await saveIfOnlyChange(async () => {
+      const found = await projectRenders.pickUpTakeFolderRenders();
+      if (found.added === 0 || currentSessionPath !== path) return found;
+      marked = markTakesRendered(getTakeIndex(), found.takeKeys, getDemos());
+      if (marked > 0) onStatusChange();
+      return found;
+    }, {
+      // Asked after the read: the project may have been renamed or replaced
+      // meanwhile (Switch to .dodstudio, #528), and with nothing found the
+      // one mark since the open is someone else's.
+      madeChange: (found) => !quiet && found.added > 0 && currentSessionPath === path,
+    });
+    if (saved) logFrontendEvent(rendersSavedOnOpenLine(path, result.added, marked));
+  }
+
+  /**
+   * Runs `change`, which marks the project unsaved at most once, and saves
+   * quietly when that mark is the only change since before it ran: work
+   * Studio did by itself (renders found on open, #1345; a batch caught up on,
+   * #1344) shouldn't leave the user a save prompt for changes they never
+   * made. Anything else unsaved means the project holds the user's edits too,
+   * and those stay theirs to save. `madeChange(result)`, asked once `change`
+   * has finished, says whether it marked anything: when it didn't, the one
+   * mark counted is someone else's (an edit made while it awaited), so
+   * nothing is saved. Resolves `{ result, saved }`.
+   */
+  async function saveIfOnlyChange(change, { madeChange = () => true } = {}) {
+    const cleanBefore = !hasUnsavedChanges;
+    const changesBefore = changeCount;
+    const result = await change();
+    const onlyChange = cleanBefore && changeCount === changesBefore + 1;
+    const saved = onlyChange && madeChange(result) && !!currentSessionPath && await saveProjectSession({ quiet: true });
+    return { result, saved: !!saved };
+  }
+
+  // Reads and applies a project file: the half of Load Session after the
+  // picker. Resolves whether it loaded. `quiet`, for Rescan Recent Sessions
+  // working through each one (#938): no toasts, no move to the top of Open
+  // Recent, no missing-demo search and no rescan offer (it rescans them
+  // itself). `rescanOffer: false` leaves out only the offer.
+  async function loadProjectFile(selected, { quiet = false, rescanOffer = !quiet } = {}) {
+    openProgress.opening();
+    try {
+      const opened = openProjectText(await readProjectFile(selected));
+      const { data } = opened;
+      if (!data) return false;
+      openedFile = opened;
+      newerNoticePending = isNewerProject(opened);
+      if (newerNoticePending) logFrontendEvent(projectNewerLine(selected, opened.schema, Object.keys(opened.unknownKeys).length));
+      currentSessionPath = selected;
+      hasUnsavedChanges = false;
+      updateSessionFileIndicator();
+      if (!quiet) onProjectFile(selected);
+      // Load Session is reachable from any tab (#122) — jump to Studio
+      // so the loaded project is actually visible, same cross-tab-jump
+      // pattern as detail_pane.js's "View Match Telemetry" button.
+      switchNavTab('workspace');
+      clearCheckedPaths();
+      // An older project's hlaePath / hlPath are ignored: Settings own
+      // those paths, and applying them here silently switched the game
+      // install (a PRE project opened on a POST setup).
+      // Tolerant: a 0.10.0 project file has no takeIndex at all — load
+      // as empty rather than reject the file. Auto-Rendered just won't
+      // retroactively apply to takes captured before this existed.
+      const takeIndex = data.takeIndex || {};
+      attachCaptures(takeIndex, data.takeCaptures);
+      attachRenders(takeIndex, data.takeRenders);
+      setTakeIndex(takeIndex);
+      // Deliberately verbose: this is the only place takeIndex is ever
+      // populated from disk, so logging it here — with exactly what
+      // came out of the file, before anything else touches it — is
+      // what makes it possible to prove a later auto-Rendered flip
+      // came from this loaded data and not a leftover in-memory state.
+      console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
+      // Tolerant the same way: a project saved before the Teams list
+      // (#445) has no `teams`, and loads with none named or merged.
+      setProjectTeams(normalizeProjectTeams(data.teams));
+      // A project saved before #828 has no `review`: the HLTV box goes
+      // back to its default, nobody picked.
+      setReviewSettings(data.review);
+      if (data.demos) {
+        // timeline_string is a derived field, saved as a convenience
+        // snapshot rather than the source of truth — recompute it from
+        // each streak's raw kills on every load so a display-only fix
+        // (e.g. a weapon-name-resolution bug) shows correctly for
+        // sessions saved before the fix, instead of replaying whatever
+        // text got baked in at save time.
+        data.demos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
+        // A project saved before #573 holds other players' highlights
+        // the table never showed; a new scan lists the recorder's alone.
+        data.demos.forEach(dropOtherPlayersSavedStreaks);
+        // Before the demos load: the grouping they start takes the line.
+        openProgress.opened(STRINGS.MAIN.projectOpenedLine(data.demos.length));
+        logFrontendEvent(projectOpenedLine(selected, data.demos.length));
+        loadDemos(data.demos);
+        if (!quiet) {
+          showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
+          openProgress.searching();
+          await checkMissingDemos(selected, data.scanPaths || [], { onSearched: () => openProgress.searched() });
+          openProgress.searched();
+        }
+        // After the missing check: a demo it relocates can be rescanned,
+        // one still missing can't.
+        if (rescanOffer) await offerRescan();
+      }
+      refreshTeamsPane();
+      // In the background: the project is usable while the take folders answer.
+      pickUpRendersOnOpen(selected, quiet)
+        .catch((err) => console.error('Picking up the take folders\' renders failed:', err));
+    } catch (err) {
+      console.error("Load project error:", err);
+      logFrontendEvent(projectFailedLine('open the project', selected, err));
+      if (!quiet) showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
+      return false;
+    } finally {
+      openProgress.opened();
+      openProgress.searched();
+    }
+    await switchToDodstudio(selected);
+    return true;
+  }
+
+  // Last, once the load and every prompt it brings (missing demos, the
+  // rescan offer) are done: the one-time offer to switch a `.json` project
+  // to `.dodstudio` (#528, project_convert.js). Changes made since the load
+  // (a relocated demo, a rescan) are saved into the renamed file.
+  async function switchToDodstudio(path) {
+    const renamed = await offerConvert(path);
+    if (!renamed) return;
+    currentSessionPath = renamed;
+    updateSessionFileIndicator();
+    onProjectRenamed(path, renamed);
+    if (hasUnsavedChanges) await saveProjectSession();
+  }
+
+  // New Session (#122/#149) — resets to the same blank state the app starts
+  // in: no session file, no demos, no take index. Reuses main.js's
+  // replaceScannedDemos for the demo-queue reset — same as Clear All — then
+  // overrides the dirty flag it sets, since a brand new untitled session has
+  // nothing to prompt about saving. `quiet`: no toast, no tab switch and no
+  // unsaved-changes prompt, for Rescan Recent Sessions putting back the blank
+  // queue it started from (#938): it asked before it began, and what's open
+  // now is a session it chose not to save.
+  async function newSession({ quiet = false } = {}) {
+    if (!quiet && refuseDuringBatch()) return;
+    if (!quiet && needsSavePrompt()) {
+      const outcome = await requestUnsavedChangesConfirmation();
+      if (!outcome) return; // Cancel — abort, keep current state
+    }
+    replaceDemos([]);
+    currentSessionPath = null;
+    openedFile = null;
+    newerNoticePending = false;
+    setTakeIndex({});
+    setProjectTeams(emptyProjectTeams());
+    setReviewSettings(null);
+    refreshTeamsPane();
+    hasUnsavedChanges = false;
+    updateSessionFileIndicator();
+    if (quiet) return;
+    logFrontendEvent(NEW_SESSION_LINE);
+    switchNavTab('workspace');
+    showToast(STRINGS.MAIN.NEW_SESSION_TOAST, 'success');
+  }
+
+  document.querySelector('#new-session-btn')?.addEventListener('click', () => newSession());
+
+  // Unsaved-changes prompt, shown by the window close handler whenever
+  // hasUnsavedChanges is set. Same Promise-resolution shape as main.js's
+  // tracked-work modal, but its own two-way branch ('save'/'discard') since
+  // closing is a binary "keep the work or don't" rather than a "confirm a
+  // removal."
+  let pendingUnsavedChangesResolve = null;
+  const unsavedChangesModal = document.querySelector('#unsaved-changes-modal');
+
+  function requestUnsavedChangesConfirmation() {
+    if (unsavedChangesModal) unsavedChangesModal.style.display = 'flex';
+    return new Promise(resolve => { pendingUnsavedChangesResolve = resolve; });
+  }
+
+  if (unsavedChangesModal) {
+    document.querySelector('#unsaved-changes-cancel-btn')?.addEventListener('click', () => {
+      unsavedChangesModal.style.display = 'none';
+      pendingUnsavedChangesResolve?.(false);
+      pendingUnsavedChangesResolve = null;
+    });
+    document.querySelector('#unsaved-changes-discard-btn')?.addEventListener('click', () => {
+      unsavedChangesModal.style.display = 'none';
+      pendingUnsavedChangesResolve?.('discard');
+      pendingUnsavedChangesResolve = null;
+    });
+    document.querySelector('#unsaved-changes-save-btn')?.addEventListener('click', async () => {
+      const saved = await saveProjectSession();
+      if (!saved) return; // Save-As cancelled/failed — leave the modal open
+      unsavedChangesModal.style.display = 'none';
+      pendingUnsavedChangesResolve?.('save');
+      pendingUnsavedChangesResolve = null;
+    });
+  }
+
+  return {
+    markProjectDirty,
+    saveProjectSession,
+    needsSavePrompt,
+    requestUnsavedChangesConfirmation,
+    openProject,
+    confirmReplaceProject,
+    loadProjectFile,
+    newSession,
+    /** The open session's file, or null when none is. */
+    currentPath: () => currentSessionPath,
+    saveIfOnlyChange,
+  };
+}

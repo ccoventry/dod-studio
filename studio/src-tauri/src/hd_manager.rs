@@ -1,21 +1,38 @@
 //! The HD Textures page's backend (#372): what is built, finding (or
-//! fetching) the upscaler and a Python, and running the build.
+//! fetching) the upscaler and a Python, running the build, the user's own
+//! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use native::hd::build::{BuildOutcome, BuildRequest};
-use native::hd::{self, HdStatus, python, setup::SetupOutcome, upscaler};
+use native::hd::my_styles::{self, StyleDef};
+use native::hd::{
+    self, HdStatus, map_keys_cache, map_list, map_textures, misses, python, setup::SetupOutcome,
+    upscaler,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
 /// flag: a build must not start while its Python is still being fetched.
+/// The style preview only reads, so it has its own.
 #[derive(Default)]
 pub struct HdManager {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
+    previewing: Arc<AtomicBool>,
+    /// The map coverage scan (#426): it only reads, so it has its own flag.
+    covering: Arc<AtomicBool>,
+}
+
+/// How far the map coverage scan is, for the page's progress bar.
+#[derive(Clone, serde::Serialize)]
+struct CoverageProgress {
+    done: usize,
+    total: usize,
 }
 
 /// The `hl.exe` path from the Configuration page, or the "set it first"
@@ -39,7 +56,7 @@ fn scripts_dir(app: &AppHandle) -> Option<PathBuf> {
     hd::build::scripts_dir(bundled.as_deref())
 }
 
-/// What is built under `<game>\dod\dodstudio_hd`, which upscaler folder and
+/// What is built under `<game>\dod_addon\dodstudio_hd` (or `dod\` from before #415), which upscaler folder and
 /// Python a build would use, and what each is missing. `game_path` is the
 /// `hl.exe` the Configuration page holds.
 #[tauri::command]
@@ -47,6 +64,13 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
     let exe = game_exe(&game_path)?;
     let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
+    // Initial Commands run after every config, so they have the last word on
+    // gl_max_size (#680).
+    let init_commands = {
+        let settings = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = lock_or_recover(&settings.inner);
+        guard.init_commands.clone()
+    };
     // A big HD folder is tens of thousands of files, and finding Python runs
     // a few processes: neither belongs on the async runtime's own threads.
     crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
@@ -57,11 +81,74 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.tools.chosen =
             upscaler::chosen(&hd_tools).map(|dir| dir.to_string_lossy().to_string());
         status.python = Some(python::resolve(&hd_tools));
+        status.my_styles = Some(my_styles::read(&root, scripts.as_deref()));
+        status.maps = hd::preview::map_choices(&exe, &root, scripts.as_deref());
+        status.map_list = Some(map_list::read(&exe, &root, scripts.as_deref()));
+        status.outdated = hd::outdated::check(&root, scripts.as_deref());
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
+        // Read fresh, not scan_cached: the user may have just edited movie.cfg.
+        if let Some(game) = exe.parent() {
+            let configs = native::patch::cfg_scan::scan(&native::shared::paths::mod_dir(game));
+            status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
+        }
         status
     }))
     .await
+}
+
+/// Which maps each style has map textures for (#426): every map in
+/// `<game>\dod\maps` against every style folder under `world`. Each map's
+/// keys come from the app's cache while its files are unchanged, so only
+/// the first scan, or one after a map or wad changed, reads the maps.
+/// Emits `hd_coverage_progress` at most ~30 times a second.
+#[tauri::command]
+pub async fn hd_world_coverage(
+    app: AppHandle,
+    state: State<'_, HdManager>,
+    game_path: String,
+) -> Result<map_textures::WorldCoverage, String> {
+    let exe = game_exe(&game_path)?;
+    let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let game = exe
+        .parent()
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?
+        .to_path_buf();
+    if state.covering.swap(true, Ordering::SeqCst) {
+        return Err(crate::messages::HD_COVERAGE_RUNNING.to_string());
+    }
+    let covering = Arc::clone(&state.covering);
+    let result = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let maps: Vec<String> = map_list::available_maps(&exe)
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        let cache_path = map_keys_cache::default_path();
+        let mut cache = map_keys_cache::KeysCache::load(&cache_path);
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let coverage = map_textures::world_coverage_with(
+            &game,
+            &root,
+            &maps,
+            &mut cache,
+            &mut |done, total| {
+                let now = std::time::Instant::now();
+                if done == total
+                    || now.duration_since(last_emit) >= std::time::Duration::from_millis(33)
+                {
+                    last_emit = now;
+                    let _ = app.emit("hd_coverage_progress", CoverageProgress { done, total });
+                }
+            },
+        );
+        // A cache that can't be written costs the next scan its speed, not
+        // this one its result.
+        let _ = cache.save(&cache_path);
+        coverage
+    }))
+    .await;
+    covering.store(false, Ordering::SeqCst);
+    result
 }
 
 /// Marks a download or build as running, or says one already is.
@@ -84,6 +171,7 @@ pub async fn hd_setup_tools(
 ) -> Result<SetupOutcome, String> {
     let scripts = scripts_dir(&app);
     let (running, cancel) = start(&state)?;
+    native::log_markdown(crate::messages::hd::HD_TOOL_DOWNLOAD_STARTED);
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
@@ -116,7 +204,38 @@ pub async fn hd_setup_tools(
     .await;
 
     running.store(false, Ordering::SeqCst);
+    native::log_markdown(&setup_end_log(&result));
     result
+}
+
+/// The activity log's line when the tool download ends.
+fn setup_end_log(result: &Result<SetupOutcome, String>) -> String {
+    match result {
+        Ok(o) if o.already_there => crate::messages::hd::HD_TOOLS_ALREADY_THERE.to_string(),
+        Ok(o) => crate::messages::hd::hd_tool_download_done(o.fetched.len()),
+        Err(e) => crate::messages::hd::hd_tool_download_stopped(e),
+    }
+}
+
+/// The activity log's line when a build starts.
+fn build_start_log(request: &BuildRequest) -> String {
+    crate::messages::hd::hd_build_started(
+        &request.styles.join(", "),
+        &request.types.join(", "),
+        request.cap,
+    )
+}
+
+/// The activity log's line when a build ends.
+fn build_end_log(result: &Result<BuildOutcome, String>) -> String {
+    match result {
+        Ok(o) => crate::messages::hd::hd_build_done(
+            o.steps,
+            o.elapsed_secs,
+            Path::new(&o.log_path).display(),
+        ),
+        Err(e) => crate::messages::hd::hd_build_stopped(e),
+    }
 }
 
 /// Stops a running download or build: a download at its next chunk (what was
@@ -139,6 +258,7 @@ pub async fn hd_build(
     let game = game_exe(&game_path)?;
     let scripts = scripts_dir(&app).ok_or_else(|| crate::messages::HD_NO_SCRIPTS.to_string())?;
     let (running, cancel) = start(&state)?;
+    native::log_markdown(&build_start_log(&request));
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
@@ -162,6 +282,7 @@ pub async fn hd_build(
     .await;
 
     running.store(false, Ordering::SeqCst);
+    native::log_markdown(&build_end_log(&result));
     result
 }
 
@@ -177,9 +298,14 @@ pub async fn hd_set_python(path: Option<String>) -> Result<(), String> {
                 if python::probe(Path::new(path), &[]).is_none() {
                     return Err(crate::messages::hd_not_python(path));
                 }
-                python::set_chosen(&hd_tools, Some(Path::new(path)))
+                python::set_chosen(&hd_tools, Some(Path::new(path))).inspect(|_| {
+                    native::log_markdown(&crate::messages::hd::hd_python_set(
+                        Path::new(path).display(),
+                    ));
+                })
             }
-            None => python::set_chosen(&hd_tools, None),
+            None => python::set_chosen(&hd_tools, None)
+                .inspect(|_| native::log_markdown(crate::messages::hd::HD_PYTHON_AUTOMATIC)),
         }
     }))
     .await
@@ -192,7 +318,159 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
         let dir = path.as_deref().map(str::trim).filter(|p| !p.is_empty());
-        upscaler::set_chosen(&hd_tools, dir.map(Path::new))
+        upscaler::set_chosen(&hd_tools, dir.map(Path::new)).inspect(|_| match dir {
+            Some(d) => native::log_markdown(&crate::messages::hd::hd_upscaler_set(
+                Path::new(d).display(),
+            )),
+            None => native::log_markdown(crate::messages::hd::HD_UPSCALER_AUTOMATIC),
+        })
     }))
     .await
+}
+
+/// The newest list `ds_debug_hd_misses` wrote to the hook log (none
+/// when no log has one yet), and the command itself.
+#[tauri::command]
+pub async fn hd_misses() -> Result<misses::MissesView, String> {
+    // A day's hook log can be tens of thousands of lines.
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(|| {
+        misses::view(&native::activity_log_dir())
+    }))
+    .await
+}
+
+/// Adds `name` to the install's `my_styles.txt` as `def`, or changes it if
+/// the file has it already.
+#[tauri::command]
+pub async fn hd_save_style(
+    app: AppHandle,
+    game_path: String,
+    name: String,
+    def: StyleDef,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        my_styles::save(&root, scripts.as_deref(), &name, &def).inspect(|_| {
+            native::log_markdown(&crate::messages::hd::hd_style_saved(&name));
+        })
+    }))
+    .await
+}
+
+/// Puts `text` in effect as the install's `hd_maps.txt`, or with `None`
+/// builds every map again (the list is set aside, not deleted).
+#[tauri::command]
+pub async fn hd_save_map_list(
+    app: AppHandle,
+    game_path: String,
+    text: Option<String>,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let what = if text.is_some() {
+            crate::messages::hd::HD_MAP_LIST_SAVED
+        } else {
+            crate::messages::hd::HD_MAP_LIST_CLEARED
+        };
+        match text {
+            Some(text) => map_list::save(&root, &text),
+            None => map_list::use_every_map(&root, scripts.as_deref()),
+        }
+        .inspect(|_| native::log_markdown(what))
+    }))
+    .await
+}
+
+/// Takes `name` out of the install's `my_styles.txt`. What it built stays.
+#[tauri::command]
+pub async fn hd_remove_style(
+    app: AppHandle,
+    game_path: String,
+    name: String,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        my_styles::remove(&root, scripts.as_deref(), &name).inspect(|_| {
+            native::log_markdown(&crate::messages::hd::hd_style_removed(&name));
+        })
+    }))
+    .await
+}
+
+/// Makes the style comparison sheet with `compare.py`: the chosen maps (or a
+/// few picked for you) in the chosen styles (or all of them).
+#[tauri::command]
+pub async fn hd_preview(
+    app: AppHandle,
+    state: State<'_, HdManager>,
+    game_path: String,
+    request: hd::preview::PreviewRequest,
+) -> Result<hd::preview::Preview, String> {
+    let game = game_exe(&game_path)?;
+    let scripts = scripts_dir(&app).ok_or_else(|| crate::messages::HD_NO_SCRIPTS.to_string())?;
+    if state.previewing.swap(true, Ordering::SeqCst) {
+        return Err(crate::messages::HD_ALREADY_RUNNING.to_string());
+    }
+    let previewing = Arc::clone(&state.previewing);
+    let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let hd_tools = hd::setup::hd_tools_dir();
+        let using = python::resolve(&hd_tools)
+            .using
+            .ok_or_else(|| crate::messages::HD_NO_PYTHON.to_string())?;
+        // Nothing stops a preview but its own timeout: it takes seconds.
+        hd::preview::run(
+            &request,
+            &using,
+            &hd_tools,
+            &scripts,
+            &game,
+            &AtomicBool::new(false),
+        )
+    }))
+    .await;
+    previewing.store(false, Ordering::SeqCst);
+    result
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn the_hd_log_lines_say_what_ran_and_how_it_ended() {
+        let req = BuildRequest {
+            styles: vec!["ultrasharp".into(), "soft".into()],
+            types: vec!["world".into()],
+            cap: 2048,
+        };
+        assert_eq!(
+            build_start_log(&req),
+            "[hd] build started: styles ultrasharp, soft, types world, up to 2048 px"
+        );
+        let done = Ok(BuildOutcome {
+            steps: 3,
+            elapsed_secs: 90,
+            log_path: "hd/build_all.log".into(),
+        });
+        assert!(build_end_log(&done).starts_with("[hd] build done: 3 step(s) in 90 s"));
+        assert_eq!(
+            build_end_log(&Err("cancelled".into())),
+            "[hd] build stopped: cancelled"
+        );
+        let fetched = Ok(SetupOutcome {
+            dir: "x".into(),
+            fetched: vec!["a".into(), "b".into()],
+            already_there: false,
+        });
+        assert_eq!(
+            setup_end_log(&fetched),
+            "[hd] tool download done: 2 file(s)"
+        );
+    }
 }

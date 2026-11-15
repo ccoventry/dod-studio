@@ -1,4 +1,13 @@
-//! `dodstudio_hide_hudelement`: hide any one of DoD's HUD elements, by name.
+//! Hide one of DoD's HUD elements by stubbing its `Draw` in its vftable.
+//! `ds_hud_hide_teammate_info` (`teammate_info.rs`) hides `statusbar` this
+//! way; nothing else is hidden here today.
+//!
+//! This was the `ds_hud_hide_element <name>` command until #342 retired it:
+//! where a stock cvar already did the job the docs point at that instead
+//! (`hud_saytext_internal 0` for chat, `cl_hud_objectives 0` and friends,
+//! `hud_deathnotice_time 0`), and the rest went to a setting named after what
+//! it hides. The table below still lists every element that overrides `Draw`:
+//! `voice_menus.rs` checks `CHudMenu` against it, and the tools read it.
 //!
 //! ## One dword, not a code patch
 //!
@@ -35,7 +44,7 @@
 //! string `.?AVCHudAmmo@@` and friends before anything is written. A wrong
 //! build fails loudly and by name.
 //!
-//! (All three of the user's Half-Life installs ship a byte-identical
+//! (All three Half-Life installs it was checked against ship a byte-identical
 //! `client.dll`, so this is insurance rather than portability.)
 //!
 //! ## What is not listed
@@ -51,15 +60,18 @@
 //! only the second is the element's. It is not offered here, but the next
 //! person to add an entry should know the trap exists.
 //!
+//! `CHudDoDCrossHair` was listed until #312. `ds_hud_hide_crosshair` already
+//! owns the crosshair (a signature patch that `dodstudio_match_pov_crosshair`
+//! defers to), so two ways to hide one element went down to one; it is in
+//! `verify_hudelements.py`'s `KNOWN_EXCLUDED`.
+//!
 //! `CHudAmmo` overrides `Draw` and registers itself, so `verify_hudelements.py`
 //! has to be told about it by name (`KNOWN_EXCLUDED`) or its completeness check
 //! would fail. Disassembly of `client+0x28b00` shows every `FillRGBA`/`SPR_Draw`
 //! pair in the function -- ammo counter and weapon-select menu alike -- lands
 //! after one of its four `CHud::ShouldDraw(3)` calls; nothing draws before the
 //! first one. So the stock `cl_hud_ammo` cvar already hides all of it, with no
-//! forced-reset trap the way `crosshair`/`r_drawentities`/`cl_lw` have -- unlike
-//! `objectives` and `icons` below, which both draw something *before* their own
-//! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
+//! forced-reset trap the way `crosshair`/`r_drawentities`/`cl_lw` have.
 //!
 //! Five more overrode `Draw` and registered themselves, so they too need
 //! `KNOWN_EXCLUDED` entries -- but for a different reason than `CHudAmmo`: each
@@ -78,7 +90,8 @@
 //!   nothing changing for exactly this reason -- there was nothing to see.
 //! - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight
 //!   bytes, no calls. The overview map is rendered some other way entirely
-//!   (not yet found; likely VGUI2, like the scoreboard).
+//!   (its draw call is not traced; `overview_map` moves it through
+//!   the rectangles `CHud::ComputeOverviewMapRects` caches).
 //! - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks
 //!   a flag and an observer sub-mode, then returns a plain boolean. Neither
 //!   function contains a single `FillRGBA`/`SPR_Draw` call. There is no mortar
@@ -92,12 +105,8 @@
 //!   slot.
 //! - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
 //!   observer-mode global, then unconditionally returns 1 without drawing.
-//!   The actual scope vignette is a `ScreenFade` engine call inside
-//!   `CHudScope::Think` (vftable slot 4, not 3), gated on the *local*
-//!   player's own current weapon -- which is never populated while
-//!   spectating, live-confirmed: no scope overlay ever appears in a demo.
-//!   Reaching the real effect would mean hooking `Think`/`ScreenFade`
-//!   instead, a materially different job (issue #307/#308 territory).
+//!   The scope is drawn by `CHudScope::DrawTriApiScope` (`client+0x46690`),
+//!   which refuses while a demo plays; `demo_scope` lifts that (#307).
 //!
 //! ## One more excluded, for a third reason: never observed to fire
 //!
@@ -116,31 +125,8 @@
 //! nothing to test against, not because it is proven dead -- unlike the five
 //! above, this one could turn out to work the moment the right demo turns up.
 //!
-//! ## `vgui2print` is narrower than its name suggests
-//!
-//! `CHudVGUI2Print` has three real callers, not one, but only one of them goes
-//! through the vtable slot this element hides:
-//!
-//! - `CHudDoDCommon` (`client+0x3c007`, key `Dod_mg_reload` -- "Deploy your
-//!   machine gun to Reload!") calls a *queueing* method (`client+0x3a990`)
-//!   that only writes text/position/color/expiry into `CHudVGUI2Print`'s own
-//!   fields. The pixels are drawn later, when `CHudVGUI2Print::Draw` itself
-//!   runs and reads that state -- the vtable-dispatched path this element's
-//!   hide actually intercepts. Live-confirmed.
-//! - `CObjectiveIcons` (`client+0x300f4`, key `clan_warmup_mode` -- "Warmup
-//!   Mode") calls a *drawing* method (`client+0x3a3f0`) that renders
-//!   immediately by calling a shared low-level helper (`client+0x3a4b0`) at
-//!   a fixed address -- never touching `CHudVGUI2Print::Draw` or its vtable
-//!   slot. Hiding `vgui2print` does not hide this banner.
-//! - `CHudMenu::Draw` (`client+0x3dee0`) calls the same low-level helper
-//!   directly too, for its own rich-text menu list (parsing `\`-prefixed
-//!   color/newline escape codes, word-wrapping, one call per word). Also
-//!   untouched by hiding `vgui2print` -- `menu`'s own vftable hide is what
-//!   stops this, by not letting `CHudMenu::Draw` run at all.
-//!
-//! So `vgui2print` only ever hides queued, timed prompts like the MG-reload
-//! message -- anything drawn immediately through the shared helper is a
-//! different code path this element's vtable slot cannot see.
+//! What each listed element draws, and what took over hiding it when
+//! `ds_hud_hide_element` went (#342), is in `docs/goldsrc_hud_elements.md`.
 //!
 //! ## Re-applied every frame
 //!
@@ -156,10 +142,6 @@
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine;
-use crate::names::console_name;
-
-/// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_hudelement");
 
 /// `Draw` is the fourth virtual: destructor, `Init`, `VidInit`, `Draw`.
 const DRAW_SLOT: usize = 3;
@@ -175,83 +157,67 @@ const BASE_DRAW_DONOR: Element = Element {
     name: "weather",
     class: ".?AVCWeatherManager@@",
     vftable_rva: 0xac2c0,
-    what: "",
 };
 
 /// One HUD element on `CHud`'s draw list.
 pub struct Element {
-    /// What to type. Short, lowercase, and not the C++ class name: nobody
-    /// wants to type `CHudDoDCrossHair` into a console.
+    /// What the code and the tools call it. Short and lowercase, not the C++
+    /// class name.
     pub name: &'static str,
     /// The decorated RTTI name, checked against the loaded module.
     pub class: &'static str,
     pub vftable_rva: usize,
-    /// What disappears, in the words someone would use to ask for it.
-    pub what: &'static str,
 }
 
 /// Every element that overrides `Draw`, so every element there is any point
 /// hiding. Derived by `goldsrc-hooks/tools/survey_client_dll.py elements`.
+/// All are checked by RTTI at the first resolve; only the ones a setting asks
+/// for are written.
 pub const ELEMENTS: &[Element] = &[
-    Element {
-        name: "crosshair",
-        class: ".?AVCHudDoDCrossHair@@",
-        vftable_rva: 0xac134,
-        what: "the crosshair, POV and spectator alike (dodstudio_hide_crosshair does this too)",
-    },
     Element {
         name: "deathnotice",
         class: ".?AVCHudDeathNotice@@",
         vftable_rva: 0xac1c4,
-        what: "the kill feed",
     },
     Element {
         name: "icons",
         class: ".?AVCHudDodIcons@@",
         vftable_rva: 0xac350,
-        what: "the MG-deploy icon, the capture-area icon, blood and bandage",
     },
     Element {
         name: "menu",
         class: ".?AVCHudMenu@@",
         vftable_rva: 0xac1a0,
-        what: "the team and class menus",
     },
     Element {
         name: "message",
         class: ".?AVCHudMessage@@",
         vftable_rva: 0xac20c,
-        what: "map text and the round result (HudText)",
     },
     Element {
         name: "objectives",
         class: ".?AVCObjectiveIcons@@",
         vftable_rva: 0xac32c,
-        what: "the objective icons and capture progress bar",
     },
     Element {
         name: "saytext",
         class: ".?AVCHudSayText@@",
         vftable_rva: 0xac278,
-        what: "chat",
     },
     Element {
         name: "statusbar",
         class: ".?AVCHudStatusBar@@",
         vftable_rva: 0xac1e8,
-        what: "the name and health readout under the crosshair",
     },
     Element {
         name: "train",
         class: ".?AVCHudTrain@@",
         vftable_rva: 0xac230,
-        what: "the tram controls",
     },
     Element {
         name: "vgui2print",
         class: ".?AVCHudVGUI2Print@@",
         vftable_rva: 0xac3e0,
-        what: "queued timed text prompts, e.g. the MG \"Deploy...to Reload!\" message (see module docs)",
     },
 ];
 
@@ -260,7 +226,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
+static STOCK_DRAW: [AtomicUsize; 9] = [const { AtomicUsize::new(0) }; 9];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);
@@ -284,7 +250,7 @@ unsafe fn read_u32(address: usize) -> u32 {
 /// image-relative.
 ///
 /// Safety: `vftable` must be a mapped address inside the module.
-unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
+pub(crate) unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
     unsafe {
         let locator = read_u32(vftable - 4) as usize;
         if locator == 0 {
@@ -357,7 +323,7 @@ fn resolve() -> Result<usize, String> {
     Ok(base)
 }
 
-/// Whether `name` is an element this can hide.
+/// Where `name` is in [`ELEMENTS`].
 pub fn find(name: &str) -> Option<usize> {
     ELEMENTS
         .iter()
@@ -365,7 +331,7 @@ pub fn find(name: &str) -> Option<usize> {
 }
 
 /// Records that `index` should be hidden or shown. The write itself happens in
-/// [`poll`], which is also what re-applies it after a demo change.
+/// [`apply`], which `commands::poll` calls every frame.
 pub fn set_hidden(index: usize, hidden: bool) {
     let bit = 1u32 << index;
     if hidden {
@@ -376,6 +342,7 @@ pub fn set_hidden(index: usize, hidden: bool) {
 }
 
 /// Shows every element again.
+#[cfg(test)]
 pub fn show_all() {
     HIDDEN.store(0, Ordering::Relaxed);
 }
@@ -431,21 +398,7 @@ pub fn apply() -> Result<usize, String> {
     Ok(written)
 }
 
-/// One line per element, for the bare command.
-pub fn listing() -> String {
-    let mut out = String::new();
-    for (index, element) in ELEMENTS.iter().enumerate() {
-        out.push_str(&format!(
-            "  {:<12} {}  {}\n",
-            element.name,
-            if is_hidden(index) { "1" } else { "0" },
-            element.what
-        ));
-    }
-    out
-}
-
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let hidden: Vec<&str> = ELEMENTS
         .iter()
@@ -454,7 +407,7 @@ pub fn status() -> String {
         .map(|(_, element)| element.name)
         .collect();
     if hidden.is_empty() {
-        return format!("every HUD element draws normally ({NAME} lists them)");
+        return "every HUD element draws normally".to_string();
     }
     format!(
         "{} HUD element(s) stubbed at the vftable: {}",
@@ -464,9 +417,20 @@ pub fn status() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// Serialises the tests that set bits in `HIDDEN`: cargo runs tests in
+    /// parallel, and one test's `show_all()` could otherwise clear the bit
+    /// another had just set. `pub(crate)`: `commands/status.rs`'s test sets
+    /// one too.
+    static HIDDEN_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn lock_hidden() -> std::sync::MutexGuard<'static, ()> {
+        // A poisoned lock means another test already failed; take it anyway.
+        HIDDEN_TESTS.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     /// `STOCK_DRAW` is a fixed-size array indexed by position in `ELEMENTS`.
     /// A table that outgrew it would index out of bounds on the eighteenth
@@ -483,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn names_are_unique_and_typeable() {
+    fn names_are_unique_and_lowercase() {
         let mut seen = HashSet::new();
         for element in ELEMENTS {
             assert!(
@@ -497,7 +461,7 @@ mod tests {
                     .name
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
-                "{:?} should be lowercase and digits only -- it gets typed into a console",
+                "{:?} should be lowercase and digits only",
                 element.name
             );
         }
@@ -547,29 +511,32 @@ mod tests {
 
     #[test]
     fn lookup_is_case_insensitive_and_exact() {
-        assert_eq!(find("crosshair"), find("CROSSHAIR"));
-        assert!(find("crosshair").is_some());
-        assert!(find("cross").is_none());
-        assert!(find("crosshairr").is_none());
+        assert_eq!(find("saytext"), find("SAYTEXT"));
+        assert!(find("saytext").is_some());
+        assert!(find("say").is_none());
+        assert!(find("saytextt").is_none());
+        // Removed in #312: ds_hud_hide_crosshair owns the crosshair.
+        assert!(find("crosshair").is_none());
         assert!(find("").is_none());
     }
 
     #[test]
     fn hiding_and_showing_move_only_the_one_bit() {
+        let _statics = lock_hidden();
         show_all();
-        let crosshair = find("crosshair").unwrap();
+        let feed = find("deathnotice").unwrap();
         let chat = find("saytext").unwrap();
 
-        set_hidden(crosshair, true);
-        assert!(is_hidden(crosshair));
+        set_hidden(feed, true);
+        assert!(is_hidden(feed));
         assert!(!is_hidden(chat));
         assert_eq!(hidden_count(), 1);
 
         set_hidden(chat, true);
         assert_eq!(hidden_count(), 2);
 
-        set_hidden(crosshair, false);
-        assert!(!is_hidden(crosshair));
+        set_hidden(feed, false);
+        assert!(!is_hidden(feed));
         assert!(is_hidden(chat));
 
         show_all();
@@ -581,6 +548,7 @@ mod tests {
     /// the test that says that was deliberate.
     #[test]
     fn setting_the_same_state_twice_is_idempotent() {
+        let _statics = lock_hidden();
         show_all();
         let train = find("train").unwrap();
         set_hidden(train, true);
@@ -593,32 +561,8 @@ mod tests {
     }
 
     #[test]
-    fn the_listing_names_every_element_and_its_state() {
-        show_all();
-        set_hidden(find("saytext").unwrap(), true);
-        let listing = listing();
-        for element in ELEMENTS {
-            assert!(
-                listing.contains(element.name),
-                "{} is missing",
-                element.name
-            );
-        }
-        assert!(
-            listing
-                .lines()
-                .any(|l| l.contains("saytext") && l.contains(" 1 "))
-        );
-        assert!(
-            listing
-                .lines()
-                .any(|l| l.contains("crosshair") && l.contains(" 0 "))
-        );
-        show_all();
-    }
-
-    #[test]
     fn status_names_what_is_hidden() {
+        let _statics = lock_hidden();
         show_all();
         assert!(status().contains("draws normally"), "{}", status());
         set_hidden(find("deathnotice").unwrap(), true);

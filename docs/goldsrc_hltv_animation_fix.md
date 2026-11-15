@@ -1,12 +1,12 @@
 # The HLTV viewmodel animation fix
 
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
-> Lives in `goldsrc-hooks/src/anim_fix/`, on branch
-> `feat/goldsrc-hooks-companion-dll`. Tracked by
-> [#204](https://github.com/ccoventry/dod-studio/issues/204).
-> Defaults **off**. It is one of the things `dodstudio_spec_match_pov` turns
-> on (with the lost gunshots and the POV crosshair): `dodstudio_spec_match_pov 1` in
-> the console, `+dodstudio_spec_match_pov 1` on the launch line, or from any `.cfg`
+> Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
+> [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
+> Defaults **on** (0.2.0). It is one of the things `ds_spec_match_pov` turns
+> on (with the POV crosshair; the lost gunshots are `ds_sound_restore_gunshots`
+> since #1036): `ds_spec_match_pov 1` in
+> the console, `+ds_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,
 > `dodstudio_hltv_show_viewmodel_animations`, until 2026-10-01.
 
@@ -153,12 +153,12 @@ refinement on top, not the point.
 
 ## 8. Diagnostics
 
-- `dodstudio_spec_match_pov <0|1>` — a **cvar**, so it also takes
-  `+dodstudio_spec_match_pov 1` on the launch line or a line in any `.cfg`,
+- `ds_spec_match_pov <0|1>` — a **cvar**, so it also takes
+  `+ds_spec_match_pov 1` on the launch line or a line in any `.cfg`,
   and shows its value in the console type-ahead.
-- `dodstudio_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
+- `ds_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
-- `dodstudio_debug_status` — what each fix is *doing*, not just what it is set to. A
+- `ds_debug_status` — what each fix is *doing*, not just what it is set to. A
   cvar can answer "what is this set to" on its own; whether the fix's
   preconditions are being met in the current view is a different question, and
   this is where it is answered.
@@ -240,16 +240,26 @@ Three things are *not* missing from the fix, and are settled rather than open:
   grenade's, but the catch is visible in the world, and the family is played
   from that (§13).
 
+**A POV demo gets none of it (#613).** It is the recording the fix copies, so
+`anim_fix::active()` stands every match-POV part down while one plays: a demo
+playing back while `IsSpectateOnly()` is false. That includes the recorder's
+dead stretches spent watching someone in-eye, which is what they saw live. The
+bug that made this explicit: `on_weapon_fired` kept the entity and viewmodel an
+HLTV demo earlier in the session had published, so in the POV demo every round
+entity 13 fired played the old model's "shoot" index on the STG44 in view, which
+is a reload. A frame with no spectated view now forgets them.
+
 One genuine `TODO` remains, marked in the source: on a bipod deploy state change
 the viewmodel snaps to the new family's idle rather than playing the model's own
 `uptodown` / `downtoup` transition. Unverified live.
 
 ## 11. How to check it is working
 
-1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
+1. Build for `i686-pc-windows-msvc` and load it through DoD Studio or HLAE's
+   custom loader (`goldsrc-hooks/README.md`) into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
-2. `dodstudio_spec_match_pov 1`, `dodstudio_debug_log_weapon_model 1`.
+2. `ds_spec_match_pov 1`, `ds_debug_log_weapon_model 1`.
 3. Play an HLTV demo in-eye and let the director move between players.
 4. Read `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log`. The lines that matter, in order of value:
    - `now spectating … holding … viewmodel "…"` on every camera switch,
@@ -261,13 +271,13 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ---
 
-## 12. The other direction: `dodstudio_hide_hand_signals`
+## 12. The other direction: `ds_player_hide_hand_signals`
 
 Everything above puts an animation *back*. This one takes one away, and it
 belongs here because it works on the same field, from the same per-frame hook.
 
 Using a voice command in DoD also plays a gesture on the player -- a nod for
-"Yes Sir!", a point for "Enemy Ahead". `dodstudio_mute_voice_commands` silences
+"Yes Sir!", a point for "Enemy Ahead". `ds_sound_mute_voice_commands` silences
 the sound and leaves the mime, because the two are unrelated mechanisms:
 `client.dll` contains **no `hs_` string at all**. The client never picks these
 by name. The server picks a sequence index and it arrives as replicated
@@ -312,7 +322,7 @@ surviving, the fallback is the one #283 names: the studio renderer's
 ### It applies to every player in view
 
 Not only the spectated one. That is what clean footage wants, but it is a
-behavioural choice rather than an obvious default, so `dodstudio_status` says so.
+behavioural choice rather than an obvious default, so `ds_debug_status` says so.
 
 ---
 

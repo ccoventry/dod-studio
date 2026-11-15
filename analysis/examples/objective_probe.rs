@@ -27,7 +27,7 @@ struct Row {
     player_credits: u32,
     no_area: u32,
     no_capper: u32,
-    breaks: u32,
+    from_enemy: u32,
     attempts: u32,
     captured: u32,
     cancelled: u32,
@@ -50,7 +50,7 @@ impl Row {
         self.player_credits += other.player_credits;
         self.no_area += other.no_area;
         self.no_capper += other.no_capper;
-        self.breaks += other.breaks;
+        self.from_enemy += other.from_enemy;
         self.attempts += other.attempts;
         self.captured += other.captured;
         self.cancelled += other.cancelled;
@@ -72,7 +72,7 @@ impl Row {
             self.player_credits,
             self.no_area,
             self.no_capper,
-            self.breaks,
+            self.from_enemy,
             self.attempts,
             self.captured,
             self.cancelled,
@@ -122,7 +122,7 @@ fn measure(analysis: &Analysis) -> Row {
         row.credits += capture.cappers().count() as u32;
         row.no_area += capture.area_index.is_none() as u32;
         row.no_capper += capture.capper.is_none() as u32;
-        row.breaks += capture.is_break() as u32;
+        row.from_enemy += capture.taken_from_enemy() as u32;
     }
     for attempt in &objectives.attempts {
         row.attempts += 1;
@@ -175,7 +175,7 @@ fn main() {
     let (paths, limit) = demo_paths(&args);
 
     println!(
-        "file\ttype\tdemos\tcaptures\tco_capper_hist[0,1,2,3+]\tcredits\tplayer_credits\tno_area\tno_capper\tbreaks\tattempts\tcaptured\tcancelled\trestarted\tround_ended\tin_progress\tobj_points\tteamkills\tsuicides"
+        "file\ttype\tdemos\tcaptures\tco_capper_hist[0,1,2,3+]\tcredits\tplayer_credits\tno_area\tno_capper\tfrom_enemy\tattempts\tcaptured\tcancelled\trestarted\tround_ended\tin_progress\tobj_points\tteamkills\tsuicides"
     );
     let mut totals = [Row::default(), Row::default()];
     for path in paths.iter().take(limit) {
@@ -209,14 +209,14 @@ fn main() {
         let pct = |n: u32, of: u32| 100.0 * n as f64 / of.max(1) as f64;
         let multi = total.captures - total.co_hist[0];
         println!(
-            "  {kind}: {} captures, {:.1}% multi-capper ({:.1}% one co-capper, {:.1}% two, {:.1}% three+), {:.3} credits per capture; {:.1}% breaks",
+            "  {kind}: {} captures, {:.1}% multi-capper ({:.1}% one co-capper, {:.1}% two, {:.1}% three+), {:.3} credits per capture; {:.1}% taken from the enemy",
             total.captures,
             pct(multi, total.captures),
             pct(total.co_hist[1], total.captures),
             pct(total.co_hist[2], total.captures),
             pct(total.co_hist[3], total.captures),
             total.credits as f64 / total.captures.max(1) as f64,
-            pct(total.breaks, total.captures),
+            pct(total.from_enemy, total.captures),
         );
         println!(
             "  {kind}: {} timed attempts, {} cancelled ({:.1}%), {} captured, {} restarted, {} ended by the round, {} still running",

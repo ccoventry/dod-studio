@@ -1,0 +1,11 @@
+// DoD Studio's Players table (Configuration > Players), for the hook DLL (#428).
+// Studio rewrites this file whenever the table changes: edit it there.
+spray_pov_fallback	none
+spray_hltv_fallback	png	team_allies.png
+crosshair_fallback	sprite	customXHair.spr	7
+spray_size	96
+spray	steamid	76561197972576011	chris_teamwork.png	dicE[: :]m00cat :D
+crosshair	steamid	76561197972576011	customXHair.spr	3	dicE[: :]m00cat :D
+spray	name	Cpl. Preddy	bot spray.png
+spray	name	Own Spray	own
+crosshair	name	Xhair Only	my_xhair.spr	16

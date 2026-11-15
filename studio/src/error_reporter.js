@@ -13,7 +13,7 @@
 // just a silently-abandoned action. This makes that class of failure
 // visible three ways at once: a tagged console.error (on top of the
 // browser's own default uncaught-error logging, not replacing it), a line
-// in crash_log.md, and a capped toast so a rapid-fire bug (like a
+// in the activity log, and a capped toast so a rapid-fire bug (like a
 // recursion loop throwing repeatedly right up to the stack limit) doesn't
 // spam the screen.
 
@@ -26,9 +26,9 @@ let toastCount = 0;
 
 function describeError(err) {
   if (err instanceof Error) {
-    return { message: err.message, stack: err.stack || '(no stack)' };
+    return { message: err.message, stack: err.stack || STRINGS.ERROR_REPORTER.NO_STACK };
   }
-  return { message: String(err), stack: '(not an Error object)' };
+  return { message: String(err), stack: STRINGS.ERROR_REPORTER.NOT_AN_ERROR_OBJECT };
 }
 
 function reportUncaught(source, err) {
@@ -39,7 +39,7 @@ function reportUncaught(source, err) {
   // purpose, since the whole point is not blending into the raw trace.
   console.error(`[dod-studio] Uncaught ${source}:`, err);
 
-  logFrontendEvent(`[error] Uncaught ${source}: ${message}\n${stack}`);
+  logFrontendEvent(STRINGS.ERROR_REPORTER.uncaughtLog(source, message, stack));
 
   toastCount += 1;
   if (toastCount <= MAX_TOASTS_PER_SESSION) {

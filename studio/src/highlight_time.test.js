@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
+import { clockFloor as formatClock } from './time_format.js';
 
 // A late highlight: frame-record index 50000 / 100 would say 8:20, but the
 // demo player's clock at the first kill reads 10:12.

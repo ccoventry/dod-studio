@@ -1,3 +1,4 @@
+use crate::shared::lock::{read_or_recover, write_or_recover};
 use std::path::{Path, PathBuf};
 
 /// Name of this app's directory under `%APPDATA%`.
@@ -53,6 +54,19 @@ pub fn get_appdata_dir() -> PathBuf {
 
 fn appdata_base() -> PathBuf {
     dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
+/// `%LOCALAPPDATA%\dod-studio`, created if absent: files that belong to this
+/// PC and have no reason to travel with a roaming Windows profile, such as
+/// the hook DLL copies the game launches from (#1146).
+pub fn get_local_appdata_dir() -> PathBuf {
+    let path = local_appdata_base().join(APPDATA_DIR_NAME);
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
+fn local_appdata_base() -> PathBuf {
+    dirs::data_local_dir().unwrap_or_else(appdata_base)
 }
 
 /// What a migration run did, for the caller to log.
@@ -153,7 +167,9 @@ fn merge_dir_entries(
             continue;
         }
 
-        if source_path.is_dir() && destination_path.is_dir() {
+        // `file_type` never follows a junction, so a link in the old folder
+        // is skipped like a file collision, never merged through (#376).
+        if entry.file_type().is_ok_and(|t| t.is_dir()) && destination_path.is_dir() {
             merge_dir_entries(&source_path, &destination_path, &name, report);
             // Only succeeds once the merge above has moved everything out --
             // anything left behind (a skipped file-vs-file collision) keeps
@@ -195,15 +211,16 @@ pub fn preview_sidecar(demo: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Stem of the primer demo `build_batch_queue` writes into the game's `dod/`
-/// folder. The `dodstudio_` prefix matches every other file this app writes
+/// Stem of the primer demo `build_batch_queue` writes into the game folder
+/// ([`mod_dir`]) when the batch launches without the hook DLL (#365). The
+/// cleanup still removes one left by such a batch. The `dodstudio_` prefix matches every other file this app writes
 /// there (`dodstudio_helper.cfg`, `dodstudio_capture_done.cfg`) and keeps the
 /// name out of the space a player's own demo could plausibly occupy (#197).
 pub const PRIMER_DEMO_STEM: &str = "dodstudio_primer";
 
-/// Prefix of every patched chain demo `build_batch_queue` writes into `dod/`,
-/// followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for why the
-/// `dodstudio_` part is there.
+/// Prefix of every patched chain demo `build_batch_queue` writes into the game
+/// folder, followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for
+/// why the `dodstudio_` part is there.
 pub const CHAIN_DEMO_PREFIX: &str = "dodstudio_chain_";
 
 /// True for exactly the filenames `build_batch_queue` gives patched chain
@@ -261,6 +278,189 @@ pub fn take_key(take_folder: &Path) -> Option<String> {
     Some(format!("{}/{}", session, take_name))
 }
 
+/// The game folder a launch names with `-game` when the user has set none
+/// (#402).
+pub const DEFAULT_GAME_FOLDER: &str = "dod";
+
+/// The user's game folder, empty for [`DEFAULT_GAME_FOLDER`] (#402).
+///
+/// Process-wide, not passed down, because most of the paths it decides are
+/// built from nothing but an `hl.exe` path, deep in code (map checks, HD
+/// builds, overviews, Blender's map list) that has no settings at hand.
+/// Studio sets it when settings load and on every save
+/// ([`set_game_folder`]); everything else (the CLIs, tests) gets `dod`.
+/// Read on every call rather than cached by callers, so a changed setting
+/// applies to the next launch, scan or build.
+static GAME_FOLDER: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+/// Why `name` cannot be a game folder, or `Ok` when it can: a single folder
+/// name beside `hl.exe`, the `<mod>` of `-game <mod>` (#402). Anything with a
+/// path separator, a drive colon, `..` or a character Windows refuses in a
+/// file name would build paths outside the install, or a launch line the
+/// engine reads differently from the folder we write to.
+pub fn validate_game_folder(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(
+            "The game folder is empty: it is the folder beside hl.exe, such as dod".to_string(),
+        );
+    }
+    if name != name.trim() {
+        return Err(format!(
+            "The game folder \"{name}\" starts or ends with a space; the engine would not find it"
+        ));
+    }
+    if name == "." || name == ".." || name.contains("..") {
+        return Err(format!(
+            "The game folder \"{name}\" contains \"..\": give the name of a folder beside hl.exe"
+        ));
+    }
+    let bad = |c: char| {
+        matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            || c.is_control()
+            || c.is_whitespace()
+    };
+    if let Some(c) = name.chars().find(|&c| bad(c)) {
+        return Err(format!(
+            "The game folder \"{name}\" contains \"{c}\": give just the name of a folder beside hl.exe, such as dod"
+        ));
+    }
+    if name.starts_with(['-', '+']) {
+        return Err(format!(
+            "The game folder \"{name}\" starts with \"{}\", which the engine reads as another launch option",
+            &name[..1]
+        ));
+    }
+    Ok(())
+}
+
+/// Sets the game folder for the rest of this process (#402). A blank `name`
+/// restores [`DEFAULT_GAME_FOLDER`]; an invalid one is refused and the old
+/// value stays.
+pub fn set_game_folder(name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if !name.is_empty() {
+        validate_game_folder(name)?;
+    }
+    let mut guard = write_or_recover(&GAME_FOLDER);
+    *guard = name.to_string();
+    Ok(())
+}
+
+/// The game folder's name: the `<mod>` in `-game <mod>`, `dod` by default
+/// (#402).
+pub fn game_folder() -> String {
+    let guard = read_or_recover(&GAME_FOLDER);
+    if guard.is_empty() {
+        DEFAULT_GAME_FOLDER.to_string()
+    } else {
+        guard.clone()
+    }
+}
+
+/// `<game_root>\<game folder>`, where the game reads its configs, maps and
+/// demos, and where a batch writes its helper `.cfg` and chain demos (#402).
+/// `game_root` is the folder holding `hl.exe`.
+pub fn mod_dir(game_root: &Path) -> PathBuf {
+    game_root.join(game_folder())
+}
+
+/// [`mod_dir`] for the folder holding `hl_exe`, `None` when it has no parent.
+pub fn mod_dir_for_exe(hl_exe: &Path) -> Option<PathBuf> {
+    hl_exe.parent().map(mod_dir)
+}
+
+/// `<game_root>\<game folder>_addon`: the engine searches it ahead of the game
+/// folder with `-addons`, and DoD Studio's own UI, HD and overview files go
+/// there (#408, #415). The engine names it from the game folder, so a
+/// `dod_movies` install's is `dod_movies_addon` (#402).
+pub fn addon_dir(game_root: &Path) -> PathBuf {
+    game_root.join(format!("{}_addon", game_folder()))
+}
+
+/// `<game_root>\<game folder>_downloads`, where the engine saves what it
+/// downloads from servers (maps, sprays). Named from the game folder like
+/// [`addon_dir`] (#402).
+pub fn downloads_dir(game_root: &Path) -> PathBuf {
+    game_root.join(format!("{}_downloads", game_folder()))
+}
+
+/// The folders beside `hl.exe` (`game_root`) that hold a `liblist.gam` and a
+/// `cl_dlls/client.dll`, the files that make a folder a mod `-game` can
+/// start, sorted by name. The Game folder setting offers these (#402).
+/// `_addon`/`_downloads` siblings have no `liblist.gam`; the movie installs'
+/// `valve` has one but no `client.dll`, and starting it ends in the engine's
+/// "could not load library" error (#768).
+pub fn list_game_folders(game_root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(game_root) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| {
+            let dir = e.path();
+            dir.join("liblist.gam").is_file() && dir.join("cl_dlls").join("client.dll").is_file()
+        })
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| validate_game_folder(name).is_ok())
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+}
+
+/// A game folder copy that lacks the text file VGUI2 needs (#925).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MissingLanguageFile {
+    pub folder: String,
+    pub language: String,
+    /// `<folder>_<language>.txt`, the file `resource\` needs.
+    pub needed: String,
+    /// The file in the folder's own `resource\` to rename to `needed`: its
+    /// `dod_<language>.txt`, else its `dod_english.txt`. `None` when it has
+    /// neither, and the file has to come from the `dod` folder.
+    pub rename_from: Option<String>,
+    /// What Explorer opens on for the user to fix it: the file to rename,
+    /// selected in `resource\`; else `resource\` itself; else the folder.
+    pub show: String,
+}
+
+/// What a copy of the `dod` folder needs so its in-game text isn't raw
+/// `#Dod_…` keys: VGUI2 loads `resource\<game folder>_<language>.txt`, and a
+/// copy only has `dod_<language>.txt` (#925). `None` for `dod` itself and for
+/// a folder that already has the file. Only looks; Studio never writes the
+/// user's folder.
+pub fn missing_language_file(
+    game_root: &Path,
+    folder: &str,
+    language: &str,
+) -> Option<MissingLanguageFile> {
+    if folder.eq_ignore_ascii_case(DEFAULT_GAME_FOLDER) {
+        return None;
+    }
+    let resource = game_root.join(folder).join("resource");
+    let needed = format!("{folder}_{language}.txt");
+    if resource.join(&needed).is_file() {
+        return None;
+    }
+    let rename_from = [
+        format!("{DEFAULT_GAME_FOLDER}_{language}.txt"),
+        format!("{DEFAULT_GAME_FOLDER}_english.txt"),
+    ]
+    .into_iter()
+    .find(|name| resource.join(name).is_file());
+    let show = match &rename_from {
+        Some(name) => resource.join(name),
+        None if resource.is_dir() => resource.clone(),
+        None => game_root.join(folder),
+    };
+    Some(MissingLanguageFile {
+        folder: folder.to_string(),
+        language: language.to_string(),
+        needed,
+        rename_from,
+        show: show.display().to_string(),
+    })
+}
+
 /// Deletes the engine's `qconsole.log`.
 ///
 /// `-condebug` writes it to `hl.exe`'s own folder, not the mod folder, so
@@ -273,7 +473,6 @@ pub fn take_key(take_folder: &Path) -> Option<String> {
 /// directory: `build_hlae_process` runs HLAE with its CWD set to HLAE's own
 /// folder, and the log still appears next to `hl.exe` with nothing in HLAE's
 /// folder. So deriving the path from the game path is always right.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn console_log_path(game_root: &Path) -> PathBuf {
     game_root.join("qconsole.log")
 }
@@ -283,7 +482,6 @@ pub fn console_log_path(game_root: &Path) -> PathBuf {
 /// retry-and-report treatment every other scratch file there gets -- but both
 /// resolve the path through [`console_log_path`], so neither can drift from
 /// the other on *where* the log lives.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn remove_console_log(game_root: &Path) {
     let _ = std::fs::remove_file(console_log_path(game_root));
 }
@@ -292,7 +490,7 @@ pub fn remove_console_log(game_root: &Path) {
 /// according to the four auto-clear settings.
 ///
 /// `game_root` is the folder holding `hl.exe`; the batch writes into it and
-/// into its `dod/` subfolder. Nothing here is fatal — a capture that finished
+/// into its game folder ([`mod_dir`], `dod/` by default). Nothing here is fatal — a capture that finished
 /// should not fail because a leftover could not be deleted — but nothing here
 /// is silent either: every removal goes through `remove_scratch_file`, which
 /// retries and then reports a file it could not delete against the checkbox
@@ -304,10 +502,6 @@ pub fn remove_console_log(game_root: &Path) {
 /// files; adding a scratch file to one and forgetting the other left it in the
 /// user's game folder with no error and no log line. Add new scratch filenames
 /// here and both paths get them.
-///
-/// Gated like the helpers it calls: this is all `std::fs`, and per CLAUDE.md's
-/// WASM guardrail direct file I/O stays off the wasm32 build.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn clear_capture_scratch(
     game_root: &Path,
     auto_clear_logs: bool,
@@ -315,7 +509,7 @@ pub fn clear_capture_scratch(
     auto_clear_previews: bool,
     save_local_patched_copy: bool,
 ) {
-    let dod_dir = game_root.join("dod");
+    let dod_dir = mod_dir(game_root);
 
     if auto_clear_logs {
         remove_scratch_file(&console_log_path(game_root), "Auto-clear Logs");
@@ -347,8 +541,9 @@ pub fn clear_capture_scratch(
         // happened.
         let primer_demo = format!("{PRIMER_DEMO_STEM}.dem");
         if let Some(e) = remove_file_retrying(&dod_dir.join(&primer_demo)) {
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove {primer_demo} after retrying: {e} (auto_clear_temp_demos left it behind; hl.exe may still have had it open)"
+            crate::log_markdown(&crate::messages::cleanup_primer_demo_failed(
+                &primer_demo,
+                e,
             ));
         }
         if let Ok(entries) = std::fs::read_dir(&dod_dir) {
@@ -412,7 +607,6 @@ pub fn clear_capture_scratch(
 ///
 /// `setting` names the auto-clear checkbox that asked for this, so the log line
 /// points at the control the user would go looking for.
-#[cfg(not(target_arch = "wasm32"))]
 fn remove_scratch_file(path: &Path, setting: &str) -> bool {
     match remove_file_retrying(path) {
         None => true,
@@ -421,8 +615,8 @@ fn remove_scratch_file(path: &Path, setting: &str) -> bool {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove {name} after retrying: {e} ({setting} left it behind; something may still have had it open)"
+            crate::log_markdown(&crate::messages::cleanup_scratch_file_failed(
+                &name, e, setting,
             ));
             false
         }
@@ -467,6 +661,46 @@ mod tests {
     #[test]
     fn test_take_key_none_without_a_parent_component() {
         assert_eq!(take_key(Path::new("")), None);
+    }
+
+    #[test]
+    fn a_dod_copy_without_its_language_file_says_which_to_rename() {
+        let root = Scratch::new("language_file");
+        let resource = root.path().join("dod_movies").join("resource");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::write(resource.join("dod_english.txt"), b"x").unwrap();
+        let missing = missing_language_file(root.path(), "dod_movies", "english").unwrap();
+        assert_eq!(missing.needed, "dod_movies_english.txt");
+        assert_eq!(missing.rename_from.as_deref(), Some("dod_english.txt"));
+        assert_eq!(
+            std::path::PathBuf::from(&missing.show),
+            resource.join("dod_english.txt")
+        );
+        // A French Steam: its own dod_french.txt first, else the English one.
+        let french = missing_language_file(root.path(), "dod_movies", "french").unwrap();
+        assert_eq!(french.needed, "dod_movies_french.txt");
+        assert_eq!(french.rename_from.as_deref(), Some("dod_english.txt"));
+        std::fs::write(resource.join("dod_french.txt"), b"x").unwrap();
+        let french = missing_language_file(root.path(), "dod_movies", "french").unwrap();
+        assert_eq!(french.rename_from.as_deref(), Some("dod_french.txt"));
+    }
+
+    #[test]
+    fn dod_itself_or_a_copy_with_its_file_needs_nothing() {
+        let root = Scratch::new("language_file_ok");
+        let resource = root.path().join("dod_movies").join("resource");
+        std::fs::create_dir_all(&resource).unwrap();
+        assert!(missing_language_file(root.path(), "dod", "english").is_none());
+        assert!(missing_language_file(root.path(), "DOD", "english").is_none());
+        std::fs::write(resource.join("dod_movies_english.txt"), b"x").unwrap();
+        assert!(missing_language_file(root.path(), "dod_movies", "english").is_none());
+        // Nothing to rename: the file has to come from dod.
+        let other = missing_language_file(root.path(), "dod_other", "english").unwrap();
+        assert_eq!(other.rename_from, None);
+        assert_eq!(
+            std::path::PathBuf::from(&other.show),
+            root.path().join("dod_other")
+        );
     }
 
     #[test]
@@ -566,6 +800,86 @@ mod tests {
         for f in &keep {
             assert!(f.exists(), "{:?} is the user's file and must survive", f);
         }
+    }
+
+    #[test]
+    fn plain_folder_names_are_game_folders() {
+        for name in ["dod", "dod_movies", "dod_3_1_beta", "dod_1.2", "valve"] {
+            assert_eq!(validate_game_folder(name), Ok(()), "{name}");
+        }
+    }
+
+    /// Each of these would build a path outside the install, or a launch
+    /// line the engine reads differently from the folder Studio writes to.
+    #[test]
+    fn paths_and_launch_options_are_not_game_folders() {
+        for name in [
+            "",
+            "   ",
+            " dod",
+            "dod ",
+            "dod movies",
+            "..",
+            ".",
+            "../dod",
+            "dod/maps",
+            r"dod\maps",
+            r"C:\Games\dod",
+            "C:dod",
+            "dod?",
+            "-insecure",
+            "+map",
+            "dod\u{0}",
+        ] {
+            assert!(
+                validate_game_folder(name).is_err(),
+                "{name:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_game_folder_leaves_the_setting_alone() {
+        // Tests never set a valid folder (the setting is process-wide and
+        // tests run in parallel), so the default is what every one sees.
+        assert!(set_game_folder("../elsewhere").is_err());
+        assert_eq!(game_folder(), DEFAULT_GAME_FOLDER);
+        let root = Path::new(r"C:\Games\Half-Life");
+        assert_eq!(mod_dir(root), root.join("dod"));
+        assert_eq!(addon_dir(root), root.join("dod_addon"));
+        assert_eq!(downloads_dir(root), root.join("dod_downloads"));
+        assert_eq!(
+            mod_dir_for_exe(&root.join("hl.exe")),
+            Some(root.join("dod"))
+        );
+    }
+
+    #[test]
+    fn only_folders_with_a_liblist_and_a_client_dll_are_listed() {
+        let root = Scratch::new("game_folders");
+        for (folder, liblist, client) in [
+            ("dod", true, true),
+            ("dod_movies", true, true),
+            ("Dod_1_2", true, true),
+            ("dod_addon", false, false),
+            ("dod_downloads", false, false),
+            // The movie installs' valve: a liblist.gam, no client.dll (#768).
+            ("valve", true, false),
+            ("half_a_mod", false, true),
+        ] {
+            let dir = root.join(folder);
+            std::fs::create_dir_all(dir.join("cl_dlls")).unwrap();
+            if liblist {
+                std::fs::write(dir.join("liblist.gam"), b"game \"Day of Defeat\"").unwrap();
+            }
+            if client {
+                std::fs::write(dir.join("cl_dlls").join("client.dll"), b"MZ").unwrap();
+            }
+        }
+        // A file named like a folder is not one.
+        std::fs::write(root.join("liblist.gam"), b"").unwrap();
+        assert_eq!(list_game_folders(&root), ["dod", "Dod_1_2", "dod_movies"]);
+        assert!(list_game_folders(&root.join("missing")).is_empty());
     }
 }
 
