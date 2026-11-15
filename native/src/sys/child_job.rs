@@ -176,7 +176,10 @@ mod win {
     }
 }
 
-#[cfg(all(test, windows))]
+// Two attributes, not `all(test, windows)`: Clippy only treats a module
+// under a plain `cfg(test)` as test code.
+#[cfg(test)]
+#[cfg(windows)]
 mod tests {
     use super::ChildJob;
     use std::time::Duration;
