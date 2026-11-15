@@ -4,7 +4,7 @@
 // colours or hides an area and the edits are saved, labels, and what Save
 // hands the backend: the drawing at the game's 1024x768 with the format and
 // place chosen.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const square = (x, y, size) => [[x, y], [x + size, y], [x + size, y + size], [x, y + size]];
 
@@ -560,6 +560,8 @@ test('hovering shows what a click would paint, and Show areas outlines them all'
   await page.check('#ov-hover-preview');
   // Nothing of this is in the saved image.
   await page.click('#ov-save-btn');
+  // Saving lets its line paint before it draws (#958), so the call comes a moment later.
+  await expect.poll(async () => (await calls(page, 'overview_export')).length).toBeGreaterThan(0);
   const rgba = (await calls(page, 'overview_export')).at(-1).args.request.rgba;
   const bytes = await page.evaluate((b) => {
     const s = atob(b);
@@ -628,6 +630,9 @@ test('colours used show as recent, and Pick from map takes a colour off the map'
   // Pick from map: the outdoor floor's colour as drawn (Colour-coded), then
   // back to Colour area.
   await page.selectOption('#ov-theme', 'colours');
+  // Choosing a theme is an edit, saved after the pane's 400 ms pause: let that
+  // save land, or it counts as one made by the Ctrl-click below.
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).length).toBe(1);
   await page.click('#ov-pick-btn');
   await clickPixel(page, 300, 450);
   await expect(page.locator('#ov-custom-colour')).toHaveValue('#5e5e55');
@@ -753,4 +758,34 @@ test("the title card's second line is the map's credit, typed over or cleared, w
   await reset.click();
   await expect.poll(saved).toBeNull();
   await expect(credit).toHaveValue('by Holeman');
+});
+
+test('Save says which of its two steps it is on, with the sliding block (#958)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    const exportNow = window.__mockInvokeHandlers.overview_export;
+    window.__mockInvokeHandlers.overview_export = (args) => new Promise((resolve) => {
+      window.__finishExport = () => resolve(exportNow(args));
+    });
+    const hdNow = window.__mockInvokeHandlers.overview_export_hd;
+    window.__mockInvokeHandlers.overview_export_hd = (bytes) => new Promise((resolve) => {
+      window.__finishHd = () => resolve(hdNow(bytes));
+    });
+  });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await page.click('#ov-save-btn');
+  const bar = page.locator('#ov-save-bar');
+  await expect(page.locator('#ov-save-status')).toHaveText('Saving the overview…');
+  await expect(bar).toHaveJSProperty('hidden', false);
+  await expect(bar).toHaveClass(/indeterminate/);
+  await expect(page.locator('#ov-save-btn')).toBeDisabled();
+
+  await expect.poll(() => page.evaluate(() => typeof window.__finishExport)).toBe('function');
+  await page.evaluate(() => window.__finishExport());
+  await expect(page.locator('#ov-save-status')).toHaveText('Saving the high-quality copy…');
+  await expect.poll(() => page.evaluate(() => typeof window.__finishHd)).toBe('function');
+  await page.evaluate(() => window.__finishHd());
+  await expect(page.locator('#ov-save-status')).toContainText('Saved the overview');
+  await expect(bar).toHaveJSProperty('hidden', true);
+  await expect(page.locator('#ov-save-btn')).toBeEnabled();
 });

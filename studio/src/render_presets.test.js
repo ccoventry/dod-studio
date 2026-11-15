@@ -8,6 +8,11 @@ describe('render presets', () => {
     expect(presetValues({ codec: 'custom', custom_codec_args: ' -c:v mpeg4 ' }).custom_codec_args).toBe('-c:v mpeg4');
   });
 
+  it('defaults a missing codec to ProRes 422 and keeps a saved HQ one', () => {
+    expect(presetValues({}).codec).toBe('prores_422');
+    expect(presetValues({ codec: 'prores' }).codec).toBe('prores');
+  });
+
   it('saves by name, replacing one of the same name, sorted', () => {
     let presets = savePreset([], 'YouTube', { codec: 'h264', fps: 300, max_concurrent: 2 });
     presets = savePreset(presets, 'archive', { codec: 'prores', fps: 300, max_concurrent: 1 });

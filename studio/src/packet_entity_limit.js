@@ -1,13 +1,13 @@
 // packet_entity_limit.js
-// Demos the configured engine can't play (#207). Each scanned demo carries
-// the most entities any one snapshot holds (`peak_packet_entities`); the
-// engine closes to the desktop at the first snapshot over its
+// Demos over the configured engine's entity limit (#207). Each scanned demo
+// carries the most entities any one snapshot holds (`peak_packet_entities`);
+// the engine closes to the desktop at the first snapshot over its
 // MAX_PACKET_ENTITIES, 256 on the pre-Anniversary build and 1024 on the 25th
-// Anniversary one. The Master Queue marks those demos, and a capture batch or
-// a Launch Preview asks before starting on one.
+// Anniversary one. Studio plays such a demo from a trimmed copy instead
+// (native::patch::trimmed_copies), so the Master Queue only marks them, and a
+// preview says when it plays one (preview_trim_status.js).
 
 import { enginePacketEntityLimit } from './ipc_bridge.js';
-import { themedConfirm } from './themed_confirm.js';
 import { STRINGS } from './strings.js';
 
 /** The pre-Anniversary engine's limit, assumed until the engine is read. */
@@ -40,29 +40,6 @@ export function packetEntityLimit() {
  *  before the count existed has none, and isn't flagged. */
 export function overPacketEntityLimit(demo, max = limit) {
   return Number.isInteger(demo?.peak_packet_entities) && demo.peak_packet_entities > max;
-}
-
-/** The demos over `max` that have a highlight ticked for capture. */
-export function pickedDemosOverLimit(demos, max = limit) {
-  return (demos || []).filter((d) => overPacketEntityLimit(d, max)
-    && (d.streaks || []).some((s) => s.selected === true));
-}
-
-/**
- * Asks before starting on demos the engine can't play. Resolves true to go
- * ahead: nothing is over the limit, or the user chose to anyway.
- */
-export async function confirmOverLimit(demos, gamePath, { preview = false } = {}) {
-  const max = await refreshPacketEntityLimit(gamePath);
-  const over = demos.filter((d) => overPacketEntityLimit(d, max));
-  if (!over.length) return true;
-  const S = STRINGS.ENTITY_LIMIT;
-  return themedConfirm(preview ? S.previewMessage(max) : S.batchMessage(over.length, max), {
-    title: preview ? S.PREVIEW_TITLE : S.batchTitle(over.length),
-    confirmLabel: preview ? S.PREVIEW_ANYWAY : S.START_ANYWAY,
-    details: over.map((d) => ({ primary: d.name, secondary: S.peakDetail(d.peak_packet_entities) })),
-    footer: max === PRE_ANNIVERSARY_LIMIT ? S.ANNIVERSARY_HINT : '',
-  });
 }
 
 /** The Master Queue's mark for a demo over the limit, or null. */

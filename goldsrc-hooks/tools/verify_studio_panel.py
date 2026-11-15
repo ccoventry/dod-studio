@@ -61,6 +61,11 @@ def rust_builds(src):
     return rows
 
 
+def add_column_slot(src):
+    """The 5-argument AddColumnHeader: the slot before the one we call (#1092)."""
+    return vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER_RANGE") - 1
+
+
 def verify(game, src):
     on_command = vwl.rust_usize(src, "FRAME_SLOT_ON_COMMAND")
     activate = vwl.rust_usize(src, "FRAME_SLOT_ACTIVATE")
@@ -226,12 +231,16 @@ def verify(game, src):
           f"ListPanel slot {wheel_slot} is OnMouseWheeled: scroll bar value - delta * 3 into SetValue")
 
     # 19: the Map and Date columns. The window's constructor makes its one
-    # column through AddColumnHeader, just after pushing "demoname".
-    for name, want in (("LIST_SLOT_ADD_COLUMN_HEADER", "ret 0x14"),
+    # column through the 5-argument AddColumnHeader (the slot before ours),
+    # just after pushing "demoname".
+    for name, want in (("LIST_SLOT_ADD_COLUMN_HEADER_RANGE", "ret 0x1c"),
                        ("LIST_SLOT_SET_COLUMN_SORTABLE", "ret 8"), ("LIST_SLOT_APPLY_ITEM_CHANGES", "ret 4")):
         index = vwl.rust_usize(src, name)
-        got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base)
+        got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base, 0x600)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    index = add_column_slot(src)
+    got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base)
+    check(got == "ret 0x14", f"ListPanel slot {index} (the 5-argument AddColumnHeader) returns with {got!r}")
     # 25: the sort arrows (#611). "SetSortColumn"'s message handler is a
     # thunk to vftable slot 190, OnSetSortColumn: a repeat
     # click flips the ascending byte at list_sort_ascending; another column
@@ -290,7 +299,7 @@ def verify(game, src):
     check(got == "ret", f"which returns with {got!r} (no arguments)")
     demoname = ui.base + ui.img.find(b"demoname\0")
     ctor = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[build["file_dialog_ctor"]:build["file_dialog_ctor"] + 0x400], ui.base + build["file_dialog_ctor"])]
-    add = 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER")
+    add = 4 * add_column_slot(src)
     at = ctor.index(f"push {hex(demoname)}") if f"push {hex(demoname)}" in ctor else None
     near = ctor[at:at + 4] if at is not None else []
     check(any(re.fullmatch(rf"call dword ptr \[e[a-z]{{2}} \+ {hex(add)}\]", x) for x in near),
@@ -484,6 +493,27 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(label_vt + 4 * set_text) - ui.base)
     check(got == "ret 4", f"Label's slot {set_text} (SetText(const char *)) returns with {got!r}")
 
+    # #781: the Player list's hovered row is read through Label::GetText(char
+    # *, int), which hands on to its TextImage; the char version converts the
+    # wide text through the localizer (its slot +0x14), with `ret 8`. Only a
+    # child with MenuItem's own vftable is read, and MenuItem inherits it.
+    get_label = vwl.rust_usize(src, "LABEL_SLOT_GET_TEXT")
+    item_vt = ui.vftable("MenuItem@vgui2")
+    check(item_vt == build["menu_item_vftable"],
+          f"MenuItem's vftable is menu_item_vftable +{(item_vt or 0):#x}")
+    label_get = ui.u32(label_vt + 4 * get_label) - ui.base
+    hop = [x for x in ui.body(label_get, 0x20) if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
+    image_vt = ui.vftable("TextImage@vgui2")
+    converts = False
+    if hop and image_vt:
+        image_fn = ui.u32(image_vt + int(hop[0].split("+ ")[1].rstrip("]"), 16)) - ui.base
+        image_body = ui.body(image_fn, 0x40)
+        converts = (any(x == "call dword ptr [edx + 0x14]" for x in image_body)
+                    and ui.last_ret(image_fn) == "ret 8")
+    check(converts and item_vt and ui.u32(item_vt + 4 * get_label) == ui.u32(label_vt + 4 * get_label),
+          f"Label slot {get_label} is GetText(char *, int) (its TextImage converts to ANSI, ret 8), "
+          f"and MenuItem inherits it: {hop}")
+
     # 18: the Commands tab's RichText::SetText, which RichText's own
     # ApplySettings (slot 80) calls with a .res "text".
     rich_vt = ui.vftable("RichText@vgui2")
@@ -541,9 +571,9 @@ def verify(game, src):
     body = ui.body(ui.u32(sheet_vt + 4 * get_active) - ui.base, 0x10)
     check(len(body) == 2 and body[0].startswith("mov eax, dword ptr [ecx +") and body[1] == "ret",
           f"PropertySheet's slot {get_active} (GetActivePage) just returns a field: {body}")
-    key = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_TYPED")
+    key = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_PRESSED")
     got = ui.last_ret(ui.u32(page_vt + 4 * key) - ui.base)
-    check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodeTyped) returns with {got!r}")
+    check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodePressed) returns with {got!r}")
     for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8"),
                        ("IPANEL_REQUEST_FOCUS", "ret 8"), ("IPANEL_GET_ABS_POS", "ret 0xc"),
                        ("IPANEL_SET_KEYBOARD_INPUT_ENABLED", "ret 8")):
@@ -615,11 +645,22 @@ def verify_column_draggers(ui, src, build, list_vt, check):
     def has(body, pattern):
         return any(re.fullmatch(pattern, x) for x in body)
 
-    add5 = ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER")) - ui.base
+    add5 = ui.u32(list_vt + 4 * add_column_slot(src)) - ui.base
     body = ui.body(add5, 0x100)
     passed = "push 0x2710" in body and "push 0x14" in body
     ok &= passed
     check(passed, "AddColumnHeader without the fixed-size flag gives a column a width range of 20..10000")
+    # #1092: the hook calls the 7-argument slot itself, with the range
+    # `column_width_range` gives, because the 25th Anniversary's 5-argument
+    # form scales 20 and 10000 to the screen (two calls of the panel's
+    # proportional-scale helper) but passes the width as given.
+    range_slot = vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER_RANGE")
+    forwards = has(body, rf"call dword ptr \[e\w\w \+ {hex(4 * range_slot)}\]")
+    ok &= forwards
+    check(forwards, f"the 5-argument AddColumnHeader forwards to slot {range_slot} (index, name, text, width, min, max, flags)")
+    scaled = sum(1 for x in body if re.fullmatch(r"call 0x[0-9a-f]+", x))
+    check(True, f"  (it scales its range with {scaled} helper call(s) on this build: "
+                f"{'the minimum grows with the screen' if scaled else 'none, 20 and 10000 as they are'})")
 
     demoname = ui.base + ui.img.find(b"demoname\0")
     ctor = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(
@@ -632,7 +673,7 @@ def verify_column_draggers(ui, src, build, list_vt, check):
     ok &= passed
     check(passed, f"the Load Demo window adds \"demoname\" with flags {flags!r} (no fixed size), the list's width wide")
 
-    slot7 = vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER") + 1
+    slot7 = range_slot
     add7 = ui.u32(list_vt + 4 * slot7) - ui.base
     body = ui.body(add7, 0x500)
     passed = ui.last_ret(add7, 0x500) == "ret 0x1c" and has(body, rf"(lea|mov) e\w\w, (dword ptr )?\[e\w\w \+ {hex(cols)}\]")

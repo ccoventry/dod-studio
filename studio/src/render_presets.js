@@ -6,7 +6,7 @@
 
 /** The settings a preset carries, in a normalised shape. */
 export function presetValues(values) {
-  const codec = String(values?.codec || 'prores');
+  const codec = String(values?.codec || 'prores_422');
   return {
     codec,
     // Only meaningful for the custom codec, so ignored for every other one.

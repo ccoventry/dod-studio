@@ -24,6 +24,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | --- | --- |
 | `frame_inspector` | What frames are in this demo, in what order, at what ordinal? |
 | `debug_cmds` | Which `ConsoleCommand` frames does a demo already carry? |
+| `map_command_probe` | When does a POV demo replay the recorder's `+map`/`+mapzoom` presses, on the viewdemo clock? (#1441) |
 | `stufftext_probe` | Which injected commands does the engine's demo command filter drop? Writes a demo for the in-game check (#679) |
 | `schedule_timing_probe` | How close `ds_capture_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
 | `debug_scanner` | What does the highlight scanner see in this demo? |
@@ -33,6 +34,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
 | `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
+| `demo_gaps` | Where does this demo's clock jump, where do its frames stop, which maps does it sign on to, and does a strict parse read it? A raw frame walk that gets past damage (#15) |
 
 ### HLTV and the director channel
 
@@ -55,6 +57,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `verify_decal_pipeline` | Does a flushed demo come out with frame ordinals intact? |
 | `validate_bsp` | Does the BSP reader agree with coordinates the engine accepted? |
 | `map_entity_trim` | Which entities can a map lose to get under `MAX_PACKET_ENTITIES`? |
+| `capture_area_kills_probe` | Who stood in a capture area at each kill, from kill positions and the map's `dod_capture_area` brushes? (#1132) |
 
 `map_entity_trim` is the one here that writes a file rather than only reporting.
 It rewrites a `.bsp`'s entity lump to drop entities that never reach the wire,
@@ -73,6 +76,7 @@ made *after* a trimmed map is deployed. See #207 for the original problem and
 | --- | --- |
 | `mute_map_sounds` | What does this map play on a capture or a round win, and can it be silenced? |
 | `hide_map_text` | What does this map put on screen, and can it be hidden? |
+| `map_sound_table` | Which victory-music and capture-announcement names do all the installed maps use, and what fires each? The two lists behind `ds_sound_mute_victory_music` and `ds_sound_mute_flag_capture` (#284) |
 
 The other one here that writes a file. It reads the sound names out of the
 map's own entity lump -- `dod_control_point`'s `point_*_capsound` keyvalues,
@@ -128,7 +132,7 @@ handshake tests live — don't treat the copy here as authoritative.
 | `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
-`capture_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,
+`scan_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,
 so its numbers are the real thing rather than a model, and reads peak working
 set from the OS rather than sampling. Over a 45-demo corpus (3.2GB, 72MB mean):
 one worker peaks at 1529 MB, two at 2414 MB, four at 4574 MB, eight at 9157 MB

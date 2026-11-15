@@ -27,7 +27,7 @@
 //! if (textureType == GLT_SPRITE && iType == TEX_TYPE_RGBA)
 //!     GL_Upload32(data, width, height, mipmap, iType, filter);          // already RGBA
 //! else
-//!     GL_Upload8(data, width, height, mipmap, iType, pPal, filter);     // palette -> RGBA
+//!     GL_Upload16(data, width, height, mipmap, iType, pPal, filter);     // palette -> RGBA
 //! ```
 //!
 //! For a world texture (`GLT_WORLD`) with a replacement on disk, the stub calls
@@ -60,9 +60,9 @@
 //! their own arm, [`spray_upload`], which swaps in what Studio's Players table
 //! gives the slot's player.
 //!
-//! ## What `GL_Upload8` would have done that the replacement must copy
+//! ## What `GL_Upload16` would have done that the replacement must copy
 //!
-//! - **Texture gamma.** `GL_Upload8` runs the palette through a 256-entry gamma
+//! - **Texture gamma.** `GL_Upload16` runs the palette through a 256-entry gamma
 //!   table (`texgamma`) in place before expanding it. The replacement's RGB goes
 //!   through the same table, read from the running engine, so brightness
 //!   matches the original.
@@ -180,7 +180,7 @@
 //! the frame type 2 with `mipmap = 0` instead of type 5 with `mipmap = 1`.
 //! The HUD draws them as a quad of exactly the `hud.txt` rect's pixels with
 //! texture coordinates `(rect ± 0.5) / frame width|height` -- the frame's
-//! logical size, never the GL texture's (`Draw_SpriteFrameGeneric`,
+//! logical size, never the GL texture's (`Draw_Frame`,
 //! pre-Anniversary `hw+0x3d280`, Anniversary `hw+0x23b1c0`) -- so a bigger
 //! upload with the logical size kept draws in the same place at the same
 //! size, as for walls. What made them worth skipping before was filtering:
@@ -194,7 +194,11 @@
 //! and sets MIN to `gl_filter_min` (trilinear by default) and MAG to
 //! `gl_filter_max`. At 1:1 the HUD then samples level 2 of a 4x file, a
 //! clean box reduction, and a scaled draw (the scopes, a bigger kill feed)
-//! gets the finer levels. Read on both builds: the `mipmap` test is at
+//! gets the finer levels; a LOD bias of -1, set right after the upload
+//! (`upload_then_bias`, `hud_sprite_lod.rs`, #841), makes a scale-2 or -3
+//! kill feed read the full-size level, and the kill feed's `weapons<N>` sheets
+//! keep their file's soft alpha instead of the cut-out below
+//! (`hud_sprite_edges.rs`). Read on both builds: the `mipmap` test is at
 //! `hw+0x3e492` / `hw+0x23d473`, the single-level filter at `hw+0x3e4bf` /
 //! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
 //! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
@@ -250,9 +254,10 @@ use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The command name that toggles verbose per-load logging. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = console_name!("debug_log_texture_loads");
 
 /// `GL_LoadTexture2`'s tail, from the optional upload callback through both
@@ -265,16 +270,16 @@ const LOAD_TEXTURE2_TAIL: &str = "A1 ?? ?? ?? ?? 85 C0 74 0F 8B 4D 14 8B 55 08 5
 
 /// Offsets into [`LOAD_TEXTURE2_TAIL`]'s match.
 mod tail {
-    /// `cmp dword ptr [ebp+0xc], 5; jne upload8` -- the detoured span.
+    /// `cmp dword ptr [ebp+0xc], 5; jne upload16` -- the detoured span.
     pub const BRANCH: usize = 24;
     /// `cmp dword ptr [ebp+0x20], 4` -- where the not-a-sprite test resumes.
     pub const RESUME: usize = 30;
     /// `call GL_Upload32`.
     pub const CALL_UPLOAD32: usize = 52;
-    /// The `GL_Upload8` argument setup the `jne` goes to.
-    pub const UPLOAD8_ARGS: usize = 62;
-    /// `call GL_Upload8`.
-    pub const CALL_UPLOAD8: usize = 84;
+    /// The `GL_Upload16` argument setup the `jne` goes to.
+    pub const UPLOAD16_ARGS: usize = 62;
+    /// `call GL_Upload16`.
+    pub const CALL_UPLOAD16: usize = 84;
     /// Just past `add esp, 0x1c`: both paths rejoin here.
     pub const AFTER: usize = 92;
 }
@@ -331,7 +336,7 @@ struct Ceiling {
     size_ok: usize,
     /// Every instruction whose `imm32` is the scratch buffer, with its opcode.
     buffer_refs: &'static [(usize, u8)],
-    /// `GL_Upload8`'s reference to the static buffer placed right after it.
+    /// `GL_Upload16`'s reference to the static buffer placed right after it.
     expansion: (usize, &'static [u8]),
     stub: fn() -> Vec<u8>,
 }
@@ -342,13 +347,13 @@ const PRE_CEILING: Ceiling = Ceiling {
     too_big: upload32::TOO_BIG,
     size_ok: upload32::SIZE_OK,
     buffer_refs: &upload32::BUFFER_REFS,
-    expansion: upload8::EXPANSION_BUFFER,
+    expansion: upload16::EXPANSION_BUFFER,
     stub: size_check_stub,
 };
 
-/// Offsets into `GL_Upload8`, each checked against its opcode bytes before
+/// Offsets into `GL_Upload16`, each checked against its opcode bytes before
 /// the operand is trusted.
-mod upload8 {
+mod upload16 {
     /// `mov dl, byte ptr [ecx + <texgamma table>]`.
     pub const GAMMA_TABLE: (usize, &[u8]) = (0x53, &[0x8A, 0x91]);
     /// `fld dword ptr [<gl_dither.value>]`.
@@ -358,7 +363,7 @@ mod upload8 {
     pub const EXPANSION_BUFFER: (usize, &[u8]) = (0x276, &[0x68]);
 }
 
-/// The detail-texture loader, from its entry through its `GL_LoadTexture2`
+/// The detail-texture loader (Valve's static `loadTextureFile`), from its entry through its `GL_LoadTexture2`
 /// call. Wildcards: the `malloc`, `snprintf`, `LoadTGA` and `GL_LoadTexture2`
 /// call displacements and the "gfx/%s.tga" format string's address.
 const DETAIL_LOADER: &str = "55 8B EC 81 EC 0C 01 00 00 53 56 57 68 00 00 10 00 E8 ?? ?? ?? ?? 8B 5D 08 \
@@ -516,7 +521,7 @@ const GLT_SPRITE: u32 = 5;
 const TEX_TYPE_NONE: u32 = 0;
 const TEX_TYPE_ALPHA: u32 = 1;
 /// `TEX_TYPE_ALPHA_GRADIENT`: index-alpha sprites (`SPR_INDEXALPHA`) and
-/// `}` decals. `GL_Upload8` draws every pixel in palette entry 255's colour,
+/// `}` decals. `GL_Upload16` draws every pixel in palette entry 255's colour,
 /// with the pixel's palette index as its alpha.
 const TEX_TYPE_ALPHA_GRADIENT: u32 = 3;
 /// `TEX_TYPE_RGBA`: already truecolour. As `GLT_SPRITE` this is the overview
@@ -546,8 +551,8 @@ pub const STYLE_NAME: &str = console_name!("hd_style");
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 /// Fallback when the cvar could not be registered.
 const STYLE_ENV: &str = "GOLDSRC_HOOKS_HD_STYLE";
-static STYLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// A string: read through [`Cvar::ptr`], not as an on/off.
+pub static STYLE_CVAR: Cvar = Cvar::new();
 /// The style in force; empty until first asked for.
 static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// Hash of the style cvar's text as last seen by [`poll_hd`], so a frame
@@ -557,23 +562,12 @@ static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 /// `ds_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
 pub const HD_NAME: &str = console_name!("hd_enabled");
-static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+pub static HD_CVAR: Cvar = Cvar::new();
 /// The switch's current value; what every replacement path checks.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Set when the switch or style changed after a map had loaded: some of what's
 /// on screen was loaded the other way until the game restarts.
 static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands.rs` once `ds_hd_style` is registered.
-pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    STYLE_CVAR.store(cvar, Ordering::Release);
-}
-
-/// Called by `commands.rs` once `ds_hd_enabled` is registered.
-pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    HD_CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether HD starts on, and so whether `lib.rs` installs the hook at
 /// startup: `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` decides outright; unset,
@@ -613,7 +607,7 @@ fn clean_style(raw: &str) -> Option<String> {
 
 /// The style cvar's raw text, or `None` if it isn't registered.
 fn style_cvar_bytes() -> Option<&'static [u8]> {
-    let cvar = STYLE_CVAR.load(Ordering::Acquire);
+    let cvar = STYLE_CVAR.ptr();
     // Safety: a cvar_t the engine registered for us and keeps for the
     // session; its `string` is always a valid C string.
     let p = (!cvar.is_null()).then(|| unsafe { (*cvar).string })?;
@@ -646,6 +640,19 @@ fn active_style() -> String {
     chosen
 }
 
+/// The style HD files load from this session, for a report that names the
+/// style to build for (#1339): the one in force, or before any HD load the
+/// one the cvar asks for. Never fixes the style itself, as `active_style`
+/// does.
+pub(crate) fn style_in_force() -> String {
+    ACTIVE_STYLE
+        .read()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.clone())
+        .unwrap_or_else(chosen_style)
+}
+
 /// The style for reports: the one in force, or "not chosen yet".
 fn style_label() -> String {
     ACTIVE_STYLE
@@ -654,6 +661,27 @@ fn style_label() -> String {
         .filter(|s| !s.is_empty())
         .map(|s| s.clone())
         .unwrap_or_else(|| "not chosen yet".to_string())
+}
+
+/// The styles built on disk: every folder name under each kind's folder in
+/// `dodstudio_hd` (`world/ultrasharp`, `detail/remacri`, ...) that a style
+/// name may be, `overrides` included; the Settings tab's style list (#899).
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn built_styles() -> Vec<String> {
+    let root = hd_base().join("dodstudio_hd");
+    let kinds = std::fs::read_dir(&root).into_iter().flatten().flatten();
+    kinds
+        .filter(|k| k.path().is_dir())
+        .flat_map(|k| std::fs::read_dir(k.path()).into_iter().flatten().flatten())
+        .filter(|s| s.path().is_dir())
+        .filter_map(|s| clean_style(&s.file_name().to_string_lossy()))
+        .collect()
+}
+
+/// The style in use now, as the cvar asks for it.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn current_style() -> String {
+    chosen_style()
 }
 
 /// `<type>/<active style>` and `<type>/overrides`, in that order -- later wins.
@@ -699,20 +727,17 @@ impl<T> Cached<T> {
 /// `ds_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
-    let cvar = HD_CVAR.load(Ordering::Acquire);
-    if !cvar.is_null() {
-        // Safety: registered by us, kept by the engine for the session.
-        let on = unsafe { (*cvar).value } != 0.0;
-        if ENABLED.swap(on, Ordering::AcqRel) != on {
-            if on && let Err(why) = install() {
-                unsafe {
-                    crate::debug::report(&format!(
-                        "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
-                    ))
-                };
-            }
-            settings_changed(&format!("{HD_NAME} {}", on as u8));
+    if let Some(on) = HD_CVAR.try_on()
+        && ENABLED.swap(on, Ordering::AcqRel) != on
+    {
+        if on && let Err(why) = install() {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
+                ))
+            };
         }
+        settings_changed(&format!("{HD_NAME} {}", on as u8));
     }
     if let Some(bytes) = style_cvar_bytes() {
         let hash = fnv1a32(&[bytes]);
@@ -789,7 +814,7 @@ struct LastReplaced {
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
 /// `ds_debug_hd_misses`: lists every texture that kept its original this
-/// session, and why. Registered in `commands.rs`.
+/// session, and why. Registered in `commands/install.rs`.
 pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
 
@@ -1411,7 +1436,7 @@ pub static LOG_TEXTURE_LOADS: AtomicBool = AtomicBool::new(false);
 static DECIDE_FN: AtomicUsize = AtomicUsize::new(0);
 static UPLOAD32_FN: AtomicUsize = AtomicUsize::new(0);
 static RESUME: AtomicUsize = AtomicUsize::new(0);
-static UPLOAD8_ARGS: AtomicUsize = AtomicUsize::new(0);
+static UPLOAD16_ARGS: AtomicUsize = AtomicUsize::new(0);
 static AFTER: AtomicUsize = AtomicUsize::new(0);
 static SIZE_OK: AtomicUsize = AtomicUsize::new(0);
 static TOO_BIG: AtomicUsize = AtomicUsize::new(0);
@@ -1450,6 +1475,42 @@ static PENDING: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
 /// Owns the pixels `PENDING` points at. Replaced on the next swap, by which
 /// time `GL_Upload32` has long since copied them into its own buffer.
 static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+/// The texture type of the replacement [`PENDING`] holds, for
+/// [`upload_then_bias`].
+static PENDING_TYPE: AtomicU32 = AtomicU32::new(0);
+/// What the swap stubs call: [`upload_then_bias`].
+static SWAP_UPLOAD_FN: AtomicUsize = AtomicUsize::new(0);
+/// Replaced HUD sprites whose LOD bias the driver took (#841).
+static HUD_BIASED: AtomicU32 = AtomicU32::new(0);
+
+/// The swap stubs' upload: the engine's `GL_Upload32` with the same six
+/// arguments, then, for a replaced HUD sprite, the LOD bias of
+/// `hud_sprite_lod.rs` on the texture it just filled. Returns what
+/// `GL_Upload32` returned, so `eax` after the stub's call is unchanged.
+///
+/// # Safety
+///
+/// Only called by the swap stubs, on the engine's GL thread, after
+/// [`install`] stored `UPLOAD32_FN`.
+unsafe extern "C" fn upload_then_bias(
+    data: usize,
+    width: usize,
+    height: usize,
+    mipmap: usize,
+    i_type: usize,
+    filter: usize,
+) -> usize {
+    type Upload32 = unsafe extern "C" fn(usize, usize, usize, usize, usize, usize) -> usize;
+    // Safety: GL_Upload32's address, verified at install; cdecl, six dwords.
+    let upload: Upload32 = unsafe { std::mem::transmute(UPLOAD32_FN.load(Ordering::Acquire)) };
+    let result = unsafe { upload(data, width, height, mipmap, i_type, filter) };
+    if crate::hud_sprite_lod::wants_bias(PENDING_TYPE.load(Ordering::Acquire), mipmap as u32)
+        && unsafe { crate::hud_sprite_lod::apply() }
+    {
+        HUD_BIASED.fetch_add(1, Ordering::Relaxed);
+    }
+    result
+}
 
 /// Installed once per process; see [`detour::Detour`] on why never undone.
 static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
@@ -1477,6 +1538,56 @@ fn fnv1a32(parts: &[&[u8]]) -> u32 {
         }
     }
     hash
+}
+
+/// The HD key of a texture: its replacement's file name without `.tga`,
+/// `<name>_<hash>`, as every miss message and `ds_debug_texture` spell it.
+pub(crate) fn hd_key(name: &str, hash: u32) -> String {
+    format!("{}_{hash:08x}", file_stem_name(name))
+}
+
+/// The pixel hash of the last world texture uploaded under each name
+/// (lowercased), noted by [`decide`]: what [`world_hd`] answers with. The
+/// latest upload of a name wins, so after a map change it is that map's.
+static WORLD_KEYS: Mutex<std::collections::BTreeMap<String, u32>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn note_world_key(name: &str, hash: u32) {
+    if let Ok(mut keys) = WORLD_KEYS.lock() {
+        keys.insert(name.to_ascii_lowercase(), hash);
+    }
+}
+
+/// What the HD swap knows of the world texture `name`, for
+/// `ds_debug_texture` (#1309).
+pub(crate) enum WorldHd {
+    /// The swap hook isn't installed, so no upload was hashed.
+    NoHook,
+    /// No world texture of that name has been uploaded since the hook went in.
+    NotUploaded,
+    /// Its key, and the HD file the active style has for it, if any (`None`
+    /// also while HD is off and no folder has been indexed).
+    Known { key: String, file: Option<PathBuf> },
+}
+
+pub(crate) fn world_hd(name: &str) -> WorldHd {
+    if !HOOK_ACTIVE.load(Ordering::Acquire) {
+        return WorldHd::NoHook;
+    }
+    let Some(hash) = WORLD_KEYS
+        .lock()
+        .ok()
+        .and_then(|keys| keys.get(&name.to_ascii_lowercase()).copied())
+    else {
+        return WorldHd::NotUploaded;
+    };
+    let file = INDEX
+        .peek()
+        .and_then(|index| index.files.get(&(file_stem_name(name), hash)).cloned());
+    WorldHd::Known {
+        key: hd_key(name, hash),
+        file,
+    }
 }
 
 /// A texture name as it appears in a replacement's filename: lowercased, with
@@ -1725,7 +1836,7 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
     while img.width > SKY_MAX_SIDE || img.height > SKY_MAX_SIDE {
         img = halve(&img);
     }
-    // Safety: addresses read out of GL_Upload8 at install; R_LoadSkys uses
+    // Safety: addresses read out of GL_Upload16 at install; R_LoadSkys uses
     // the same texgamma table and gl_dither cvar for its own faces.
     let gamma = unsafe { &*(gamma_at as *const [u8; 256]) };
     let dither = unsafe { *(dither_at as *const f32) } != 0.0;
@@ -2158,7 +2269,7 @@ fn halve(img: &Rgba) -> Rgba {
     }
 }
 
-/// Applies what `GL_Upload8` would have done to the original's palette:
+/// Applies what `GL_Upload16` would have done to the original's palette:
 /// texture gamma, `gl_dither`'s `c | c >> 6` for opaque textures, and the
 /// all-zero transparent pixel for masked ones. For index-alpha sprites every
 /// pixel becomes `tint` (the original's palette entry 255) through the gamma
@@ -2220,8 +2331,10 @@ fn pot_floor(max: f32) -> u32 {
     1 << (31 - max.leading_zeros())
 }
 
-/// Loads, fits and prepares the replacement at `path`.
-fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, String> {
+/// Loads, fits and prepares the replacement at `path`. `soft` keeps the
+/// file's alpha for a kill-feed sheet (`hud_sprite_edges.rs`, #841) instead
+/// of cutting it.
+fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3], soft: bool) -> Result<Rgba, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let mut img = decode_tga(&bytes)?;
     let cap = replacement_cap();
@@ -2229,11 +2342,20 @@ fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, Str
         img = halve(&img);
     }
 
-    // Safety: both addresses were read out of GL_Upload8's own instructions
+    // Safety: both addresses were read out of GL_Upload16's own instructions
     // and checked at install; the table is 256 bytes of hw.dll's .data.
     let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
     let dither = unsafe { *(DITHER_VALUE.load(Ordering::Acquire) as *const f32) } != 0.0;
-    match_engine_expansion(&mut img.pixels, gamma, i_type, dither, tint);
+    if soft {
+        crate::hud_sprite_edges::prepare_soft_alpha(
+            &mut img.pixels,
+            img.width as usize,
+            img.height as usize,
+            gamma,
+        );
+    } else {
+        match_engine_expansion(&mut img.pixels, gamma, i_type, dither, tint);
+    }
     Ok(img)
 }
 
@@ -2243,7 +2365,7 @@ fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, Str
 /// # Safety
 ///
 /// `data` and `palette` are `GL_LoadTexture2`'s own arguments, which
-/// `GL_Upload8` is about to read over exactly these spans.
+/// `GL_Upload16` is about to read over exactly these spans.
 unsafe fn upload_hash(data: *const u8, palette: *const u8, width: u32, height: u32) -> Option<u32> {
     if data.is_null()
         || palette.is_null()
@@ -2263,7 +2385,7 @@ unsafe fn upload_hash(data: *const u8, palette: *const u8, width: u32, height: u
     Some(fnv1a32(&[indices, pal]))
 }
 
-/// Whether `GL_Upload8` would expand an upload of this `textureType` and
+/// Whether `GL_Upload16` would expand an upload of this `textureType` and
 /// `iType` in a way [`match_engine_expansion`] copies. Walls and skins come
 /// as `TEX_TYPE_NONE` or `TEX_TYPE_ALPHA`; sprites, world and HUD alike
 /// (one loader), also as `TEX_TYPE_ALPHA_GRADIENT` (index-alpha), while ones
@@ -2369,7 +2491,7 @@ fn spray_upload(
             return std::ptr::null();
         }
     };
-    // Safety: read out of GL_Upload8's own instructions and checked at install.
+    // Safety: read out of GL_Upload16's own instructions and checked at install.
     let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
     match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
     let from = path.display().to_string();
@@ -2423,14 +2545,21 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let palette = arg(0x24) as *const u8;
 
     // What this world texture's record holds, for `keep_cached` to compare
-    // the next map's same-named texture against. Every world upload, whether
-    // or not it's replaced.
+    // the next map's same-named texture against, and its key by name for
+    // `ds_debug_texture`. Every world upload, whether or not it's replaced.
     if texture_type == GLT_WORLD
-        && !record.is_null()
         && let Some(hash) = unsafe { upload_hash(data, palette, width, height) }
-        && let Ok(mut hashes) = RECORD_HASH.lock()
     {
-        hashes.insert(record as usize, hash);
+        if !record.is_null()
+            && let Ok(mut hashes) = RECORD_HASH.lock()
+        {
+            hashes.insert(record as usize, hash);
+        }
+        if !name_ptr.is_null() {
+            // Safety: the identifier every caller passes is a NUL-terminated name.
+            let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+            note_world_key(&name, hash);
+        }
     }
     if !enabled() {
         return std::ptr::null();
@@ -2522,7 +2651,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         return skip(Miss::OnPurpose, "no palette data");
     }
 
-    // Safety: GL_Upload8 is about to read exactly these spans itself.
+    // Safety: GL_Upload16 is about to read exactly these spans itself.
     let (indices, pal) = unsafe {
         (
             std::slice::from_raw_parts(data, (width * height) as usize),
@@ -2583,14 +2712,15 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
                 return skip(
                     Miss::WrongVersion,
                     &format!(
-                        "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
+                        "replacement(s) named {stem:?} exist, none for this content (needs {}.tga)",
+                        hd_key(&stem, hash)
                     ),
                 );
             }
             None => {
                 return skip(
                     Miss::NoFile,
-                    &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
+                    &format!("no replacement (would be {}.tga)", hd_key(&stem, hash)),
                 );
             }
         },
@@ -2598,7 +2728,17 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let name = real_name.unwrap_or(name);
 
     let tint = [pal[765], pal[766], pal[767]];
-    let img = match load_replacement(path, i_type, tint) {
+    // A kill-feed sheet keeps its soft alpha and draws blended (#841).
+    let soft_sheet = (texture_type == GLT_HUDSPRITE && i_type == TEX_TYPE_ALPHA)
+        .then(|| crate::hud_sprite_edges::sheet_of_frame(&name))
+        .flatten();
+    // So does a frame of the even layout's atlas, which that layout only
+    // draws once all its frames went up this way (#1022).
+    let atlas_frame = (texture_type == GLT_HUDSPRITE && i_type == TEX_TYPE_ALPHA)
+        .then(|| crate::hud_sprite_edges::atlas_frame_of(&name))
+        .flatten();
+    let soft = soft_sheet.is_some() || atlas_frame.is_some();
+    let img = match load_replacement(path, i_type, tint, soft) {
         Ok(img) => img,
         Err(why) => {
             unsafe {
@@ -2628,7 +2768,14 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         replacement_mipmap(texture_type, mipmap) as usize,
         Ordering::Release,
     );
+    PENDING_TYPE.store(texture_type, Ordering::Release);
     drop(owned);
+    if let Some(sheet) = soft_sheet {
+        crate::hud_sprite_edges::mark_soft(sheet);
+    }
+    if let Some(frame) = atlas_frame {
+        crate::hud_sprite_edges::mark_atlas_soft(frame);
+    }
 
     replaced.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut last) = LAST_REPLACED.lock() {
@@ -2664,7 +2811,7 @@ fn indirect(code: &mut Vec<u8>, modrm: u8, slot: &AtomicUsize) {
 const CALL: u8 = 0x15;
 const JMP: u8 = 0x25;
 
-/// The swap stub, replacing `cmp [ebp+0xc], 5; jne upload8`.
+/// The swap stub, replacing `cmp [ebp+0xc], 5; jne upload16`.
 ///
 /// ```asm
 ///     push esi                      ; the gltexture_t being filled
@@ -2676,7 +2823,7 @@ const JMP: u8 = 0x25;
 ///     cmp dword ptr [ebp+0xc], 5    ; the stolen bytes, verbatim in effect
 ///     jne +6
 ///     jmp [RESUME]
-///     jmp [UPLOAD8_ARGS]
+///     jmp [UPLOAD16_ARGS]
 /// swap:
 ///     push [ebp+0x28]               ; filter
 ///     push [ebp+0x20]               ; iType
@@ -2684,7 +2831,7 @@ const JMP: u8 = 0x25;
 ///     push [eax+8]                  ; replacement height
 ///     push [eax+4]                  ; replacement width
 ///     push [eax]                    ; replacement pixels
-///     call [UPLOAD32_FN]
+///     call [SWAP_UPLOAD_FN]        ; GL_Upload32, then a HUD sprite's LOD bias
 ///     add esp, 0x18
 ///     jmp [AFTER]
 /// ```
@@ -2701,7 +2848,7 @@ fn swap_stub() -> Vec<u8> {
     code.extend_from_slice(&[0x83, 0x7D, 0x0C, 0x05]); // cmp dword ptr [ebp+0xc], 5
     code.extend_from_slice(&[0x75, 0x06]); // jne +6
     indirect(&mut code, JMP, &RESUME);
-    indirect(&mut code, JMP, &UPLOAD8_ARGS);
+    indirect(&mut code, JMP, &UPLOAD16_ARGS);
     // swap:
     code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
     code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
@@ -2709,7 +2856,7 @@ fn swap_stub() -> Vec<u8> {
     code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
     code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
     code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
-    indirect(&mut code, CALL, &UPLOAD32_FN);
+    indirect(&mut code, CALL, &SWAP_UPLOAD_FN);
     code.extend_from_slice(&[0x83, 0xC4, 0x18]); // add esp, 0x18
     indirect(&mut code, JMP, &AFTER);
     code
@@ -2858,11 +3005,11 @@ fn check_span(at: usize, expected: &[u8]) -> Result<(), String> {
 /// [`raise_ceiling`], saying so when it can't.
 fn install_ceiling(
     upload32: usize,
-    upload8: usize,
+    upload16: usize,
     site: &Ceiling,
     detours: &mut Vec<detour::Detour>,
 ) {
-    match raise_ceiling(upload32, upload8, site) {
+    match raise_ceiling(upload32, upload16, site) {
         Ok(d) => detours.push(d),
         Err(why) => unsafe {
             crate::debug::report(&format!(
@@ -2877,7 +3024,7 @@ fn install_ceiling(
 /// nothing is written unless all of it matches.
 fn raise_ceiling(
     upload32: usize,
-    upload8: usize,
+    upload16: usize,
     site: &Ceiling,
 ) -> Result<detour::Detour, String> {
     let check_at = upload32 + site.size_check;
@@ -2901,7 +3048,7 @@ fn raise_ceiling(
     // The next static buffer starts exactly 2 MB later: that is the proof
     // the stock one holds STOCK_MAX_PIXELS pixels and no more.
     let (off, op) = site.expansion;
-    let next = unsafe { operand_after(upload8 + off, op) }?;
+    let next = unsafe { operand_after(upload16 + off, op) }?;
     if next != stock_buffer + STOCK_MAX_PIXELS * 4 {
         return Err(format!(
             "GL_Upload32's buffer {stock_buffer:#x} is not {} bytes before {next:#x}; its size is unknown",
@@ -3030,8 +3177,8 @@ fn install_detail(base: usize, site: &DetailSite, detours: &mut Vec<detour::Deto
 }
 
 /// `GL_LoadTexture2` from its entry through its name-keyed cache lookup, up
-/// to the hit path's servercount refresh. Wildcards: call displacements and
-/// absolute addresses (the record array, its count, strings, servercount).
+/// to the hit path's gHostSpawnCount refresh. Wildcards: call displacements and
+/// absolute addresses (the record array, its count, strings, gHostSpawnCount).
 const LOAD_TEXTURE2_HEAD: &str = "55 8B EC B8 0C 40 00 00 E8 ?? ?? ?? ?? 8B 45 08 53 33 DB 56 8A 08 57 84 C9 \
     89 5D F4 74 61 33 F6 BF ?? ?? ?? ?? 3B 35 ?? ?? ?? ?? 7D 5F 66 83 7F 04 00 7D 0C 85 DB 75 1C 8B DF 46 \
     83 C7 54 EB E5 8B 55 08 8D 4F 14 51 52 E8 ?? ?? ?? ?? 83 C4 08 85 C0 74 06 46 83 C7 54 EB CB 8B 45 10 \
@@ -3041,7 +3188,7 @@ const LOAD_TEXTURE2_HEAD: &str = "55 8B EC B8 0C 40 00 00 E8 ?? ?? ?? ?? 8B 45 0
     C4 04 EB 38 66 83 7F 04 00 7E 0B 66 8B 15 ?? ?? ?? ?? 66 89 57 04";
 
 /// Offsets into [`LOAD_TEXTURE2_HEAD`]. Inside the lookup loop `edi` is the
-/// `gltexture_t` being compared (84 bytes: `+4` servercount as a short, `+8`
+/// `gltexture_t` being compared (84 bytes: `+4` gHostSpawnCount as a short, `+8`
 /// width, `+0xc` height, `+0x14` name).
 mod head {
     /// `inc esi; add edi, 0x54; jmp loop` -- on to the next record.
@@ -3051,14 +3198,14 @@ mod head {
     pub const NAME_MATCHED: usize = 0x5a;
     /// `cmp eax, ecx` -- the width compare, where the stub resumes.
     pub const SIZE_COMPARE: usize = 0x60;
-    /// `mov dx, word ptr [servercount]` on the hit path.
-    pub const SERVERCOUNT: usize = 0xce;
+    /// `mov dx, word ptr [gHostSpawnCount]` on the hit path.
+    pub const HOST_SPAWN_COUNT: usize = 0xce;
 }
 const NAME_MATCHED_STOLEN: &[u8] = &[0x8B, 0x45, 0x10, 0x8B, 0x4F, 0x08];
 
-/// `keep_cached`'s address, the servercount global, and the stub's two exits.
+/// `keep_cached`'s address, the gHostSpawnCount global, and the stub's two exits.
 static KEEP_CACHED_FN: AtomicUsize = AtomicUsize::new(0);
-static SERVERCOUNT: AtomicUsize = AtomicUsize::new(0);
+static HOST_SPAWN_COUNT: AtomicUsize = AtomicUsize::new(0);
 static CACHE_NEXT: AtomicUsize = AtomicUsize::new(0);
 static CACHE_RESUME: AtomicUsize = AtomicUsize::new(0);
 /// Whether the leftover-texture fix is installed, and what it has done.
@@ -3078,7 +3225,7 @@ static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
 /// world textures are still cached while the next map loads, so a new map's
 /// texture with the same name and size but different pixels used to get the
 /// old map's texture instead (and one with a different size got renamed; see
-/// [`renamed_by_engine`]). Only world textures carry a servercount (every
+/// [`renamed_by_engine`]). Only world textures carry a gHostSpawnCount (every
 /// other type is stored with 0, "permanent"), and it's bumped at every map
 /// load, including every demo. So: a world texture left over from an earlier
 /// map is reused only if its pixels are identical -- otherwise the lookup
@@ -3094,14 +3241,14 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
     if frame.is_null() || record.is_null() || arg(0x0c) != GLT_WORLD {
         return 1;
     }
-    let servercount_at = SERVERCOUNT.load(Ordering::Acquire);
-    if servercount_at == 0 {
+    let spawn_count_at = HOST_SPAWN_COUNT.load(Ordering::Acquire);
+    if spawn_count_at == 0 {
         return 1;
     }
     // Safety: the record's short at +4; the engine's int, of which the
     // record keeps the low 16 bits.
     let cached = unsafe { (record.add(4) as *const i16).read_unaligned() };
-    let current = unsafe { (servercount_at as *const i32).read_unaligned() } as i16;
+    let current = unsafe { (spawn_count_at as *const i32).read_unaligned() } as i16;
     if cached <= 0 || cached == current {
         return 1;
     }
@@ -3203,8 +3350,8 @@ fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String>
         ));
     }
     check_span(head + head::NAME_MATCHED, NAME_MATCHED_STOLEN)?;
-    let servercount = unsafe { operand_after(head + head::SERVERCOUNT, &[0x66, 0x8B, 0x15]) }?;
-    SERVERCOUNT.store(servercount, Ordering::Release);
+    let spawn_count = unsafe { operand_after(head + head::HOST_SPAWN_COUNT, &[0x66, 0x8B, 0x15]) }?;
+    HOST_SPAWN_COUNT.store(spawn_count, Ordering::Release);
     KEEP_CACHED_FN.store(keep_cached as *const () as usize, Ordering::Release);
     CACHE_NEXT.store(head + head::NEXT_RECORD, Ordering::Release);
     CACHE_RESUME.store(head + head::SIZE_COMPARE, Ordering::Release);
@@ -3231,13 +3378,13 @@ fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String>
 ///   keeps the cache record in `ebx`, not `esi`. The detour takes the compare
 ///   and that load (no relative branch among them) and resumes *at* the
 ///   `jne`, so the flags it tests are the stub's own compare's.
-/// - `GL_Upload8` (+0x23cfa0) does exactly what the pre-Anniversary one does
+/// - `GL_Upload16` (+0x23cfa0) does exactly what the pre-Anniversary one does
 ///   to a palette -- `texgamma` through a 256-byte table, `gl_dither`'s
 ///   `c | c >> 6` for opaque textures, index 255 transparent for masked ones
 ///   -- so the replacement is prepared the same way, with the table and the
 ///   cvar read out of its instructions.
 /// - The cache lookup compares the record in `esi`; its hit path refreshes
-///   the servercount with `mov ax, word ptr [servercount]`.
+///   the gHostSpawnCount with `mov ax, word ptr [gHostSpawnCount]`.
 ///
 /// - The upload ceiling, detail textures and skies work as on the
 ///   pre-Anniversary build, from this build's own offsets (`CEILING`,
@@ -3251,7 +3398,7 @@ mod anniversary {
 
     /// `GL_LoadTexture2`'s tail, from the optional upload callback through the
     /// `GL_Upload32` call and the jump to the common exit. Wildcards: the
-    /// callback pointer's address, the two `jne upload8`s, the call and the
+    /// callback pointer's address, the two `jne upload16`s, the call and the
     /// jump.
     pub const TAIL: &str = "A1 ?? ?? ?? ?? 8B 75 10 85 C0 74 10 FF B5 EC BC FF FF FF 75 14 56 57 FF D0 \
         83 C4 10 83 7D 0C 05 8B 45 20 0F 85 ?? ?? ?? ?? 83 F8 04 0F 85 ?? ?? ?? ?? FF 75 28 50 FF 75 1C \
@@ -3261,8 +3408,8 @@ mod anniversary {
     pub mod tail {
         /// `cmp dword ptr [ebp+0xc], 5; mov eax, [ebp+0x20]` -- the detoured span.
         pub const BRANCH: usize = 0x1c;
-        /// `jne upload8` (`0F 85 rel32`), right after the span: the stub resumes here.
-        pub const JNE_UPLOAD8: usize = 0x23;
+        /// `jne upload16` (`0F 85 rel32`), right after the span: the stub resumes here.
+        pub const JNE_UPLOAD16: usize = 0x23;
         /// `call GL_Upload32`.
         pub const CALL_UPLOAD32: usize = 0x43;
         /// `jmp exit` (`E9 rel32`), past the `GL_Upload32` path.
@@ -3271,36 +3418,36 @@ mod anniversary {
 
     pub const BRANCH_STOLEN: &[u8] = &[0x83, 0x7D, 0x0C, 0x05, 0x8B, 0x45, 0x20];
 
-    /// The `GL_Upload8` argument setup the `jne` goes to, up to its call; the
+    /// The `GL_Upload16` argument setup the `jne` goes to, up to its call; the
     /// call's `add esp, 0x1c` is followed directly by the common exit.
-    pub const UPLOAD8_ARGS: &[u8] = &[
+    pub const UPLOAD16_ARGS: &[u8] = &[
         0xFF, 0x75, 0x28, 0xFF, 0xB5, 0xD4, 0xBC, 0xFF, 0xFF, 0x50, 0xFF, 0x75, 0x1C, 0xFF, 0x75,
         0x14, 0x56, 0xFF, 0xB5, 0xEC, 0xBC, 0xFF, 0xFF,
     ];
     /// `add esp, 0x1c`.
-    pub const UPLOAD8_POP: &[u8] = &[0x83, 0xC4, 0x1C];
+    pub const UPLOAD16_POP: &[u8] = &[0x83, 0xC4, 0x1C];
 
-    /// `GL_Upload32`'s and `GL_Upload8`'s first instructions, to confirm the
+    /// `GL_Upload32`'s and `GL_Upload16`'s first instructions, to confirm the
     /// two calls land where the disassembly says: `GL_Upload32`'s texture-stat
-    /// call, and `GL_Upload8`'s "it's > 640*480 bytes" check.
+    /// call, and `GL_Upload16`'s "it's > 640*480 bytes" check.
     pub const UPLOAD32_ENTRY: &[u8] = &[
         0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0x53, 0x56, 0x57, 0x8D, 0x45, 0xF8, 0x50, 0x8D, 0x45,
         0xD0, 0x50, 0x8D, 0x45, 0xCC, 0x50, 0xE8,
     ];
-    pub const UPLOAD8_ENTRY: &[u8] = &[
+    pub const UPLOAD16_ENTRY: &[u8] = &[
         0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45, 0x0C, 0x8B, 0xC8, 0x8B, 0x55, 0x10, 0x0F,
         0xAF, 0xCA, 0x89, 0x4D, 0xF8, 0x81, 0xF9, 0x00, 0xC0, 0x12, 0x00,
     ];
 
-    /// `mov al, byte ptr [eax + <texgamma table>]`, in `GL_Upload8`'s palette loop.
-    pub const UPLOAD8_GAMMA: (usize, &[u8]) = (0x58, &[0x8A, 0x80]);
+    /// `mov al, byte ptr [eax + <texgamma table>]`, in `GL_Upload16`'s palette loop.
+    pub const UPLOAD16_GAMMA: (usize, &[u8]) = (0x58, &[0x8A, 0x80]);
     /// `movss xmm0, dword ptr [<gl_dither.value>]`.
-    pub const UPLOAD8_DITHER: (usize, &[u8]) = (0x16e, &[0xF3, 0x0F, 0x10, 0x05]);
+    pub const UPLOAD16_DITHER: (usize, &[u8]) = (0x16e, &[0xF3, 0x0F, 0x10, 0x05]);
 
     /// `GL_Upload32`'s size check, `cmp eax, 0x80000; jbe ok` (the product is
     /// already stored at `[ebp-0x10]`, and `esi` is the scaled width); its
     /// four `push <scratch buffer>`s and one `mov edi, <scratch buffer>`; and
-    /// `GL_Upload8`'s `push` of the buffer placed 2 MB after it.
+    /// `GL_Upload16`'s `push` of the buffer placed 2 MB after it.
     pub(super) const CEILING: Ceiling = Ceiling {
         size_check: 0x178,
         stolen: &[0x3D, 0x00, 0x00, 0x08, 0x00, 0x76, 0x0D],
@@ -3401,7 +3548,7 @@ mod anniversary {
     }
     pub const NAME_MATCHED_STOLEN: &[u8] = &[0x8B, 0x45, 0x10, 0x3B, 0x46, 0x08];
     /// The hit path: `cmp word ptr [esi+4], 0; jle +0xa`, then
-    /// `mov ax, word ptr [servercount]`.
+    /// `mov ax, word ptr [gHostSpawnCount]`.
     pub const HIT: &[u8] = &[0x66, 0x83, 0x7E, 0x04, 0x00, 0x7E, 0x0A, 0x66, 0xA1];
 
     /// The swap stub, replacing `cmp [ebp+0xc], 5; mov eax, [ebp+0x20]`.
@@ -3423,7 +3570,7 @@ mod anniversary {
     ///     push [eax+8]                  ; replacement height
     ///     push [eax+4]                  ; replacement width
     ///     push [eax]                    ; replacement pixels
-    ///     call [UPLOAD32_FN]
+    ///     call [SWAP_UPLOAD_FN]        ; GL_Upload32, then a HUD sprite's LOD bias
     ///     add esp, 0x18
     ///     jmp [AFTER]
     /// ```
@@ -3448,7 +3595,7 @@ mod anniversary {
         code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
         code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
         code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
-        indirect(&mut code, CALL, &UPLOAD32_FN);
+        indirect(&mut code, CALL, &SWAP_UPLOAD_FN);
         code.extend_from_slice(&[0x83, 0xC4, 0x18]); // add esp, 0x18
         indirect(&mut code, JMP, &AFTER);
         code
@@ -3478,29 +3625,29 @@ mod anniversary {
     pub fn install(base: usize, tail: usize) -> Result<Vec<detour::Detour>, String> {
         let upload32 = unsafe { call_target(tail + tail::CALL_UPLOAD32) }?;
         check_span(upload32, UPLOAD32_ENTRY)?;
-        let upload8_args = unsafe { rel32_target(tail + tail::JNE_UPLOAD8, &[0x0F, 0x85]) }?;
-        check_span(upload8_args, UPLOAD8_ARGS)?;
-        let upload8 = unsafe { call_target(upload8_args + UPLOAD8_ARGS.len()) }?;
-        check_span(upload8, UPLOAD8_ENTRY)?;
+        let upload16_args = unsafe { rel32_target(tail + tail::JNE_UPLOAD16, &[0x0F, 0x85]) }?;
+        check_span(upload16_args, UPLOAD16_ARGS)?;
+        let upload16 = unsafe { call_target(upload16_args + UPLOAD16_ARGS.len()) }?;
+        check_span(upload16, UPLOAD16_ENTRY)?;
         let after = unsafe { rel32_target(tail + tail::JMP_AFTER, &[0xE9]) }?;
-        // The GL_Upload8 path's `add esp, 0x1c` falls straight into the exit
+        // The GL_Upload16 path's `add esp, 0x1c` falls straight into the exit
         // the GL_Upload32 path jumps to: the swap rejoins where both do.
-        let pop = upload8_args + UPLOAD8_ARGS.len() + 5;
-        check_span(pop, UPLOAD8_POP)?;
-        if pop + UPLOAD8_POP.len() != after {
+        let pop = upload16_args + UPLOAD16_ARGS.len() + 5;
+        check_span(pop, UPLOAD16_POP)?;
+        if pop + UPLOAD16_POP.len() != after {
             return Err(format!(
-                "GL_Upload8's path ends at {:#x}, but GL_Upload32's jumps to {after:#x}",
-                pop + UPLOAD8_POP.len()
+                "GL_Upload16's path ends at {:#x}, but GL_Upload32's jumps to {after:#x}",
+                pop + UPLOAD16_POP.len()
             ));
         }
-        let (off, op) = UPLOAD8_GAMMA;
-        let gamma = unsafe { operand_after(upload8 + off, op) }?;
-        let (off, op) = UPLOAD8_DITHER;
-        let dither = unsafe { operand_after(upload8 + off, op) }?;
+        let (off, op) = UPLOAD16_GAMMA;
+        let gamma = unsafe { operand_after(upload16 + off, op) }?;
+        let (off, op) = UPLOAD16_DITHER;
+        let dither = unsafe { operand_after(upload16 + off, op) }?;
         check_span(tail + tail::BRANCH, BRANCH_STOLEN)?;
 
         let mut detours = Vec::new();
-        install_ceiling(upload32, upload8, &CEILING, &mut detours);
+        install_ceiling(upload32, upload16, &CEILING, &mut detours);
         install_detail(base, &DETAIL, &mut detours);
         GAMMA_TABLE.store(gamma, Ordering::Release);
         DITHER_VALUE.store(dither, Ordering::Release);
@@ -3511,7 +3658,8 @@ mod anniversary {
             },
         }
         UPLOAD32_FN.store(upload32, Ordering::Release);
-        RESUME.store(tail + tail::JNE_UPLOAD8, Ordering::Release);
+        SWAP_UPLOAD_FN.store(upload_then_bias as *const () as usize, Ordering::Release);
+        RESUME.store(tail + tail::JNE_UPLOAD16, Ordering::Release);
         AFTER.store(after, Ordering::Release);
         DECIDE_FN.store(decide as *const () as usize, Ordering::Release);
 
@@ -3558,8 +3706,8 @@ mod anniversary {
         check_span(head + head::NAME_MATCHED, NAME_MATCHED_STOLEN)?;
         let hit = unsafe { rel32_target(head + head::JE_HIT, &[0x0F, 0x84]) }?;
         check_span(hit, HIT)?;
-        let servercount = unsafe { operand_after(hit + HIT.len() - 2, &[0x66, 0xA1]) }?;
-        SERVERCOUNT.store(servercount, Ordering::Release);
+        let spawn_count = unsafe { operand_after(hit + HIT.len() - 2, &[0x66, 0xA1]) }?;
+        HOST_SPAWN_COUNT.store(spawn_count, Ordering::Release);
         KEEP_CACHED_FN.store(keep_cached as *const () as usize, Ordering::Release);
         CACHE_NEXT.store(head + head::NEXT_RECORD, Ordering::Release);
         CACHE_RESUME.store(head + head::SIZE_BRANCH, Ordering::Release);
@@ -3616,15 +3764,15 @@ pub fn install() -> Result<(), String> {
             "GL_LoadTexture2 calls {called32:#x}, but GL_Upload32 matched at {upload32:#x}"
         ));
     }
-    let upload8 = unsafe { call_target(tail + tail::CALL_UPLOAD8) }?;
-    let (off, op) = upload8::GAMMA_TABLE;
-    let gamma = unsafe { operand_after(upload8 + off, op) }?;
-    let (off, op) = upload8::DITHER;
-    let dither = unsafe { operand_after(upload8 + off, op) }?;
+    let upload16 = unsafe { call_target(tail + tail::CALL_UPLOAD16) }?;
+    let (off, op) = upload16::GAMMA_TABLE;
+    let gamma = unsafe { operand_after(upload16 + off, op) }?;
+    let (off, op) = upload16::DITHER;
+    let dither = unsafe { operand_after(upload16 + off, op) }?;
     check_span(tail + tail::BRANCH, BRANCH_STOLEN)?;
 
     let mut detours = Vec::new();
-    install_ceiling(upload32, upload8, &PRE_CEILING, &mut detours);
+    install_ceiling(upload32, upload16, &PRE_CEILING, &mut detours);
     install_detail(base, &PRE_DETAIL, &mut detours);
 
     GAMMA_TABLE.store(gamma, Ordering::Release);
@@ -3636,8 +3784,9 @@ pub fn install() -> Result<(), String> {
         },
     }
     UPLOAD32_FN.store(upload32, Ordering::Release);
+    SWAP_UPLOAD_FN.store(upload_then_bias as *const () as usize, Ordering::Release);
     RESUME.store(tail + tail::RESUME, Ordering::Release);
-    UPLOAD8_ARGS.store(tail + tail::UPLOAD8_ARGS, Ordering::Release);
+    UPLOAD16_ARGS.store(tail + tail::UPLOAD16_ARGS, Ordering::Release);
     AFTER.store(tail + tail::AFTER, Ordering::Release);
     DECIDE_FN.store(decide as *const () as usize, Ordering::Release);
 
@@ -3728,9 +3877,26 @@ pub fn status() -> String {
     );
     // Same folder as the world sprites, so no file count of its own.
     let hud = format!(
-        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps)",
+        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps; LOD bias {} on {}; soft kill-feed edges: {})",
         HUD_REPLACED.load(Ordering::Relaxed),
         HUD_SEEN.load(Ordering::Relaxed),
+        crate::hud_sprite_lod::HUD_LOD_BIAS,
+        HUD_BIASED.load(Ordering::Relaxed),
+        match (
+            crate::hud_sprite_edges::describe_soft(),
+            crate::hud_sprite_edges::describe_draws(),
+        ) {
+            (soft, _) if soft.is_empty() => "none".to_string(),
+            (soft, draws) => format!(
+                "{soft}, {} icon(s) without the rows the icon below owns{}",
+                crate::hud_sprite_edges::trim_count(),
+                if draws.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {draws}")
+                }
+            ),
+        },
     );
     let decals = format!(
         "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Players table says",
@@ -3852,8 +4018,8 @@ mod tests {
         fixed(LOAD_TEXTURE2_TAIL, tail::BRANCH, BRANCH_STOLEN);
         fixed(LOAD_TEXTURE2_TAIL, tail::RESUME, &[0x83, 0x7D, 0x20, 0x04]);
         fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD32, &[0xE8]);
-        fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD8_ARGS, &[0x8B, 0x45, 0x28]);
-        fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD8, &[0xE8]);
+        fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD16_ARGS, &[0x8B, 0x45, 0x28]);
+        fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD16, &[0xE8]);
         fixed(LOAD_TEXTURE2_TAIL, tail::AFTER - 3, &[0x83, 0xC4, 0x1C]);
     }
 
@@ -4080,7 +4246,7 @@ mod tests {
         );
         fixed(
             anniversary::TAIL,
-            anniversary::tail::JNE_UPLOAD8,
+            anniversary::tail::JNE_UPLOAD16,
             &[0x0F, 0x85],
         );
         fixed(anniversary::TAIL, anniversary::tail::CALL_UPLOAD32, &[0xE8]);
@@ -4095,7 +4261,7 @@ mod tests {
         // The stolen span runs straight into the jne the stub resumes at.
         assert_eq!(
             anniversary::tail::BRANCH + anniversary::BRANCH_STOLEN.len(),
-            anniversary::tail::JNE_UPLOAD8
+            anniversary::tail::JNE_UPLOAD16
         );
         assert_eq!(
             anniversary::head::NAME_MATCHED + anniversary::NAME_MATCHED_STOLEN.len(),
@@ -4411,6 +4577,12 @@ mod tests {
             Some(("under_score".to_string(), 0xdead_beef))
         );
         assert_eq!(parse_file_name("nohash.tga"), None);
+        // The key a miss message and ds_debug_texture print is the file's stem.
+        assert_eq!(hd_key("+0Lambda", 0x1a2b_3c4d), "+0lambda_1a2b3c4d");
+        assert_eq!(
+            parse_file_name(&format!("{}.tga", hd_key("XCONCRETE_C54_Y", 7))),
+            Some(("xconcrete_c54_y".to_string(), 7))
+        );
         assert_eq!(parse_file_name("x_123.tga"), None);
         assert_eq!(parse_file_name("x_1a2b3c4d.png"), None);
     }
@@ -4636,12 +4808,19 @@ mod tests {
         );
         fixed(LOAD_TEXTURE2_HEAD, head::NAME_MATCHED, NAME_MATCHED_STOLEN);
         fixed(LOAD_TEXTURE2_HEAD, head::SIZE_COMPARE, &[0x3B, 0xC1]);
-        fixed(LOAD_TEXTURE2_HEAD, head::SERVERCOUNT, &[0x66, 0x8B, 0x15]);
+        fixed(
+            LOAD_TEXTURE2_HEAD,
+            head::HOST_SPAWN_COUNT,
+            &[0x66, 0x8B, 0x15],
+        );
         // The `je` after the name compare lands exactly on the detour: `74 06`
         // right before NEXT_RECORD's 6 bytes.
         fixed(LOAD_TEXTURE2_HEAD, head::NEXT_RECORD - 2, &[0x74, 0x06]);
         assert_eq!(head::NEXT_RECORD + 6, head::NAME_MATCHED);
-        assert_eq!(tokens(LOAD_TEXTURE2_HEAD).len(), head::SERVERCOUNT + 11);
+        assert_eq!(
+            tokens(LOAD_TEXTURE2_HEAD).len(),
+            head::HOST_SPAWN_COUNT + 11
+        );
     }
 
     #[test]

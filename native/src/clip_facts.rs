@@ -4,15 +4,20 @@
 //! `CaptureStreak.kills` is `(tick, time, weapon)`, which the patcher uses and
 //! which stays as it is. These facts ride beside it on the Studio side only.
 
-use analysis::{Analysis, Connection, Team};
+use analysis::{Analysis, Connection, FlagTag, Headshot, Team, flag_tags_of, headshot_of};
 
-/// A highlight's facts for its clip name, one victim entry per kill.
+/// A highlight's facts beside its streak (the clip name, the headshot
+/// filter, the flag tags), one entry per kill.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreakFacts {
     /// "Allies", "British", "Axis", "Spectator" or "Unknown".
     pub faction: String,
     pub victims: Vec<String>,
     pub victim_factions: Vec<String>,
+    /// Whether each kill was a headshot (#1128).
+    pub headshots: Vec<Headshot>,
+    /// What was going on at the flags at each kill (#1132).
+    pub flag_tags: Vec<Vec<FlagTag>>,
 }
 
 /// A side as a clip name spells it. `allies_are_british` covers a demo
@@ -60,7 +65,15 @@ pub fn streak_facts(
         faction: faction_name(player.team.as_ref(), british).to_string(),
         ..StreakFacts::default()
     };
-    for (_, _, victim_id) in &streak.kills {
+    for (time, _, victim_id) in &streak.kills {
+        facts
+            .headshots
+            .push(headshot_of(&analysis.state.kill_positions, time, victim_id));
+        facts.flag_tags.push(flag_tags_of(
+            &analysis.state.kill_positions,
+            time,
+            victim_id,
+        ));
         let victim = players.iter().find(|p| &p.id == victim_id);
         facts
             .victims
@@ -85,5 +98,52 @@ mod tests {
         assert_eq!(faction_name(Some(&Team::Spectators), false), "Spectator");
         assert_eq!(faction_name(Some(&Team::Unassigned), false), "Unknown");
         assert_eq!(faction_name(None, false), "Unknown");
+    }
+
+    #[test]
+    fn a_streaks_facts_carry_each_kills_headshot_and_flag_tags() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let analysis = Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = analysis::highlights::highlights(&analysis);
+        let mut headshots = 0;
+        let mut while_capping = 0;
+        for highlight in highlights.shown() {
+            let first = highlight.kills[0].frame_index as i32;
+            let slot = usize::from(highlight.slot.unwrap());
+            let facts = streak_facts(&analysis, slot, first).unwrap();
+            assert_eq!(facts.headshots.len(), highlight.kills.len());
+            assert_eq!(facts.headshots.len(), facts.victims.len());
+            assert_eq!(facts.flag_tags.len(), facts.victims.len());
+            let shown: Vec<_> = highlight
+                .kills
+                .iter()
+                .map(|k| k.flag_tags.clone())
+                .collect();
+            assert_eq!(facts.flag_tags, shown);
+            while_capping += facts
+                .flag_tags
+                .iter()
+                .filter(|tags| tags.contains(&FlagTag::WhileCapping))
+                .count();
+            headshots += facts
+                .headshots
+                .iter()
+                .filter(|h| **h == Headshot::Yes)
+                .count();
+        }
+        assert_eq!(
+            headshots,
+            highlights
+                .shown()
+                .map(|h| h.headshot_counts().0)
+                .sum::<usize>()
+        );
+        assert!(headshots > 0);
+        // The recorder scored three kills on a flag (#1132).
+        assert_eq!(while_capping, 3);
     }
 }

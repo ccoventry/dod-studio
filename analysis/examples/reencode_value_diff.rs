@@ -1,6 +1,6 @@
 //! Do a full round-trip's *values* survive, not just message counts, for the
 //! real untouched tail content in a window? Matches frames between the
-//! pre-injection splice (raw bytes, multi_bridge's own output -- ground truth)
+//! pre-injection splice (raw bytes, multi_bridge's own output, now `analysis::repair`'s bridge -- ground truth)
 //! and the post-injection file (fully re-encoded by snapshot_inject) using
 //! `incoming_sequence`, which is untouched for real frames in either file, and
 //! diffs their Debug-formatted message content.
@@ -13,10 +13,10 @@ use std::collections::BTreeMap;
 /// comparing raw Debug strings flags every frame as "different" even when
 /// every field and value is identical. Canonicalise by sorting keys first.
 fn canon_delta(d: &Delta) -> String {
-    let mut keys: Vec<&String> = d.keys().collect();
+    let mut keys: Vec<&dem::types::FieldName> = d.keys().collect();
     keys.sort();
     keys.iter()
-        .map(|k| format!("{k}={:?}", d[*k]))
+        .map(|k| format!("{k}={:?}", d.get(k).unwrap()))
         .collect::<Vec<_>>()
         .join(",")
 }

@@ -1,5 +1,5 @@
 // batch_results.js — the Last Batch panel (#172).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const streak = (player, kills, at) => ({ target_player: player, kill_count: kills, viewdemo_times: [at], kills: [[0, at, 'garand']], start_index: 0, end_index: 0 });
 const DISPATCH = { streaks: [streak('krod', 4, 754), streak('krod', 2, 800), streak('milo', 3, 65)] };
@@ -39,6 +39,21 @@ test('a finished batch lists each take: what it was, whether it landed, its size
   expect(opened).toBe('C:\caps\a');
 });
 
+test('a cancelled batch shows the clips it never reached as not reached, not missing (#1434)', async ({ page }) => {
+  await loadHarness(page);
+  const [a, b, c] = PAYLOAD.blocks;
+  const cancelled = {
+    ...PAYLOAD, captured_count: 1, renderable_count: 1, ended_by: 'cancel',
+    blocks: [a, { ...b, captured: false, bytes: 0 }, { ...c, not_reached: true }],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('cancelled', ''); window.__verified(p, d); }, [cancelled, DISPATCH]);
+  const rows = page.locator('#batch-results tbody tr');
+  await expect(rows.nth(1)).toContainText('Missing');
+  await expect(rows.nth(2)).toContainText('Not reached: the batch was cancelled first');
+  await expect(rows.nth(2)).toHaveClass(/batch-results-row-not_reached/);
+  await expect(rows.nth(2).getByRole('button')).toHaveCount(0);
+});
+
 test('the takes can arrive before the outcome, an error says why, and the next batch clears it', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(([p, d]) => window.__verified(p, d), [PAYLOAD, DISPATCH]);
@@ -50,10 +65,87 @@ test('the takes can arrive before the outcome, an error says why, and the next b
   await expect(page.locator('#batch-results')).toBeHidden();
 });
 
+test('an OBS batch shows what OBS dropped per take and names the fix (#172)', async ({ page }) => {
+  await loadHarness(page);
+  const clip = (n, folder, skipped, lagging) => ({
+    clip: n, take_folder: folder, recording: false, skipped_pct: skipped, missed_pct: 0,
+    skipped: Math.round(skipped * 12), frames: 1200, missed: 0, rendered: 1200, lagging, capture_fps: 120,
+  });
+  const [a, b] = PAYLOAD.blocks;
+  await page.evaluate(([p, d, x, y]) => {
+    window.__obsClip(x);
+    window.__obsClip(y);
+    window.__ended('completed', '');
+    window.__verified(p, d);
+  }, [PAYLOAD, DISPATCH, clip(1, a.take_folder, 34.2, true), clip(2, b.take_folder, 0.3, false)]);
+  const panel = page.locator('#batch-results');
+  await expect(panel.locator('.batch-results-summary')).toContainText(
+    'OBS dropped frames in 1 of 2 takes. Lower OBS Capture FPS to 60');
+  const rows = panel.locator('tbody tr');
+  await expect(rows.nth(0)).toContainText('OBS: 34.2% skipped');
+  await expect(rows.nth(0).locator('.batch-results-obs-lagging')).toHaveCount(1);
+  await expect(rows.nth(1)).toContainText('OBS: 0.3% skipped');
+  await expect(rows.nth(1).locator('.batch-results-obs-lagging')).toHaveCount(0);
+  await page.evaluate(() => window.__started());
+  await page.evaluate(([p, d]) => { window.__ended('completed', ''); window.__verified(p, d); }, [PAYLOAD, DISPATCH]);
+  await expect(panel.locator('.batch-results-summary')).not.toContainText('OBS');
+});
+
 test('the panel can be hidden until the next batch', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(() => window.__ended('cancelled', ''));
   await expect(page.locator('.batch-results-summary')).toHaveText('Cancelled. Checking the takes on disk…');
   await page.click('.batch-results-close');
   await expect(page.locator('#batch-results')).toBeHidden();
+});
+
+test('a clip Cancel cut short shows as a partial take, not a captured one (#1081)', async ({ page }) => {
+  await loadHarness(page);
+  const payload = {
+    total_count: 2, captured_count: 1, renderable_count: 1,
+    blocks: [
+      { ...PAYLOAD.blocks[0] },
+      { take_key: 'b', demo_name: 'flash.dem', source_streak_indices: [2], captured: false, renderable: false, cut_short: true, bytes: 200 * 1024 ** 2, take_folder: 'C:/caps/b' },
+    ],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('cancelled', ''); window.__verified(p, d); }, [payload, DISPATCH]);
+  await expect(page.locator('.batch-results-summary')).toHaveText(/^Cancelled\. 1 of 2 takes on disk/);
+  const row = page.locator('#batch-results tbody tr').nth(1);
+  await expect(row).toContainText('Cut short by Cancel (partial take, not captured)');
+  await expect(row).toContainText('200.0 MB');
+  await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
+});
+
+test('a clip the game closing cut short says the game closed, not Cancel', async ({ page }) => {
+  await loadHarness(page);
+  const payload = {
+    total_count: 2, captured_count: 1, renderable_count: 1,
+    blocks: [
+      { ...PAYLOAD.blocks[0] },
+      { take_key: 'b', demo_name: 'flash.dem', source_streak_indices: [2], captured: false, renderable: false, cut_short: true, cut_by: 'game_closed', bytes: 200 * 1024 ** 2, take_folder: 'C:/caps/b' },
+    ],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('error', 'the game closed'); window.__verified(p, d); }, [payload, DISPATCH]);
+  await expect(page.locator('.batch-results-summary')).toHaveText(/^Stopped: the game closed\. 1 of 2 takes on disk/);
+  const row = page.locator('#batch-results tbody tr').nth(1);
+  await expect(row).toContainText('Cut short: the game closed (partial take, not captured)');
+  await expect(row).toHaveClass(/batch-results-row-cut_short/);
+  await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
+});
+
+test('a take that stopped writing early shows as a partial take with its length (#1105)', async ({ page }) => {
+  await loadHarness(page);
+  const payload = {
+    total_count: 2, captured_count: 1, renderable_count: 1,
+    blocks: [
+      { ...PAYLOAD.blocks[0] },
+      { take_key: 'b', demo_name: 'flash.dem', source_streak_indices: [2], captured: false, renderable: false, cut_short: true, short_take: { video_secs: 1.83, audio_secs: 10.04 }, bytes: 300 * 1024 ** 2, take_folder: 'C:/caps/b' },
+    ],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('completed', ''); window.__verified(p, d); }, [payload, DISPATCH]);
+  await expect(page.locator('.batch-results-summary')).toContainText('1 of 2 takes on disk');
+  const row = page.locator('#batch-results tbody tr').nth(1);
+  await expect(row).toContainText('Video stops early: 1.8 s of 10.0 s (partial take, not captured)');
+  await expect(row).toHaveClass(/batch-results-row-short/);
+  await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
 });

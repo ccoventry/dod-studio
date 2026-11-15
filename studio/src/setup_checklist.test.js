@@ -8,6 +8,7 @@ import {
   defaultDemoFolder,
   engineBuild,
   isSteamPlayInstall,
+  usesPlayFolder,
   wrongExeName,
   EXE_NAMES,
   sameDriveFolders,
@@ -57,6 +58,13 @@ describe('setup checklist (#599)', () => {
     expect(c.requiredDone).toBe(3);
     expect(c.doneCount).toBe(3);
     expect(c.steps.filter((s) => s.required).map((s) => s.key)).toEqual(['hl', 'hlae', 'captures']);
+  });
+
+  it("FFmpeg is done only when DoD Studio finds one too, not just HLAE's own copy", () => {
+    const ffmpegDone = (state) => setupChecklist({ ...complete, ...state }).steps.find((s) => s.key === 'ffmpeg').done;
+    expect(ffmpegDone({ appFfmpeg: 'C:\\Programs\\FFmpeg\\ffmpeg.exe' })).toBe(true);
+    expect(ffmpegDone({ appFfmpeg: '' })).toBe(false);
+    expect(ffmpegDone({ appFfmpeg: 'C:\\Programs\\FFmpeg\\ffmpeg.exe', ffmpegUsable: false })).toBe(false);
   });
 
   it('a path the check says is missing is not done, whatever the box says', () => {
@@ -148,6 +156,15 @@ describe('Half-Life install helpers', () => {
     expect(isSteamPlayInstall('c:/steam/STEAMAPPS/COMMON/half-life/HL.EXE')).toBe(true);
     expect(isSteamPlayInstall('C:\\Steam\\steamapps\\common\\Half-Life - PRE-Anniversary for Movies\\hl.exe')).toBe(false);
     expect(isSteamPlayInstall('')).toBe(false);
+  });
+
+  it("only Steam's own Half-Life with its own dod folder gets the movie-copy note", () => {
+    const steam = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Half-Life\\hl.exe';
+    expect(usesPlayFolder(steam, 'dod')).toBe(true);
+    expect(usesPlayFolder(steam, 'DOD')).toBe(true);
+    expect(usesPlayFolder(steam, '')).toBe(true);
+    expect(usesPlayFolder(steam, 'dod_movies')).toBe(false);
+    expect(usesPlayFolder('D:\\Half-Life - Movies\\hl.exe', 'dod')).toBe(false);
   });
 
   it('names the engine build from its packet-entity limit', () => {

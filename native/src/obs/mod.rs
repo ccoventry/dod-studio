@@ -27,21 +27,30 @@
 //! hard kill or a power cut. `recover` handles those on the next start
 //! instead, because from outside the process they are indistinguishable.
 
-#![cfg(not(target_arch = "wasm32"))]
-
+pub mod audio_sync;
+pub mod bench;
 pub mod client;
+pub mod drop_rate;
+pub mod encoder;
+#[cfg(test)]
+mod fake_obs;
 pub mod log_tail;
+pub mod marker_gate;
 pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
 pub mod session;
+pub mod take_state;
 
+pub use audio_sync::GAME_AUDIO_SYNC_OFFSET_MS;
 pub use client::{ObsClient, ObsError};
-pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};
+pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};
+pub use log_tail::{LogTailer, Marker, MarkerKind};
+pub use marker_gate::MarkerGate;
 pub use pipe_tail::PipeTailer;
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};
 pub use recover::{OrphanReport, check as check_orphan, recover as recover_orphan};
-pub use session::{ObsSession, RecordedBlock};
+pub use session::{LateStart, ObsSession, RecordedBlock};
 
 /// Stage markers the capture path acts on.
 ///
@@ -54,6 +63,9 @@ pub use session::{ObsSession, RecordedBlock};
 /// the file instead of five, so there is less to trim later.
 ///
 /// 1.0s of lead against OBS's measured 59-85 ms start latency is a ~14x margin.
+/// A margin is not a guarantee, so with the hook running the batch the game
+/// also waits at this marker until OBS is recording (#1109,
+/// `capture_engine::markers::RecordingGoAhead`).
 pub const TRIGGER_MARKER: MarkerKind = MarkerKind::AudioSync;
 
 /// Marker that ends a block's recording.
@@ -66,3 +78,13 @@ pub const TRIGGER_MARKER: MarkerKind = MarkerKind::AudioSync;
 /// seventeen were clamped where blocks chained or highlights merged. An
 /// echo-driven stop is self-correcting and needs none of that.
 pub const STOP_MARKER: MarkerKind = MarkerKind::StopRecord;
+
+/// What OBS mode adds to the game's launch line (#645).
+///
+/// OBS records the sound the game plays, and through DirectSound, the
+/// engine's default, the game plays nothing while it isn't the active window:
+/// measured on POST, every clip of a batch kept behind other windows (the
+/// default) was digital silence. `-wavonly` makes the engine play through
+/// waveOut, which keeps playing behind other windows. Its cost is latency,
+/// which [`GAME_AUDIO_SYNC_OFFSET_MS`] takes back out.
+pub const GAME_ARGS: &str = "-wavonly";

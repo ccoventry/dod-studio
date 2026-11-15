@@ -17,6 +17,8 @@ members = [
     # 32-bit cdylib injected into hl.exe; see goldsrc-hooks/README.md. Built
     # for i686-pc-windows-msvc, not the host target.
     "goldsrc-hooks",
+    # Source-reading checks with no dependencies; see its Cargo.toml.
+    "source-checks",
 ]
 
 [workspace.package]
@@ -79,10 +81,6 @@ field_reassign_with_default = "allow"
 # ordinal) and maps keyed on PathBuf to Arc<Vec<f32>>. A type alias would name
 # the shape without explaining it.
 type_complexity = "allow"
-# `spawn_capture_engine` (8) and the CLI entry point (12). Both are one-call
-# seams where every argument is independent; a params struct would exist only
-# to satisfy the lint.
-too_many_arguments = "allow"
 # Indexing by axis (`for axis in 0..3 { out[axis] = ... }`) reads better than an
 # iterator when the index *is* the meaning -- x, y, z.
 needless_range_loop = "allow"
@@ -106,6 +104,15 @@ opt-level = 1
 # the Overviews page took 43 s for dod_harrington and 270 s for dod_charlie
 # in `npm run tauri dev`, against 0.3 s and 1.3 s in release.
 [profile.dev.package.native]
+opt-level = 3
+
+# `dem` (the dem-patch crate) and `analysis` parse and walk whole demos in tight
+# loops, so their tests were mostly unoptimised-code time: the workspace test
+# CPU time went from 124.8 s to 29.4 s with these two at opt-level 3.
+[profile.dev.package.dem]
+opt-level = 3
+
+[profile.dev.package.analysis]
 opt-level = 3
 
 # Reduce the amount of debug info generated to speed up compilation

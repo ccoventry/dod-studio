@@ -52,8 +52,11 @@ describe('suggestions (#215)', () => {
     expect(tierNote('r_decals', { scheduled: true }).level).toBe('refused');
     expect(tierNote('r_decals', { scheduled: false }).level).toBe('warned');
     expect(tierNote('mirv_movie_filename', { scheduled: false }).level).toBe('noop');
-    expect(tierNote('exec', { scheduled: true }).level).toBe('noop');
+    expect(tierNote('exec', { scheduled: true, seeks: false }).level).toBe('noop');
     expect(tierNote('sensitivity', { scheduled: true })).toBeNull();
+    // #1021: an ordinary user command, in Initial and Scheduled alike.
+    expect(tierNote('ds_player_change_name', { scheduled: false })).toBeNull();
+    expect(tierNote('ds_player_change_name', { scheduled: true })).toBeNull();
   });
 
   it("knows the fast-forward's cvars (#724): r_norefresh refused, fps_max honoured in Initial, short-lived scheduled", () => {
@@ -66,13 +69,26 @@ describe('suggestions (#215)', () => {
     }
   });
 
-  it("says when the game drops a name from a demo (#679), in either list", () => {
+  it("says when the game drops a name from a demo (#679), in either list, with Seek Between Clips off", () => {
     for (const scheduled of [false, true]) {
-      const note = tierNote('mirv_matte_setcolor', { scheduled });
+      const note = tierNote('mirv_matte_setcolor', { scheduled, seeks: false });
       expect(note.level).toBe('noop');
       expect(note.text).toContain("'_set'");
+      expect(note.text).toContain('Seek Between Clips is off');
     }
-    expect(tierNote('kill', { scheduled: true }).text).toContain("'kill'");
+    expect(tierNote('kill', { scheduled: true, seeks: false }).text).toContain("'kill'");
+  });
+
+  it('says nothing about the demo filter while Seek Between Clips is on: the hook runs both lists', () => {
+    for (const scheduled of [false, true]) {
+      expect(tierNote('exec', { scheduled })).toBeNull();
+      expect(tierNote('exec', { scheduled, seeks: true })).toBeNull();
+      expect(tierNote('mirv_matte_setcolor', { scheduled, seeks: true })).toBeNull();
+    }
+    // The other tiers don't depend on it.
+    expect(tierNote('host_framerate', { scheduled: false, seeks: true }).level).toBe('refused');
+    expect(suggestions('exec', { seeks: false })[0].note.level).toBe('noop');
+    expect(suggestions('exec', { seeks: true })[0].note).toBeNull();
   });
 });
 
@@ -158,5 +174,42 @@ describe('kept in step with the code', () => {
     walk(path.join(repo, 'goldsrc-hooks', 'src'));
     const listed = new Set(DODSTUDIO_NAMES.map(([n]) => n));
     expect([...names].filter((n) => !listed.has(n))).toEqual([]);
+  });
+});
+
+describe('stock movie cvars (#1087)', () => {
+  const stock = ['hud_saytext_internal', 'cl_hud_objectives', 'cl_hud_objtimer', 'cl_hud_reinforcements', 'hud_deathnotice_time', 'hud_draw',
+    'cl_fog', 'cl_fog_start', 'cl_fog_end', 'cl_weatherdis', 'cl_bulletejects', 'cl_dynamiclights', 'cl_corpsestay', 'cl_particlefx', 'room_off'];
+
+  it('lists each with a plain one-line hint, in Initial and Scheduled Commands', () => {
+    for (const name of stock) {
+      for (const scheduled of [false, true]) {
+        const hit = suggestions(name, { scheduled })[0];
+        expect(hit.name).toBe(name);
+        expect(hit.source).toBe('game');
+        expect(hit.hint.length).toBeGreaterThan(10);
+        expect(hit.hint).not.toContain('\n');
+        expect(hit.note).toBeNull();
+      }
+    }
+  });
+
+  it('says which are saved to config.cfg', () => {
+    const hint = (n) => suggestions(n)[0].hint;
+    expect(hint('cl_hud_objtimer')).toContain('Saved to config.cfg');
+    expect(hint('hud_deathnotice_time')).toContain('Saved to config.cfg');
+    expect(hint('hud_saytext_internal')).toContain('Not saved');
+    expect(hint('hud_draw')).not.toMatch(/saved/i);
+  });
+
+  it('gives other game names no hint', () => {
+    expect(suggestions('fps_max')[0].hint).toBe('');
+  });
+
+  it('leaves out the fog colour and density, which change nothing (#1131)', () => {
+    for (const name of ['cl_fog_red', 'cl_fog_green', 'cl_fog_blue', 'cl_fog_density']) {
+      const hit = suggestions(name).find((e) => e.name === name);
+      expect(hit.hint).toBe('');
+    }
   });
 });

@@ -7,7 +7,7 @@
 //! `%APPDATA%\dod-studio\analyzer_cache`): a demo Studio's Demo Analyzer or
 //! Master Queue scan already read, or one shown here before, is there and
 //! takes a few milliseconds. Anything else is analysed by DoD Studio itself
-//! when it is running (its analysis pipe, `STUDIO_PIPE`), else here, on a thread of its own at
+//! when it is running (its analysis pipe, `studio_pipe`), else here, on a thread of its own at
 //! below-normal priority; either way it is saved there, for Studio and the
 //! next time.
 //!
@@ -44,7 +44,7 @@ pub struct Streak {
     /// The last kill's, the same way.
     pub last_kill: f32,
     /// Each kill's weapon, and from the second on the time since the one
-    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Capture page's
+    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Highlights page's
     /// Details column (`CaptureStreak::update_visuals`).
     pub details: String,
     /// The player's number (entity index, what `ds_spec_target`
@@ -87,7 +87,7 @@ impl Streak {
         })
     }
 
-    /// From the first kill to the last, as the Capture page's Dur. column
+    /// From the first kill to the last, as the Highlights page's Dur. column
     /// shows it.
     pub fn duration_text(&self) -> String {
         gap_text(self.last_kill - self.first_kill)
@@ -115,10 +115,10 @@ pub struct Found {
 
 /// The streaks to list, earliest first: the highlights
 /// `analysis::highlights` keeps (#573, D18: a POV demo's recorder's, an HLTV
-/// demo's everyone's), the same ones the Capture page lists. Each carries the
+/// demo's everyone's), the same ones the Highlights page lists. Each carries the
 /// number its player had when the kills happened, so a player who left
 /// before the demo ended still has one for Go to spectate (#706). Weapon
-/// names are `analysis`' own, the Capture page's: built-in English when the
+/// names are `analysis`' own, the Highlights page's: built-in English when the
 /// game's folder has no `localizations`.
 pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
     let found = analysis::highlights::highlights(analysis);
@@ -159,7 +159,7 @@ pub fn with_damage(text: String, found: &Found) -> String {
     }
 }
 
-/// A span of time as `m:ss`, rounded to the second, as the Capture page
+/// A span of time as `m:ss`, rounded to the second, as the Highlights page
 /// shows its gaps and durations.
 fn gap_text(secs: f32) -> String {
     let secs = secs.max(0.0).round() as u64;
@@ -383,10 +383,6 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     ))
 }
 
-/// DoD Studio's analysis pipe; must match `native::sys::analysis_server::
-/// PIPE_NAME` to the character.
-const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
-
 /// One line of DoD Studio's answer (`native::sys::analysis_server`'s
 /// protocol).
 #[derive(Debug, PartialEq)]
@@ -432,11 +428,7 @@ fn version_mismatch(studio: u32, ours: u32) -> String {
 /// from before #684 doesn't).
 fn ask_studio(path: &Path, generation: u64) -> Option<Result<Option<u32>, String>> {
     use std::io::{BufRead, BufReader, Write};
-    let mut pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(STUDIO_PIPE)
-        .ok()?;
+    let mut pipe = crate::studio_pipe::connect().ok()?;
     log(&format!("asking DoD Studio to analyse {}", path.display()));
     let request = format!("analyze {}\n", path.to_string_lossy());
     if let Err(e) = pipe.write_all(request.as_bytes()) {
@@ -627,12 +619,6 @@ mod tests {
         let (free, largest) = free_address_space().unwrap();
         assert!(largest > 0 && largest <= free);
         assert_eq!(block_needed(100 << 20), 232 << 20);
-    }
-
-    #[test]
-    fn the_studio_pipe_is_the_one_studio_serves() {
-        let server = include_str!("../../native/src/sys/analysis_server.rs");
-        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
     }
 
     #[test]

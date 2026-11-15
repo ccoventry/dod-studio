@@ -3,6 +3,7 @@
 // count, and one line per attempt. Pure, so it can be tested on its own.
 
 import { STRINGS } from './strings.js';
+import { fileNameOf } from './path_display.js';
 
 /**
  * What an attempt came to, as HISTORY_OUTCOME keys it. An attempt is written
@@ -37,15 +38,13 @@ export function historySummary(history, currentAttempt = null) {
   return { label, bytes };
 }
 
-function when(unixMs) {
+/** `2026-10-30 14:05`, local time. */
+export function formatWhen(unixMs) {
   const d = new Date(unixMs);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function fileName(path) {
-  return String(path || '').split(/[\\/]/).pop();
-}
 
 /**
  * One line per attempt, newest first: when, settings, and what came of it.
@@ -59,13 +58,13 @@ export function historyLines(history, formatSize, currentAttempt = null) {
     let result;
     if (h.outcome === 'finished') {
       result = h.output_exists
-        ? `${fileName(h.output_path)}, ${formatSize(h.output_size_bytes)}`
-        : STRINGS.RENDER.historyFileNotFound(fileName(h.output_path));
+        ? `${fileNameOf(h.output_path)}, ${formatSize(h.output_size_bytes)}`
+        : STRINGS.RENDER.historyFileNotFound(fileNameOf(h.output_path));
     } else {
       const key = outcomeOf(h, currentAttempt);
       const outcome = STRINGS.RENDER.HISTORY_OUTCOME[key] || key;
       result = h.error ? `${outcome}: ${h.error}` : outcome;
     }
-    return `${when(h.started_unix_ms)} · ${settings} · ${result}`;
+    return `${formatWhen(h.started_unix_ms)} · ${settings} · ${result}`;
   });
 }

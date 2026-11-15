@@ -1,0 +1,312 @@
+//! A Seek Between Clips batch in a game that is already open (#725), instead
+//! of Force Relaunch.
+//!
+//! Such a batch runs entirely over the hook's pipe (`runtime_batch`): Studio
+//! sends a few settings and `ds_capture_batch start "<file>"`, and the hook
+//! loads each demo itself. A game Studio started takes those commands just as
+//! a fresh one does, as long as nothing a launch fixes differs. That is:
+//!
+//! - **Seek Between Clips.** A patched batch starts the game on its first
+//!   patched demo from the launch line, so it always launches.
+//! - **Not OBS mode.** OBS mode starts the game with its sound through
+//!   waveOut (`obs::GAME_ARGS`), which only a launch sets. The other modes add
+//!   nothing to the launch line a batch would not add over the pipe.
+//! - **The install, game folder, resolution and hook DLL** (`launch_settings`,
+//!   #666, #1143): the caller asks about a game started with other ones
+//!   before this. That check compares the hook DLL's build (#1146); this
+//!   one only refuses a game that has none, which Steam started.
+//! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
+//!   capture mode records through HLAE's `mirv_` commands.
+//! - **Its command pipe answers**, so the batch can be handed over.
+//! - **It asks this Studio**, not another one open beside it, for analyses
+//!   and reviews (#1235): a game another open Studio started stays that one's.
+//!
+//! What a launch guarantees and a reuse doesn't is listed in
+//! `docs/features.md` (3.3); `REUSE_LINES` resets what the batch relies on.
+
+use std::path::{Path, PathBuf};
+
+use crate::patch::CaptureMode;
+use crate::patch::launch_settings::RunningGameCheck;
+
+/// What the decision reads, gathered by the caller.
+#[derive(Debug, Clone)]
+pub struct ReuseFacts<'a> {
+    /// Seek Between Clips is on.
+    pub hook_runs_batch: bool,
+    pub capture_mode: CaptureMode,
+    /// `launch_settings::check_running_game` for the launch Studio would make.
+    pub running: &'a RunningGameCheck,
+    /// The hook DLL Studio would launch with (`PatcherConfig::goldsrc_hooks_dll`).
+    pub hook_dll: Option<&'a Path>,
+    /// The running game's modules (`sys::modules::loaded_modules`), `None`
+    /// when they could not be read.
+    pub modules: Option<&'a [PathBuf]>,
+    /// Its command pipe took an empty message.
+    pub pipe_answers: bool,
+    /// It asks this Studio, not another one open beside it, for analyses
+    /// and reviews (`sys::studio_pipe::game_asks_this_studio`, #1235).
+    pub asks_this_studio: bool,
+}
+
+/// The hook DLL's file name, as the game has it loaded.
+pub const HOOK_DLL_NAME: &str = "dodstudio_goldsrc_hooks.dll";
+
+/// HLAE's DLL in the game, as the game has it loaded.
+pub const HLAE_DLL_NAME: &str = "AfxHookGoldSrc.dll";
+
+fn named<'a>(modules: &'a [PathBuf], name: &str) -> Vec<&'a PathBuf> {
+    modules
+        .iter()
+        .filter(|m| {
+            m.file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
+        })
+        .collect()
+}
+
+/// Whether a running game with `modules` loaded could be capturing a batch:
+/// every batch records through HLAE, and a game left open for one (#1075)
+/// was started by Studio through HLAE too, so a game without it (started
+/// from Steam) never is. One whose DLLs can't be read (`None`) may be.
+pub fn may_be_capturing(modules: Option<&[PathBuf]>) -> bool {
+    modules.is_none_or(|m| !named(m, HLAE_DLL_NAME).is_empty())
+}
+
+/// The game to run the batch in, or why a launch is needed (one sentence
+/// for the activity log, starting lower case).
+pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
+    let pid = match facts.running {
+        RunningGameCheck::Match { pid } => *pid,
+        RunningGameCheck::None => return Err(crate::messages::game_reuse::NO_GAME_RUNNING.into()),
+        RunningGameCheck::Mismatch { .. } => {
+            return Err(crate::messages::game_reuse::GAME_HAS_OTHER_LAUNCH_SETTINGS.into());
+        }
+    };
+    if !facts.hook_runs_batch {
+        return Err(crate::messages::game_reuse::SEEK_BETWEEN_CLIPS_OFF.into());
+    }
+    if facts.capture_mode == CaptureMode::Obs {
+        return Err(crate::messages::game_reuse::OBS_NEEDS_FRESH_START.into());
+    }
+    if facts.hook_dll.is_none() {
+        return Err(crate::messages::game_reuse::NO_HOOK_DLL_IN_STUDIO.into());
+    }
+    let Some(modules) = facts.modules else {
+        return Err(crate::messages::game_reuse::game_dlls_unreadable(pid));
+    };
+    // Which hook DLL and build it has is part of `facts.running` (#1143).
+    if named(modules, HOOK_DLL_NAME).is_empty() {
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HOOK_DLL.into());
+    }
+    if named(modules, HLAE_DLL_NAME).is_empty() {
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HLAE.into());
+    }
+    if !facts.pipe_answers {
+        return Err(crate::messages::game_reuse::GAME_DOES_NOT_TAKE_COMMANDS.into());
+    }
+    if !facts.asks_this_studio {
+        return Err(crate::messages::game_reuse::GAME_STARTED_BY_OTHER_STUDIO.into());
+    }
+    Ok(pid)
+}
+
+/// Sent to a reused game ahead of the batch's own early lines: stop whatever
+/// it is doing (a review, an earlier batch, a demo), and load the helper cfg
+/// with the batch's aliases, which a launch gets from `+exec` on its command
+/// line.
+pub const REUSE_LINES: &[&str] = &[
+    "ds_demo_review stop",
+    "ds_capture_batch stop",
+    "disconnect",
+    "exec dodstudio_helper.cfg",
+];
+
+/// Sent to a reused game when its batch ends or is cancelled: the batch's
+/// recording is stopped and the demo closed, so the game is left at its menu
+/// rather than closed. A Cancel can land mid-clip or mid-fast-forward, so the
+/// helper cfg's own aliases put back what those set: `sys_record_stop` ends
+/// an AGR recording and its `host_framerate` (`ds_capture_batch stop` only
+/// stops `mirv_recordmovie`), and `sys_normal_speed` undoes
+/// `sys_fast_forward` (`r_norefresh 1`, `host_framerate 0.1`, `fps_max`).
+pub const LEAVE_LINES: &[&str] = &[
+    "ds_capture_batch stop",
+    "sys_record_stop",
+    "mirv_recordmovie_stop",
+    "sys_normal_speed",
+    "disconnect",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::patch::launch_settings::{GameLaunch, LaunchDifference};
+
+    const DLL: &str = r"C:\dod-studio\local\test\dodstudio_goldsrc_hooks.dll";
+
+    fn modules() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from(r"C:\Games\Half-Life\hl.exe"),
+            PathBuf::from(r"C:\HLAE\AfxHookGoldSrc.dll"),
+            PathBuf::from(DLL.to_ascii_uppercase()),
+        ]
+    }
+
+    fn facts<'a>(running: &'a RunningGameCheck, modules: &'a [PathBuf]) -> ReuseFacts<'a> {
+        ReuseFacts {
+            hook_runs_batch: true,
+            capture_mode: CaptureMode::DirectToVideo,
+            running,
+            hook_dll: Some(Path::new(DLL)),
+            modules: Some(modules),
+            pipe_answers: true,
+            asks_this_studio: true,
+        }
+    }
+
+    /// #20: a game from Steam, with no HLAE in it, can't be capturing a
+    /// batch from before Studio closed, so the catch-up doesn't wait for it.
+    #[test]
+    fn only_a_game_with_hlae_in_it_may_be_capturing() {
+        let m = modules();
+        assert!(may_be_capturing(Some(&m)));
+        let steam = vec![
+            PathBuf::from(r"C:\Games\Half-Life\hl.exe"),
+            PathBuf::from(r"C:\Games\Half-Life\hw.dll"),
+        ];
+        assert!(!may_be_capturing(Some(&steam)));
+        // Unreadable: it may be.
+        assert!(may_be_capturing(None));
+    }
+
+    #[test]
+    fn a_studio_game_with_the_same_hook_dll_is_reused() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let m = modules();
+        assert_eq!(game_to_reuse(&facts(&running, &m)), Ok(42));
+        // AGR and frame sequences add nothing to the launch line either.
+        for mode in [CaptureMode::Agr, CaptureMode::FrameSequence] {
+            let f = ReuseFacts {
+                capture_mode: mode,
+                ..facts(&running, &m)
+            };
+            assert_eq!(game_to_reuse(&f), Ok(42));
+        }
+    }
+
+    #[test]
+    fn anything_a_launch_fixes_needs_a_launch() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let m = modules();
+        let refused = |f: ReuseFacts| game_to_reuse(&f).unwrap_err();
+        assert!(
+            refused(ReuseFacts {
+                hook_runs_batch: false,
+                ..facts(&running, &m)
+            })
+            .contains("Seek Between Clips is off")
+        );
+        assert!(
+            refused(ReuseFacts {
+                capture_mode: CaptureMode::Obs,
+                ..facts(&running, &m)
+            })
+            .contains("OBS")
+        );
+        assert!(
+            refused(ReuseFacts {
+                hook_dll: None,
+                ..facts(&running, &m)
+            })
+            .contains("no hook DLL")
+        );
+        assert!(
+            refused(ReuseFacts {
+                modules: None,
+                ..facts(&running, &m)
+            })
+            .contains("could not be read")
+        );
+        assert!(
+            refused(ReuseFacts {
+                pipe_answers: false,
+                ..facts(&running, &m)
+            })
+            .contains("does not take commands")
+        );
+    }
+
+    #[test]
+    fn a_game_another_open_studio_started_is_not_reused() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let m = modules();
+        let f = ReuseFacts {
+            asks_this_studio: false,
+            ..facts(&running, &m)
+        };
+        assert!(
+            game_to_reuse(&f)
+                .unwrap_err()
+                .contains("another DoD Studio")
+        );
+    }
+
+    #[test]
+    fn a_game_without_the_hook_dll_or_hlae_is_not_reused() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let none = vec![PathBuf::from(r"C:\Games\Half-Life\hl.exe")];
+        assert!(
+            game_to_reuse(&facts(&running, &none))
+                .unwrap_err()
+                .contains("no DoD Studio hook DLL")
+        );
+        // Our hook DLL without HLAE: nothing would record.
+        let no_hlae = vec![PathBuf::from(DLL)];
+        assert!(
+            game_to_reuse(&facts(&running, &no_hlae))
+                .unwrap_err()
+                .contains("no HLAE")
+        );
+    }
+
+    #[test]
+    fn no_game_or_one_with_other_launch_settings_is_not_reused() {
+        let m = modules();
+        assert!(
+            game_to_reuse(&facts(&RunningGameCheck::None, &m))
+                .unwrap_err()
+                .contains("no game")
+        );
+        let launch = GameLaunch {
+            install: "x".into(),
+            exe: "x".into(),
+            width: None,
+            height: None,
+            game_folder: None,
+            hook_dll: None,
+            hook_label: None,
+            hook_build: None,
+        };
+        let mismatch = RunningGameCheck::Mismatch {
+            pid: 42,
+            running: Box::new(launch.clone()),
+            wanted: Box::new(launch),
+            differs: vec![LaunchDifference::Resolution],
+        };
+        assert!(
+            game_to_reuse(&facts(&mismatch, &m))
+                .unwrap_err()
+                .contains("other launch settings")
+        );
+    }
+
+    #[test]
+    fn the_lines_are_ones_the_pipe_takes() {
+        for line in REUSE_LINES.iter().chain(LEAVE_LINES) {
+            assert!(
+                crate::sys::game_remote::check_command(line).is_ok(),
+                "{line}"
+            );
+        }
+    }
+}

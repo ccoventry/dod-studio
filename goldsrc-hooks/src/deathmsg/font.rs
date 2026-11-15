@@ -16,7 +16,8 @@
 //! In `hw.dll`, `pfnDrawConsoleString` draws through the engine's own vgui2
 //! surface (`VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s
 //! `CreateInterface` on both builds) with one font: `"EngineFont"` from the
-//! default scheme, `dod/resource/TrackerScheme.res`, fetched once and kept.
+//! default scheme, `dod/resource/TrackerScheme.res`, fetched once and kept
+//! (`VGUI2_Draw_Init`, PRE `hw.dll+0x69e0`, POST `+0x230d40`).
 //! The call sets the font, the position and the colour, converts the string
 //! to UTF-16 (`ILocalize::ConvertANSIToUnicode`, CP_UTF8), prints it, and then
 //! puts the colour back to `con_color`. Its width is the sum of each
@@ -34,7 +35,10 @@
 //! surface with our handle, [`hook::string_len`] measures it with the same
 //! handle (so the right-edge anchoring the layout computes stays right), and
 //! [`hook::set_text_color`] records the colour the game asked for, since each
-//! name is coloured by a call just before it. A 16-byte detour at the line
+//! name is coloured by a call just before it. The victim's width call goes to
+//! [`hook::victim_len`] instead, which adds a right margin while a font or a
+//! scale is in force, so a big last glyph or a drop shadow is not cut by the
+//! screen's edge (`scale::right_margin`). A 16-byte detour at the line
 //! step makes it `max(icon height, font height)`, so taller text does not
 //! overlap the next line. The icon's size and its place on the line are
 //! [`super::scale`]'s (#728), which rewrites three more operands and adds a
@@ -44,13 +48,14 @@
 //! (`scale::name_draw_y`); at scale 1 with no font they stay where the game
 //! puts them.
 //!
-//! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. Each change
-//! makes a **new** handle: `CFontManager::AddGlyphSetToFont` returns false
-//! for a handle that already has a glyph set, and `VGUI_Surface026` has no
-//! way to free one. The old handle costs one table entry; the Windows font
-//! behind it is cached by name, size and flags, so switching back and forth
-//! allocates nothing more. The next frame draws with the new handle: no
-//! demo reload.
+//! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. A handle
+//! can't be changed: `CFontManager::AddGlyphSetToFont` returns false for a
+//! handle that already has a glyph set, and `VGUI_Surface026` has no way to
+//! free one. So every handle made is kept by what it was made for
+//! ([`HANDLES`]: face, size, weight, effects, widened or not), and `font` or
+//! `fallback` asking for one again gets the same handle back instead of a
+//! new table entry. The next frame draws with the new handle: no demo
+//! reload.
 //!
 //! Installed on the first `font` or `scale` other than 1, and never undone
 //! (`detour::Detour`):
@@ -63,15 +68,60 @@
 //! it `SupportsFeature(2)`, which both `hw.dll` builds do, and the PRE
 //! `EngineFont`'s own shadow shows the renderer honours it. Neither build's
 //! font manager knows an outline bit (0x200), and only the scheme loader of
-//! a later vgui2 does, so `outline` is accepted and said to do nothing.
+//! a later vgui2 does, so `outline` is accepted and said to do nothing; the
+//! `outline` subcommand draws one by hand (`backdrop.rs`).
+//!
+//! ## Characters past Latin-1 (#1052)
+//!
+//! The font manager (`CFontManager::AddGlyphSetToFont`, both builds) gives
+//! the face only U+0000..U+00FF and draws everything above from `Tahoma`,
+//! unless the face is `Tahoma` itself. And `GetTextSize` is not what
+//! `DrawPrintText` draws: it skips `&` and every character `iswprint`
+//! rejects (`⅞`, `★`, `™`, `€`, emoji halves), which `DrawUnicodeChar`
+//! still draws and advances past by its `GetCharABCwide` a+b+c. A name
+//! holding one measured short by that character, so the killer's ran into
+//! the icon and the victim's off the screen.
+//!
+//! So the width is that same a+b+c sum over the characters printed
+//! ([`drawn_width`]), and before that a character with a plain Latin-1
+//! compatibility form becomes it ([`push_compat_form`]: `⅞` is `7/8`), so it
+//! is drawn in the chosen face rather than Tahoma's. The game's own font path
+//! gets the same forms while the sites are ours: its draw turns anything
+//! `iswprint` rejects into a space, so `⅞` showed as a blank there.
+//!
+//! The font manager's split is its own choice, not the face's: the surface's
+//! `AddGlyphSetToFont` drops the range arguments, and the manager makes the
+//! face's handle two ranges, 0..0xff from the face and 0x100..0xffff from
+//! Tahoma (only `Marlett` and `Tahoma` get the whole range). So once our
+//! handle is made, `hook::widen` raises its first range to 0xffff (one u32
+//! in the manager's data, and only when the two ranges are exactly that
+//! split), and the names draw in runs ([`font_runs`]): the face's handle for
+//! what the face has (`GetFontUnicodeRanges`, [`Coverage`]), a Tahoma handle
+//! for the rest, as before (#1054). A compatibility form is then used only
+//! for a character the face lacks: Bahnschrift's own `™` stays `™`.
+//!
+//! ## Backup faces (#1079)
+//!
+//! `fallback <face>...` names faces to try, in order, for a character the
+//! chosen face lacks, before Tahoma: Tahoma's shapes and weight can look out
+//! of place next to, say, Bahnschrift. Each is made at the chosen font's
+//! size, weight and effects, widened as the face's handle is (its own
+//! handle's upper range is Tahoma's too) and asked for its coverage, so a
+//! character goes to the first backup that has it and Tahoma gets only what
+//! none has ([`font_for`]). The runs and their widths are measured per run
+//! as before. A compatibility form still comes first: `⅞` stays `7/8` in the
+//! chosen face, the closest match to it, and the backups take only what
+//! Tahoma drew. They apply to our font only: the game's own font is one
+//! scheme font the hook never draws with.
 
 // The patching runs only in the 32-bit DLL; a host build (workspace clippy,
 // tests) keeps the tables and helpers for the unit tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
+use std::borrow::Cow;
 use std::fmt;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Mutex, RwLock};
 
 /// `Draw` from the victim's width call on (`client+0x2b002`): the two `lea`s
 /// and three pushes of its arguments, the call, and the x arithmetic after
@@ -83,12 +133,20 @@ const PATTERN: &str = "8D 54 24 40 8D 44 24 30 52 50 51 FF 15 ?? ?? ?? ?? 8B 5C 
 /// Which engine call a redirected site makes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Call {
-    /// `pfnDrawConsoleString`, slot 27.
+    /// `pfnDrawConsoleString`, slot 27, for the victim's name.
     Draw,
+    /// The same call for the killer's name: where it ends is where `Draw`
+    /// puts the icon, 5 px on, so it also adds the killer's side of
+    /// `layout even`'s `gap` (`scale::killer_extra`).
+    KillerDraw,
     /// `pfnDrawSetTextColor`, slot 28.
     Color,
-    /// `pfnDrawConsoleStringLen`, slot 29.
+    /// `pfnDrawConsoleStringLen`, slot 29, for the killer's width (the
+    /// anchor's), plus the killer's side of the gap like [`Call::KillerDraw`].
     Len,
+    /// The same call for the victim, the width the line is anchored by: it
+    /// also reserves the right margin (`scale::right_margin`).
+    VictimLen,
 }
 
 impl Call {
@@ -96,9 +154,9 @@ impl Call {
     /// same three.
     fn slot(self) -> usize {
         match self {
-            Call::Draw => 27,
+            Call::Draw | Call::KillerDraw => 27,
             Call::Color => 28,
-            Call::Len => 29,
+            Call::Len | Call::VictimLen => 29,
         }
     }
 }
@@ -106,10 +164,10 @@ impl Call {
 /// The six call sites, as offsets from the [`PATTERN`] match: the victim's
 /// and killer's width, then the killer's colour and name, then the victim's.
 const SITES: &[(usize, Call)] = &[
-    (0x0b, Call::Len),
+    (0x0b, Call::VictimLen),
     (0x4c, Call::Len),
     (0x77, Call::Color),
-    (0x87, Call::Draw),
+    (0x87, Call::KillerDraw),
     (0x123, Call::Color),
     (0x133, Call::Draw),
 ];
@@ -313,18 +371,326 @@ fn color_byte(component: f32) -> i32 {
     ((component * 255.0) as i32).clamp(0, 255)
 }
 
+/// The face the font manager draws U+0100 and up from, whatever the face
+/// asked for; given it, a face covers every character itself.
+const FALLBACK_FACE: &str = "Tahoma";
+
+const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+const ROMAN: [&str; 16] = [
+    "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "L", "C", "D", "M",
+];
+const ROMAN_SMALL: [&str; 16] = [
+    "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "l", "c", "d", "m",
+];
+
+/// Appends `c`'s Unicode compatibility form (NFKD) when that is plain
+/// Latin-1, which the chosen face draws itself, and says whether it did. Only
+/// forms that keep the meaning: fractions (`⅞` is `7/8`, the fraction slash
+/// read as `/`), super- and subscript digits, `™`, Roman numerals, Latin
+/// ligatures, fullwidth ASCII and the wide spaces. A letter with an accent
+/// keeps it: Tahoma draws `ł` well, and `l` would be another name.
+fn push_compat_form(c: char, out: &mut String) -> bool {
+    let cp = c as u32;
+    let at = |first: u32| (cp - first) as usize;
+    let form: &str = match cp {
+        0x2000..=0x200a | 0x202f | 0x205f | 0x3000 => " ",
+        0x2024 => ".",
+        0x2025 => "..",
+        0x2026 => "...",
+        0x2044 | 0x2215 => "/",
+        0x2070 => "0",
+        0x2071 => "i",
+        0x2074..=0x2079 => DIGITS[at(0x2070)],
+        0x207a | 0x208a => "+",
+        0x207b | 0x208b => "-",
+        0x207c | 0x208c => "=",
+        0x207d | 0x208d => "(",
+        0x207e | 0x208e => ")",
+        0x207f => "n",
+        0x2080..=0x2089 => DIGITS[at(0x2080)],
+        0x2116 => "No",
+        0x2120 => "SM",
+        0x2122 => "TM",
+        0x2150 => "1/7",
+        0x2151 => "1/9",
+        0x2152 => "1/10",
+        0x2153 => "1/3",
+        0x2154 => "2/3",
+        0x2155 => "1/5",
+        0x2156 => "2/5",
+        0x2157 => "3/5",
+        0x2158 => "4/5",
+        0x2159 => "1/6",
+        0x215a => "5/6",
+        0x215b => "1/8",
+        0x215c => "3/8",
+        0x215d => "5/8",
+        0x215e => "7/8",
+        0x215f => "1/",
+        0x2160..=0x216f => ROMAN[at(0x2160)],
+        0x2170..=0x217f => ROMAN_SMALL[at(0x2170)],
+        0x2189 => "0/3",
+        0xfb00 => "ff",
+        0xfb01 => "fi",
+        0xfb02 => "fl",
+        0xfb03 => "ffi",
+        0xfb04 => "ffl",
+        0xfb05 | 0xfb06 => "st",
+        // Fullwidth `!`..`~`, 0xfee0 above their ASCII.
+        0xff01..=0xff5e => {
+            out.push(char::from_u32(cp - 0xfee0).unwrap_or(c));
+            return true;
+        }
+        _ => return false,
+    };
+    out.push_str(form);
+    true
+}
+
+/// `text` with every character above Latin-1 that has a compatibility form
+/// ([`push_compat_form`]) replaced by it; borrowed when there is none.
+fn with_compat_forms(text: &str) -> Cow<'_, str> {
+    with_compat_forms_where(text, |_| false)
+}
+
+/// [`with_compat_forms`], leaving alone the characters `drawn` says the
+/// chosen face draws itself (Bahnschrift's own `™` stays `™`).
+fn with_compat_forms_where(text: &str, drawn: impl Fn(char) -> bool) -> Cow<'_, str> {
+    let swapped = |c: char| c > '\u{ff}' && !drawn(c) && push_compat_form(c, &mut String::new());
+    let Some(first) = text
+        .char_indices()
+        .find(|&(_, c)| swapped(c))
+        .map(|(i, _)| i)
+    else {
+        return Cow::Borrowed(text);
+    };
+    let mut out = String::with_capacity(text.len() + 8);
+    out.push_str(&text[..first]);
+    for c in text[first..].chars() {
+        if c <= '\u{ff}' || drawn(c) || !push_compat_form(c, &mut out) {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// Which UTF-16 code units the chosen face has a glyph for, one bit each:
+/// what `GetFontUnicodeRanges` reports for it (#1054). Surrogates are never
+/// in it, so half an emoji goes to the fallback face as it always did.
+pub(super) struct Coverage(Box<[u64; 1024]>);
+
+impl Coverage {
+    /// From `GetFontUnicodeRanges`' `(first, count)` pairs.
+    fn from_ranges(ranges: impl IntoIterator<Item = (u16, u16)>) -> Self {
+        let mut bits = Box::new([0u64; 1024]);
+        for (low, count) in ranges {
+            let end = (u32::from(low) + u32::from(count)).min(0x1_0000);
+            for unit in u32::from(low)..end {
+                if !(0xd800..=0xdfff).contains(&unit) {
+                    bits[(unit >> 6) as usize] |= 1 << (unit & 63);
+                }
+            }
+        }
+        Coverage(bits)
+    }
+
+    fn has(&self, unit: u16) -> bool {
+        self.0[usize::from(unit >> 6)] & (1 << (unit & 63)) != 0
+    }
+}
+
+/// Which font draws `unit`: 0 for the chosen face, which has all of Latin-1
+/// as the font manager hands it over and above that what `face_has`; else
+/// `i` for the first backup face (`backups[i - 1]`) that has it (#1079); else
+/// `backups.len() + 1`, the fallback face, which is what drew it before.
+fn font_for(unit: u16, face_has: impl Fn(u16) -> bool, backups: &[&Coverage]) -> usize {
+    if unit <= 0xff || face_has(unit) {
+        return 0;
+    }
+    backups
+        .iter()
+        .position(|backup| backup.has(unit))
+        .map_or(backups.len() + 1, |i| i + 1)
+}
+
+/// Splits `chars` (up to a terminator) into runs drawn with one font each,
+/// tagged with what `which` ([`font_for`]) says for their characters.
+fn font_runs(chars: &[u16], which: impl Fn(u16) -> usize) -> Vec<(usize, std::ops::Range<usize>)> {
+    let mut runs: Vec<(usize, std::ops::Range<usize>)> = Vec::new();
+    for (i, &unit) in chars.iter().take_while(|&&c| c != 0).enumerate() {
+        let font = which(unit);
+        match runs.last_mut() {
+            Some((f, range)) if *f == font => range.end = i + 1,
+            _ => runs.push((font, i..i + 1)),
+        }
+    }
+    runs
+}
+
+/// How many backup faces `fallback` takes: enough for a face per script
+/// (say Latin symbols, Georgian, CJK) while the per-character lookup stays a
+/// handful of bit tests.
+pub(super) const MAX_BACKUP_FACES: usize = 4;
+
+/// The arguments after `fallback`: `default` for none, or the backup faces in
+/// the order they are tried. One argument per face, so a face with a space is
+/// quoted (`fallback "Segoe UI" Tahoma`), as the console splits on spaces; a
+/// face named twice is kept once, where it first appears.
+pub(super) fn parse_fallback_args(rest: &[String]) -> Result<Vec<String>, String> {
+    if rest.len() == 1 && rest[0].eq_ignore_ascii_case("default") {
+        return Ok(Vec::new());
+    }
+    let mut faces: Vec<String> = Vec::new();
+    for face in rest.iter().map(|t| t.trim()) {
+        if face.is_empty() {
+            return Err("a face name is empty".to_string());
+        }
+        if face.len() > MAX_FACE_LEN {
+            return Err(format!(
+                "face names are at most {MAX_FACE_LEN} characters, got {face:?}"
+            ));
+        }
+        if !faces.iter().any(|f| f.eq_ignore_ascii_case(face)) {
+            faces.push(face.to_string());
+        }
+    }
+    if faces.is_empty() {
+        return Err("name at least one face, e.g. fallback \"Segoe UI\" Tahoma".to_string());
+    }
+    if faces.len() > MAX_BACKUP_FACES {
+        return Err(format!(
+            "at most {MAX_BACKUP_FACES} backup faces, got {}",
+            faces.len()
+        ));
+    }
+    Ok(faces)
+}
+
+/// The backup faces as `status` prints them: quoted, in order, then the
+/// fallback face that follows them.
+fn describe_backups(faces: &[String]) -> String {
+    if faces.is_empty() {
+        return format!("fallback = {FALLBACK_FACE} (the game's)");
+    }
+    let listed: Vec<String> = faces.iter().map(|f| format!("\"{f}\"")).collect();
+    if faces.iter().any(|f| f.eq_ignore_ascii_case(FALLBACK_FACE)) {
+        return format!("fallback = {}", listed.join(", "));
+    }
+    format!("fallback = {}, then {FALLBACK_FACE}", listed.join(", "))
+}
+
+/// `CFontManager`'s data, the same on both builds (the verify script checks
+/// it): a `CUtlVector<CFontAmalgam>` first, whose element count is at +0xc;
+/// each amalgam 0x3c bytes with its own `CUtlVector<TFontRange>` first; each
+/// range `{ low, high, CWin32Font* }`, and `GetFontForChar` takes the first
+/// range holding the character.
+const VECTOR_COUNT_AT: usize = 0xc;
+const AMALGAM_SIZE: usize = 0x3c;
+const RANGE_SIZE: usize = 12;
+
+/// Where the `AddGlyphSetToFont` slot calls `FontManager()`: the thunk on
+/// both builds is `call FontManager; mov ecx, eax; call
+/// CFontManager::AddGlyphSetToFont`. The offset of that first `call` and its
+/// displacement.
+fn manager_call(thunk: &[u8]) -> Option<(usize, i32)> {
+    thunk
+        .windows(8)
+        .position(|w| w[0] == 0xe8 && w[5..8] == [0x8b, 0xc8, 0xe8])
+        .map(|at| {
+            let rel =
+                i32::from_le_bytes([thunk[at + 1], thunk[at + 2], thunk[at + 3], thunk[at + 4]]);
+            (at, rel)
+        })
+}
+
+/// `FontManager()` is `mov eax, imm32; ret` on both builds: the manager.
+fn returns_constant(code: &[u8]) -> Option<u32> {
+    match code {
+        [0xb8, a, b, c, d, 0xc3, ..] => Some(u32::from_le_bytes([*a, *b, *c, *d])),
+        _ => None,
+    }
+}
+
+/// Whether a fresh handle's two ranges are what `AddGlyphSetToFont` makes
+/// of a face other than Tahoma: the face over 0..0xff, Tahoma over
+/// 0x100..0xffff. Anything else is left alone.
+fn split_as_expected(ranges: [u32; 6]) -> bool {
+    let [low0, high0, face, low1, high1, fallback] = ranges;
+    (low0, high0, low1, high1) == (0, 0xff, 0x100, 0xffff)
+        && face != 0
+        && fallback != 0
+        && face != fallback
+}
+
+/// A name as the engine's own font gets it while the sites are ours: the
+/// compatibility forms, or `None` to pass the game's bytes on unchanged.
+/// Bytes that are not UTF-8 go on as they are; the engine converts them.
+/// Zero-width characters are dropped: the engine's draw makes every one a
+/// space (`iswprint` rejects them), so `zero\u{200b}width` read as two words
+/// (#1054).
+fn engine_name(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.is_ascii() {
+        return None;
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let shown: Cow<'_, str> = if text.chars().any(is_zero_width) {
+        Cow::Owned(text.chars().filter(|&c| !is_zero_width(c)).collect())
+    } else {
+        Cow::Borrowed(text)
+    };
+    if let Cow::Owned(swapped) = with_compat_forms(&shown) {
+        return Some(swapped.into_bytes());
+    }
+    match shown {
+        Cow::Owned(text) => Some(text.into_bytes()),
+        Cow::Borrowed(_) => None,
+    }
+}
+
+/// Zero-width space, non-joiner, joiner, word joiner and BOM.
+fn is_zero_width(c: char) -> bool {
+    matches!(c, '\u{200b}'..='\u{200d}' | '\u{2060}' | '\u{feff}')
+}
+
 /// The engine's conversion, near enough: UTF-8 to UTF-16 (`ConvertANSIToUnicode`
 /// is `MultiByteToWideChar(CP_UTF8, ...)` on both builds), control characters
 /// drawn as spaces as the engine does with anything `iswprint` rejects, and a
-/// terminator for `GetTextSize`.
-fn to_wide(bytes: &[u8]) -> Vec<u16> {
+/// terminator. With `compat`, the characters with a Latin-1 compatibility
+/// form become it first ([`with_compat_forms`]).
+fn to_wide(bytes: &[u8], compat: bool) -> Vec<u16> {
+    to_wide_where(bytes, compat, |_| false)
+}
+
+/// [`to_wide`], keeping the characters `drawn` says the face draws itself.
+fn to_wide_where(bytes: &[u8], compat: bool, drawn: impl Fn(char) -> bool) -> Vec<u16> {
     let text = String::from_utf8_lossy(bytes);
+    let text = if compat {
+        with_compat_forms_where(&text, drawn)
+    } else {
+        Cow::Borrowed(&*text)
+    };
     let mut out: Vec<u16> = text
         .encode_utf16()
         .map(|c| if c < 0x20 { 0x20 } else { c })
         .collect();
     out.push(0);
     out
+}
+
+/// What `DrawPrintText` advances past for `chars` (up to a terminator):
+/// `DrawUnicodeChar` moves on by each character's `GetCharABCwide` a+b+c on
+/// both builds, `&` and characters `iswprint` rejects included. `GetTextSize`
+/// skips those two, so it measured such a name short (#1052).
+fn drawn_width(chars: &[u16], mut abc: impl FnMut(u16) -> (i32, i32, i32)) -> i32 {
+    chars
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| {
+            let (a, b, c) = abc(c);
+            a.saturating_add(b).saturating_add(c)
+        })
+        .fold(0i32, i32::saturating_add)
+        .max(0)
 }
 
 /// The font in force, for `status` and the usage text.
@@ -340,6 +706,25 @@ static FONT_TALL: AtomicI32 = AtomicI32::new(0);
 /// `0x00rrggbb`, or -1 once a draw has used it (the engine resets to
 /// `con_color` after each string).
 static COLOR: AtomicI32 = AtomicI32::new(-1);
+/// The same colour as the game passed it, as `f32` bits, so the engine's
+/// own font can be given it again exactly after the outline's passes.
+static COLOR_F: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+/// Whether our font's names get their compatibility forms: false for a face
+/// that draws every character itself ([`FALLBACK_FACE`]).
+static COMPAT: AtomicBool = AtomicBool::new(true);
+/// The fallback face's handle while the chosen face covers more than
+/// Latin-1 (#1054), 0 otherwise: names then draw in runs, the face's own
+/// glyphs with [`FONT`] and the rest with this.
+static FALLBACK: AtomicU32 = AtomicU32::new(0);
+/// What the chosen face has, while [`FALLBACK`] is set.
+static COVERAGE: RwLock<Option<Coverage>> = RwLock::new(None);
+/// The backup faces as typed (`fallback`), kept across font changes and
+/// `font default`, so the next font is made with them.
+static BACKUP_FACES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The backup faces' handles, in the font in force, and what each has: tried
+/// in order for a character the chosen face lacks, before [`FALLBACK`]
+/// (#1079). Empty while no font is set or none was named.
+static BACKUPS: RwLock<Vec<(u32, Coverage)>> = RwLock::new(Vec::new());
 /// Whether a failure has been logged, so the per-frame check says it once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// The `client.dll` the sites were rewritten in, 0 before.
@@ -347,6 +732,16 @@ static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The engine font's height as its length call last reported it, for
 /// centring the names drawn in it; 0 until a line was measured.
 static ENGINE_TALL: AtomicI32 = AtomicI32::new(0);
+/// Whether our font was made with `shadow`; false for the game's.
+static SHADOW: AtomicBool = AtomicBool::new(false);
+
+/// How far our font's drop shadow reaches right of the name's ink: vgui2's
+/// shadow is the glyph again 1 px right and down, and the killer's name
+/// measured 1 px nearer the icon with it than without (POST, Bahnschrift
+/// SemiBold 32). 0 for the game's font, whose look is the scheme's.
+pub(super) fn shadow_px() -> i32 {
+    i32::from(SHADOW.load(Ordering::Relaxed))
+}
 
 /// Our font's height in pixels, 0 while the game's font is in use: the floor
 /// the step stub applies, so `scale` centres the icon on the same line height
@@ -355,12 +750,102 @@ pub(super) fn tall() -> i32 {
     FONT_TALL.load(Ordering::Relaxed)
 }
 
+/// The names' height: our font's, or the engine font's as its length call
+/// last reported it (0 before the first line).
+pub(super) fn text_tall() -> i32 {
+    match FONT_TALL.load(Ordering::Relaxed) {
+        0 => ENGINE_TALL.load(Ordering::Relaxed),
+        tall => tall,
+    }
+}
+
 /// What `status` says about the font.
 pub(super) fn describe() -> String {
-    match SPEC.lock().map(|s| s.clone()) {
+    let font = match SPEC.lock().map(|s| s.clone()) {
         Ok(Some(spec)) => format!("font = {spec}"),
         _ => "font = the game's".to_string(),
+    };
+    match BACKUP_FACES.lock().map(|f| f.clone()) {
+        Ok(faces) if !faces.is_empty() => format!("{font}, {}", describe_backups(&faces)),
+        _ => font,
     }
+}
+
+/// What `fallback` with no arguments prints.
+pub(super) fn describe_fallback() -> String {
+    let faces = BACKUP_FACES.lock().map(|f| f.clone()).unwrap_or_default();
+    describe_backups(&faces)
+}
+
+/// Makes `faces` the backup faces (`fallback`), rebuilding them in the font
+/// in force if there is one. The reply is what the console prints.
+pub(super) fn set_fallback(faces: Vec<String>) -> Result<String, String> {
+    if let Ok(mut held) = BACKUP_FACES.lock() {
+        *held = faces;
+    }
+    #[cfg(target_arch = "x86")]
+    {
+        hook::rebuild_backups()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        Err("only in the 32-bit game".to_string())
+    }
+}
+
+/// What a font handle was made for: the face (as Windows matches it, any
+/// case), the size, weight and effects, and whether it was widened to draw
+/// past Latin-1 itself (a widened handle can't be widened again, and a plain
+/// one may be in use plain).
+#[derive(Debug, Clone, PartialEq)]
+struct HandleKey {
+    face: String,
+    tall: i32,
+    weight: i32,
+    flags: i32,
+    wide: bool,
+}
+
+impl HandleKey {
+    fn new(face: &str, spec: &FontSpec, wide: bool) -> HandleKey {
+        HandleKey {
+            face: face.to_ascii_lowercase(),
+            tall: spec.tall,
+            weight: spec.weight(),
+            flags: spec.flags(),
+            wide,
+        }
+    }
+}
+
+/// How many handles [`HANDLES`] keeps: far more fonts than anyone tries in a
+/// game. Past it, new ones are made and not kept, as before the cache.
+const HANDLES_KEPT: usize = 64;
+
+/// Every font handle made, by what it was made for, so `font` and
+/// `fallback` reuse one instead of making another each time: vgui2's font
+/// manager has no way to free a handle, and each costs `hl.exe` GDI objects
+/// (#1182's review). Reusing never frees, so a handle still selected in a DC
+/// or in this frame's draw stays good. Console paths only (`font`,
+/// `fallback`), never the draw, so a `Mutex` is fine.
+static HANDLES: Mutex<Vec<(HandleKey, u32)>> = Mutex::new(Vec::new());
+
+/// The handle made before for `key`, if any.
+fn kept_handle(handles: &[(HandleKey, u32)], key: &HandleKey) -> Option<u32> {
+    handles.iter().find(|(k, _)| k == key).map(|&(_, h)| h)
+}
+
+/// Keeps `handle` for `key` (the first one stays when `key` has one); false
+/// when the cache is full and it isn't kept.
+fn keep_handle(handles: &mut Vec<(HandleKey, u32)>, key: HandleKey, handle: u32) -> bool {
+    if kept_handle(handles, &key).is_some() {
+        return true;
+    }
+    if handles.len() >= HANDLES_KEPT {
+        return false;
+    }
+    handles.push((key, handle));
+    true
 }
 
 #[cfg(target_arch = "x86")]
@@ -384,7 +869,9 @@ mod hook {
     const SURFACE_CREATE_FONT: usize = 59;
     const SURFACE_ADD_GLYPH_SET_TO_FONT: usize = 60;
     const SURFACE_GET_FONT_TALL: usize = 62;
-    const SURFACE_GET_TEXT_SIZE: usize = 65;
+    /// What `DrawUnicodeChar` advances by (`call [eax+0xfc]` in it, both
+    /// builds); see [`drawn_width`].
+    const SURFACE_GET_CHAR_ABC_WIDE: usize = 63;
 
     type SetFontFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type SetPosFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32);
@@ -409,7 +896,9 @@ mod hook {
         i32,
     ) -> u32;
     type FontTallFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
-    type TextSizeFn = unsafe extern "thiscall" fn(*mut c_void, u32, *const u16, *mut i32, *mut i32);
+    /// `(font, ch, &a, &b, &c)`.
+    type CharAbcFn =
+        unsafe extern "thiscall" fn(*mut c_void, u32, i32, *mut i32, *mut i32, *mut i32);
 
     /// The engine's `BaseUISurface`, once looked up.
     static SURFACE: AtomicUsize = AtomicUsize::new(0);
@@ -448,9 +937,54 @@ mod hook {
     fn target_of(call: Call) -> usize {
         match call {
             Call::Draw => draw_string as engine::DrawConsoleStringFn as usize,
+            Call::KillerDraw => killer_draw as engine::DrawConsoleStringFn as usize,
             Call::Color => set_text_color as engine::DrawSetTextColorFn as usize,
-            Call::Len => string_len as engine::DrawConsoleStringLenFn as usize,
+            Call::Len => killer_len as engine::DrawConsoleStringLenFn as usize,
+            Call::VictimLen => victim_len as engine::DrawConsoleStringLenFn as usize,
         }
+    }
+
+    /// The screen's width as the engine reports it, 0 when it cannot.
+    fn screen_width() -> i32 {
+        let Some(e) = engine::engfuncs() else {
+            return 0;
+        };
+        let mut info = engine::ScreenInfo {
+            size: size_of::<engine::ScreenInfo>() as i32,
+            width: 0,
+            height: 0,
+            flags: 0,
+            char_height: 0,
+            char_widths: [0; 256],
+        };
+        // Safety: the engine fills the struct whose size it is told.
+        unsafe { (e.pfn_get_screen_info)(&mut info) };
+        info.width.max(0)
+    }
+
+    /// Stands in for `pfnDrawConsoleStringLen` at the victim's width, the
+    /// first call of every line: [`string_len`], plus the right margin while
+    /// a scale or a font is in force. `Draw` anchors the line at
+    /// `ScreenWidth - icon - victim width`, so the extra width moves the whole line left
+    /// and leaves the victim's name that far from the edge; the name itself is
+    /// drawn where the icon's advance puts it, at its own width.
+    unsafe extern "C" fn victim_len(text: *const c_char, width: *mut i32, height: *mut i32) {
+        unsafe { string_len(text, width, height) };
+        if width.is_null() || !super::super::scale::layout_is_ours() {
+            return;
+        }
+        let tall = if height.is_null() {
+            0
+        } else {
+            unsafe { *height }
+        };
+        let screen = screen_width();
+        // An outline or a box reaches past the name: keep that clear too.
+        let margin =
+            super::super::scale::right_margin(screen, tall) + super::super::backdrop::edge_extra();
+        // Safety: the caller's out-parameter, which `string_len` just wrote.
+        unsafe { *width += margin };
+        super::super::backdrop::line_started(screen - margin);
     }
 
     /// `con_color` as (r, g, b), the colour a string gets with none set.
@@ -482,15 +1016,61 @@ mod hook {
     /// centred on the line by [`super::super::scale::name_draw_y`], which
     /// leaves `y` alone at scale 1 with no font.
     unsafe extern "C" fn draw_string(x: i32, y: i32, text: *const c_char) -> i32 {
+        use super::super::{backdrop, scale};
+
         let font = FONT.load(Ordering::Acquire);
-        if font == 0 {
-            let y = super::super::scale::name_draw_y(y, ENGINE_TALL.load(Ordering::Relaxed));
-            return match engine::engfuncs() {
-                Some(e) => unsafe { (e.pfn_draw_console_string)(x, y, text) },
-                None => x,
-            };
+        // The colour the game gave this name, if it gave one; the engine
+        // resets to `con_color` after every string either way.
+        let asked = COLOR.swap(-1, Ordering::AcqRel);
+        let name_rgb = || match asked {
+            -1 => con_color(),
+            packed => ((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff),
+        };
+        let line_y = y;
+        let text_tall = text_tall();
+        let y = scale::name_draw_y(y, text_tall);
+        let backdrop_on = backdrop::active();
+        if backdrop_on {
+            // The killer's name is a line's first draw; the box goes under it.
+            // Safety: inside the HUD draw, on the engine's thread.
+            unsafe { backdrop::line_box_at(x, line_y, scale::line_height(text_tall)) };
         }
-        let y = super::super::scale::name_draw_y(y, FONT_TALL.load(Ordering::Relaxed));
+        if font == 0 {
+            let Some(e) = engine::engfuncs() else {
+                return x;
+            };
+            // Kept alive past every engine call below that reads it.
+            let shown = engine_text(text);
+            let text = shown.as_ref().map_or(text, |s| s.as_ptr());
+            if backdrop_on && !text.is_null() {
+                if backdrop::name_boxes() {
+                    let (mut w, mut h) = (0, 0);
+                    unsafe { (e.pfn_draw_console_string_len)(text, &mut w, &mut h) };
+                    let line = (line_y, scale::line_height(text_tall));
+                    unsafe { backdrop::name_box_at(name_rgb(), x, w, y, text_tall, line) };
+                }
+                let (px, (r, g, b), _alpha) = backdrop::outline();
+                if px > 0 {
+                    // The engine's call takes no alpha: the outline is opaque.
+                    let to_f = |v: i32| v as f32 / 255.0;
+                    for dy in -px..=px {
+                        for dx in -px..=px {
+                            if backdrop::in_outline(dx, dy, px) {
+                                unsafe {
+                                    (e.pfn_draw_set_text_color)(to_f(r), to_f(g), to_f(b));
+                                    (e.pfn_draw_console_string)(x + dx, y + dy, text);
+                                }
+                            }
+                        }
+                    }
+                    if asked != -1 {
+                        let f = |i: usize| f32::from_bits(COLOR_F[i].load(Ordering::Relaxed));
+                        unsafe { (e.pfn_draw_set_text_color)(f(0), f(1), f(2)) };
+                    }
+                }
+            }
+            return unsafe { (e.pfn_draw_console_string)(x, y, text) };
+        }
         let Ok(surface) = surface() else {
             return x;
         };
@@ -498,12 +1078,19 @@ mod hook {
             return x;
         }
         // Safety: the game's own `szKiller`/`szVictim`, NUL-terminated by `MsgFunc_DeathMsg`.
-        let wide = to_wide(unsafe { CStr::from_ptr(text) }.to_bytes());
-        let (r, g, b) = match COLOR.swap(-1, Ordering::AcqRel) {
-            -1 => con_color(),
-            packed => ((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff),
+        let wide = name_wide(unsafe { CStr::from_ptr(text) }.to_bytes());
+        let (r, g, b) = name_rgb();
+        let runs = runs_of(surface, font, &wide);
+        let width = runs.iter().map(|run| run.2).fold(0i32, i32::saturating_add);
+        if backdrop_on && backdrop::name_boxes() {
+            let line = (line_y, scale::line_height(text_tall));
+            unsafe { backdrop::name_box_at((r, g, b), x, width, y, text_tall, line) };
+        }
+        let (outline_px, (or, og, ob), outline_alpha) = if backdrop_on {
+            backdrop::outline()
+        } else {
+            (0, (0, 0, 0), 0)
         };
-        let chars = (wide.len() - 1) as i32;
         // Safety: the engine's own text path makes these same calls from
         // `HUD_Redraw`; the slots are checked by ret size on both builds.
         unsafe {
@@ -512,23 +1099,61 @@ mod hook {
             let set_color: SetColorFn = slot(surface, SURFACE_DRAW_SET_TEXT_COLOR_RGBA);
             let print: PrintTextFn = slot(surface, SURFACE_DRAW_PRINT_TEXT);
             let flush: FlushFn = slot(surface, SURFACE_DRAW_FLUSH_TEXT);
-            set_font(surface, font);
-            set_pos(surface, x, y);
+            // Each run in its own font, starting where the last one ended.
+            let print_at = |x: i32, y: i32| {
+                let mut at = x;
+                for (handle, range, run_width) in &runs {
+                    set_font(surface, *handle);
+                    set_pos(surface, at, y);
+                    print(surface, wide[range.start..].as_ptr(), range.len() as i32);
+                    at = at.saturating_add(*run_width);
+                }
+            };
+            if outline_px > 0 {
+                set_color(surface, or, og, ob, outline_alpha);
+                for dy in -outline_px..=outline_px {
+                    for dx in -outline_px..=outline_px {
+                        if backdrop::in_outline(dx, dy, outline_px) {
+                            print_at(x + dx, y + dy);
+                        }
+                    }
+                }
+            }
             set_color(surface, r, g, b, 255);
-            print(surface, wide.as_ptr(), chars);
+            print_at(x, y);
             flush(surface);
         }
-        x + text_width(surface, font, &wide)
+        x + width
+    }
+
+    /// Stands in for `pfnDrawConsoleString` at the killer's name: [`draw_string`],
+    /// ending the killer's side of `gap` further on, which is where `Draw`
+    /// then puts the icon (5 px after the end it is handed).
+    unsafe extern "C" fn killer_draw(x: i32, y: i32, text: *const c_char) -> i32 {
+        unsafe { draw_string(x, y, text) }.saturating_add(super::super::scale::killer_extra())
+    }
+
+    /// Stands in for `pfnDrawConsoleStringLen` at the killer's width, which
+    /// `Draw` anchors the line by: [`string_len`], plus the killer's side of
+    /// `gap`, so the line ends where [`killer_draw`]'s extra leaves it.
+    unsafe extern "C" fn killer_len(text: *const c_char, width: *mut i32, height: *mut i32) {
+        unsafe { string_len(text, width, height) };
+        if !width.is_null() {
+            // Safety: the caller's out-parameter, which `string_len` just wrote.
+            unsafe { *width = (*width).saturating_add(super::super::scale::killer_extra()) };
+        }
     }
 
     /// Stands in for `pfnDrawSetTextColor` before each name: remembers the
-    /// colour for [`draw_string`] and still tells the engine, so its own
-    /// state is what it would have been.
+    /// colour for [`draw_string`] (our font's colour, a team box's shade, and
+    /// the engine font's colour again after an outline) and still tells the
+    /// engine, so its own state is what it would have been.
     unsafe extern "C" fn set_text_color(r: f32, g: f32, b: f32) {
-        if FONT.load(Ordering::Acquire) != 0 {
-            let packed = (color_byte(r) << 16) | (color_byte(g) << 8) | color_byte(b);
-            COLOR.store(packed, Ordering::Release);
+        for (slot, v) in COLOR_F.iter().zip([r, g, b]) {
+            slot.store(v.to_bits(), Ordering::Relaxed);
         }
+        let packed = (color_byte(r) << 16) | (color_byte(g) << 8) | color_byte(b);
+        COLOR.store(packed, Ordering::Release);
         if let Some(e) = engine::engfuncs() {
             unsafe { (e.pfn_draw_set_text_color)(r, g, b) };
         }
@@ -540,6 +1165,8 @@ mod hook {
         let font = FONT.load(Ordering::Acquire);
         if font == 0 {
             if let Some(e) = engine::engfuncs() {
+                let shown = engine_text(text);
+                let text = shown.as_ref().map_or(text, |s| s.as_ptr());
                 unsafe { (e.pfn_draw_console_string_len)(text, width, height) };
                 // The engine font's height, for centring its names: the
                 // victim's width call starts every line, before either draw.
@@ -555,9 +1182,12 @@ mod hook {
         let wide = if text.is_null() {
             vec![0u16]
         } else {
-            to_wide(unsafe { CStr::from_ptr(text) }.to_bytes())
+            name_wide(unsafe { CStr::from_ptr(text) }.to_bytes())
         };
-        let w = text_width(surface, font, &wide);
+        let w = runs_of(surface, font, &wide)
+            .iter()
+            .map(|run| run.2)
+            .fold(0i32, i32::saturating_add);
         let h = FONT_TALL.load(Ordering::Relaxed);
         // Safety: the caller's two out-parameters, as the engine writes them.
         unsafe {
@@ -570,15 +1200,435 @@ mod hook {
         }
     }
 
-    /// `GetTextSize`'s width: the same per-character `GetCharABCwide` sum the
-    /// engine's own length call makes.
+    /// How far `DrawPrintText` moves on for `wide` in `font`: [`drawn_width`]
+    /// over the surface's own `GetCharABCwide`, the call `DrawUnicodeChar`
+    /// advances by. Not `GetTextSize`, which skips characters it still draws.
     fn text_width(surface: *mut c_void, font: u32, wide: &[u16]) -> i32 {
-        let (mut w, mut h) = (0i32, 0i32);
-        unsafe {
-            let size: TextSizeFn = slot(surface, SURFACE_GET_TEXT_SIZE);
-            size(surface, font, wide.as_ptr(), &mut w, &mut h);
+        // Safety: slot checked by ret size on both builds; the out-parameters are locals.
+        let abc: CharAbcFn = unsafe { slot(surface, SURFACE_GET_CHAR_ABC_WIDE) };
+        drawn_width(wide, |ch| {
+            let (mut a, mut b, mut c) = (0i32, 0i32, 0i32);
+            unsafe { abc(surface, font, i32::from(ch), &mut a, &mut b, &mut c) };
+            (a, b, c)
+        })
+    }
+
+    /// A name as our font draws it: UTF-16 with the compatibility forms of
+    /// the characters the face lacks ([`to_wide_where`]).
+    fn name_wide(bytes: &[u8]) -> Vec<u16> {
+        let compat = COMPAT.load(Ordering::Relaxed);
+        if FALLBACK.load(Ordering::Acquire) == 0 {
+            return to_wide(bytes, compat);
         }
-        w.max(0)
+        let Ok(coverage) = COVERAGE.read() else {
+            return to_wide(bytes, compat);
+        };
+        to_wide_where(bytes, compat, |c| {
+            u16::try_from(u32::from(c))
+                .is_ok_and(|unit| coverage.as_ref().is_some_and(|cov| cov.has(unit)))
+        })
+    }
+
+    /// `wide`'s runs with the handle each is drawn with and its width: one
+    /// run in `font` unless the face covers more than Latin-1 (#1054), else
+    /// the face's own glyphs, the backup faces' (#1079) and the fallback's.
+    /// Each run is measured in its own handle, so the name's width is what
+    /// the draw advances past.
+    fn runs_of(
+        surface: *mut c_void,
+        font: u32,
+        wide: &[u16],
+    ) -> Vec<(u32, std::ops::Range<usize>, i32)> {
+        let chars = wide.iter().take_while(|&&c| c != 0).count();
+        let fallback = FALLBACK.load(Ordering::Acquire);
+        let mut handles = vec![font];
+        let split = if fallback == 0 {
+            None
+        } else {
+            let backups = BACKUPS.read();
+            let backups = backups.as_deref().map_or(&[][..], |b| b);
+            handles.extend(backups.iter().map(|(handle, _)| *handle));
+            handles.push(fallback);
+            let backup_coverage: Vec<&Coverage> = backups.iter().map(|(_, cov)| cov).collect();
+            COVERAGE.read().ok().and_then(|cov| {
+                cov.as_ref().map(|cov| {
+                    font_runs(wide, |unit| {
+                        font_for(unit, |u| cov.has(u), &backup_coverage)
+                    })
+                })
+            })
+        };
+        let runs = split.unwrap_or_else(|| vec![(0, 0..chars)]);
+        runs.into_iter()
+            .map(|(which, range)| {
+                let handle = handles.get(which).copied().unwrap_or(font);
+                let width = text_width(surface, handle, &wide[range.clone()]);
+                (handle, range, width)
+            })
+            .collect()
+    }
+
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn CreateCompatibleDC(hdc: *mut c_void) -> *mut c_void;
+        fn DeleteDC(hdc: *mut c_void) -> i32;
+        // FFI declaration: must match the Win32 signature.
+        #[allow(clippy::too_many_arguments)]
+        fn CreateFontA(
+            height: i32,
+            width: i32,
+            escapement: i32,
+            orientation: i32,
+            weight: i32,
+            italic: u32,
+            underline: u32,
+            strike_out: u32,
+            charset: u32,
+            out_precision: u32,
+            clip_precision: u32,
+            quality: u32,
+            pitch_and_family: u32,
+            face: *const c_char,
+        ) -> *mut c_void;
+        fn SelectObject(hdc: *mut c_void, object: *mut c_void) -> *mut c_void;
+        fn DeleteObject(object: *mut c_void) -> i32;
+        fn GetFontUnicodeRanges(hdc: *mut c_void, glyph_set: *mut u32) -> u32;
+        fn GetTextFaceA(hdc: *mut c_void, count: i32, face: *mut c_char) -> i32;
+    }
+
+    /// What `face`, at `spec`'s size and weight, has, from Windows
+    /// (`GetFontUnicodeRanges`): the same face the engine's font manager
+    /// asked `CreateFontA` for, so the same substitute when Windows has no
+    /// such face. Also the face Windows actually made (`GetTextFaceA`),
+    /// which differs from `face` exactly when it substituted.
+    fn face_coverage(face: &str, spec: &FontSpec) -> Result<(Coverage, String), String> {
+        const DEFAULT_CHARSET: u32 = 1;
+        let face = CString::new(face).map_err(|_| "the face has a NUL in it")?;
+        // Safety: a memory DC and a font of our own, freed before returning.
+        unsafe {
+            let dc = CreateCompatibleDC(std::ptr::null_mut());
+            if dc.is_null() {
+                return Err("no memory DC".to_string());
+            }
+            let font = CreateFontA(
+                spec.tall,
+                0,
+                0,
+                0,
+                spec.weight(),
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                0,
+                0,
+                0,
+                0,
+                face.as_ptr(),
+            );
+            if font.is_null() {
+                DeleteDC(dc);
+                return Err(format!("Windows could not create {face:?}"));
+            }
+            let old = SelectObject(dc, font);
+            // `LF_FACESIZE`, the terminator included.
+            let mut made = [0 as c_char; 32];
+            let made_len = GetTextFaceA(dc, made.len() as i32, made.as_mut_ptr());
+            let made = if made_len > 0 {
+                CStr::from_ptr(made.as_ptr()).to_string_lossy().into_owned()
+            } else {
+                String::new()
+            };
+            let size = GetFontUnicodeRanges(dc, std::ptr::null_mut()) as usize;
+            // `GLYPHSET`: four u32s, then one `WCRANGE` (u16 low, u16 count) per range.
+            let mut set = vec![0u32; size.div_ceil(4).max(4)];
+            let got = if size >= 16 {
+                GetFontUnicodeRanges(dc, set.as_mut_ptr())
+            } else {
+                0
+            };
+            SelectObject(dc, old);
+            DeleteObject(font);
+            DeleteDC(dc);
+            if got == 0 {
+                return Err("GetFontUnicodeRanges failed".to_string());
+            }
+            let ranges = (set[3] as usize).min(set.len() - 4);
+            let coverage = Coverage::from_ranges(
+                set[4..4 + ranges]
+                    .iter()
+                    .map(|&w| ((w & 0xffff) as u16, (w >> 16) as u16)),
+            );
+            Ok((coverage, made))
+        }
+    }
+
+    /// The engine's `CFontManager`, found through the `AddGlyphSetToFont`
+    /// slot's thunk ([`manager_call`], [`returns_constant`]).
+    fn font_manager(surface: *mut c_void) -> Result<usize, String> {
+        // Safety: the surface's vftable, checked on both builds.
+        let thunk: usize = unsafe { slot(surface, SURFACE_ADD_GLYPH_SET_TO_FONT) };
+        const THUNK_LEN: usize = 0x40;
+        if !crate::crash::readable(thunk, THUNK_LEN) {
+            return Err("the AddGlyphSetToFont thunk is not readable".to_string());
+        }
+        // Safety: checked readable just above.
+        let code = unsafe { std::slice::from_raw_parts(thunk as *const u8, THUNK_LEN) };
+        let (at, rel) =
+            manager_call(code).ok_or("the AddGlyphSetToFont thunk has no FontManager() call")?;
+        let target = (thunk + at + 5).wrapping_add(rel as usize);
+        if !crate::crash::readable(target, 6) {
+            return Err(format!("FontManager() at {target:#x} is not readable"));
+        }
+        // Safety: checked readable just above.
+        let body = unsafe { std::slice::from_raw_parts(target as *const u8, 6) };
+        returns_constant(body).map(|m| m as usize).ok_or_else(|| {
+            format!("FontManager() at {target:#x} is not `mov eax, imm32; ret`: {body:02x?}")
+        })
+    }
+
+    /// Reads a u32 the engine owns, refusing memory that is not committed.
+    fn read_u32(address: usize) -> Result<u32, String> {
+        if !crate::crash::readable(address, 4) {
+            return Err(format!("{address:#x} is not readable"));
+        }
+        // Safety: committed, checked just above.
+        Ok(unsafe { std::ptr::read_unaligned(address as *const u32) })
+    }
+
+    /// Gives the face in `handle` the whole of U+0000..U+FFFF: its first
+    /// range's upper bound, 0xff, becomes 0xffff, so `GetFontForChar` never
+    /// reaches Tahoma's. Only for a handle whose ranges are exactly what the
+    /// font manager makes ([`split_as_expected`]); anything else is left
+    /// alone and the reason returned.
+    fn widen(manager: usize, handle: u32) -> Result<(), String> {
+        let amalgams = read_u32(manager)? as usize;
+        let count = read_u32(manager + VECTOR_COUNT_AT)?;
+        if handle >= count || amalgams == 0 {
+            return Err(format!(
+                "handle {handle} is not among the manager's {count} fonts"
+            ));
+        }
+        let amalgam = amalgams + handle as usize * AMALGAM_SIZE;
+        let ranges_at = read_u32(amalgam)? as usize;
+        let ranges = read_u32(amalgam + VECTOR_COUNT_AT)?;
+        if ranges != 2 || !crate::crash::readable(ranges_at, 2 * RANGE_SIZE) {
+            return Err(format!(
+                "handle {handle} has {ranges} ranges, not the face's and Tahoma's"
+            ));
+        }
+        let mut found = [0u32; 6];
+        for (i, v) in found.iter_mut().enumerate() {
+            *v = read_u32(ranges_at + 4 * i)?;
+        }
+        if !split_as_expected(found) {
+            return Err(format!(
+                "handle {handle}'s ranges are {found:x?}, not 0..ff face, 100..ffff Tahoma"
+            ));
+        }
+        // Safety: the first range's `high`, inside the vector just read; the
+        // game's thread, the only one that draws or makes fonts.
+        unsafe { std::ptr::write_volatile((ranges_at + 4) as *mut u32, 0xffff) };
+        Ok(())
+    }
+
+    /// The chosen face drawing every character it has itself, with a Tahoma
+    /// handle for the rest (#1054).
+    struct Wide {
+        handle: u32,
+        fallback: u32,
+        coverage: Coverage,
+        /// How many characters past Latin-1 the face covers.
+        past_latin1: usize,
+    }
+
+    /// `spec`'s face widened to draw every character it has, and the Tahoma
+    /// handle for the rest; nothing in force changes.
+    fn widen_to_face(surface: *mut c_void, spec: &FontSpec) -> Result<Wide, String> {
+        let (coverage, _) = face_coverage(&spec.face, spec)?;
+        let fallback = font_handle(surface, FALLBACK_FACE, spec, false).map_err(|_| {
+            format!("the engine would not make a {FALLBACK_FACE} font to fall back on")
+        })?;
+        let handle = font_handle(surface, &spec.face, spec, true)?;
+        let past_latin1 = (0x100u32..0x1_0000)
+            .filter(|&u| coverage.has(u as u16))
+            .count();
+        Ok(Wide {
+            handle,
+            fallback,
+            coverage,
+            past_latin1,
+        })
+    }
+
+    /// A handle for `face` at `spec`'s size, weight and effects, widened
+    /// when `wide`: the one made before for the same, else a new one, kept
+    /// for next time ([`HANDLES`]). A handle whose widening failed is kept
+    /// as the plain one it still is.
+    fn font_handle(
+        surface: *mut c_void,
+        face: &str,
+        spec: &FontSpec,
+        wide: bool,
+    ) -> Result<u32, String> {
+        let key = HandleKey::new(face, spec, wide);
+        let mut handles = HANDLES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(handle) = kept_handle(&handles, &key) {
+            return Ok(handle);
+        }
+        let manager = if wide {
+            Some(font_manager(surface)?)
+        } else {
+            None
+        };
+        let handle = make_handle(surface, face, spec)?;
+        let widened = manager.map(|manager| widen(manager, handle));
+        let kept_as = match widened {
+            Some(Err(_)) => HandleKey { wide: false, ..key },
+            _ => key,
+        };
+        if !keep_handle(&mut handles, kept_as, handle) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "deathmsg font: {HANDLES_KEPT} font handles kept already; handle {handle} for {face:?} is not reused"
+                ))
+            };
+        }
+        widened.unwrap_or(Ok(())).map(|()| handle)
+    }
+
+    /// A new handle for `face` at `spec`'s size, weight and effects, through
+    /// the surface as the scheme loader makes one; an error says only that
+    /// the engine refused, for the caller to say what it was for.
+    fn make_handle(surface: *mut c_void, face: &str, spec: &FontSpec) -> Result<u32, String> {
+        let name = CString::new(face).map_err(|_| "the face has a NUL in it")?;
+        // Safety: the surface's own font calls, slots checked on both builds.
+        unsafe {
+            let create: CreateFontFn = slot(surface, SURFACE_CREATE_FONT);
+            let add: AddGlyphSetFn = slot(surface, SURFACE_ADD_GLYPH_SET_TO_FONT);
+            let handle = create(surface);
+            if handle == 0 {
+                return Err("the engine gave no font handle".to_string());
+            }
+            let ok = add(
+                surface,
+                handle,
+                name.as_ptr(),
+                spec.tall,
+                spec.weight(),
+                0,
+                0,
+                spec.flags(),
+                0,
+                0xffff,
+            ) & 0xff
+                != 0;
+            if ok {
+                Ok(handle)
+            } else {
+                Err(format!("the engine refused {face:?}"))
+            }
+        }
+    }
+
+    /// One backup face in `spec`'s size and effects: its handle, widened
+    /// like the chosen face's so it draws past Latin-1 itself, and what it
+    /// has. `tahoma` is the fallback's handle, which a backup named Tahoma
+    /// shares. Refuses a face Windows does not have, which it would quietly
+    /// swap for another (`fallback Segoe UI` unquoted asks for "Segoe" and
+    /// "UI").
+    fn make_backup(
+        surface: *mut c_void,
+        face: &str,
+        spec: &FontSpec,
+        tahoma: u32,
+    ) -> Result<(u32, Coverage), String> {
+        let (coverage, made) = face_coverage(face, spec)?;
+        if !made.eq_ignore_ascii_case(face) {
+            return Err(format!(
+                "Windows has no font called \"{face}\" (it would draw {made:?}); quote a face with a space in it"
+            ));
+        }
+        if face.eq_ignore_ascii_case(FALLBACK_FACE) {
+            return Ok((tahoma, coverage));
+        }
+        Ok((font_handle(surface, face, spec, true)?, coverage))
+    }
+
+    /// The typed backup faces made in `spec`, in order, and a sentence for
+    /// the console naming what each covers or why it was left out. Needs the
+    /// fallback face's handle, so only once [`widen_to_face`] succeeded.
+    fn make_backups(surface: *mut c_void, spec: &FontSpec) -> (Vec<(u32, Coverage)>, String) {
+        let faces = BACKUP_FACES.lock().map(|f| f.clone()).unwrap_or_default();
+        let tahoma = FALLBACK.load(Ordering::Acquire);
+        if faces.is_empty() || tahoma == 0 {
+            return (Vec::new(), String::new());
+        }
+        if let Err(why) = font_manager(surface) {
+            return (Vec::new(), format!(" No backup faces: {why}."));
+        }
+        let mut made = Vec::new();
+        let mut said = Vec::new();
+        for face in &faces {
+            if face.eq_ignore_ascii_case(&spec.face) {
+                said.push(format!("\"{face}\" is the font itself, skipped"));
+                continue;
+            }
+            match make_backup(surface, face, spec, tahoma) {
+                Ok((handle, coverage)) => {
+                    let past_latin1 = (0x100u32..0x1_0000)
+                        .filter(|&u| coverage.has(u as u16))
+                        .count();
+                    said.push(format!("\"{face}\" ({past_latin1} past Latin-1)"));
+                    made.push((handle, coverage));
+                }
+                Err(why) => said.push(format!("\"{face}\" left out: {why}")),
+            }
+        }
+        let then = if faces.iter().any(|f| f.eq_ignore_ascii_case(FALLBACK_FACE)) {
+            String::new()
+        } else {
+            format!("; then {FALLBACK_FACE}")
+        };
+        let reply = format!(" Backup faces, in order: {}{then}.", said.join(", "));
+        (made, reply)
+    }
+
+    /// Remakes the backup faces in the font in force after `fallback`
+    /// changed them; with no font set they wait for one.
+    pub(super) fn rebuild_backups() -> Result<String, String> {
+        let spec = SPEC.lock().map(|s| s.clone()).unwrap_or(None);
+        let described =
+            describe_backups(&BACKUP_FACES.lock().map(|f| f.clone()).unwrap_or_default());
+        let in_force = spec.filter(|_| FONT.load(Ordering::Acquire) != 0);
+        let Some(spec) = in_force else {
+            if let Ok(mut held) = BACKUPS.write() {
+                held.clear();
+            }
+            return Ok(format!("{described} (used once a font is set)"));
+        };
+        if FALLBACK.load(Ordering::Acquire) == 0 {
+            return Ok(format!(
+                "{described} (not used while the font draws everything past Latin-1 in {FALLBACK_FACE})"
+            ));
+        }
+        let surface = surface()?;
+        let (made, said) = make_backups(surface, &spec);
+        if let Ok(mut held) = BACKUPS.write() {
+            *held = made;
+        }
+        Ok(format!("{described}.{said}"))
+    }
+
+    /// A name for the engine's own font with its compatibility forms
+    /// ([`engine_name`]), or `None` to pass the game's pointer on.
+    fn engine_text(text: *const c_char) -> Option<CString> {
+        if text.is_null() {
+            return None;
+        }
+        // Safety: the game's own `szKiller`/`szVictim`, NUL-terminated by `MsgFunc_DeathMsg`.
+        let bytes = engine_name(unsafe { CStr::from_ptr(text) }.to_bytes())?;
+        CString::new(bytes).ok()
     }
 
     /// Finds `Draw`'s span in the module at `base`, once per base.
@@ -712,8 +1762,13 @@ mod hook {
     /// Makes `spec` the font, or `None` the game's own.
     pub(super) fn apply(spec: Option<FontSpec>) -> Result<String, String> {
         let Some(spec) = spec else {
+            FALLBACK.store(0, Ordering::Release);
+            if let Ok(mut held) = BACKUPS.write() {
+                held.clear();
+            }
             FONT.store(0, Ordering::Release);
             FONT_TALL.store(0, Ordering::Release);
+            SHADOW.store(false, Ordering::Relaxed);
             if let Ok(mut held) = SPEC.lock() {
                 *held = None;
             }
@@ -732,47 +1787,65 @@ mod hook {
             };
         }
         let surface = surface()?;
-        let face = CString::new(spec.face.as_str()).map_err(|_| "the face has a NUL in it")?;
-        // Safety: the surface's own font calls, slots checked on both builds.
-        let (handle, tall) = unsafe {
-            let create: CreateFontFn = slot(surface, SURFACE_CREATE_FONT);
-            let add: AddGlyphSetFn = slot(surface, SURFACE_ADD_GLYPH_SET_TO_FONT);
-            let font_tall: FontTallFn = slot(surface, SURFACE_GET_FONT_TALL);
-            let handle = create(surface);
-            if handle == 0 {
-                return Err("the engine gave no font handle".to_string());
-            }
-            let ok = add(
-                surface,
-                handle,
-                face.as_ptr(),
-                spec.tall,
-                spec.weight(),
-                0,
-                0,
-                spec.flags(),
-                0,
-                0xffff,
-            ) & 0xff
-                != 0;
-            if !ok {
-                return Err(format!(
-                    "the engine refused {spec} -- could Windows not create that font?"
-                ));
-            }
-            (handle, font_tall(surface, handle))
+        let compat = !spec.face.eq_ignore_ascii_case(FALLBACK_FACE);
+        let wide = compat.then(|| widen_to_face(surface, &spec));
+        let handle = match &wide {
+            Some(Ok(wide)) => wide.handle,
+            _ => font_handle(surface, &spec.face, &spec, false)
+                .map_err(|why| format!("{why}: {spec} -- could Windows not create that font?"))?,
         };
+        // Safety: the surface's own call, slot checked on both builds.
+        let tall = unsafe {
+            let font_tall: FontTallFn = slot(surface, SURFACE_GET_FONT_TALL);
+            font_tall(surface, handle)
+        };
+        // The old handle's runs must not be drawn with the new one's coverage.
+        FONT.store(0, Ordering::Release);
+        FALLBACK.store(0, Ordering::Release);
+        if let Ok(mut held) = BACKUPS.write() {
+            held.clear();
+        }
+        let beyond = match wide {
+            Some(Ok(wide)) => {
+                if let Ok(mut held) = COVERAGE.write() {
+                    *held = Some(wide.coverage);
+                }
+                FALLBACK.store(wide.fallback, Ordering::Release);
+                let (made, said) = make_backups(surface, &spec);
+                let rest = if said.is_empty() {
+                    format!(", the rest in {FALLBACK_FACE}.")
+                } else {
+                    ".".to_string()
+                };
+                if let Ok(mut held) = BACKUPS.write() {
+                    *held = made;
+                }
+                let n = wide.past_latin1;
+                format!(" Past Latin-1 it draws the {n} characters it has itself{rest}{said}")
+            }
+            Some(Err(why)) => {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "deathmsg font: characters past Latin-1 stay {FALLBACK_FACE}'s -- {why}"
+                    ))
+                };
+                format!(" Past Latin-1 it draws in {FALLBACK_FACE} ({why}).")
+            }
+            None => String::new(),
+        };
+        COMPAT.store(compat, Ordering::Relaxed);
         // Height first: the stub reads it, and a draw with the new handle
         // must not step by the old one.
         FONT_TALL.store(tall.max(0), Ordering::Release);
+        SHADOW.store(spec.shadow, Ordering::Relaxed);
         FONT.store(handle, Ordering::Release);
         let outline = if spec.outline {
-            " (outline: this engine's font renderer has none, so it is drawn without)"
+            " (outline: this engine's font renderer has none, so it is drawn without; `outline <px>` draws one)"
         } else {
             ""
         };
         let reply = format!(
-            "font = {spec}, {tall} px tall, handle {handle}{outline}. A face Windows does not have falls back to its default; `font default` puts the game's back."
+            "font = {spec}, {tall} px tall, handle {handle}{outline}.{beyond} A face Windows does not have falls back to its default; `font default` puts the game's back."
         );
         if let Ok(mut held) = SPEC.lock() {
             *held = Some(spec);
@@ -986,6 +2059,74 @@ mod tests {
     }
 
     #[test]
+    fn a_font_asked_for_again_reuses_its_handle() {
+        let spec = parse_args(&argv(&["Verdana", "20"])).unwrap().unwrap();
+        let bold = parse_args(&argv(&["Verdana", "20", "bold"]))
+            .unwrap()
+            .unwrap();
+        let mut kept = Vec::new();
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec, true),
+            7
+        ));
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Tahoma", &spec, false),
+            8
+        ));
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("verdana", &spec, true)),
+            Some(7),
+            "Windows matches a face in any case"
+        );
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &spec, false)),
+            None,
+            "a plain handle is not the widened one"
+        );
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &bold, true)),
+            None
+        );
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec, true),
+            9
+        ));
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &spec, true)),
+            Some(7),
+            "the first handle stays"
+        );
+    }
+
+    #[test]
+    fn the_handle_cache_is_bounded() {
+        let spec = |tall| FontSpec {
+            face: "Verdana".into(),
+            tall,
+            bold: false,
+            shadow: false,
+            outline: false,
+        };
+        let mut kept = Vec::new();
+        for tall in 0..HANDLES_KEPT as i32 {
+            assert!(keep_handle(
+                &mut kept,
+                HandleKey::new("Verdana", &spec(tall), false),
+                1
+            ));
+        }
+        assert!(!keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec(999), false),
+            2
+        ));
+        assert_eq!(kept.len(), HANDLES_KEPT);
+    }
+
+    #[test]
     fn con_color_parses_as_the_engine_reads_it() {
         assert_eq!(con_color_from("255 180 30"), Some((255, 180, 30)));
         assert_eq!(con_color_from(" 10  20  300 "), Some((10, 20, 255)));
@@ -1008,13 +2149,319 @@ mod tests {
     #[test]
     fn names_become_terminated_utf16_with_controls_as_spaces() {
         assert_eq!(
-            to_wide(b"m00cat"),
+            to_wide(b"m00cat", true),
             vec![0x6d, 0x30, 0x30, 0x63, 0x61, 0x74, 0]
         );
         // UTF-8, as the engine converts it.
-        assert_eq!(to_wide("é".as_bytes()), vec![0xe9, 0]);
-        assert_eq!(to_wide(b"a\tb\x01"), vec![0x61, 0x20, 0x62, 0x20, 0]);
-        assert_eq!(to_wide(b""), vec![0]);
+        assert_eq!(to_wide("é".as_bytes(), true), vec![0xe9, 0]);
+        assert_eq!(to_wide(b"a\tb\x01", true), vec![0x61, 0x20, 0x62, 0x20, 0]);
+        assert_eq!(to_wide(b"", true), vec![0]);
+    }
+
+    fn wide(text: &str) -> String {
+        let units = to_wide(text.as_bytes(), true);
+        String::from_utf16(&units[..units.len() - 1]).unwrap()
+    }
+
+    #[test]
+    fn the_seven_eighths_name_is_drawn_in_the_chosen_face() {
+        // The WSOD25 player whose name broke the line (#1052): U+215E, e2 85 9e.
+        let name = "NoGo ! kroD- \u{215e}";
+        assert_eq!(&name.as_bytes()[name.len() - 3..], &[0xe2, 0x85, 0x9e]);
+        assert_eq!(wide(name), "NoGo ! kroD- 7/8");
+        assert!(wide(name).chars().all(|c| c <= '\u{ff}'));
+        // A Tahoma face draws it itself.
+        let units = to_wide(name.as_bytes(), false);
+        assert_eq!(units[units.len() - 2], 0x215e);
+        // And the engine's own font gets the same bytes.
+        assert_eq!(
+            engine_name(name.as_bytes()).as_deref(),
+            Some(&b"NoGo ! kroD- 7/8"[..])
+        );
+    }
+
+    #[test]
+    fn compatibility_forms_keep_the_meaning() {
+        for (from, to) in [
+            ("\u{215b}\u{215c}\u{215d}", "1/83/85/8"),
+            ("1\u{2044}2", "1/2"),
+            ("x\u{00b2}\u{2074}\u{2089}", "x\u{00b2}49"),
+            ("Brand\u{2122}", "BrandTM"),
+            ("\u{2163} \u{216b} \u{2170}", "IV XII i"),
+            ("\u{fb01}re", "fire"),
+            ("\u{ff21}\u{ff42}\u{ff10}\u{ff01}\u{3000}x", "Ab0! x"),
+            ("wait\u{2026}", "wait..."),
+            ("No\u{2116}1", "NoNo1"),
+        ] {
+            assert_eq!(wide(from), to, "{from:?}");
+        }
+    }
+
+    #[test]
+    fn characters_without_a_plain_form_are_left_alone() {
+        // Accented letters stay themselves (Tahoma draws them), as do symbols
+        // with no Latin-1 form, CJK and emoji: measured as drawn instead.
+        for name in [
+            "\u{0141}ukasz",
+            "\u{2605}ace\u{2605}",
+            "\u{4e2d}\u{6587}",
+            "\u{1f600}",
+            "\u{20ac}100",
+            "caf\u{e9} & bar \u{00bd}",
+        ] {
+            assert_eq!(wide(name), name, "{name:?}");
+            assert_eq!(engine_name(name.as_bytes()), None, "{name:?}");
+        }
+        assert!(matches!(with_compat_forms("m00cat"), Cow::Borrowed(_)));
+        assert_eq!(engine_name(b"m00cat"), None);
+        // Not UTF-8: the engine converts it as it always did.
+        assert_eq!(engine_name(b"bad \xe2\x85"), None);
+    }
+
+    #[test]
+    fn every_form_is_latin1_and_every_listed_character_has_one() {
+        for cp in (0x100..0x1_0000).filter_map(char::from_u32) {
+            let mut out = String::new();
+            if push_compat_form(cp, &mut out) {
+                assert!(!out.is_empty(), "{cp:?}");
+                assert!(
+                    out.chars().all(|c| (' '..='\u{ff}').contains(&c)),
+                    "{cp:?} -> {out:?}"
+                );
+            }
+        }
+        for c in ['\u{215e}', '\u{2044}', '\u{2122}', '\u{ff5e}', '\u{217f}'] {
+            assert!(push_compat_form(c, &mut String::new()), "{c:?}");
+        }
+        // Latin-1 itself is never rewritten.
+        for c in (0x20u8..=0xff).map(char::from) {
+            assert_eq!(wide(&c.to_string()), c.to_string());
+        }
+    }
+
+    #[test]
+    fn the_width_is_what_draw_print_text_advances_past() {
+        // A made-up font: 10 px a character, `&` and `⅞` included, with a
+        // negative a and c to show all three parts count.
+        let abc = |c: u16| {
+            if c == u16::from(b'i') {
+                (-1, 4, -1)
+            } else {
+                (1, 8, 1)
+            }
+        };
+        let units = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        assert_eq!(drawn_width(&units("ab"), abc), 20);
+        assert_eq!(drawn_width(&units("a&b"), abc), 30, "GetTextSize skips &");
+        assert_eq!(
+            drawn_width(&units("kroD- \u{215e}"), abc),
+            70,
+            "nor a character iswprint rejects"
+        );
+        assert_eq!(drawn_width(&units("ii"), abc), 4);
+        assert_eq!(drawn_width(&units(""), abc), 0);
+        // Stops at the terminator, as the draw does.
+        assert_eq!(drawn_width(&[0x61, 0, 0x62], abc), 10);
+        assert_eq!(drawn_width(&units("i"), |_| (-5, 1, -5)), 0);
+    }
+
+    #[test]
+    fn the_font_manager_is_found_through_both_builds_thunks() {
+        // `AddGlyphSetToFont`'s slot as shipped (hw.dll +0x3d90 PRE,
+        // +0x22cf60 Anniversary): `call FontManager; mov ecx, eax; call ...`.
+        let pre = [
+            0x55, 0x8b, 0xec, 0x8b, 0x45, 0x20, 0x8b, 0x4d, 0x1c, 0x8b, 0x55, 0x18, 0x50, 0x8b,
+            0x45, 0x14, 0x51, 0x8b, 0x4d, 0x10, 0x52, 0x8b, 0x55, 0x0c, 0x50, 0x8b, 0x45, 0x08,
+            0x51, 0x52, 0x50, 0xe8, 0x4c, 0xbc, 0x0c, 0x00, 0x8b, 0xc8, 0xe8, 0xb5, 0xbf, 0x0c,
+            0x00, 0x5d, 0xc2, 0x24,
+        ];
+        let post = [
+            0x55, 0x8b, 0xec, 0xff, 0x75, 0x20, 0xff, 0x75, 0x1c, 0xff, 0x75, 0x18, 0xff, 0x75,
+            0x14, 0xff, 0x75, 0x10, 0xff, 0x75, 0x0c, 0xff, 0x75, 0x08, 0xe8, 0x43, 0x02, 0x04,
+            0x00, 0x8b, 0xc8, 0xe8, 0x8c, 0xfb, 0x03, 0x00, 0x5d, 0xc2, 0x24, 0x00,
+        ];
+        // PRE: thunk at 0x1d03d90 calls FontManager() at 0x1dcfa00.
+        let (at, rel) = manager_call(&pre).unwrap();
+        assert_eq!((0x1d0_3d90 + at + 5).wrapping_add(rel as usize), 0x1dc_fa00);
+        // Anniversary: 0x1022cf60 calls 0x1026d1c0.
+        let (at, rel) = manager_call(&post).unwrap();
+        assert_eq!(
+            (0x1022_cf60 + at + 5).wrapping_add(rel as usize),
+            0x1026_d1c0
+        );
+        assert_eq!(manager_call(&pre[..0x20]), None, "cut short");
+        // `mov eax, 0x24e4ab8; ret` (PRE).
+        assert_eq!(
+            returns_constant(&[0xb8, 0xb8, 0x4a, 0x4e, 0x02, 0xc3]),
+            Some(0x024e_4ab8)
+        );
+        assert_eq!(
+            returns_constant(&[0xb8, 0xb8, 0x4a, 0x4e, 0x02, 0x90]),
+            None
+        );
+        assert_eq!(returns_constant(&[0x55, 0x8b]), None);
+    }
+
+    #[test]
+    fn only_the_managers_own_split_is_widened() {
+        assert!(split_as_expected([0, 0xff, 0x1000, 0x100, 0xffff, 0x2000]));
+        // Tahoma itself (one range), a face that failed, the same font twice,
+        // or ranges someone else changed: left alone.
+        assert!(!split_as_expected([
+            0, 0xffff, 0x1000, 0x100, 0xffff, 0x2000
+        ]));
+        assert!(!split_as_expected([0, 0xff, 0, 0x100, 0xffff, 0x2000]));
+        assert!(!split_as_expected([0, 0xff, 0x1000, 0x100, 0xffff, 0x1000]));
+        assert!(!split_as_expected([0, 0xff, 0x1000, 0x100, 0xfffe, 0x2000]));
+    }
+
+    #[test]
+    fn coverage_holds_the_reported_ranges_and_never_a_surrogate() {
+        let cov = Coverage::from_ranges([
+            (0x20, 0x5f),
+            (0x400, 0x100),
+            (0xd800, 0x800),
+            (0xfff0, 0x20),
+        ]);
+        assert!(cov.has(u16::from(b'A')) && cov.has(0x7e) && !cov.has(0x7f));
+        assert!(cov.has(0x414) && cov.has(0x4ff) && !cov.has(0x500));
+        assert!(!cov.has(0xd83d) && !cov.has(0xde00), "half an emoji");
+        assert!(cov.has(0xffff), "clipped at the end of the BMP");
+    }
+
+    #[test]
+    fn names_split_into_runs_by_who_has_the_glyph() {
+        let units = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        // Bahnschrift-like: Latin Extended and Cyrillic, not ★ or emoji; no
+        // backups, so 1 is the fallback.
+        let has = |u: u16| font_for(u, |u| (0x100..0x500).contains(&u), &[]);
+        assert_eq!(font_runs(&units("m00cat"), has), vec![(0, 0..6)]);
+        assert_eq!(font_runs(&units("\u{141}ukasz"), has), vec![(0, 0..6)]);
+        assert_eq!(
+            font_runs(&units("\u{2605}Ace\u{2605}"), has),
+            vec![(1, 0..1), (0, 1..4), (1, 4..5)]
+        );
+        // Both halves of a surrogate pair go to the fallback together.
+        assert_eq!(
+            font_runs(&units("a\u{1f600}b"), has),
+            vec![(0, 0..1), (1, 1..3), (0, 3..4)]
+        );
+        assert_eq!(font_runs(&units(""), has), vec![]);
+        assert_eq!(
+            font_runs(&[0x61, 0, 0x2605], has),
+            vec![(0, 0..1)],
+            "stops at the terminator"
+        );
+    }
+
+    #[test]
+    fn a_character_the_face_lacks_goes_to_the_first_backup_that_has_it() {
+        // Bahnschrift-like face; a Segoe UI-like backup with arrows and
+        // Georgian; a Tahoma-like one with ♪ too.
+        let face = |u: u16| (0x100..0x500).contains(&u);
+        let segoe = Coverage::from_ranges([(0x2190, 0x10), (0x10d0, 0x30)]);
+        let tahoma = Coverage::from_ranges([(0x2190, 0x10), (0x266a, 1)]);
+        let backups = [&segoe, &tahoma];
+        assert_eq!(font_for(u16::from(b'a'), face, &backups), 0);
+        assert_eq!(
+            font_for(0xe9, |_| false, &backups),
+            0,
+            "Latin-1 is the face's"
+        );
+        assert_eq!(font_for(0x414, face, &backups), 0, "the face's own Д");
+        assert_eq!(
+            font_for(0x2192, face, &backups),
+            1,
+            "→: both have it, the first wins"
+        );
+        assert_eq!(font_for(0x10d0, face, &backups), 1, "Georgian");
+        assert_eq!(font_for(0x266a, face, &backups), 2, "♪: only the second");
+        assert_eq!(
+            font_for(0x2605, face, &backups),
+            3,
+            "★: nobody, the fallback"
+        );
+        assert_eq!(font_for(0x2605, face, &[]), 1, "no backups: the fallback");
+    }
+
+    #[test]
+    fn backup_runs_split_where_the_font_changes() {
+        let units = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        let face = |u: u16| (0x100..0x500).contains(&u);
+        let segoe = Coverage::from_ranges([(0x2190, 0x10)]);
+        let which = |u: u16| font_for(u, face, &[&segoe]);
+        assert_eq!(
+            font_runs(&units("a\u{2192}\u{2192}\u{2605}\u{414}"), which),
+            vec![(0, 0..1), (1, 1..3), (2, 3..4), (0, 4..5)]
+        );
+    }
+
+    #[test]
+    fn fallback_arguments_parse_as_typed() {
+        assert_eq!(parse_fallback_args(&argv(&["default"])), Ok(vec![]));
+        assert_eq!(parse_fallback_args(&argv(&["DEFAULT"])), Ok(vec![]));
+        // The console hands a quoted face over as one argument.
+        assert_eq!(
+            parse_fallback_args(&argv(&["Segoe UI", "Tahoma"])),
+            Ok(vec!["Segoe UI".to_string(), "Tahoma".to_string()])
+        );
+        assert_eq!(
+            parse_fallback_args(&argv(&["Arial", "arial", " Tahoma "])),
+            Ok(vec!["Arial".to_string(), "Tahoma".to_string()]),
+            "named twice: kept once, first place; trimmed"
+        );
+        assert!(parse_fallback_args(&argv(&[])).is_err());
+        assert!(parse_fallback_args(&argv(&[" "])).is_err());
+        assert!(parse_fallback_args(&argv(&["a", "b", "c", "d"])).is_ok());
+        assert!(parse_fallback_args(&argv(&["a", "b", "c", "d", "e"])).is_err());
+        assert!(parse_fallback_args(&argv(&["x".repeat(32).as_str()])).is_err());
+    }
+
+    #[test]
+    fn status_lists_the_backups_then_the_fallback() {
+        assert_eq!(describe_backups(&[]), "fallback = Tahoma (the game's)");
+        assert_eq!(
+            describe_backups(&argv(&["Segoe UI", "Arial"])),
+            "fallback = \"Segoe UI\", \"Arial\", then Tahoma"
+        );
+        assert_eq!(
+            describe_backups(&argv(&["Segoe UI", "tahoma"])),
+            "fallback = \"Segoe UI\", \"tahoma\"",
+            "Tahoma named: not twice"
+        );
+    }
+
+    #[test]
+    fn the_engine_font_loses_zero_width_characters_rather_than_drawing_spaces() {
+        assert_eq!(
+            engine_name("zero\u{200b}width\u{200d}join".as_bytes()).as_deref(),
+            Some(&b"zerowidthjoin"[..])
+        );
+        assert_eq!(
+            engine_name("\u{feff}a\u{2122}".as_bytes()).as_deref(),
+            Some(&b"aTM"[..])
+        );
+        // Combining marks stay: the engine blanks them, but dropping one
+        // changes the name.
+        assert_eq!(engine_name("Ze\u{301}ro".as_bytes()), None);
+    }
+
+    #[test]
+    fn a_character_the_face_has_keeps_its_own_glyph() {
+        // Bahnschrift has ™ and €, not ⅞: only ⅞ is swapped.
+        let face_has = |c: char| matches!(c, '\u{2122}' | '\u{20ac}');
+        assert_eq!(
+            with_compat_forms_where("x\u{2122} \u{215e}", face_has),
+            "x\u{2122} 7/8"
+        );
+        assert_eq!(
+            with_compat_forms_where("x\u{2122} \u{215e}", |_| false),
+            "xTM 7/8"
+        );
+        assert!(matches!(
+            with_compat_forms_where("\u{2122}", face_has),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]

@@ -29,6 +29,7 @@ on:
 permissions:
   contents: write
   pull-requests: read # release_notes.py reads the merged PRs' bodies
+  checks: read # require_ci_passed.py reads CI's check runs
 
 jobs:
   release:
@@ -39,6 +40,12 @@ jobs:
         with:
           ref: main
           fetch-depth: 0 # full tag history — needed to find the last patch under this major.minor
+
+      # The commit actually built: main's head when the job checked it out.
+      - name: Record the commit being built
+        id: commit
+        shell: bash
+        run: echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Compute release version
         id: version
@@ -77,6 +84,23 @@ jobs:
             cat "$RUNNER_TEMP/release_notes.md"
             echo "RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
           } >> "$GITHUB_OUTPUT"
+          # The same notes go in the app for its What's new window (#1013):
+          # Vite copies studio/public/ beside index.html, readable offline.
+          mkdir -p studio/public
+          cp "$RUNNER_TEMP/release_notes.md" studio/public/release_notes.md
+
+      # Nothing is published from a tree CI hasn't passed. CI already ran every
+      # test on this code before it merged, so this asks GitHub for those
+      # results instead of running the Rust and frontend tests again (~2.5-10
+      # min, #915): every required check of `main`'s ruleset must have passed on
+      # this commit or on a commit with the same tree (its PR head; a merge
+      # commit has no CI of its own). It waits while a run is still going.
+      - name: Require passing CI on this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.commit.outputs.SHA }}
+        run: python .github/scripts/require_ci_passed.py --sha "$SHA" --branch main
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
@@ -93,14 +117,10 @@ jobs:
       # app builds for the host's native 64-bit target. Built before
       # tauri-action so tauri.conf.json's `bundle.resources` entry for it
       # already exists on disk when bundling runs.
+      # `--locked` here but not on tauri-action's build: the version stamp below
+      # rewrites studio/src-tauri/Cargo.toml, so Cargo.lock no longer matches it.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
         run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --locked
-
-      # Nothing is published from a tree that fails its tests. `--locked` here
-      # and above but not on tauri-action's build: the version stamp below
-      # rewrites studio/src-tauri/Cargo.toml, so Cargo.lock no longer matches it.
-      - name: Rust tests
-        run: cargo test --workspace --locked
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -112,10 +132,6 @@ jobs:
       - name: Install frontend dependencies
         working-directory: studio
         run: npm ci
-
-      - name: Frontend unit tests
-        working-directory: studio
-        run: npm run test:unit
 
       # Stamps this run's version into the two Tauri-side manifests. Not
       # committed back — the repo's checked-in version stays whatever it was;

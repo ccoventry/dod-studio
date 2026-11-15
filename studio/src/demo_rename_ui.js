@@ -9,14 +9,18 @@ import { placeholderDescription } from './placeholder_catalogue.js';
 import { renderPlaceholderChips } from './placeholder_chips.js';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, WITH_FALLBACK, placeholdersFor,
-  parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView,
+  parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView, renameProgressView, renameDoneLine,
 } from './demo_rename.js';
+import { showBar, hideBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
 import { parseClock } from './scan_progress.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { onUseAsChange } from './player_alias.js';
 import { setAuditorFooter } from './auditor_footer.js';
+import { fileNameOf } from './path_display.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -78,6 +82,41 @@ function showListProgress(p) {
 function hideListProgress() {
   const bar = $('#rename-progress');
   if (bar) bar.hidden = true;
+}
+
+// Rename and Undo's bar (#958): which one runs, and how many it renames.
+let renaming = null;
+function showRenameProgress(p) {
+  if (!renaming) return;
+  const view = renameProgressView(renaming.kind, p, renaming.count);
+  showBar($('#rename-progress'), view);
+  setStatus(view.text);
+}
+
+/** Runs Rename (`kind` 'apply') or Undo with its bar and its last line. */
+async function runRenames(kind, count, run, toast) {
+  busy = true;
+  updateButtons();
+  renaming = { kind, count };
+  const started = Date.now();
+  showRenameProgress(null);
+  let doneLine = '';
+  try {
+    const outcome = await run();
+    doneLine = renameDoneLine(kind, outcome, durationTextMs(Date.now() - started));
+    followRenames(outcome.renamed);
+    if (outcome.renamed.length) showToast(toast(outcome.renamed.length), 'success');
+    reportFailures(outcome.failed);
+  } catch {
+    // ipc_bridge already said why.
+  } finally {
+    renaming = null;
+    hideBar($('#rename-progress'));
+    busy = false;
+    refresh();
+    if (doneLine) setStatus(doneLine);
+    refreshUndo();
+  }
 }
 
 function setStatus(text) {
@@ -294,7 +333,7 @@ function followRenames(renamed) {
   facts = facts.map((f) => {
     const to = byOld.get(f.path);
     if (!to) return f;
-    const fileName = to.split(/[\\/]/).pop();
+    const fileName = fileNameOf(to);
     if (selected.delete(f.path)) selected.add(to);
     return { ...f, path: to, file_name: fileName };
   });
@@ -315,37 +354,11 @@ async function applyRenames() {
     confirmLabel: STRINGS.DEMO_RENAME.CONFIRM_OK,
   });
   if (!ok) return;
-  busy = true;
-  updateButtons();
-  try {
-    const outcome = await demoRenameApply(pairs);
-    followRenames(outcome.renamed);
-    if (outcome.renamed.length) showToast(STRINGS.DEMO_RENAME.renamedToast(outcome.renamed.length), 'success');
-    reportFailures(outcome.failed);
-  } catch {
-    // ipc_bridge already said why.
-  } finally {
-    busy = false;
-    refresh();
-    refreshUndo();
-  }
+  await runRenames('apply', pairs.length, () => demoRenameApply(pairs), STRINGS.DEMO_RENAME.renamedToast);
 }
 
 async function undoLast() {
-  busy = true;
-  updateButtons();
-  try {
-    const outcome = await demoRenameUndo();
-    followRenames(outcome.renamed);
-    if (outcome.renamed.length) showToast(STRINGS.DEMO_RENAME.undoneToast(outcome.renamed.length), 'success');
-    reportFailures(outcome.failed);
-  } catch {
-    // ipc_bridge already said why.
-  } finally {
-    busy = false;
-    refresh();
-    refreshUndo();
-  }
+  await runRenames('undo', 0, () => demoRenameUndo(), STRINGS.DEMO_RENAME.undoneToast);
 }
 
 /**
@@ -355,6 +368,8 @@ async function undoLast() {
  */
 export function initDemoRenamePane({ projectTeams, onChange } = {}) {
   if (projectTeams) getProjectTeams = projectTeams;
+  // A Use as name edited on the Players tab (#686) changes the new names.
+  onUseAsChange(refresh);
   const inputs = [
     ['#rename-pov-template', '#rename-pov-reset', DEFAULT_POV_TEMPLATE],
     ['#rename-hltv-template', '#rename-hltv-reset', DEFAULT_HLTV_TEMPLATE],
@@ -396,6 +411,8 @@ export function initDemoRenamePane({ projectTeams, onChange } = {}) {
   listen('demo_rename_progress', (event) => {
     if (listing) showListProgress(event.payload);
   });
+  listen('demo_rename_apply_progress', (event) => showRenameProgress(event.payload))
+    .catch((err) => console.error('Failed to register demo_rename_apply_progress listener:', err));
   refresh();
   refreshUndo();
 }

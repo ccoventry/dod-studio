@@ -1,6 +1,6 @@
 // Finish clips after a capture batch (#440), driven against
 // tests/e2e/finish-clips.html — see that file and tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const BLOCK_A = 'D:\\cap\\s1\\demo1_b0';
 const BLOCK_B = 'D:\\cap\\s1\\demo1_b1';
@@ -108,6 +108,9 @@ test('waits for a busy Render tab instead of replacing its batch', async ({ page
   await page.evaluate((v) => window.__requestFinish(v, 'frame_sequence'), verified());
 
   await expect(page.locator('#batch-status')).toContainText('waiting for the Render tab');
+  // The wait has no count to show, so the bar slides a block (#954).
+  await expect(page.locator('#capture-progress-container')).toHaveClass(/indeterminate/);
+  await expect(page.locator('#capture-progress-container')).toHaveCSS('display', 'block');
   expect(await invocations(page, 'queue_render_batch')).toEqual([]);
 
   await emit(page, 'render_jobs_snapshot', [job('0', 'D:\\older', 'Finished')]);
@@ -126,4 +129,20 @@ test('changing a finish setting saves settings', async ({ page }) => {
   await gotoHarness(page);
   await page.selectOption('#config-finish-codec-frames', 'prores');
   expect(await page.evaluate(() => window.__testSettingsChangeCount)).toBe(1);
+});
+
+test('the scan for the new takes slides a block, then the bar counts the renders (#954)', async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.queue_render_batch = () => new Promise((resolve) => { window.__resolveScan = () => resolve({ total: 2, added: 2 }); });
+  });
+  await page.selectOption('#config-finish-clips', 'finish');
+  await page.evaluate((v) => window.__requestFinish(v, 'frame_sequence'), verified());
+
+  await expect(page.locator('#batch-status')).toHaveText('Finishing clips: looking for the new takes');
+  await expect(page.locator('#capture-progress-container')).toHaveClass(/indeterminate/);
+
+  await page.evaluate(() => window.__resolveScan());
+  await expect(page.locator('#batch-status')).toHaveText('Finishing clips: 0 of 2');
+  await expect(page.locator('#capture-progress-container')).not.toHaveClass(/indeterminate/);
 });

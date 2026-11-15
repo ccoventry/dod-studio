@@ -33,7 +33,7 @@
 //! current weapon instead (`+0x46742`, `CHudAmmo`'s `m_pWeapon->iId`), which
 //! the recorded `CurWeapon` messages set. The FOV gate still decides when:
 //! `SetFOV` gives the recorder's zoom, so the scope appears only while he is
-//! zoomed.
+//! zoomed, and [`drawn_fov`] keeps it to the frames drawn zoomed.
 //!
 //! In an HLTV demo the zoom comes from the `HLTV` message (player, FOV):
 //! its handler (`+0x22270`) keeps a FOV per player, and `CHud::Think`
@@ -119,15 +119,17 @@
 //! demo, [`fill`] draws black from the frame's edges outward in the same
 //! plane (#799).
 
+mod drawn_fov;
 mod fill;
 
 pub use fill::with_black_fill;
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_show_scope");
 
@@ -208,15 +210,11 @@ const KEPT: u64 = 1 << 48;
 static ORIGIN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static ORIGIN_SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static ON: AtomicBool = AtomicBool::new(false);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The scope id for a third-person weapon model, or `None` for one without
 /// a scope. See the module doc for why the FG42 maps to 6.
@@ -345,16 +343,17 @@ pub fn before_transparent_triangles() {
     for (cell, value) in DRAWN_ORIGIN.iter().zip(origin) {
         cell.store(value.to_bits(), Ordering::Relaxed);
     }
+    drawn_fov::measure();
 }
 
-/// Points three absolute operands (`site + offsets`) at `cells` (`drawn`) or
+/// Points absolute operands (`site + offsets`) at `cells` (`drawn`) or
 /// back at what they read stock, kept in `stock` the first time. Returns
 /// whether it wrote.
-fn point_operands(
+fn point_operands<const N: usize>(
     site: usize,
-    offsets: &[usize; 3],
-    cells: &'static [AtomicU32; 3],
-    stock: &[AtomicU32; 3],
+    offsets: &[usize; N],
+    cells: &'static [AtomicU32; N],
+    stock: &[AtomicU32; N],
     drawn: bool,
     what: &str,
 ) -> Result<bool, String> {
@@ -398,6 +397,15 @@ fn point_operands(
 /// player's FOV from the `HLTV` message while the client data keeps the
 /// spectator's 90, so the two never meet and the scope never drew (the user,
 /// 2026-10-11, POST). Returns whether it wrote.
+///
+/// A POV demo keeps the test, against the FOV the frame is drawn with
+/// ([`drawn_fov`]): for the first frame or so of a scope-in the HUD can have
+/// the zoom (`SetFOV`) while the frame is still drawn at 90, and without the
+/// test the scope, sized for the zoom, came out tiny, and the black fill
+/// blacked out the rest of the screen (#933). The camera's in-eye mode is no
+/// guide to which kind of demo plays: a POV demo can carry a stale
+/// `g_iUser1` of 4 (`2021draft-rd1-harrington-axis`), so [`skips_settle_check`]
+/// asks the engine.
 fn skip_settle_check(skip: bool) -> Result<bool, String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     let at = if SETTLE_SCANNED_BASE.load(Ordering::Acquire) == base
@@ -443,6 +451,12 @@ fn skip_settle_check(skip: bool) -> Result<bool, String> {
         return Err("could not make the scope's zoom-settled test writable".into());
     }
     Ok(true)
+}
+
+/// Whether the zoom-settled test comes out: only in-eye in an HLTV demo,
+/// where it can never pass. See [`skip_settle_check`].
+fn skips_settle_check(in_demo: bool, pov_demo: bool, in_eye: bool) -> bool {
+    in_demo && !pov_demo && in_eye
 }
 
 /// The start of [`ORIGIN_PATTERN`] in the loaded `client.dll`.
@@ -509,9 +523,15 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         "the scope's origin reads",
     )?;
     let view = view || angles || origin;
-    let in_eye = in_demo && crate::spectator_target::in_eye_target().is_some();
-    let settle = skip_settle_check(in_eye)?;
-    let view = view || settle;
+    let pov_demo = in_demo && crate::anim_fix::pov_demo_playing();
+    let skip_settle = skips_settle_check(
+        in_demo,
+        pov_demo,
+        crate::spectator_target::in_eye_target().is_some(),
+    );
+    let settle = skip_settle_check(skip_settle)?;
+    let settle_fov = drawn_fov::point(pov_demo)?;
+    let view = view || settle || settle_fov;
     let id = if on {
         watched_scope_id()
     } else {
@@ -535,11 +555,9 @@ fn describe(on: bool) -> &'static str {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     fill::poll(wanted && playing_demo());
     let was = ON.load(Ordering::Relaxed);
     match set_on(wanted) {
@@ -577,9 +595,10 @@ pub fn status_line() -> Option<String> {
             format!("{} (id {id})", sprite_name(id))
         });
     Some(format!(
-        "demo scope: {NAME} = {}; in-eye draws {rifle}; {}",
+        "demo scope: {NAME} = {}; in-eye draws {rifle}; {}; {}",
         describe(true),
-        fill::describe_last()
+        fill::describe_last(),
+        drawn_fov::describe_last()
     ))
 }
 
@@ -752,6 +771,16 @@ mod tests {
                 "{p} {y} {r} -> {p2} {y2} {r2}"
             );
         }
+    }
+
+    #[test]
+    fn only_hltv_in_eye_skips_the_zoom_settled_test() {
+        assert!(skips_settle_check(true, false, true), "HLTV, in-eye");
+        assert!(!skips_settle_check(true, false, false), "HLTV, free camera");
+        // #933: a POV demo whose g_iUser1 still says in-eye keeps the test.
+        assert!(!skips_settle_check(true, true, true), "POV, stale in-eye");
+        assert!(!skips_settle_check(true, true, false), "POV");
+        assert!(!skips_settle_check(false, false, true), "live play");
     }
 
     #[test]

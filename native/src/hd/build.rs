@@ -220,6 +220,7 @@ impl Drop for TreeGuard {
 /// launches, and `realesrgan` the upscaler folder
 /// ([`super::upscaler::resolve`]); `progress` is called at each step and log
 /// line (a few times a minute, so no throttling is needed).
+// One-call entry point; every argument is an independent input.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     request: &BuildRequest,

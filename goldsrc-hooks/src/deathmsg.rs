@@ -60,20 +60,37 @@
 //!
 //! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
 //! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
-//! (#728).
+//! (#728), and `layout even` -- every icon in a box of one height, from DoD
+//! Studio's own atlas -- in [`even`] (#1022).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
+use crate::console_tokens::rejoin_colons;
 use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+use crate::steam_id;
 
+mod backdrop;
+mod butt;
+mod clear;
+mod colour;
+mod even;
 mod font;
+mod layout_report;
+mod name_cap;
+mod replace;
 mod scale;
+
+/// A translucent box under a HUD draw; the review's panel (#660) uses it too.
+#[cfg(target_arch = "x86")]
+pub(crate) use backdrop::fill as fill_box;
+pub(crate) use clear::on_round_state;
+pub(crate) use layout_report::report_again as report_layout_again;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -278,24 +295,13 @@ impl std::fmt::Display for Player {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Player::Slot(slot) => write!(f, "{slot}"),
-            Player::SteamId(id) => match classic_steam_id(*id) {
+            Player::SteamId(id) => match steam_id::classic(*id) {
                 Some(classic) => f.write_str(&classic),
                 None => write!(f, "{id}"),
             },
             Player::OwnPov => f.write_str("self"),
         }
     }
-}
-
-/// A SteamID64 in the `STEAM_0:Y:Z` form GoldSrc's own `status` prints, the
-/// one players and server admins recognise (#537). `None` for an id that
-/// isn't a player's own account, such as the HLTV proxy's: that form only
-/// exists for individual accounts, base + a 32-bit account number.
-fn classic_steam_id(id: u64) -> Option<String> {
-    let account = id
-        .checked_sub(STEAM_ID64_BASE)
-        .filter(|&a| a <= u64::from(u32::MAX))?;
-    Some(format!("STEAM_0:{}:{}", account % 2, account / 2))
 }
 
 /// One block-list entry for `status`: slots as `slot N`, SteamIDs in the
@@ -347,50 +353,12 @@ fn current_name(player: Player) -> Option<String> {
     }
 }
 
-/// SteamID64 of account number 0 in the public universe; an individual
-/// account's SteamID64 is this plus its account number.
-const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
-
-/// A SteamID in any form a user is likely to paste: the 17-digit SteamID64,
-/// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
-/// the engine that printed it and does not change the account), or the newer
-/// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
-fn parse_steam_id(text: &str) -> Option<u64> {
-    let bare = text
-        .strip_prefix('[')
-        .and_then(|t| t.strip_suffix(']'))
-        .unwrap_or(text);
-    if bare.len() > 4 && bare[..4].eq_ignore_ascii_case("U:1:") {
-        let n: u64 = bare[4..].parse().ok()?;
-        return n.checked_add(STEAM_ID64_BASE);
-    }
-    if text.len() >= 6 && text[..6].eq_ignore_ascii_case("STEAM_") {
-        let mut parts = text[6..].split(':');
-        let (Some(universe), Some(y), Some(z), None) =
-            (parts.next(), parts.next(), parts.next(), parts.next())
-        else {
-            return None;
-        };
-        universe.parse::<u8>().ok()?;
-        let y: u64 = y.parse().ok().filter(|y| *y <= 1)?;
-        let z: u64 = z.parse().ok()?;
-        return z
-            .checked_mul(2)
-            .and_then(|z2| z2.checked_add(y))
-            .and_then(|n| n.checked_add(STEAM_ID64_BASE));
-    }
-    if text.len() == 17 && text.bytes().all(|b| b.is_ascii_digit()) {
-        return text.parse().ok();
-    }
-    None
-}
-
 /// One `block` argument, without its `!`: `self`, a SteamID, or a slot.
 fn parse_player(text: &str) -> Option<Player> {
     if text.eq_ignore_ascii_case("self") {
         return Some(Player::OwnPov);
     }
-    if let Some(id) = parse_steam_id(text) {
+    if let Some(id) = steam_id::parse(text) {
         return Some(Player::SteamId(id));
     }
     // Slots are 1..=32; a longer number is a mistyped SteamID, not a slot.
@@ -458,46 +426,6 @@ fn is_hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
-/// Bytes of a player's userinfo string (`MAX_INFO_STRING`).
-const USERINFO_LEN: usize = 256;
-
-/// The SteamID in the userinfo stored just before a player's name.
-///
-/// The engine's player record (0x250 bytes, the same on both `hw.dll`
-/// builds) is `userid`, then `userinfo[256]`, then `name[32]`, and
-/// `pfnGetPlayerInfo` hands out a pointer to `name`. So the userinfo is the
-/// 256 bytes before it. It's only trusted when it really is this player's:
-/// its `name` key must equal the name. Otherwise 0.
-///
-/// Safety: `name` is the pointer `pfnGetPlayerInfo` returned, into the
-/// engine's static player array, whose earlier bytes are always mapped.
-pub(crate) unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
-    if name.is_null() {
-        return 0;
-    }
-    let userinfo =
-        unsafe { std::slice::from_raw_parts((name as *const u8).sub(USERINFO_LEN), USERINFO_LEN) };
-    let name = unsafe { CStr::from_ptr(name) }.to_bytes();
-    sid_from_userinfo(userinfo, name).unwrap_or(0)
-}
-
-/// `*sid` from a `\key\value\...` userinfo buffer, if its `name` is `name`.
-fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
-    let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
-    let text = buffer[..end].strip_prefix(b"\\")?;
-    let mut fields = text.split(|&b| b == b'\\');
-    let mut sid = None;
-    let mut name_ok = false;
-    while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
-        match key {
-            b"name" => name_ok = value == name,
-            b"*sid" => sid = std::str::from_utf8(value).ok()?.parse::<u64>().ok(),
-            _ => {}
-        }
-    }
-    sid.filter(|&id| name_ok && id != 0)
-}
-
 /// A `block` argument list: the players, and whether it's `!` (hide everyone
 /// else). The console's pieces are rejoined first, so every check below sees
 /// whole ids: counting `!` on the raw pieces once read `!STEAM_0 : 1 :
@@ -531,28 +459,6 @@ fn parse_block_args(rest: &[String]) -> Result<(Vec<Player>, bool), String> {
     Ok((players, negations != 0))
 }
 
-/// Puts `STEAM_0:1:1234567` back together. GoldSrc's console tokenizer makes
-/// `:` a token of its own, so typed unquoted it arrives as `STEAM_0`, `:`,
-/// `1`, `:`, `1234567` (seen live 2026-09-30). Any token that is `:`, or
-/// follows one, is glued onto the one before it.
-fn rejoin_colons(tokens: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
-    let mut glue_next = false;
-    for token in tokens {
-        match out.last_mut() {
-            Some(last) if token == ":" => {
-                last.push(':');
-                glue_next = true;
-                continue;
-            }
-            Some(last) if glue_next => last.push_str(token),
-            _ => out.push(token.clone()),
-        }
-        glue_next = false;
-    }
-    out
-}
-
 /// `players`: every occupied slot with the name and SteamID `block` would
 /// match against right now. For finding the id to block, and for checking
 /// that the engine hands SteamIDs over at all (0 means it didn't).
@@ -574,7 +480,7 @@ fn players() -> String {
         let id = if who.steam_id == 0 {
             "SteamID unknown (0)".to_string()
         } else {
-            match classic_steam_id(who.steam_id) {
+            match steam_id::classic(who.steam_id) {
                 Some(classic) => format!("{} ({classic})", who.steam_id),
                 None => format!("{} (not a player account)", who.steam_id),
             }
@@ -613,7 +519,7 @@ fn lookup(slot: i32, hltv: bool) -> Option<(String, Who)> {
     who.steam_id = if info.steam_id != 0 {
         info.steam_id
     } else {
-        unsafe { steam_id_from_record(info.name) }
+        unsafe { steam_id::from_record(info.name) }
     };
     who.is_own_pov = !hltv && info.thisplayer != 0;
     let name = unsafe { CStr::from_ptr(info.name) }
@@ -770,7 +676,7 @@ fn apply_max(max: i32) -> Result<(), String> {
     };
 
     for &(rva, field) in ARRAY_REFS {
-        let value = (array + field) as u32;
+        let value = (array + name_cap::field_for(base, rva, field)) as u32;
         if !unsafe { write_code(base, rva, &value.to_le_bytes()) } {
             return Err(format!("could not make +{rva:#x} writable"));
         }
@@ -793,6 +699,25 @@ fn apply_max(max: i32) -> Result<(), String> {
 
     PATCHED_MAX.store(if reverting { 0 } else { max }, Ordering::Release);
     Ok(())
+}
+
+/// Lets the kill feed hold names of up to 63 characters instead of 31, for
+/// `ds_player_change_name`'s long names (#1021). Once lifted it stays: the
+/// engine's own names are at most 31, so they show as before. See
+/// [`name_cap`].
+pub(crate) fn lift_name_cap() -> Result<(), String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    let (array, _) = current_array(base);
+    // Safety: the stock check has passed for this module.
+    unsafe { name_cap::lift(base, array) }
+}
+
+/// Whether the kill feed holds 63-character names now.
+pub(crate) fn name_cap_lifted() -> bool {
+    engine::client_module_base().is_some_and(name_cap::lifted)
 }
 
 // ── The y detour ─────────────────────────────────────────────────────────────
@@ -998,31 +923,108 @@ fn original_thunk() -> Option<engine::UserMsgHookFn> {
     Some(unsafe { std::mem::transmute::<usize, engine::UserMsgHookFn>(base + THUNK_RVA) })
 }
 
-/// Our `DeathMsg` handler. Reads the three bytes, drops the message if the
-/// block list says so, and otherwise hands it to the game untouched.
+/// Our `DeathMsg` handler. Reads the three bytes, applies the `replace` lines
+/// (#1021), drops the message if one hides it or the block list says so, and
+/// otherwise hands it to the game.
 ///
-/// Deliberately does not parse or rewrite the payload on the way through: a
-/// forwarded message is the *same* buffer the engine handed us, so a message
-/// that is not being blocked behaves exactly as if we were not here.
+/// A message no `replace` line changes is forwarded as the *same* buffer the
+/// engine handed us, so it behaves exactly as if we were not here. A changed
+/// one goes over as a copy: the engine's buffer is left as it was read.
 unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
+    let victim = (size >= 3 && !buf.is_null()).then(|| unsafe { *(buf as *const u8).add(1) });
+    let (handled, shown) = unsafe { forward_death_msg(name, size, buf) };
+    // The line the game just added, as shown: a butt stroke's icon depends
+    // on who held what (#1088).
+    if let Some([killer, victim, butt::BUTT_WEAPON]) = shown {
+        note_butt(i32::from(killer), i32::from(victim));
+    }
+    // After the game has added the line, so `clear_on death` takes it too.
+    // The death happened whatever `replace` or `block` showed of it.
+    if let Some(victim) = victim {
+        clear::on_death(i32::from(victim));
+    }
+    handled
+}
+
+/// Whether player `index` is the one whose view the demo shows: the POV
+/// recorder, or the player an HLTV demo watches in first person. Used by
+/// `clear_on death` and `ds_sound_headshot_pov_farther` (#1353).
+pub(crate) fn is_watched_player(index: i32) -> bool {
+    if index <= 0 {
+        return false;
+    }
+    if is_hltv() {
+        crate::spectator_target::in_eye_target() == Some(index)
+    } else {
+        resolve(index, false).is_own_pov
+    }
+}
+
+/// [`hooked_death_msg`]'s filtering and forwarding: what the game's handler
+/// returned, and the three bytes it was handed (`None` when the message was
+/// hidden, blocked or too short to read).
+unsafe fn forward_death_msg(
+    name: *const c_char,
+    size: i32,
+    buf: *mut c_void,
+) -> (i32, Option<[u8; 3]>) {
+    let mut rewritten = None;
+    let mut forwarded = None;
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
-        let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
-        // The death happened whether or not the feed shows it.
-        crate::spectator_deathcam::note_death(killer, victim);
+        let original = [bytes[0], bytes[1], bytes[2]];
+        // The death happened whether or not the feed shows it, and as it was
+        // recorded, whatever `replace` shows.
+        crate::spectator_deathcam::note_death(original[0] as i32, original[1] as i32);
+        crate::headshot_sound::note_kill(original[0] as i32, original[1] as i32);
+        let rules = replace::live();
+        let shown = if rules.is_empty() {
+            original
+        } else {
+            match replace::apply(rules, original) {
+                // 1 is what the engine's own dispatcher treats as handled.
+                replace::Outcome::Hide(_) => return (1, None),
+                replace::Outcome::Rewrite(_, out) => {
+                    rewritten = Some(out);
+                    out
+                }
+                replace::Outcome::Keep | replace::Outcome::Unresolved(..) => original,
+            }
+        };
+        // `block` filters the feed as `replace` leaves it.
         let blocked = BLOCK
             .lock()
-            .map(|list| list.blocks_slots(killer, victim))
+            .map(|list| list.blocks_slots(shown[0] as i32, shown[1] as i32))
             .unwrap_or(false);
         if blocked {
-            // 1 is what the engine's own dispatcher treats as handled.
-            return 1;
+            return (1, None);
         }
+        forwarded = Some(shown);
     }
-    match original_thunk() {
-        Some(original) => unsafe { original(name, size, buf) },
-        None => 1,
+    let Some(original) = original_thunk() else {
+        return (1, None);
+    };
+    let handled = match rewritten {
+        Some(out) => {
+            let mut copy =
+                unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }.to_vec();
+            copy[..3].copy_from_slice(&out);
+            unsafe { original(name, size, copy.as_mut_ptr() as *mut c_void) }
+        }
+        None => unsafe { original(name, size, buf) },
+    };
+    (handled, forwarded)
+}
+
+/// Notes a butt stroke's line for the even layout's per-line icon
+/// ([`butt`]), only while that layout is asked for.
+fn note_butt(killer: i32, victim: i32) {
+    #[cfg(target_arch = "x86")]
+    if even::wanted() {
+        butt::note(killer, victim);
     }
+    #[cfg(not(target_arch = "x86"))]
+    let _ = (killer, victim); // only the 32-bit game has a feed
 }
 
 /// Installs (or re-installs) our handler.
@@ -1046,11 +1048,21 @@ fn install_hook() {
 /// Called once per frame from [`crate::commands::poll`].
 pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
-    // installed while that switch is on too, with an empty block list.
-    if HOOK_WANTED.load(Ordering::Relaxed) || crate::spectator_deathcam::enabled() {
+    // installed while that switch is on too, with an empty block list; so
+    // does the even layout, for the butt stroke's per-line icon (#1088), and
+    // the headshot sound kept to the POV player's kills (#1353).
+    if HOOK_WANTED.load(Ordering::Relaxed)
+        || crate::spectator_deathcam::enabled()
+        || clear::wants_death_msg()
+        || even::wanted()
+        || crate::headshot_sound::wants_kills()
+    {
         install_hook();
     }
+    clear::poll();
     font::poll();
+    // Before `scale`, whose copy follows what the even layout finds.
+    even::poll();
     scale::poll();
 }
 
@@ -1199,6 +1211,10 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     if let Some(base) = engine::client_module_base() {
         restamp_display_time(base);
     }
+    // After the line is in the array: the note reads its names from there.
+    if weapon == i32::from(butt::BUTT_WEAPON) {
+        note_butt(killer, victim);
+    }
     Ok(())
 }
 
@@ -1221,18 +1237,77 @@ fn usage() -> String {
          \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
          \x20                               weapon is a name (d_garand, garand) or 1..43\n\
+         \x20 {COMMAND} replace [killer <id>] [victim <id>] [at <time>] [in <demo>,...]\n\
+         \x20                  with [killer <id>] [victim <id>] [weapon <weapon>]\n\
+         \x20                               change one kill-feed line; with hide hides it.\n\
+         \x20                               Before with: which kill (killer or victim needed;\n\
+         \x20                               at is the demo bar's clock, m:ss or seconds, +-2 s;\n\
+         \x20                               in: demo file names, * allowed). After with: what\n\
+         \x20                               changes. Any order. The kill feed only.\n\
+         \x20 {COMMAND} replace list | remove <n> | clear\n\
          \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
          \x20 {COMMAND} font default       the game's own font again\n\
+         \x20 {COMMAND} fallback <face> [<face> ...]\n\
+         \x20                               up to {} faces to try, in order, for a character\n\
+         \x20                               the font lacks, before Tahoma (quote a face with\n\
+         \x20                               a space: fallback \"Segoe UI\" Tahoma)\n\
+         \x20 {COMMAND} fallback default   Tahoma only again (the default)\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
-         \x20 {COMMAND} scale default      the game's own size again\n",
+         \x20 {COMMAND} scale default      the game's own size again\n\
+         \x20 {COMMAND} layout even        every weapon icon in a box of one height, full\n\
+         \x20                               magazines and bipods shown, every line one step\n\
+         \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
+         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n\
+         \x20 {COMMAND} gap <0..{}>           with layout even: px between each name (its\n\
+         \x20                               outline) and the icon's art, both sides\n\
+         \x20 {COMMAND} gap default        the game's spacing: {} px before the icon, none after\n\
+         \x20 {COMMAND} outline <0..{}> [colour] [alpha]\n\
+         \x20                               outline the names that many px (default black, 255)\n\
+         \x20 {COMMAND} outline default    no outline\n\
+         \x20 {COMMAND} background <alpha> [colour] [padding]\n\
+         \x20                               a box behind each line (default black, padding {})\n\
+         \x20 {COMMAND} background team <alpha> [padding]\n\
+         \x20                               a box behind each name, a dark shade of its team's colour\n\
+         \x20 {COMMAND} background allies|axis <colour>|default\n\
+         \x20                               that team's box colour (allies covers the British)\n\
+         \x20 {COMMAND} background default no boxes, team colours back to the shade\n\
+         \x20                               a colour is r g b (0..255 each) or hex, #0a286e or #0af\n\
+         \x20 {COMMAND} clear              empty the kill feed now\n\
+         \x20 {COMMAND} clear_on restart <0|1> [delay]\n\
+         \x20                               at each new round, after delay s (default 0), clear\n\
+         \x20                               the lines that were up when it restarted\n\
+         \x20 {COMMAND} clear_on death <0|1> [delay]\n\
+         \x20                               when the watched player dies (POV: the recorder;\n\
+         \x20                               HLTV: the in-eye player), after delay s, clear the\n\
+         \x20                               lines up at the death, that one included\n\
+         \x20 {COMMAND} clear_on default   neither (the default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
+        font::MAX_BACKUP_FACES,
         scale::MIN_SCALE,
-        scale::MAX_SCALE
+        scale::MAX_SCALE,
+        even::MAX_GAP,
+        even::GAME_GAP_BEFORE,
+        backdrop::MAX_OUTLINE,
+        backdrop::DEFAULT_PADDING,
     )
+}
+
+/// Puts `font`'s text calls and `scale`'s icon call in place (both forward
+/// to the game's while unused), which `outline` and `background` draw from.
+fn install_backdrop() -> Result<(), String> {
+    #[cfg(target_arch = "x86")]
+    {
+        font::ensure_installed()?;
+        scale::ensure_installed()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        Err("only in the 32-bit game".to_string())
+    }
 }
 
 /// `pub(crate)`: also folded into `ds_debug_status`'s combined report.
@@ -1250,10 +1325,19 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, {}, blocking {block}, replacing {}, {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
+        even::describe(),
+        even::describe_gap(),
+        backdrop::describe(),
+        match replace::count() {
+            0 => "nothing".to_string(),
+            1 => "1 kill line (replace list)".to_string(),
+            n => format!("{n} kill lines (replace list)"),
+        },
+        clear::describe(),
     )
 }
 
@@ -1352,6 +1436,18 @@ fn dispatch(argv: &[String]) -> String {
             status()
         }
         "players" => players(),
+        "replace" => replace::command(&argv[2..]),
+        "clear" => clear::clear_now(),
+        "clear_on" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", clear::describe(), usage());
+            }
+            match clear::parse_clear_on(rest) {
+                Ok(asked) => format!("{COMMAND}: {}\n", clear::apply(asked)),
+                Err(why) => format!("{COMMAND} clear_on: {why}\n"),
+            }
+        }
         "font" => {
             let rest = &argv[2..];
             if rest.is_empty() {
@@ -1365,6 +1461,19 @@ fn dispatch(argv: &[String]) -> String {
                 Err(why) => format!("{COMMAND} font: {why}\n"),
             }
         }
+        "fallback" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", font::describe_fallback(), usage());
+            }
+            match font::parse_fallback_args(rest) {
+                Ok(faces) => match font::set_fallback(faces) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} fallback: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} fallback: {why}\n"),
+            }
+        }
         "scale" => {
             let rest = &argv[2..];
             if rest.is_empty() {
@@ -1376,6 +1485,61 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} scale: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
+        "outline" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", backdrop::describe(), usage());
+            }
+            match backdrop::parse_outline(rest) {
+                Ok((0, rgb, alpha)) => {
+                    format!("{COMMAND}: {}\n", backdrop::set_outline(0, rgb, alpha))
+                }
+                Ok((px, rgb, alpha)) => match install_backdrop() {
+                    Ok(()) => format!("{COMMAND}: {}\n", backdrop::set_outline(px, rgb, alpha)),
+                    Err(why) => format!("{COMMAND} outline: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} outline: {why}\n"),
+            }
+        }
+        "background" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", backdrop::describe(), usage());
+            }
+            match backdrop::parse_background(rest) {
+                Ok(
+                    asked @ (backdrop::Background::Line { .. } | backdrop::Background::Team { .. }),
+                ) => match install_backdrop() {
+                    Ok(()) => format!("{COMMAND}: {}\n", backdrop::set_background(asked)),
+                    Err(why) => format!("{COMMAND} background: {why}\n"),
+                },
+                Ok(asked) => format!("{COMMAND}: {}\n", backdrop::set_background(asked)),
+                Err(why) => format!("{COMMAND} background: {why}\n"),
+            }
+        }
+        "layout" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe(), usage());
+            }
+            match even::parse_args(rest) {
+                Ok(layout) => match even::apply(layout) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} layout: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} layout: {why}\n"),
+            }
+        }
+        "gap" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe_gap(), usage());
+            }
+            match even::parse_gap(rest) {
+                Ok(gap) => format!("{COMMAND}: {}\n", even::set_gap(gap)),
+                Err(why) => format!("{COMMAND} gap: {why}\n"),
             }
         }
         "fake" => {
@@ -1593,34 +1757,6 @@ mod tests {
     }
 
     #[test]
-    fn the_steam_id_comes_from_the_matching_userinfo_only() {
-        // As recorded in wsod25_grp5_h1_hltv.dem.
-        let mut record = [0u8; USERINFO_LEN];
-        let info = b"\\model\\us-inf\\name\\dicE[: :]m00cat :D\\*sid\\76561197962734863\\*hltv\\0";
-        record[..info.len()].copy_from_slice(info);
-        assert_eq!(
-            sid_from_userinfo(&record, b"dicE[: :]m00cat :D"),
-            Some(76_561_197_962_734_863)
-        );
-        assert_eq!(
-            sid_from_userinfo(&record, b"someone else"),
-            None,
-            "not this player's"
-        );
-        assert_eq!(sid_from_userinfo(&[0u8; 16], b"x"), None, "empty");
-        assert_eq!(
-            sid_from_userinfo(b"\\name\\bot\\*sid\\0", b"bot"),
-            None,
-            "a bot's 0"
-        );
-        assert_eq!(
-            sid_from_userinfo(b"name\\bot", b"bot"),
-            None,
-            "not userinfo"
-        );
-    }
-
-    #[test]
     fn a_pasted_classic_steam_id_is_one_negated_player_not_a_mix() {
         let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let me = 76_561_197_962_734_863;
@@ -1674,48 +1810,6 @@ mod tests {
     }
 
     #[test]
-    fn a_classic_steam_id_split_at_its_colons_is_put_back_together() {
-        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            rejoin_colons(&argv(&["!STEAM_0", ":", "1", ":", "1234567", "13"])),
-            argv(&["!STEAM_0:1:1234567", "13"])
-        );
-        assert_eq!(
-            rejoin_colons(&argv(&["!self", "!STEAM_0:1:1234567"])),
-            argv(&["!self", "!STEAM_0:1:1234567"]),
-            "quoted: already whole"
-        );
-        assert_eq!(
-            rejoin_colons(&argv(&[":", "3"])),
-            argv(&[":", "3"]),
-            "nothing to glue onto"
-        );
-    }
-
-    #[test]
-    fn steam_ids_parse_in_both_forms() {
-        assert_eq!(parse_steam_id("76561197975574370"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:0:7654321"), Some(ME));
-        assert_eq!(parse_steam_id("steam_1:0:7654321"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:1:7654321"), Some(ME + 1));
-        assert_eq!(parse_steam_id("STEAM_0:2:7654321"), None);
-        assert_eq!(parse_steam_id("STEAM_0:0"), None);
-        // SteamID3: account number 15308642 = 2 * 7654321.
-        assert_eq!(parse_steam_id("[U:1:15308642]"), Some(ME));
-        assert_eq!(parse_steam_id("U:1:15308642"), Some(ME));
-        assert_eq!(parse_steam_id("[u:1:15308642]"), Some(ME));
-        assert_eq!(parse_steam_id("[U:1:]"), None);
-        assert_eq!(
-            parse_steam_id("[G:1:15308642]"),
-            None,
-            "a group, not a user"
-        );
-        assert_eq!(parse_steam_id("STEAM_0:0:1:2"), None);
-        assert_eq!(parse_steam_id("7656119797793012"), None, "16 digits");
-        assert_eq!(parse_steam_id("12"), None);
-    }
-
-    #[test]
     fn block_arguments_are_a_slot_a_steam_id_or_self() {
         assert_eq!(parse_player("3"), Some(Player::Slot(3)));
         assert_eq!(parse_player("self"), Some(Player::OwnPov));
@@ -1728,15 +1822,7 @@ mod tests {
     }
 
     #[test]
-    fn only_player_accounts_get_the_classic_form() {
-        assert_eq!(
-            classic_steam_id(76_561_197_962_734_863).as_deref(),
-            Some("STEAM_0:1:1234567")
-        );
-        // The HLTV proxy's id from a real demo's `players` list: not an
-        // individual account, so no STEAM_0 form (#539 live test).
-        assert_eq!(classic_steam_id(90_071_996_842_377_220), None);
-        assert_eq!(classic_steam_id(12), None);
+    fn a_non_player_id_displays_as_the_raw_number() {
         assert_eq!(
             Player::SteamId(90_071_996_842_377_220).to_string(),
             "90071996842377220"

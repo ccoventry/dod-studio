@@ -13,6 +13,8 @@ import {
   placeholderNames, CLIP_ALIASES, MODIFIERS, WITH_FALLBACK,
 } from './placeholder_catalogue.js';
 import { nameWithoutTag, sideTag, sideTeams, teamsForHighlight } from './project_teams.js';
+import { headshotsPlaceholder } from './headshots.js';
+import { useAsName } from './player_alias.js';
 import { STRINGS } from './strings.js';
 
 export { MODIFIERS, WITH_FALLBACK };
@@ -36,8 +38,11 @@ const INVALID_CHARS_ALL = /[\\/:*?"<>|\x00-\x1f]/g;
 export const NAME_WARN_LENGTH = 120;
 /** The full output path is kept under this, below Windows' 260. */
 export const PATH_LIMIT = 250;
-/** Room for what the renderer adds: `_hud`, a wav suffix, `_NN`, extension. */
-const RENDER_SUFFIX_MARGIN = 20;
+/** Room for what the renderer adds: `_hud`, a wav suffix, `_NN`, extension,
+ *  and the `.partial` mark the file carries until it is finished (#1439);
+ *  `name_room` in renderer.rs counts the mark too, so a name cut here isn't
+ *  cut again at render for it. */
+const RENDER_SUFFIX_MARGIN = 28;
 
 /** What a template may hold, and what to warn about. A clip name's by
  *  default; the Demo Auditor's renamer (#469) passes its own. */
@@ -150,9 +155,10 @@ export function localDate(unixSecs) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** The highlight's row number, 1-based, stable whatever Min Kills is set to:
- *  its place in the demo's highlights, the rows Highlight Details numbers
- *  with Min Kills at 1 (whose they are is the scan's decision, #573). */
+/** The highlight's row number, 1-based, stable whatever the Player filter
+ *  shows: its place in the demo's highlights, the rows Highlight Details
+ *  numbers with every player shown (whose they are is the scan's decision,
+ *  #573). */
 export function highlightRow(demo, streak) {
   const index = (demo?.streaks || []).indexOf(streak);
   return index === -1 ? 1 : index + 1;
@@ -165,7 +171,8 @@ export function highlightRow(demo, streak) {
  *
  * The team placeholders come from the project's Teams list (#445):
  * `context.projectTeams` resolves them per highlight, or `context.teams`
- * gives them ready-made.
+ * gives them ready-made. `context.useAs` looks a SteamID up in the Players
+ * tab's Use as names (player_alias.js); tests pass their own.
  */
 export function highlightValues(demo, streak, context = {}) {
   const kills = streak?.kills || [];
@@ -179,14 +186,18 @@ export function highlightValues(demo, streak, context = {}) {
   const row = context.row ?? highlightRow(demo, streak);
   const teams = context.teams
     || (context.projectTeams ? teamsForHighlight(demo, streak, context.projectTeams) : {});
+  // The Players tab's Use as name (#686) stands for both the player's name
+  // and the full one; the tag is already out of it.
+  const useAs = (context.useAs || useAsName)(streak?.steam_id);
   const player = streak?.target_player || null;
   return {
-    name: nameWithoutTag(player, sideTag(demo, streak?.faction)),
-    full_name: player,
+    name: useAs || nameWithoutTag(player, sideTag(demo, streak?.faction)),
+    full_name: useAs || player,
     faction: streak?.faction || null,
     enemy_faction: mostCommon(victimSides),
     map,
     kills: String(range.length || streak?.kill_count || 0),
+    headshots: headshotsPlaceholder(streak),
     weapons: distinct(range.map((k) => weaponWord(k[2]))).join('-') || null,
     first_weapon: weaponWord(range[0]?.[2]) || null,
     victims: distinct(victims).join('-') || null,

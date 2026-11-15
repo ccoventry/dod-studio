@@ -9,13 +9,14 @@
 
 import { demoHasTeams } from './project_teams.js';
 
-export const HIGHLIGHTS_VERSION = 1;
+export const HIGHLIGHTS_VERSION = 3;
 
 /**
  * True when `demo` was scanned by this version of highlight detection and
  * has every field a scan now fills: file_key, map_name (#441), teams (#445),
- * signon_maps (#217), and per highlight `spectated` (#247) and
- * `viewdemo_times` (#434).
+ * signon_maps (#217), no_camera_data (#920), damage (#15), and per highlight `spectated`
+ * (#247), `viewdemo_times` (#434), `headshots` (#1128) and `flag_tags`
+ * (#1132).
  */
 export function scanIsCurrent(demo) {
   if (!demo) return false;
@@ -23,8 +24,11 @@ export function scanIsCurrent(demo) {
     && demo.map_name !== undefined
     && demoHasTeams(demo)
     && demo.signon_maps !== undefined
+    && demo.no_camera_data !== undefined
+    && demo.damage !== undefined
     && (demo.highlights_version ?? 0) >= HIGHLIGHTS_VERSION
-    && (demo.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined);
+    && (demo.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined && s.headshots !== undefined
+      && s.flag_tags !== undefined);
 }
 
 /** The demos a rescan would bring up to date; a missing file can't be read. */

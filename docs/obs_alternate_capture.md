@@ -28,8 +28,8 @@
 > - Every obs-websocket request the design needs exists on the install tested.
 >
 > **Not built (as of 2026-10, unchanged):** the Render Studio trim pass (staging item 6, now
-> [#84](https://github.com/ccoventry/dod-studio/issues/84), open), and the wall-clock/disk comparison
-> against the existing path (item 7, no issue) — so the speed claim remains an expectation.
+> [#84](https://github.com/ccoventry/dod-studio/issues/84), open). The wall-clock/disk comparison
+> was measured on 2026-10-26: see "Standard settings, and OBS against HLAE".
 >
 > See "Measured against a live OBS". **One claim was refuted rather than confirmed:** the wall-clock
 > saving is small — the real prize is disk. See "What OBS actually buys".
@@ -49,6 +49,219 @@
 > **Everything below marked *(unverified)* needs an experiment.** The sections that are settled are
 > settled by reading this repository's own code, or — where it says so — by the probe run recorded
 > under "Measured against a live OBS" below.
+
+---
+
+## Standard settings, and OBS against HLAE (2026-10-26, #645)
+
+Measured on one PC (RTX 3070 Ti, 2560x1440, OBS 32.2.2), the 25th Anniversary engine (POST), the
+same three clips from two POV demos by one recorder (m00cat, BAR multi-kills, 64 s of game time),
+the game kept behind other windows the whole time (Studio's default). HLAE ran direct-to-video,
+utvideo, 300 fps.
+
+### What Studio sets (`native/src/obs/provision.rs`, every connect)
+
+| Setting | Value | Why |
+|---|---|---|
+| Output mode | **Advanced** with NVENC (OBS 31+), Simple otherwise | Simple mode's NVENC setup can't keep up with 120 fps at 1440p (#1060, below). Studio writes Advanced mode's encoder file itself |
+| Recording encoder (NVENC) | H.264, preset P4, single pass, no lookahead, no B-frames, constant QP from **OBS Quality** (Standard: 16) | holds 120 fps at 1440p; see "Encoder and quality" below |
+| Recording quality (Simple mode) | Indistinguishable (`HQ`) | constant QP: 16 on NVENC at 2560x1440. A new profile records "Same as stream", **6 Mbps CBR** |
+| Encoder | the one OBS picked for this PC (the profile's default) | NVENC here; undoes a switch to x264. On AMD, Intel or x264 Studio keeps Simple mode: their fast settings are unmeasured |
+| Colour | NV12 (I444 for Max), Rec. 709, limited range | OBS's defaults, and what the render step and editors read an H.264 file as |
+| Container | Hybrid MP4 (OBS 30.2+) | a killed OBS leaves a playable file; the finished file is a plain MP4 (VEGAS opens it) |
+| Replay buffer | off | |
+| Canvas and output | the game's resolution | as before |
+| FPS | Configuration's OBS Capture FPS, **120** by default | 120 holds at 1440p with the Advanced-mode encoder (#1060, below) |
+| `[DoD-Studio] Game Audio` sync offset | **-270 ms** | waveOut's latency, see the sound paragraph below |
+
+Settings written over obs-websocket only take effect when OBS rebuilds its outputs: changing the
+quality preset without that made the next `StartRecord` fail, with OBS's "Failed to start recording"
+box in front of the user's windows. So after a change Studio switches to another profile and back.
+Only Studio's own `[DoD-Studio]` profile is written. NVENC's keyframe interval stays at 250 frames
+(~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+
+**How Studio writes Advanced mode's encoder settings.** obs-websocket can write a profile's
+`basic.ini` but not its `recordEncoder.json`, so Studio writes that file itself. It finds the
+profile's folder by writing a fresh marker (`[DoDStudio] ProvisionMarker`) through obs-websocket,
+which saves `basic.ini` at once, then looking for it under `%APPDATA%\obs-studio\basic\profiles\`
+and a portable OBS's `config\obs-studio\` beside each running `obs64.exe`. The profile round trip
+below then makes OBS read the file. If the folder isn't found, or OBS is older than 31 (its NVENC
+encoder named these settings differently), the profile stays in Simple mode, never Advanced mode on
+OBS's NVENC defaults (10 Mbps CBR). Picking "OBS's own" under OBS Quality switches it back to
+Simple mode too.
+
+The game side, OBS mode only: `fps_override 1; fps_max <2 x OBS FPS>; gl_vsync 0` in the helper cfg,
+and `-wavonly` on the launch line.
+
+### Measured
+
+| | HLAE (direct-to-video, 300 fps) | OBS before (fps_max = OBS rate) | OBS with the settings above (120 fps) |
+|---|---|---|---|
+| Batch wall clock, 3 clips | 6 min 6 s (the target drive's write speed was the limit) | 2 min 3 s | 1 min 55 s |
+| Disk written | 110 GB | 3.3 GB at CQP 16 (about 0.05 GB at 6 Mbps) | 3.3 GB |
+| Render step | needed (ProRes; ~17x the footage length at 300 fps, measured earlier) | optional: Source copy | optional: Source copy |
+| Frames OBS repeated with the game moving | 0 by construction | 1.5-2.1% | 0.07-0.37% |
+| OBS frames skipped (encoding or render lag) | n/a | 0 | 0 |
+| Sound | sound.wav, in sync | **silent** | -32 to +25 ms from HLAE's |
+| Sound at the clip start | cut by `stopsound` at the first frame | ~250 ms of silence (once audible) | runs on unbroken |
+
+**The demo's own freezes are in both.** m00cat's recording freezes for 100-380 ms at a time (lag in
+the recording itself): HLAE's take repeats frames there too (17% of one clip). The "repeated" row
+counts only OBS frames repeated while HLAE's take of the same moment was moving (the two files
+aligned on their freeze patterns).
+
+**Sound was silent behind other windows.** The engine plays through DirectSound, which silences a
+program whose window isn't in front (HLAE's sound.wav is unaffected: it mixes its own). `-wavonly`
+plays through waveOut instead, which keeps playing; its cost is 241-299 ms of latency, which the
+source's -270 ms sync offset takes back out. A hook that keeps DirectSound playing behind other
+windows would keep the lower latency (not built). On PRE (2026-10-26, same clips, 60 fps) the
+sound was +20 to +29 ms from HLAE's with the same -270 ms, so one offset fits both builds on this
+PC; other PCs' waveOut latency is unmeasured (#646). OBS's sound sat about 14 dB below HLAE's
+sound.wav (mean -24..-26 dB against -10..-12 dB).
+
+**OBS ignores a change of the offset away from 0 while the sound plays (#1385).** OBS re-times a
+source's sound to a new sync offset only when the old one was nonzero
+(`libobs/obs-source.c`, `source_output_audio_data`, OBS 33.0.1). From 0 it keeps adding the sound straight after what it had, at the old
+time, until the stream next breaks, and only then does the new offset apply. So 0 to -270 set while
+the game plays left the sound ~280 ms late, or flipped between late and in sync within one take; that
+is what a test harness that switched the offset between 0 and -270 during a launch measured. Studio
+sets the offset in two steps when it is 0 (-1 first, then -270, `obs::audio_sync`), which works while
+the sound plays too. Measured 2026-11-15, 0.8 s pieces of HLAE takes found in the OBS files
+(`ktps8w9-stealth_gskill_rr2_h1`, Brain account, this PC):
+
+| Offset, and how it was set | PRE | POST |
+|---|---|---|
+| 0 | +254 to +296 ms | +258 to +321 ms |
+| -270, set while no game ran (Studio's order) | +8 to +35 ms | -12 to +36 ms |
+| -270, set from 0 while the game played | +271 to +293 ms (ignored) | +265 to +300 ms (ignored) |
+| -270, set from 0 through -1 while the game played | +2 to +35 ms | -3 to +28 ms |
+
+OBS also has to buffer at least the offset's worth of sound; with the offset in place when the sound
+starts it grows its buffering on its own (298 ms, logged as "adding 298 milliseconds of audio
+buffering"). The game's `_snd_mixahead` (0.1 s by default) is about 50 ms of the latency: at 0.05 the
+sound was ~220 ms late with no offset.
+
+**`stopsound` at the record start** (`sys_record_start`) left ~250 ms of silence one second into
+every OBS clip. OBS mode no longer sends it there; the `AUDIO_SYNC` one, which clears the
+fast-forward's sound just before OBS starts, stays.
+
+**240 fps does not hold** at 2560x1440 with Simple mode's encoder preset: OBS output about half the
+frames it drew and reported 95-98% skipped "due to encoding lag". HLAE's 300 fps and its
+blend-to-motion-blur use stay HLAE-only.
+
+**120 fps was at Simple mode's encoder limit, not safely inside it** (fixed by #1060, next
+section). It held in one POST run (above) and
+dropped 12% in the next; on 2026-10-26 evening it dropped 32-95% per clip in five more runs, on
+PRE and POST alike, with `fps_max` at 120 or 240 (so not the game's rate). NVENC sat at 99% the
+whole time. Simple mode's recording encoder is fixed at p5, `hq` tuning, quarter-resolution
+two-pass, 8-frame lookahead and 2 B-frames; ffmpeg with those settings on PRE footage managed
+136 fps on its own, so a game and OBS's own GPU work beside it leave nothing spare. The QP doesn't
+help (153-163 fps at QP 16-23, same preset). **60 fps held on PRE**: no skipped frames, 0-0.4% of
+frames repeated with the game moving.
+
+### Encoder and quality (2026-10-27, #1060)
+
+Same PC, OBS **33.0.0** (the runs above were 32.2.2), POST, the same three clips, game behind other
+windows, OBS Capture FPS 120, `fps_max` 240.
+
+**What was slow.** Simple mode sets only the rate control, profile and QP; everything else is
+`obs-nvenc`'s default: preset P5, quarter-resolution two-pass, 8 frames of lookahead, 2 B-frames.
+Encoding 720 frames of 1440p from memory with ffmpeg on the same NVENC, nothing else running, that
+setup managed **119 fps**; the same QP with preset P4, single pass, no lookahead and no B-frames
+**244 fps**, at the same quality. Presets P1-P3 were faster still (291-335 fps) for no change in
+quality at this QP, P4 leaves the most quality per bit of the fast ones.
+
+**Live, OBS's own log and nvidia-smi** (NVENC busy % while recording, average/peak):
+
+| OBS Quality | Frames skipped (encoding lag) | Frames missed (rendering lag) | NVENC | GPU 3D | Size, MB per minute |
+|---|---|---|---|---|---|
+| OBS's own (Simple, before) | 0 this time; 32-95% per clip in five runs on 32.2.2 | 0 | **96% / 100%** | 39% | 2,880-3,340 |
+| Small (QP 20) | 0 | 0 | 56% / 72% | 40% | 1,590-1,900 |
+| Standard (QP 16), two runs | 0 | 0 | 57% / 75% | 40% | 2,770-3,170 |
+| High (QP 12) | 0 | 0 | 64% / 94% | 39% | 4,170-4,740 |
+| Max (4:4:4, QP 12) | 2-5 per clip, all before the first written frame (no gaps in the file) | 0 | 55% / 79% | 48% | 5,030-5,720 |
+| Standard, `fps_max` 120 | 0 | 0 | 67% / 83% | 29% | as Standard |
+| Max, `fps_max` 120 | 0-5 per clip, as above | 0 | 61% / 77% | 36% | as Max |
+| Standard, game **in front** | 0 | 0 | 57% / 69% | 41% | as Standard |
+
+Every take ran at 119.9-120.0 fps from first frame to last. The sizes are bigger than ffmpeg's on
+the HLAE reference clip (1.2 GB a minute at QP 16) because these clips are BAR fire fights.
+
+**Quality**, offline against HLAE's lossless frames of the same 6 s (an HLAE utvideo take at
+2560x1440 resampled to 120 fps, converted the way OBS converts: NV12, Rec. 709, limited range):
+
+| Setup | Encoder fps (ffmpeg) | VMAF | VMAF, worst 1% of frames | PSNR in RGB |
+|---|---|---|---|---|
+| OBS's own Simple HQ | 119 | 99.67 | 96.31 | 37.59 |
+| Small: H.264 QP 20 | 247 | 99.42 | 95.47 | 37.06 |
+| Standard: H.264 QP 16 | 244 | 99.79 | 96.76 | 37.66 |
+| High: H.264 QP 12 | 236 | 99.89 | 97.46 | 38.08 |
+| H.264 QP 8 | 224 | 99.90 | 97.46 | 38.30 |
+| Max: H.264 4:4:4 QP 12 | 172 | 99.86 | 97.19 | **41.98** |
+| H.264 lossless (4:2:0) | 309 | 99.96 | 98.32 | 38.53 |
+| HEVC QP 16 / 12 | 229 / 226 | 99.74 / 99.87 | 96.43 / 97.19 | 37.63 / 37.96 |
+| HEVC 4:4:4 QP 12 | 164 | 99.83 | 96.93 | 42.47 |
+
+- **4:2:0 is the ceiling, not the QP.** Even lossless 4:2:0 stops at 38.5 dB in RGB, because
+  colour is stored at half resolution: red kill-feed names lose saturation and their edges in every
+  4:2:0 choice, and only 4:4:4 matches HLAE's (stills in `local\review-images\obs-encoder\`,
+  not in the repo). Below QP 12 a 4:2:0 file only grows.
+- **HEVC buys nothing here.** At these quantisers NVENC's HEVC made the same size file at the same
+  quality as H.264, slightly slower, so every choice is H.264. The RTX 3070 Ti has no AV1 encoder
+  (OBS's log: "AV1 supported: false").
+- **Max goes through OBS's slower path.** `obs-nvenc` encodes I444 from system memory, not from a
+  GPU texture, so OBS converts and copies each frame (GPU 3D up about 8 points). It held 120 fps;
+  its few skipped frames fall before recording starts. Some editors can't open 4:4:4 H.264; Studio's
+  render step (FFmpeg to ProRes) can.
+- **Colour range.** OBS's defaults (Rec. 709, limited range) are what an editor assumes of an H.264
+  file; full range in a file read as limited crushes the blacks GoldSrc's dark maps live in, and the
+  other way round washes them out. Studio sets them on every connect.
+
+**Other things tried** for the frame drops, one at a time:
+
+- **Game Capture's capture method.** OBS's log shows `gl shared texture capture successful` for
+  hl.exe, with and without HLAE: the fast GPU-to-GPU path, not the slow CPU copy (`shmem`).
+- **`fps_max` 120 instead of 240** lowered GPU 3D load by about 10 points and made no difference to
+  OBS (0 skipped either way). Kept at twice OBS's rate for the frame pacing measured in #645.
+- **Game in front vs behind** (`ds_capture_stay_behind`): no difference (table above).
+- **Not changed**, for want of an effect to fix once the encoder was: running OBS as administrator
+  (it raises OBS's GPU priority, the usual fix for *rendering* lag, of which there was none), OBS's
+  process priority, Game Capture's frame-rate limit. Windows Game Mode is off on this PC;
+  hardware-accelerated GPU scheduling is at the driver's default (no `HwSchMode` value).
+
+**Does the hook DLL cost OBS anything?** POST, game in front, OBS Standard, the first 60 s of
+`ktps8w8-stealth_ih_saints_h1_p3` (a POV demo; 466 s, 42,399 frames), launched three ways:
+(a) HLAE + the hook DLL, as Studio does; (b) HLAE alone; (c) plain hl.exe.
+
+| | (a) HLAE + hook | (b) HLAE only | (c) plain hl.exe |
+|---|---|---|---|
+| `timedemo`, uncapped (whole demo, average fps) | 231.3, 232.4, 233.1 | 237.8 | 238.2, 238.1, 238.2 |
+| (a) with `ds_hd_enabled 0` | 237.9 | | |
+| (a) with `ds_sound_restore_gunshots 0` / `ds_hud_show_scope 0` | 233.1 / 232.9 (no change) | | |
+| OBS recording, `fps_max` 240: skipped / missed frames | 0 / 0 | 0 / 0 | 0 / 0 |
+| same: NVENC, GPU 3D | 66%, 33% | 66%, 33% | 67%, 33% |
+| OBS recording, `fps_max` 1000: skipped / missed | 0 / 0 | 1 / 1 of 7,356 | 0 / 0 |
+
+The game is CPU-bound near 238 fps at 1440p on this PC (one core busy, the GPU about a third). The
+hook costs about 2.5% of uncapped frame rate (0.1 ms a frame), and all of it is HD textures: with
+`ds_hd_enabled 0` the hook's run matches plain hl.exe. None of it reaches OBS: the encoder and the
+GPU are equally busy in all three, and none dropped frames. A frame-time 1% low wasn't measured:
+PresentMon needs administrator rights (ETW), and only `timedemo`'s average is available without the
+hook.
+
+**OBS Game Capture records the game behind other windows**: its frames match HLAE's of the same
+moment. A minimised game is parked off-screen by `ds_capture_stay_behind`; not measured with OBS.
+
+**The stall watchdog fired live**: `ds_capture_batch stop` plus `disconnect` mid-clip, then 5 min 0 s
+without a marker; the game ended, OBS stopped and the take was kept (5 min long, 0.5 GB: a still
+menu costs little at constant QP). A plain `disconnect` doesn't stall a seeking batch at all: the
+hook moves on to the next clip, the missed `STOP_RECORD` closes the take at the next `AUDIO_SYNC`,
+and OBS ignored the `StartRecord` sent right after that stop (now sent again once).
+
+**OBS's own boxes come to the front**: "Failed to start recording" (above) and "New update
+available" when OBS starts with update checks on (OBS Settings → General). Studio's Launch OBS, and
+its automatic start before a batch, pass `--disable-updater`, so an OBS Studio starts never shows
+the second; an OBS started any other way still can.
 
 ---
 
@@ -139,10 +352,11 @@ risk in the document and it is now closed on evidence rather than on the absence
 target process has exited records black into a file that is valid in every other respect — right
 resolution, right frame rate, right duration, sometimes real audio from another source. Two probe
 recordings were wasted that way before the cause was understood, and the second one looked exactly
-like a hook collision. dod-studio owns the game's lifecycle, and *any* rebuild of the workspace while
-`tauri dev` is watching takes `hl.exe` down with it — including a `git checkout` that touches
-`Cargo.toml`. The game having been launched earlier in a session is not evidence that it is running
-now, which is why `probe_obs` checks and says so.
+like a hook collision. dod-studio owns the game's lifecycle, and at the time *any* rebuild of the
+workspace while `tauri dev` was watching took `hl.exe` down with it — including a `git checkout` that
+touches `Cargo.toml` (a dev build now starts the game outside cargo's job, so it survives, #545). The
+game having been launched earlier in a session is not evidence that it is running now, which is why
+`probe_obs` checks and says so.
 
 ---
 
@@ -310,6 +524,42 @@ The cost is that the recording contains the pre-roll and post-roll as head and t
 "Does Render Studio still run" below — the user can simply trim it in their editor, which is why the
 render pass stays *optional* here rather than becoming a requirement.
 
+### The game waits for the recording (#1109)
+
+The lead is a margin, not a guarantee: a slow OBS, a retried `StartRecord` or a clamped lead could
+still start the file after the clip's first frame. So with the hook running the batch (Seek Between
+Clips), the batch file has a `ds_capture_batch wait_for_recording` line at every `AUDIO_SYNC`
+(`runtime_batch`): the hook pauses the demo there and says `BATCH_WAITING_FOR_RECORDING` on the
+events pipe, Studio starts OBS on the `AUDIO_SYNC` marker as before, and once `OUTPUT_STARTED` is in
+it sends `ds_capture_batch recording` and the demo plays on. The lead-in then plays its full second
+with OBS already recording, however slow the start was. The pause sits at the head of the file as a
+still frame, inside the lead-in.
+
+- **No go-ahead in 20 s** with Studio still there: the clip plays on (Studio's own start gives up
+  after about 16 s, so the answer was lost). **Studio gone** from the events pipe for 10 s: the
+  batch ends, keeping its clips, as the space hold does (#885): without Studio nothing starts or
+  stops OBS.
+- **The safety net.** Studio holds the arrival of `OUTPUT_STARTED` against the arrival of the
+  clip's `START_RECORD` marker, both stamped when read. A recording that started after the clip did
+  (a hook DLL without the wait, a patched batch, a wait that timed out) is missing the clip's
+  opening: the take is not counted as captured, Render While Capturing skips it, and Last Batch says
+  by how many ms.
+
+**Measured (#1109, 2026-10-30, POST and PRE, 120 fps, 1280x720, one m00cat demo, 27 clips in 10 batches):**
+
+- **Cost:** the game waited 68-112 ms per clip (hook log; 79-87 ms on PRE), OBS's own start.
+- **Demo clock:** the demo player's clock reads the same at the pause and at the resume (783.644 and
+  783.644), and the takes are the same length with and without the wait (20.358 s both), so nothing
+  is skipped or replayed.
+- **Still frame:** none at the head of any take: OBS's first frame comes with the go-ahead, a few ms
+  after `OUTPUT_STARTED`, so the file starts on the moving lead-in, a second ahead of the clip.
+- **Sound:** the same four clips recorded with and without the wait line up within the run-to-run
+  spread (picture against sound, take against take: -15 to -12 ms on POST, +8 to +19 ms on PRE;
+  two runs both with the wait differ by up to ±14 ms), so the pause moves neither against the other.
+- **Slow start:** with OBS's start held back 1.5 s, the game waited 1573-1584 ms and both takes
+  were whole. Without the wait, the same start left both takes 589-605 ms late, and Last Batch
+  marked them. Held back 25 s, the wait gave up at 20 s and the take was marked 4066 ms late.
+
 ## The output, and the recommendation that keeps the rest of the pipeline
 
 OBS writes one file wherever its profile points, named by its own filename formatting. `StopRecord`
@@ -400,14 +650,15 @@ Three things it breaks that the existing path cannot:
 1. **Desktop Audio captures the whole machine.** A Discord notification during a clip is in the clip.
    Application Audio Capture targeting `hl.exe` avoids this and is the right recommendation, with the
    caveat that it is a newer Windows capture method. *(Unverified against this setup.)*
-2. **`stopsound` fires audibly.** `sys_record_start` is `mirv_recordmovie_start; stopsound`, and
-   `sys_sound` fires a `stopsound` a second before it. Under HLAE those land outside or at the very
-   edge of the captured audio; under OBS the microphone is already open, so a `stopsound` cutting
-   sustained sounds is *recorded*. Whether the pre-roll's `stopsound` is needed at all once nothing is
-   being time-warped through the record window is worth asking — it exists to fix fast-forward audio
-   corruption, and Option A starts OBS before the flush anyway, putting it in the discarded head.
+2. **`stopsound` fires audibly.** In HLAE's modes `sys_record_start` is
+   `mirv_recordmovie_start; stopsound`, and `sys_sound` fires a `stopsound` a second before it. Under
+   OBS the recording is already running at the record start, and that `stopsound` left ~250 ms of
+   silence in every clip (measured 2026-10-26), so OBS mode's `sys_record_start` is only an echo now.
+   The `sys_sound` one stays: it clears the fast-forward's sound as OBS starts.
 3. **Nothing enforces that audio was captured.** A muted source produces a perfectly valid file.
-   Hence the audio-stream test in the predicate above.
+   Hence the audio-stream test in the predicate above. It doesn't catch silence: with the game behind
+   other windows every clip was digital silence until OBS mode started the game with `-wavonly`
+   (see "Standard settings, and OBS against HLAE").
 
 ---
 
@@ -424,7 +675,7 @@ anything survive to send `StopRecord`?** Where nothing does, OBS records until t
 | `quit` in console | hl.exe gone, no exit trigger | Same path, via the crash branch |
 | ALT+F4 | Identical to `quit` | Same |
 | End Process hl.exe | Identical to `quit` | Same |
-| **`disconnect` in console** | **Nothing — hl.exe is alive and idle at the menu** | **Marker-silence watchdog** |
+| **`disconnect` in console** | **Nothing — hl.exe is alive and idle at the menu** (a seeking batch moves on to its next clip instead, measured 2026-10-26) | **Marker-silence watchdog**, fired live at 5 min 0 s |
 | Demo fails to load, or ends early | Same as `disconnect` | Same watchdog |
 | hl.exe freezes | Same as `disconnect` | Same watchdog |
 | OBS closed or crashes | Requests start failing | One reconnect, then abort the batch |
@@ -451,6 +702,11 @@ is on the way *back in* — `obs::recover` asks OBS at start-up whether it is re
 shaped like `<take>/take0000/all`, which is a path only this app produces, and offers to stop it and
 fold the file. Anything else is somebody's own recording and is left alone.
 
+That folded take is not the clip as planned: nobody stopped it at the clip's end. So the session
+writes `dodstudio_obs_take.json` into the block folder while OBS records (`obs::take_state`), and
+removes it at the stop; a late start (#1109) is kept in it after the stop. The next start's catch-up
+(#20) reads it and counts neither take as captured.
+
 Two smaller ones found on the way:
 
 - **An OBS killed mid-recording truncates a plain MP4 — it does not destroy it.** Measured on OBS
@@ -473,19 +729,21 @@ Two smaller ones found on the way:
 
 - ~~**`qconsole.log` flush cadence.**~~ **Answered 2026-08-28.** 21–40 ms across a real 17-block
   batch. The `screenshot` fallback is not needed and was never built.
-- **Frame pacing under real playback.** *(No issue.)* The delivery test was taken at the menu, where nothing is
-  moving. Whether a demo playing at `host_framerate 0` on a loaded machine produces dropped or
-  duplicated frames is a different question, and it is the one that decides how good this path
-  actually looks. **Still open** — the captured clips decode clean and run the right duration, which
-  says nothing about frames OBS silently duplicated to fill time.
+- ~~**Frame pacing under real playback.**~~ **Measured 2026-10-26** (#645): 1.5-2.1% of frames
+  repeated while the game moved with `fps_max` at OBS's rate, 0.07-0.37% with the game at twice the
+  rate and vsync off, which OBS mode now sets. See "Standard settings, and OBS against HLAE".
 - ~~**Which container.**~~ **Settled, and the worry was overstated.** A plain MP4 from an OBS killed
   mid-recording is *truncated, not destroyed*: measured, it played, decoded to the moment OBS died,
   and reported only `partial file` with one broken audio frame. So the container choice is a
   preference — MKV and the hybrid/fragmented variants lose nothing, plain MP4 loses the tail — not a
   correctness gate. What remains is that MP4 needs a second frame-count reader beside
   `avi_frame_count`, while Custom Output writing `utvideo` into an AVI reuses the existing one.
-- **Is `stopsound` still wanted in the record window** *(no issue)* once nothing is being time-warped through it?
-- **What happens when the machine cannot keep up.** Promoted from a nicety to the question that
+- ~~**Is `stopsound` still wanted in the record window**~~ **No** (2026-10-26): it left ~250 ms of
+  silence at every clip's start, and OBS mode no longer sends it there.
+- **What happens when the machine cannot keep up.** Partly measured 2026-10-26: at 240 fps, 2560x1440,
+  OBS output about half its frames and reported 95-98% skipped for encoding lag, and Studio's
+  per-block warning (`ObsSession::warn_if_frames_dropped`, over `GetStats`) fired for every block.
+  A user-facing test is #646. Promoted from a nicety to the question that
   decides who this path is usable for — see the break-even table above: the machines where OBS saves
   the most wall-clock are the machines where OBS drops the most frames. Dropped frames are invisible
   in the output file's metadata: the duration is right and the frames are simply missing.
@@ -496,12 +754,13 @@ Two smaller ones found on the way:
   `ObsSession::start` fails the batch on an active stream rather than warning, because the failure
   would be visible to the user's audience rather than to them. It refuses an already-running
   recording the same way.
-- **The stall watchdog is the one failure path never triggered live** *(no issue)*. Everything else in the table
-  above has been tested against a real batch. Reproducing this one means a demo that fails to load
-  with hl.exe still alive, plus a five-minute wait; it did arm correctly off a real run in the
-  activity log, which is weaker evidence than the rest.
+- ~~**The stall watchdog is the one failure path never triggered live.**~~ **Fired live 2026-10-26**
+  (#645): `ds_capture_batch stop` and `disconnect` mid-clip, 5 min 0 s later the game was ended and
+  OBS stopped, the take kept.
 - **Is `OBS_TAKE_SEPARATION_SECONDS` right at sane settings?** It is 2.0 s (> 1.065 s, tested in
   `native/src/obs/client.rs`); the HLAE-side `MIN_TAKE_SEPARATION_SECONDS` is measured at 0.5 s
   ([#9](https://github.com/ccoventry/dod-studio/issues/9)), and the OBS re-test at a sustainable
   frame rate is still open there.
-- **Measure wall-clock and disk against a real batch** (staging item 7). *(No issue.)*
+- ~~**Measure wall-clock and disk against a real batch**~~ **Measured 2026-10-26**: 3 clips took
+  6 min 6 s and 110 GB with HLAE (300 fps, utvideo) against 1 min 55 s and 3.3 GB with OBS (120 fps),
+  before HLAE's render step.

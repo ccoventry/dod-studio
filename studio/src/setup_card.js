@@ -1,5 +1,5 @@
 // setup_card.js
-// The Capture page's setup checklist (#599): "Finish setting up, 3 of 6",
+// The Highlights page's setup checklist (#599): "Finish setting up, 3 of 6",
 // one row per step with its fix button. Shown while something Start Capture
 // Batch needs is missing, gone once it is all set. Draws from a snapshot and
 // calls back for every action, so it does no IPC of its own

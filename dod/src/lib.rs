@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 //! Parsers, mappers, and other utilities for reading data structures in Day of Defeat demo files.
 
 #![allow(dead_code)]
@@ -15,6 +17,9 @@ use nom::{
 use std::convert::Infallible;
 use std::str::from_utf8;
 use std::time::Duration;
+
+pub mod map_entities;
+pub mod map_sounds;
 
 #[cfg(test)]
 mod tests;
@@ -220,6 +225,17 @@ impl Weapon {
             Self::MillsBomb | Self::Mk2Grenade | Self::StickGrenade
         )
     }
+
+    /// A rocket launcher: its round can kill after its shooter has died.
+    pub fn is_rocket(&self) -> bool {
+        matches!(self, Self::Bazooka | Self::Panzerschreck | Self::Piat)
+    }
+
+    /// A weapon whose shot flies on its own, grenades and rockets, so its
+    /// kill can come after its shooter's death (#664, #1091).
+    pub fn is_projectile(&self) -> bool {
+        self.is_grenade() || self.is_rocket()
+    }
 }
 
 /// Ammunition used by a [Weapon].
@@ -396,10 +412,43 @@ pub struct ClCorpse {
 ///     CObjectCapture::area_SendStatus = {m_iAreaIndex, -1, sz_HudIcon}
 ///     CObjectCapture::area_SetIndex = {m_iAreaIndex, -1, sz_HudIcon}
 /// ```
+///
+/// What the status byte means, from `dod.so` and `client.so` (#1132): the
+/// message goes to one player (`MSG_ONE`), so a POV demo carries it for its
+/// recorder alone and an HLTV demo only the icons and the reset.
 #[derive(Debug)]
 pub struct ClientAreas {
     pub icon_index: u8,
+    pub status: ClientAreaStatus,
     pub hud_icon: Option<String>,
+}
+
+/// The second byte of [ClientAreas].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientAreaStatus {
+    /// 0: the player left the area (`HandleSignals`).
+    Left,
+    /// 1: the player is touching an area their team can capture, sent on
+    /// every touch while they stand in it (`SetClientAreaIcon`).
+    Inside,
+    /// 2: every area is cleared, at a round reset (`LevelChangeResets`).
+    ClearAll,
+    /// 255 (-1 as a byte): the area's HUD icon name follows.
+    Icon,
+    /// Any other value.
+    Other(u8),
+}
+
+impl From<u8> for ClientAreaStatus {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::Left,
+            1 => Self::Inside,
+            2 => Self::ClearAll,
+            255 => Self::Icon,
+            other => Self::Other(other),
+        }
+    }
 }
 
 /// - Length: 1
@@ -1188,6 +1237,7 @@ fn client_areas(i: &[u8]) -> IResult<&[u8], ClientAreas> {
         i,
         ClientAreas {
             icon_index,
+            status: ClientAreaStatus::from(flags),
             hud_icon,
         },
     ))

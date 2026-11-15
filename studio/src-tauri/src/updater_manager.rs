@@ -1,5 +1,8 @@
+use crate::download_progress::DownloadMeter;
+use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -59,7 +62,16 @@ pub async fn check_for_update(
         .build()
         .map_err(crate::messages::failed_to_build_updater)?;
 
-    let update = updater.check().await.map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| {
+        native::log_markdown(&crate::messages::update::update_check_failed(&channel, &e));
+        e.to_string()
+    })?;
+    native::log_markdown(&crate::messages::update::update_check_result(
+        &channel,
+        update
+            .as_ref()
+            .map(|u| (u.current_version.as_str(), u.version.as_str())),
+    ));
 
     match update {
         Some(update) => {
@@ -70,17 +82,24 @@ pub async fn check_for_update(
                 pub_date: update.date.map(|d| d.to_string()),
             };
             let pending = Arc::clone(&state.pending);
-            let mut guard = pending.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&pending);
             *guard = Some(update);
             Ok(Some(info))
         }
         None => {
             let pending = Arc::clone(&state.pending);
-            let mut guard = pending.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&pending);
             *guard = None;
             Ok(None)
         }
     }
+}
+
+/// The update a check found, left in place: a failed download re-enables
+/// Download & Install (`updater_pane.js`), and a retry needs it still there.
+/// Taking it out made every retry fail with "no update available".
+fn pending_update<T: Clone>(slot: &Mutex<Option<T>>) -> Option<T> {
+    lock_or_recover(slot).clone()
 }
 
 #[tauri::command]
@@ -94,35 +113,68 @@ pub async fn download_and_install_update(
     if cfg!(debug_assertions) {
         return Err(crate::messages::LOCAL_BUILD_CANNOT_INSTALL_UPDATE.to_string());
     }
-    let pending = Arc::clone(&state.pending);
-    let update = pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .take()
-        .ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
+    let update =
+        pending_update(&state.pending).ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
 
-    let progress_app = app.clone();
-    let mut downloaded: u64 = 0;
-    update
-        .download_and_install(
-            move |chunk_length, content_length| {
-                downloaded += chunk_length as u64;
-                let _ = progress_app.emit(
-                    "update_download_progress",
-                    serde_json::json!({
-                        "downloaded": downloaded,
-                        "total": content_length,
-                    }),
-                );
+    // Download, then install, rather than `download_and_install`: its
+    // download-finished callback fires before the signature check and the
+    // install, too early for "Installing" or "Ready" (#957).
+    let mut meter = DownloadMeter::default();
+    native::log_markdown(&crate::messages::update::update_downloading(
+        &update.version,
+    ));
+    let bytes = update
+        .download(
+            |chunk_length, content_length| {
+                if let Some(p) = meter.chunk(chunk_length as u64, content_length, Instant::now()) {
+                    let _ = app.emit("update_download_progress", p);
+                }
             },
-            move || {
-                let _ = app.emit("update_ready", ());
-            },
+            || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            native::log_markdown(&crate::messages::update::update_download_failed(&e));
+            e.to_string()
+        })?;
+    // The throttle may have held back the last chunk: the bar ends full.
+    let _ = app.emit("update_download_progress", meter.progress());
+    let _ = app.emit("update_installing", ());
+    // On Windows this starts the installer and quits Studio, so nothing after
+    // it runs there.
+    native::log_markdown(crate::messages::update::UPDATE_DOWNLOADED_INSTALLING);
+    update.install(bytes).map_err(|e| {
+        native::log_markdown(&crate::messages::update::update_install_failed(&e));
+        e.to_string()
+    })?;
+    let _ = app.emit("update_ready", ());
 
     Ok(())
+}
+
+/// Earlier versions' release notes for the What's new window (#1013):
+/// GitHub's release list, saved in the app's data folder, or that saved copy
+/// when GitHub can't be read. `offline` reads only the saved copy, for a
+/// Studio whose update checks are off. Off the async runtime: it waits on the
+/// network.
+#[tauri::command]
+pub async fn release_history(
+    offline: bool,
+) -> Result<native::shared::release_history::History, String> {
+    use native::shared::release_history as history;
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let dir = native::shared::paths::get_appdata_dir();
+        if offline {
+            history::History {
+                releases: history::read_cache(&dir),
+                from_cache: true,
+                error: None,
+            }
+        } else {
+            history::fetch_or_cached(history::RELEASES_URL, &dir)
+        }
+    }))
+    .await
 }
 
 /// `cfg!(debug_assertions)` is compile-time info baked into the binary — the
@@ -147,6 +199,21 @@ pub fn is_debug_build() -> bool {
 #[tauri::command(async)]
 pub fn local_git_branch() -> Option<String> {
     git_branch_from(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+/// Whether this build uses Configuration's GoldSrc Hooks DLL override: a
+/// debug build, or one made on this PC (its source tree is readable, as for
+/// [`local_git_branch`]). An installed release always runs the hook DLL it
+/// ships with, so an override saved while testing can't apply out of sight
+/// (the row is hidden there, `hook_dll_row.js`).
+#[tauri::command(async)]
+pub fn hook_dll_override_allowed() -> bool {
+    cfg!(debug_assertions) || local_git_branch().is_some()
+}
+
+/// `path` when this build uses the override, else `None` (the bundled DLL).
+pub(crate) fn allowed_hook_dll(path: Option<String>) -> Option<String> {
+    path.filter(|_| hook_dll_override_allowed())
 }
 
 /// Walks up from `start` to the nearest `.git` and reads its `HEAD`.
@@ -256,4 +323,19 @@ mod git_branch_tests {
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
+}
+
+#[cfg(test)]
+mod pending_update_tests {
+    use super::pending_update;
+    use std::sync::Mutex;
+
+    /// A download that fails leaves the update for Download & Install's retry.
+    #[test]
+    fn reading_the_pending_update_leaves_it_for_a_retry() {
+        let slot = Mutex::new(Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&Mutex::new(None::<&str>)), None);
+    }
 }

@@ -433,6 +433,25 @@ fn weapon_is_grenade() {
 }
 
 #[test]
+fn weapon_is_projectile() {
+    let projectiles: Vec<Weapon> = (0..=43u8)
+        .map(|id| weapon(&[id]).unwrap().1)
+        .filter(Weapon::is_projectile)
+        .collect();
+    assert_eq!(
+        projectiles,
+        vec![
+            Weapon::Mk2Grenade,
+            Weapon::StickGrenade,
+            Weapon::Bazooka,
+            Weapon::Panzerschreck,
+            Weapon::Piat,
+            Weapon::MillsBomb
+        ]
+    );
+}
+
+#[test]
 fn ammo_ids() {
     let cases = [
         (0u8, "Unknown"),
@@ -592,6 +611,17 @@ fn client_areas_without_icon() {
         assert_eq!(m.icon_index, 4);
         assert_eq!(m.hud_icon, None);
     }
+}
+
+#[test]
+fn client_areas_keeps_the_status() {
+    use crate::ClientAreaStatus::*;
+    for (flag, status) in [(0u8, Left), (1, Inside), (2, ClearAll), (254, Other(254))] {
+        let m = parse_as!("ClientAreas", [4u8, flag], ClientAreas);
+        assert_eq!(m.status, status);
+    }
+    let m = parse_as!("ClientAreas", [4u8, 255, 0], ClientAreas);
+    assert_eq!(m.status, Icon);
 }
 
 #[test]

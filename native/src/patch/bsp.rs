@@ -107,51 +107,105 @@ pub struct Bsp {
     bounds: Vec<([f32; 3], [f32; 3])>,
 }
 
-fn rd_i32(b: &[u8], at: usize) -> Result<i32, String> {
-    b.get(at..at + 4)
-        .map(|s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-        .ok_or_else(|| format!("truncated at byte {}", at))
+/// Why a map file could not be read or parsed. `Display` is the text the
+/// callers showed before this type existed (`messages::bsp`), so logs and the
+/// Maps list read the same (#1382).
+#[derive(Debug)]
+pub enum BspError {
+    /// The file is shorter than the BSP header.
+    ShorterThanHeader,
+    /// The header's version is not the GoldSrc one ([`BSP_VERSION`]).
+    NotGoldSrc { version: i32 },
+    /// A read ran off the end of the file or lump, at this byte.
+    Truncated { at: usize },
+    /// A lump's offset and length point past the end of the file.
+    LumpPastEnd { index: usize },
+    /// The map file could not be read while loading it for its geometry.
+    Read {
+        path: String,
+        source: std::io::Error,
+    },
+    /// The map file could not be read while computing its checksum. A
+    /// separate variant only because its text has no "could not read" prefix.
+    ReadForChecksum {
+        path: String,
+        source: std::io::Error,
+    },
 }
 
-fn rd_u32(b: &[u8], at: usize) -> Result<u32, String> {
+impl std::fmt::Display for BspError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShorterThanHeader => f.write_str(crate::messages::bsp::SHORTER_THAN_HEADER),
+            Self::NotGoldSrc { version } => f.write_str(
+                &crate::messages::bsp::not_goldsrc_version(version, BSP_VERSION),
+            ),
+            Self::Truncated { at } => f.write_str(&crate::messages::bsp::truncated_at(at)),
+            Self::LumpPastEnd { index } => f.write_str(&crate::messages::bsp::lump_past_end(index)),
+            Self::Read { path, source } => {
+                f.write_str(&crate::messages::bsp::could_not_read(path, source))
+            }
+            Self::ReadForChecksum { path, source } => {
+                f.write_str(&crate::messages::labeled(path, source))
+            }
+        }
+    }
+}
+
+impl std::error::Error for BspError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } | Self::ReadForChecksum { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+fn rd_i32(b: &[u8], at: usize) -> Result<i32, BspError> {
+    b.get(at..at + 4)
+        .map(|s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+        .ok_or(BspError::Truncated { at })
+}
+
+fn rd_u32(b: &[u8], at: usize) -> Result<u32, BspError> {
     rd_i32(b, at).map(|v| v as u32)
 }
 
-fn rd_i16(b: &[u8], at: usize) -> Result<i16, String> {
+fn rd_i16(b: &[u8], at: usize) -> Result<i16, BspError> {
     b.get(at..at + 2)
         .map(|s| i16::from_le_bytes([s[0], s[1]]))
-        .ok_or_else(|| format!("truncated at byte {}", at))
+        .ok_or(BspError::Truncated { at })
 }
 
-fn rd_u16(b: &[u8], at: usize) -> Result<u16, String> {
+fn rd_u16(b: &[u8], at: usize) -> Result<u16, BspError> {
     rd_i16(b, at).map(|v| v as u16)
 }
 
-fn rd_f32(b: &[u8], at: usize) -> Result<f32, String> {
+fn rd_f32(b: &[u8], at: usize) -> Result<f32, BspError> {
     rd_u32(b, at).map(f32::from_bits)
 }
 
-fn rd_vec3(b: &[u8], at: usize) -> Result<[f32; 3], String> {
+fn rd_vec3(b: &[u8], at: usize) -> Result<[f32; 3], BspError> {
     Ok([rd_f32(b, at)?, rd_f32(b, at + 4)?, rd_f32(b, at + 8)?])
 }
 
 /// One lump's byte range, validated against the file length so every later read
 /// is inside the file.
-fn lump(bytes: &[u8], index: usize) -> Result<&[u8], String> {
+fn lump(bytes: &[u8], index: usize) -> Result<&[u8], BspError> {
     let at = 4 + index * 8;
     let offset = rd_i32(bytes, at)? as usize;
     let length = rd_i32(bytes, at + 4)? as usize;
     bytes
         .get(offset..offset + length)
-        .ok_or_else(|| format!("lump {} runs past the end of the file", index))
+        .ok_or(BspError::LumpPastEnd { index })
 }
 
 /// Reads a lump as a fixed-stride array.
 fn entries<T>(
     data: &[u8],
     stride: usize,
-    mut parse: impl FnMut(&[u8], usize) -> Result<T, String>,
-) -> Result<Vec<T>, String> {
+    mut parse: impl FnMut(&[u8], usize) -> Result<T, BspError>,
+) -> Result<Vec<T>, BspError> {
     let n = data.len() / stride;
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
@@ -161,16 +215,13 @@ fn entries<T>(
 }
 
 impl Bsp {
-    pub fn parse(bytes: &[u8]) -> Result<Bsp, String> {
+    pub fn parse(bytes: &[u8]) -> Result<Bsp, BspError> {
         if bytes.len() < HEADER_SIZE {
-            return Err("file is shorter than a BSP header".to_string());
+            return Err(BspError::ShorterThanHeader);
         }
         let version = rd_i32(bytes, 0)?;
         if version != BSP_VERSION {
-            return Err(format!(
-                "BSP version {} is not the GoldSrc version {}",
-                version, BSP_VERSION
-            ));
+            return Err(BspError::NotGoldSrc { version });
         }
 
         let planes = entries(lump(bytes, LUMP_PLANES)?, 20, |b, at| {
@@ -262,9 +313,11 @@ impl Bsp {
         Ok(bsp)
     }
 
-    pub fn from_file(path: &std::path::Path) -> Result<Bsp, String> {
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("could not read {}: {}", path.display(), e))?;
+    pub fn from_file(path: &std::path::Path) -> Result<Bsp, BspError> {
+        let bytes = std::fs::read(path).map_err(|source| BspError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
         Bsp::parse(&bytes)
     }
 
@@ -682,12 +735,14 @@ fn edge_clearance(poly: &[[f32; 3]], p: &[f32; 3]) -> f32 {
 /// The TEXTURES lump is a directory: a count, then one offset per texture
 /// relative to the lump start, then the miptex headers those point at. An
 /// offset of -1 means the texture lives in a WAD and only the name is present.
-fn parse_texture_names(data: &[u8]) -> Result<Vec<String>, String> {
+fn parse_texture_names(data: &[u8]) -> Result<Vec<String>, BspError> {
     if data.len() < 4 {
         return Ok(Vec::new());
     }
     let count = rd_u32(data, 0)? as usize;
-    let mut out = Vec::with_capacity(count);
+    // The reader stops at the first offset past the lump, so reserve no more
+    // than the lump can hold: a corrupt count must not abort on allocation (#1236).
+    let mut out = Vec::with_capacity(count.min(data.len() / 4));
     for i in 0..count {
         let at = 4 + i * 4;
         let Ok(offset) = rd_i32(data, at) else {
@@ -1014,9 +1069,9 @@ const LUMP_ENTITIES: usize = 0;
 /// finalising it here would miss by exactly `0xFFFFFFFF`.
 ///
 /// Verified against 390 first-person demos: every one matches its own map.
-pub fn map_checksum(bytes: &[u8]) -> Result<u32, String> {
+pub fn map_checksum(bytes: &[u8]) -> Result<u32, BspError> {
     if bytes.len() < HEADER_SIZE {
-        return Err("file is shorter than a BSP header".to_string());
+        return Err(BspError::ShorterThanHeader);
     }
 
     let mut table = [0u32; 256];
@@ -1045,8 +1100,11 @@ pub fn map_checksum(bytes: &[u8]) -> Result<u32, String> {
 }
 
 /// `map_checksum` for a map on disk.
-pub fn map_checksum_of_file(path: &std::path::Path) -> Result<u32, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+pub fn map_checksum_of_file(path: &std::path::Path) -> Result<u32, BspError> {
+    let bytes = std::fs::read(path).map_err(|source| BspError::ReadForChecksum {
+        path: path.display().to_string(),
+        source,
+    })?;
     map_checksum(&bytes)
 }
 

@@ -1,6 +1,7 @@
 // running_game_guard.js
 // Before DoD Studio reuses or starts the game (#666): a running game started
-// with other launch settings (another install, game folder or resolution) would be reused
+// with other launch settings (another install, game folder, resolution or
+// hook DLL, #1143) would be reused
 // as it is, because the game only reads them when it starts. This asks to
 // close it and start again, naming what differs. Called by Launch Preview,
 // Launch Game, Start Capture Batch and Review highlights before their own
@@ -11,14 +12,27 @@ import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
-/** The confirm's list: both hl.exe paths, when the install differs. */
+/** The confirm's list: both hl.exe paths when the install differs, and
+ *  both hook DLLs (path and build) when the hook DLL does (#1143). */
 export function runningGameDetails(check) {
-  if (!check.differs.includes('install')) return [];
   const S = STRINGS.RUNNING_GAME;
-  return [
-    { primary: S.RUNNING_EXE, secondary: check.running.exe },
-    { primary: S.STUDIO_EXE, secondary: check.wanted.exe },
-  ];
+  const rows = [];
+  if (check.differs.includes('install')) {
+    rows.push(
+      { primary: S.RUNNING_EXE, secondary: check.running.exe },
+      { primary: S.STUDIO_EXE, secondary: check.wanted.exe },
+    );
+  }
+  if (check.differs.includes('hook_dll') || check.differs.includes('hook_build')) {
+    rows.push(
+      { primary: S.RUNNING_HOOK, secondary: S.hookLine(check.running) },
+      { primary: S.STUDIO_HOOK, secondary: S.hookLine(check.wanted) },
+    );
+  }
+  if (check.differs.includes('hook_unreadable') && check.wanted.hook_dll) {
+    rows.push({ primary: S.STUDIO_HOOK, secondary: S.hookLine(check.wanted) });
+  }
+  return rows;
 }
 
 /**
@@ -29,14 +43,16 @@ export function runningGameDetails(check) {
  *
  * `request`: launch settings not saved yet (see checkRunningGame).
  * `button`: disabled while the game closes.
+ * `switching`: asked by Configuration's install list (#931), which closes
+ * the game to switch installs rather than to start it again.
  */
-export async function closeGameWithOtherSettings(request = null, { button = null } = {}) {
+export async function closeGameWithOtherSettings(request = null, { button = null, switching = false } = {}) {
   const check = await checkRunningGame(request);
   if (!check || check.state !== 'mismatch') return true;
   const S = STRINGS.RUNNING_GAME;
-  const ok = await themedConfirm(S.message(check), {
-    title: S.TITLE,
-    confirmLabel: S.CLOSE_AND_RESTART,
+  const ok = await themedConfirm(switching ? S.switchMessage(check) : S.message(check), {
+    title: switching ? S.SWITCH_TITLE : S.TITLE,
+    confirmLabel: switching ? S.CLOSE_AND_SWITCH : S.CLOSE_AND_RESTART,
     cancelLabel: S.CANCEL,
     details: runningGameDetails(check),
   });

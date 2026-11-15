@@ -5,17 +5,49 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log::error!/eprintln!
-// diagnostics stay inline at their call site, same as strings.js leaves
-// console.log/console.error alone. Issue #33, track 2 — a parallel catalog
+// as a toast/dialog string, and, since #237's decision, the activity-log
+// lines too (moved area by area, e.g. `messages/capture.rs`). Per-item
+// eprintln! diagnostics stay inline. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
 // Covers every Tauri command file's error/status strings: lib.rs,
 // capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
 // hd_manager.rs, updater_manager.rs, settings_manager.rs, and
-// dir_browser.rs. Not covered: native/analysis errors that bubble straight
-// through Tauri commands unwrapped (a separate crate — see issue #650).
+// dir_browser.rs. Errors built in `native` and `analysis` are wrapped here
+// too, as `failed_to_<action>(err)` around the lower crate's text (#650).
+// Where the frontend already names the action around the error
+// (`STRINGS.IPC.hdBuildFailed` and the like), the command passes the cause
+// through unwrapped rather than stacking two prefixes: the demo split and its
+// map read (`SPLIT.splitFailed`, `detailsFailed`, `queueSplitFailed`), the
+// menu size (`menuScaleFailed`), HLAE's FFmpeg link
+// (`HLAE_FFMPEG_LINK_FAILED`), the demo links list (`listFailed`), the map
+// download (`downloadFailedToast`), the take checks, previews and deletion
+// (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
+// `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
+// caller before wrapping.
+
+pub mod batch;
+pub mod blender;
+pub mod capture;
+pub mod catch_up;
+pub mod clip_relink;
+pub mod combine;
+pub mod game_process;
+pub mod hd;
+pub mod open_with;
+pub mod overview;
+pub mod preview;
+pub mod preview_start;
+pub mod render;
+pub mod repair;
+pub mod review;
+pub mod scan;
+pub mod settings;
+pub mod take_cleanup;
+pub mod take_delete;
+pub mod update;
+pub mod vegas;
 
 use std::fmt::Display;
 use std::path::Path;
@@ -106,9 +138,9 @@ pub fn analyzer_error(err: impl Display) -> String {
 
 pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
     format!(
-        "Could not resolve an FFmpeg from \"{}\". Set Render Studio's FFmpeg path to a real \
-         ffmpeg.exe first — HLAE's ini needs an absolute path and cannot use a bare command \
-         name.",
+        "Could not find FFmpeg from \"{}\": no such file, and no ffmpeg.exe on the Windows \
+         PATH. Pick your ffmpeg.exe first (Setup's FFmpeg step, or Configuration > Paths > \
+         FFmpeg Override Path): HLAE's ini needs a full path.",
         ffmpeg_path
     )
 }
@@ -145,6 +177,8 @@ pub fn hd_not_python(path: &str) -> String {
 
 pub const CAPTURE_BATCH_ALREADY_RUNNING: &str = "Capture batch already in progress";
 pub const NO_STREAKS_IN_PAYLOAD: &str = "No streaks in payload";
+pub const AGR_FPS_REQUIRED: &str =
+    "AGR FPS is empty: set it on Configuration > Output Format before starting an AGR capture.";
 
 pub fn configure_paths_before(action: &str) -> String {
     format!(
@@ -176,6 +210,35 @@ pub fn obs_orphan_recovery_failed(err: impl Display) -> String {
     format!("OBS orphan recovery failed to run: {}", err)
 }
 
+// ── OBS capture test (#646) ──
+pub const OBS_TEST_NO_DEMO: &str = "The OBS capture test's demo isn't in DoD Studio's install folder. Reinstall DoD Studio to get it back.";
+
+pub fn obs_test_unreadable_demo(path: &Path, err: impl Display) -> String {
+    format!("Could not read the test demo {}: {err}", path.display())
+}
+
+pub fn obs_test_no_clip(path: &Path, seconds: f32) -> String {
+    format!(
+        "{} has no kill with {seconds:.0} s of demo around it to record.",
+        path.display()
+    )
+}
+
+pub fn obs_test_no_video(folder: &Path) -> String {
+    format!(
+        "OBS recorded no video into {}. Check OBS's own window for why.",
+        folder.display()
+    )
+}
+
+pub fn obs_test_not_a_test_folder(folder: &str) -> String {
+    format!("{folder} isn't an OBS capture test's folder, so it was not deleted.")
+}
+
+pub fn obs_test_delete_failed(folder: &Path, err: impl Display) -> String {
+    format!("Could not delete the test clip {}: {err}", folder.display())
+}
+
 pub fn failed_to_create_dod_directory(err: impl Display) -> String {
     format!(
         "Failed to create the game folder `{}` beside hl.exe: {}",
@@ -205,15 +268,71 @@ pub fn failed_to_launch_obs(err: impl Display) -> String {
 }
 
 /// The batch status line while the game fast-forwards to, then records, a
-/// clip (#76). 1-based.
-pub fn capturing_clip(clip: u32, total: u32) -> String {
-    format!("Capturing clip {} of {}", clip, total)
+/// clip (#76) of the demo `demo` (#952). 1-based.
+pub fn capturing_clip(clip: u32, total: u32, demo: &str) -> String {
+    if demo.is_empty() {
+        format!("Capturing clip {clip} of {total}")
+    } else {
+        format!("Capturing clip {clip} of {total} ({demo})")
+    }
+}
+
+/// The batch status line from the click that opens the game until its first
+/// demo loads (#952). `first_demo` is the batch's first demo, `demos` how
+/// many it plays.
+pub fn starting_the_game(first_demo: Option<&str>, demos: usize) -> String {
+    match first_demo {
+        None => "Starting the game…".to_string(),
+        Some(name) if demos > 1 => format!("Starting the game for {name} (demo 1 of {demos})"),
+        Some(name) => format!("Starting the game for {name}"),
+    }
+}
+
+/// The batch status line while the game loads a demo (#952).
+pub fn loading_demo(demo: &str) -> String {
+    if demo.is_empty() {
+        "Loading the next demo…".to_string()
+    } else {
+        format!("Loading {demo}…")
+    }
+}
+
+/// The batch status line while the takes are checked on disk after the
+/// game closes (#952).
+pub fn checking_takes(done: usize, total: usize) -> String {
+    format!("Checking the takes: {done} of {total}")
 }
 
 /// The batch status line while a demo whose highlights have no demo-player
 /// times is read again before a Seek Between Clips batch (#434). 1-based.
 pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
     format!("Reading {demo} again for its clip times ({index} of {total})")
+}
+
+/// A batch that was to run in the open game (#725) but has to be patched,
+/// which only a fresh game can play. `why` says why it can't seek.
+pub fn batch_needs_fresh_game(why: &str) -> String {
+    format!(
+        "This batch has to be patched ({why}), and a patched batch needs a fresh game. Close Day of Defeat and start the batch again."
+    )
+}
+
+/// The activity-log line when a Seek Between Clips batch falls back to
+/// patching and some of its Initial or Scheduled Commands are ones the
+/// game's demo filter drops (#679), or `None` when there are none.
+pub fn dropped_when_patched(dropped: &[native::patch::cfg_scan::DemoFiltered]) -> Option<String> {
+    if dropped.is_empty() {
+        return None;
+    }
+    let list = dropped
+        .iter()
+        .map(|d| format!("`{}`", d.command))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "⚠️ **Commands dropped** — a patched batch puts Initial and Scheduled Commands in the demo, \
+         and the game drops these from a demo without running them: {list}"
+    ))
 }
 
 pub fn game_directory_not_found(game_dir: &str) -> String {
@@ -235,6 +354,10 @@ pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
 pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
     format!("Could not send the review to the game: {e}")
 }
+/// The game asked for a review, and the page could not be told (#1142).
+pub fn game_review_not_handed_on(e: impl std::fmt::Display) -> String {
+    format!("DoD Studio's window could not take the request: {e}")
+}
 pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
     format!("Could not save the list of highlights to review: {e}")
 }
@@ -244,6 +367,16 @@ pub const REVIEW_GAME_NOT_FROM_STUDIO: &str = "Day of Defeat is open, but DoD St
 pub const REVIEW_GAME_LAUNCH_SETTINGS_DIFFER: &str = "Day of Defeat is open with other launch settings than DoD Studio's (another install or resolution). Close the game and press Review highlights again.";
 pub const GAME_DID_NOT_CLOSE: &str = "Day of Defeat didn't close within 10 seconds, so nothing was started. Close it yourself, then try again.";
 pub const REVIEW_GAME_DID_NOT_START: &str = "Day of Defeat didn't open within two minutes. Start it with Launch Game, then press Review highlights again.";
+// ── review_library.rs (#848) ────────────────────────────────────────────────
+pub fn review_library_unreadable(path: &std::path::Path, e: impl Display) -> String {
+    format!(
+        "Could not read your saved Review marks ({}): {e}",
+        path.display()
+    )
+}
+pub fn review_library_unwritable(path: &std::path::Path, e: impl Display) -> String {
+    format!("Could not save your Review marks ({}): {e}", path.display())
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 
@@ -251,29 +384,35 @@ pub fn failed_to_read_dod_directory(err: impl Display) -> String {
     format!("Failed to read dod directory: {}", err)
 }
 
-/// The batch status line while demos patch (#75). `writing` holds each
-/// in-flight job's percent written; `clearing` counts those still in the
-/// decal pass, which reports no percentage.
-pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8]) -> String {
-    let head = format!("Patching {} / {}", done, total);
-    match (clearing, writing) {
-        (0, []) => head,
-        (1, []) => format!("{}: clearing decals", head),
-        (0, [percent]) => format!("{}: writing, {}%", head, percent),
+/// The batch status line from the moment the batch starts until a step
+/// with a count says more (#952): checking the demos are unchanged, reading
+/// any again, copying them beside the game.
+pub const GETTING_DEMOS_READY: &str = "Getting demos ready…";
+
+/// The batch status line while demos are patched (#75), in plain words
+/// (#952): `running` is each in-flight demo's name and its percent written,
+/// `None` while it is in a step that reports none (the decal pass, whose
+/// name stays out of the line).
+pub fn preparing_status(done: u32, total: usize, running: &[(&str, Option<u8>)]) -> String {
+    let head = "Getting demos ready";
+    match running {
+        [] => format!("{head}: {done} of {total}"),
+        [(name, percent)] => {
+            let number = (done as usize + 1).min(total);
+            match percent {
+                Some(p) => format!("{head}: {number} of {total} ({name}, {p}%)"),
+                None => format!("{head}: {number} of {total} ({name})"),
+            }
+        }
         _ => {
-            let mut parts = Vec::new();
-            if clearing > 0 {
-                parts.push(format!("{} clearing decals", clearing));
-            }
-            if !writing.is_empty() {
+            let writing: Vec<u8> = running.iter().filter_map(|(_, p)| *p).collect();
+            let at_once = running.len();
+            if writing.is_empty() {
+                format!("{head}: {done} of {total} done, {at_once} at once")
+            } else {
                 let average = writing.iter().map(|&p| p as usize).sum::<usize>() / writing.len();
-                parts.push(format!(
-                    "{} writing ({}% on average)",
-                    writing.len(),
-                    average
-                ));
+                format!("{head}: {done} of {total} done, {at_once} at once ({average}% on average)")
             }
-            format!("{}: {}", head, parts.join(", "))
         }
     }
 }
@@ -310,6 +449,16 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_preview_manager.rs (#1069) ─────────────────────────────────────
+
+pub fn take_not_listed_for_preview(take_folder: &str) -> String {
+    format!("{take_folder} isn't in the Render tab's list, so no pictures were made")
+}
+
+pub fn take_preview_empty(take_folder: &str) -> String {
+    format!("No pictures were made from {take_folder}")
+}
+
 // ── take_delete_manager.rs (#644) ───────────────────────────────────────
 
 pub fn take_not_listed(take_folder: &str) -> String {
@@ -327,6 +476,76 @@ pub fn take_is_rendering(take_folder: &str) -> String {
 }
 
 pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
+// ── take_cleanup_manager.rs (#644, the automatic half) ──────────────────
+
+/// The Capture footer's line while finished takes make room for a capture.
+pub const MAKING_ROOM_LOOKING: &str = "Making room: looking for finished takes";
+
+pub fn making_room_measuring(done: usize, total: usize) -> String {
+    format!("Making room: measuring finished takes ({done} of {total})")
+}
+
+pub fn making_room_deleting(done: usize, total: usize) -> String {
+    format!("Making room: deleting finished takes ({done} of {total})")
+}
+
+pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
+    format!("{take_folder} is queued or rendering, so it was not deleted")
+}
+
+pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
+    "Capture cancelled while making room. Nothing was captured.";
+
+// ── trimmed_demos.rs (#207) ──────────────────────────────────────────────
+
+pub const CAPTURE_CANCELLED_WHILE_TRIMMING: &str =
+    "Capture cancelled while making a trimmed copy. Nothing was captured.";
+
+/// The status line while Studio learns whether a demo is over the engine's
+/// entity limit, or makes its trimmed copy.
+pub fn trimming_demo(demo: &str, step: native::patch::trimmed_copies::Progress) -> String {
+    use native::patch::trimmed_copies::Progress;
+    let percent = |f: f32| (f.clamp(0.0, 1.0) * 100.0).round() as u32;
+    match step {
+        Progress::Counting(f) => format!(
+            "Checking whether {demo} has more entities than the game takes ({}%)",
+            percent(f)
+        ),
+        Progress::Reading(f) => format!(
+            "Making a trimmed copy of {demo}: reading it ({}%)",
+            percent(f)
+        ),
+        Progress::Writing => format!("Making a trimmed copy of {demo}: writing it"),
+        Progress::Checking(f) => format!(
+            "Making a trimmed copy of {demo}: checking it ({}%)",
+            percent(f)
+        ),
+    }
+}
+
+/// Why a demo over the engine's entity limit can't be played: no trimmed copy
+/// could be made safely.
+pub fn demo_cannot_be_trimmed(
+    demo: &str,
+    engine: &native::patch::trimmed_copies::Engine,
+    why: &native::patch::entity_trim::TrimError,
+) -> String {
+    format!(
+        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}. \
+         Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights.",
+        engine.name(),
+        engine.limit
+    )
+}
+
+/// What a Launch Preview says when it plays a trimmed copy.
+pub fn preview_plays_trimmed_copy(engine: &native::patch::trimmed_copies::Engine) -> String {
+    format!(
+        "This demo has more entities than the {} engine takes, so the preview plays a trimmed copy: fog, invisible hulls and a few far decorations are left out. The original is unchanged.",
+        engine.name()
+    )
+}
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
@@ -475,6 +694,70 @@ pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) 
     format!("Failed to write settings file {}: {}", path.display(), err)
 }
 
+// ── native / analysis errors, named at the command boundary (#650) ──────────
+//
+// A `native` or `analysis` function returns its error as plain text, so a
+// command that passed it through showed the toast a bare cause ("Permission
+// denied") with no hint of what failed. Each function here puts the action
+// first and leaves the lower crate's text as the cause, so the crates keep
+// their wording for `preview_cli`, `dod-studio-cli` and the web analyzer.
+
+/// A stop the user asked for comes back as native's cancelled error, which
+/// the frontend matches exactly (`'cancelled'`), so it is never given a prefix.
+fn failed_to(action: &str, err: impl Display) -> String {
+    let cause = err.to_string();
+    if native::hlcr::take_frames::is_cancelled(&cause) {
+        return cause;
+    }
+    format!("Failed to {action}: {cause}")
+}
+
+pub fn failed_to_forget_crash_map(err: impl Display) -> String {
+    failed_to("forget the crashed map", err)
+}
+
+pub fn failed_to_set_blender_exe(err: impl Display) -> String {
+    failed_to("use that Blender", err)
+}
+
+pub fn failed_to_check_demo_sources(err: impl Display) -> String {
+    failed_to("check the demos against the scan", err)
+}
+
+pub fn failed_to_copy_demos_for_batch(err: impl Display) -> String {
+    failed_to("copy the demos for the batch", err)
+}
+
+pub fn failed_to_read_map_for_flags(err: impl Display) -> String {
+    failed_to("read the map's flags", err)
+}
+
+pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
+    failed_to("discard the saved render queue", err)
+}
+
+// ── menu_scale_manager.rs, movie_copy_manager.rs, overview_manager.rs, players_tab.rs ──
+
+pub fn menu_size_check_stopped(err: impl Display) -> String {
+    format!("menu size check stopped: {err}")
+}
+
+pub fn menu_size_change_stopped(err: impl Display) -> String {
+    format!("menu size change stopped: {err}")
+}
+
+pub fn could_not_list_to_copy(source: impl Display, err: impl Display) -> String {
+    format!("Couldn't list {source} to copy it: {err}")
+}
+
+pub const MOVIE_COPY_ALREADY_RUNNING: &str = "A movie copy is already running";
+
+pub const OVERVIEW_IMAGE_NOT_RAW_BYTES: &str = "the high-quality image did not arrive as raw bytes";
+
+pub fn not_a_sprite_file_name(sprite: &str) -> String {
+    format!("{sprite:?} is not a sprite file name")
+}
+
 /// Pins every function/constant above against the exact `format!`/literal it
 /// replaced at its original call site (text copied verbatim from the pre-PR
 /// source, not re-derived), so this refactor can't have silently changed any
@@ -482,6 +765,18 @@ pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropped_when_patched_lists_each_command_or_says_nothing() {
+        assert_eq!(dropped_when_patched(&[]), None);
+        let dropped = native::patch::cfg_scan::demo_filtered_commands(&[
+            "exec movie.cfg".to_string(),
+            "sensitivity 2".to_string(),
+            "quit".to_string(),
+        ]);
+        let line = dropped_when_patched(&dropped).unwrap();
+        assert!(line.ends_with("`exec movie.cfg`, `quit`"), "{line}");
+    }
 
     #[test]
     fn lib_rs_messages_match_their_original_inline_text() {
@@ -520,9 +815,9 @@ mod tests {
         assert_eq!(
             ffmpeg_could_not_be_resolved("ffmpeg"),
             format!(
-                "Could not resolve an FFmpeg from \"{}\". Set Render Studio's FFmpeg path to a real \
-                 ffmpeg.exe first — HLAE's ini needs an absolute path and cannot use a bare command \
-                 name.",
+                "Could not find FFmpeg from \"{}\": no such file, and no ffmpeg.exe on the Windows \
+                 PATH. Pick your ffmpeg.exe first (Setup's FFmpeg step, or Configuration > Paths > \
+                 FFmpeg Override Path): HLAE's ini needs a full path.",
                 "ffmpeg"
             )
         );
@@ -767,6 +1062,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lower_crate_errors_name_the_action_then_the_cause() {
+        assert_eq!(
+            failed_to_copy_demos_for_batch("no room on D:"),
+            "Failed to copy the demos for the batch: no room on D:"
+        );
+        assert_eq!(
+            failed_to_set_blender_exe("not found"),
+            "Failed to use that Blender: not found"
+        );
+    }
+
+    #[test]
+    fn a_cancellation_is_never_given_an_action_prefix() {
+        // The frontend compares it to the bare word.
+        let cancelled = native::hlcr::take_frames::cancelled_error();
+        assert_eq!(failed_to(".", &cancelled), cancelled);
+        assert_eq!(cancelled, "cancelled");
+    }
+
     // Every non-panicking call site's spawn_blocking wrapping was already
     // exercised implicitly by the crate's existing capture_manager/map_manager
     // tests once this PR rewired them through these two helpers — what's
@@ -780,6 +1095,28 @@ mod tests {
         assert!(
             err.starts_with("Background task crashed: "),
             "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn small_manager_messages_match_their_original_inline_text() {
+        assert_eq!(menu_size_check_stopped("x"), "menu size check stopped: x");
+        assert_eq!(menu_size_change_stopped("x"), "menu size change stopped: x");
+        assert_eq!(
+            could_not_list_to_copy("D:/dod", "denied"),
+            "Couldn't list D:/dod to copy it: denied"
+        );
+        assert_eq!(
+            MOVIE_COPY_ALREADY_RUNNING,
+            "A movie copy is already running"
+        );
+        assert_eq!(
+            OVERVIEW_IMAGE_NOT_RAW_BYTES,
+            "the high-quality image did not arrive as raw bytes"
+        );
+        assert_eq!(
+            not_a_sprite_file_name("a.spr"),
+            "\"a.spr\" is not a sprite file name"
         );
     }
 

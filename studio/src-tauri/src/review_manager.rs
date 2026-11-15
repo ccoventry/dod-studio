@@ -10,6 +10,7 @@
 //! per game reads them for as long as that game runs and emits each one as a
 //! `review_event`.
 
+use native::shared::lock::lock_or_recover;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -87,7 +88,7 @@ fn send_to_any_game(lines: &[String]) -> Result<Option<u32>, String> {
 /// Starts reading `pid`'s answers, unless a thread already is.
 fn ensure_listener(app: AppHandle, pid: u32) {
     {
-        let mut listening = LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listening = lock_or_recover(&LISTENING);
         if *listening == Some(pid) {
             return;
         }
@@ -95,21 +96,26 @@ fn ensure_listener(app: AppHandle, pid: u32) {
     }
     std::thread::spawn(move || {
         listen(&app, pid);
-        let mut listening = LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut listening = lock_or_recover(&LISTENING);
         if *listening == Some(pid) {
             *listening = None;
         }
     });
 }
 
-/// Reads `pid`'s events pipe until the game is gone, emitting each review
-/// line. The pipe keeps lines written while nobody read it, so an answer
-/// given during a reconnect still arrives.
+/// Reads `pid`'s events pipe until the review ends or the game is gone,
+/// emitting each review line. The pipe keeps lines written while nobody read
+/// it, so an answer given during a reconnect still arrives. It takes one
+/// reader at a time, so the listener lets go once the review has ended: a
+/// capture batch run in the same game (#725) reads its markers from it next.
 fn listen(app: &AppHandle, pid: u32) {
     let name = game_remote::events_pipe_name(pid);
+    // The pipe reopens after every reader disconnect: one line says the
+    // listener found the game, not one per reconnect.
+    let mut said_reading = false;
     loop {
         if !native::sys::process::game_pids().contains(&pid) {
-            log::info!("[review] game {pid} has closed; no more answers to read");
+            native::log_markdown(&crate::messages::review::game_closed(pid));
             let _ = app.emit(
                 EVENT,
                 native::review_queue::ReviewEvent::Ended {
@@ -122,35 +128,46 @@ fn listen(app: &AppHandle, pid: u32) {
             std::thread::sleep(RETRY);
             continue;
         };
-        log::info!("[review] reading answers from game {pid}");
+        if !std::mem::replace(&mut said_reading, true) {
+            native::log_markdown(&crate::messages::review::reading_answers(pid));
+        }
         for bytes in BufReader::new(pipe).split(b'\n').map_while(Result::ok) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
-                log::info!("[review] {}", line.trim());
+                native::log_markdown(&crate::messages::review::answer_line(line.trim()));
+                let ended = matches!(event, native::review_queue::ReviewEvent::Ended { .. });
                 let _ = app.emit(EVENT, event);
+                if ended {
+                    return;
+                }
             }
         }
     }
 }
 
 /// Starts reviewing `highlights` in the running game, or in one DoD Studio
-/// starts for it. `fast_forward_gap`: see [`format_queue`] (#665).
+/// starts for it. `fast_forward_gap` (#665) and `start_from` (#1142): see
+/// [`format_queue`].
 #[tauri::command]
 pub async fn start_highlight_review(
     app: AppHandle,
     highlights: Vec<ReviewHighlight>,
     fast_forward_gap: Option<f64>,
+    start_from: Option<f64>,
 ) -> Result<ReviewStarted, String> {
     let count = highlights.len();
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
-    std::fs::write(&queue, format_queue(&highlights, fast_forward_gap))
-        .map_err(crate::messages::could_not_write_review_queue)?;
-    let settings = crate::capture_manager::saved_settings(&app);
+    std::fs::write(
+        &queue,
+        format_queue(&highlights, fast_forward_gap, start_from),
+    )
+    .map_err(crate::messages::could_not_write_review_queue)?;
+    let settings = crate::game_process_manager::saved_settings(&app);
     let line = review_lines(&queue, settings.players.use_in_game);
 
-    let launch = crate::capture_manager::launch_config(
+    let launch = crate::game_process_manager::launch_config(
         &settings,
-        &crate::capture_manager::LaunchRequest::default(),
+        &crate::game_process_manager::LaunchRequest::default(),
     );
     let sent = {
         let line = line.clone();
@@ -174,7 +191,7 @@ pub async fn start_highlight_review(
             if !native::sys::process::game_pids().is_empty() {
                 return Err(crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string());
             }
-            crate::capture_manager::launch_standalone_game(app.clone()).await?;
+            crate::game_process_manager::launch_standalone_game(app.clone()).await?;
             let pid =
                 crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
                     let since = Instant::now();
@@ -190,7 +207,9 @@ pub async fn start_highlight_review(
             (pid, true)
         }
     };
-    log::info!("[review] {count} highlight(s) sent to game {pid} (launched: {launched})");
+    native::log_markdown(&crate::messages::review::highlights_sent(
+        count, pid, launched,
+    ));
     ensure_listener(app, pid);
     Ok(ReviewStarted {
         pid,
@@ -199,10 +218,48 @@ pub async fn start_highlight_review(
     })
 }
 
+/// The page's event for a review the game asked for (#1142): a
+/// `game_review_requests::ReviewRequest`, which the page answers through
+/// [`game_review_progress`] and [`game_review_finished`].
+const GAME_REQUEST_EVENT: &str = "game_review_request";
+
+/// Hands every review the in-game Review tab asks for to the page, which
+/// starts it as its Review highlights button would (#1142).
+pub fn serve_game_requests(app: AppHandle) {
+    use native::sys::game_review_requests::{ReviewUpdate, report, set_review_handler};
+    set_review_handler(move |request| {
+        let id = request.id;
+        if let Err(e) = app.emit(GAME_REQUEST_EVENT, request) {
+            report(
+                id,
+                ReviewUpdate::Failed(crate::messages::game_review_not_handed_on(e)),
+            );
+        }
+    });
+}
+
+/// Tells the game what DoD Studio is doing about its review request `id`.
+/// Cheap (a channel send), so it runs on the main thread.
+#[tauri::command]
+pub fn game_review_progress(id: u64, text: String) {
+    native::sys::game_review_requests::report(
+        id,
+        native::sys::game_review_requests::ReviewUpdate::Progress(text),
+    );
+}
+
+/// Tells the game its review request `id` has started (`error` none) or
+/// why it couldn't.
+#[tauri::command]
+pub fn game_review_finished(id: u64, error: Option<String>) {
+    use native::sys::game_review_requests::{ReviewUpdate, report};
+    report(id, error.map_or(ReviewUpdate::Done, ReviewUpdate::Failed));
+}
+
 /// Ends the review in the game being read; its answers so far are already in.
 #[tauri::command]
 pub async fn stop_highlight_review() -> Result<(), String> {
-    let pid = *LISTENING.lock().unwrap_or_else(|e| e.into_inner());
+    let pid = *lock_or_recover(&LISTENING);
     let Some(pid) = pid else { return Ok(()) };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         game_remote::send_console_commands(pid, &["ds_demo_review stop".to_string()])

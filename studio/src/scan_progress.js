@@ -3,6 +3,7 @@
 // demos the analyzer cache has go first and take milliseconds; the parses
 // come after, and the time left is measured from their pace.
 import { STRINGS } from './strings.js';
+import { durationTextMs } from './time_format.js';
 
 /** " (N from the analyzer cache)", or nothing when the cache has none. */
 export function fromCacheText(cached) {
@@ -25,6 +26,31 @@ export function timeLeftText({
     ? (parseMs / bytesParsed) * (bytesToParse - bytesParsed)
     : (parseMs / parsed) * left;
   return STRINGS.SCAN_PROGRESS.timeLeft(Math.round(msLeft / 1000));
+}
+
+/** Seconds to one decimal. */
+const secs = durationTextMs;
+
+/**
+ * The activity log's line for a finished or cancelled scan: how long it
+ * took, how many demos it read and how many it skipped as unchanged, and how
+ * many had a current analyzer cache entry, how many didn't and how long
+ * those took (the scan's own counts, `outcome` from scan_directory).
+ */
+export function scanEndLogLine({
+  cancelled = false, ms = 0, read = 0, unchanged = 0, outcome = null,
+} = {}) {
+  const S = STRINGS.SCAN_PROGRESS;
+  const line = S.endLog(cancelled ? 'cancelled' : 'finished', secs(ms), read, unchanged);
+  const cached = outcome?.cached || 0;
+  const notCached = outcome?.not_cached || 0;
+  if (cached + notCached === 0) return line;
+  return line + S.endLogSplit(cached, notCached, secs(outcome?.not_cached_ms || 0));
+}
+
+/** The activity log's line for a scan that failed. */
+export function scanFailedLogLine(ms, err) {
+  return STRINGS.SCAN_PROGRESS.failedLog(secs(ms), err);
 }
 
 /**

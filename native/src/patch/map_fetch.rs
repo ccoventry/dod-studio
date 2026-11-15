@@ -15,7 +15,7 @@
 // to be the wrong build is still the map the user had, and it is not this
 // code's call to destroy it.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::bsp;
@@ -61,6 +61,15 @@ pub fn map_url(mirror: &str, map_name: &str) -> Result<String, String> {
     Ok(format!("{}/maps/{}.bsp", base, map_name))
 }
 
+/// Where a fetch is, for a progress line (#957).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchStep {
+    /// `chunk` more bytes arrived; `total` is the size the mirror stated.
+    Downloaded { chunk: u64, total: Option<u64> },
+    /// Everything arrived: reading the checksum and installing it.
+    Checking,
+}
+
 /// Download one map into `maps_dir`, verifying before it lands.
 ///
 /// `expected` is the checksum the demo asked for. `None` — an HLTV demo, which
@@ -71,6 +80,18 @@ pub fn fetch_map(
     expected: Option<u32>,
     maps_dir: &Path,
     mirror: &str,
+) -> Result<FetchOutcome, String> {
+    fetch_map_with_progress(map_name, expected, maps_dir, mirror, &mut |_| {})
+}
+
+/// [`fetch_map`], telling `on_step` about every chunk read and when the check
+/// starts. Unthrottled: the caller decides how often to show it.
+pub fn fetch_map_with_progress(
+    map_name: &str,
+    expected: Option<u32>,
+    maps_dir: &Path,
+    mirror: &str,
+    on_step: &mut dyn FnMut(FetchStep),
 ) -> Result<FetchOutcome, String> {
     let url = map_url(mirror, map_name)?;
     let target = maps_dir.join(format!("{}.bsp", map_name));
@@ -93,7 +114,8 @@ pub fn fetch_map(
     std::fs::create_dir_all(maps_dir)
         .map_err(|e| crate::messages::labeled(maps_dir.display(), e))?;
 
-    let body = download(&url)?;
+    let body = download(&url, on_step)?;
+    on_step(FetchStep::Checking);
 
     // What arrived, not what was asked for. A mirror can serve an error page
     // with a 200, and an error page is not a map.
@@ -147,13 +169,38 @@ pub fn fetch_map(
     })
 }
 
-fn download(url: &str) -> Result<Vec<u8>, String> {
-    crate::utils::http::get(url)?
+fn download(url: &str, on_step: &mut dyn FnMut(FetchStep)) -> Result<Vec<u8>, String> {
+    let mut response = crate::utils::http::get(url)?;
+    let total = response.body().content_length();
+    let reader = response
         .body_mut()
         .with_config()
         .limit(MAX_MAP_BYTES)
-        .read_to_vec()
-        .map_err(|e| crate::messages::labeled(url, e))
+        .reader();
+    read_counted(reader, total, on_step).map_err(|e| crate::messages::labeled(url, e))
+}
+
+/// Reads `reader` to the end, reporting each chunk as it arrives.
+fn read_counted(
+    mut reader: impl Read,
+    total: Option<u64>,
+    on_step: &mut dyn FnMut(FetchStep),
+) -> std::io::Result<Vec<u8>> {
+    let mut body = Vec::with_capacity(total.unwrap_or(0).min(MAX_MAP_BYTES) as usize);
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => return Ok(body),
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        body.extend_from_slice(&buf[..n]);
+        on_step(FetchStep::Downloaded {
+            chunk: n as u64,
+            total,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +238,31 @@ mod tests {
         // The file lands in the folder the engine loads maps from, and a demo
         // that records no checksum has nothing else standing behind it.
         assert!(map_url("http://fastdl.ktpdod.com/dod/", "dod_anzio").is_err());
+    }
+
+    #[test]
+    fn reading_a_download_reports_every_chunk_and_keeps_every_byte() {
+        let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
+        let mut steps = Vec::new();
+        let body = read_counted(
+            std::io::Cursor::new(data.clone()),
+            Some(200_000),
+            &mut |s| steps.push(s),
+        )
+        .unwrap();
+        assert_eq!(body, data);
+        let mut sum = 0;
+        for s in &steps {
+            match s {
+                FetchStep::Downloaded { chunk, total } => {
+                    assert_eq!(*total, Some(200_000));
+                    sum += chunk;
+                }
+                FetchStep::Checking => panic!("reading never reports the check"),
+            }
+        }
+        assert_eq!(sum, 200_000);
+        assert!(steps.len() >= 4, "64 KB chunks: {}", steps.len());
     }
 
     #[test]

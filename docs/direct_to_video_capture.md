@@ -414,3 +414,32 @@ Separate HUD both on and off. The same build, same codec, same settings capture
 direct-to-video. Untested whether it also crashes in frame-sequence mode. Note it has a
 `_forcehltv` twin of identical byte size but different content, which suggests it was already
 known to need working around.
+
+## Anti-aliasing comes from the NVIDIA driver, not the engine (measured 2026-10-26)
+
+Both `hw.dll` builds draw into their own framebuffer object with 4x MSAA, a sample count hard-coded in
+the `glRenderbufferStorageMultisampleEXT` call (PRE `hw+0x4dd72`, Anniversary `hw+0x24f016`), and blit
+the resolved image to the window. `-nomsaa` turns the MSAA off and `-nofbo` the whole framebuffer.
+HLAE turns the framebuffer off itself (its changelog: "HLAE now adds -nofbo to the launch options"),
+so under HLAE the game draws to the window's own buffer **with no anti-aliasing at all**: frames from a
+plain launch, `-nomsaa` and `-nofbo` are byte-identical, with hard staircase edges.
+
+Because the game draws to the window's buffer, the driver's override applies, and HLAE's frames carry it.
+Measured on both builds at 2560x1440 (an RTX 3070 Ti), the same free-camera frames each launch:
+
+| NVIDIA Control Panel, hl.exe's program settings | Effect on HLAE frames |
+|---|---|
+| Antialiasing - Mode: Override, Setting: 4x, 8xQ or 32x | Geometry and viewmodel edges smooth (1-2% of pixels change, all on edges); 4x, 8xQ and 32x look alike; 32x also lifts the whole frame by about 0.6/255 |
+| Setting: 16x | No edge smoothing on this GPU (CSAA is gone), yet pixels shift |
+| Mode: Enhance the application setting | Nothing: the game asks for no AA under HLAE |
+| Antialiasing - Transparency (multisample, 4x supersample, sparse grid) | Alpha-tested leaves and fences stay jagged in every mode; 4x supersample blurs grass and loses the edge AA; **8x sparse grid makes the kill feed and HUD disappear** |
+| FXAA | Nothing in HLAE's frames (applied when the frame is shown, after HLAE has read it) |
+| Texture filtering - Quality: High quality, LOD bias clamp, 16x AF override | Nothing visible; `gl_ansio 16` already gives 16x AF |
+
+The cost is nil: a `timedemo` ran at 227 fps without AA and 229-230 fps with 8xQ or 32x (the game is
+CPU-bound), and a 10 s, 300 fps utvideo capture took 17.6-18.6 s either way. Kill-feed text is drawn
+as 2D sprites, so AA leaves it untouched.
+
+So: Override + 8xQ on hl.exe's profile, Transparency off, FXAA off. The game window can't be bigger
+than the desktop, so supersampling (DSR) only works fullscreen or with the desktop itself at the DSR
+resolution; it is untested here.

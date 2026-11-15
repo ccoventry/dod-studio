@@ -14,8 +14,12 @@
 //!   defaults (brightness 0, lightgamma 2.5).
 //! - `config.cfg` and `movie.cfg` change the cvars later. The table only
 //!   follows in `V_CheckGamma` (+0xc19b0), which runs at the start of every
-//!   `SCR_UpdateScreen`, and it never rebuilds lightmaps when it does: the
-//!   call it makes for that (+0x4703e) is an empty `ret`.
+//!   `SCR_UpdateScreen`, and the stock engine never rebuilds lightmaps when
+//!   it does: the call it makes for that (`D_FlushCaches`, +0x4703e) is an
+//!   empty `ret`.
+//!   `lightmap_rebuild` (#662) points that call at `GL_BuildLightmaps`
+//!   while a map is loaded; this detour is still what makes a map load
+//!   build from the current table in the first place.
 //! - A demo named on the command line loads its map before the first screen
 //!   update. So the first map's lightmaps come from the default-cvar table:
 //!   with the movie install's brightness 10 (clamped to 2 in multiplayer) and
@@ -47,18 +51,18 @@
 //!
 //! The Anniversary `hw.dll` (3,598,176 bytes) has the same setup -- `V_Init`
 //! (+0x231770) builds the table once with the constant 2.5, `V_CheckGamma`
-//! (+0x231470, and a copy inlined into the palette pass at +0x232360) runs
-//! from the screen update (+0x24d550) and compares the cvars with the values
-//! it saw last time -- but its flush is no longer empty: it is a `jmp` thunk
-//! (+0x245a70) to `GL_BuildLightmaps` itself (+0x246f80, the function the map
-//! load calls at +0x2465e7, with `R_BuildLightMap` at +0x247b50 reading
-//! `lightgammatable` +0xf6d560). So on that build a gamma change rebuilds
-//! every lightmap, and the first screen update puts the first map right
-//! before its first frame draws; the texture loader (+0x23c0d0) calls
-//! `V_CheckGamma` too, which covers `texgamma` as well. There is nothing to
-//! detour. `tools/verify_lightmap_gamma_offsets.py --anniversary` derives all
-//! of this from the binary and proves the signatures above match nothing in
-//! it.
+//! (+0x231470, and a copy inlined into the palette pass, `V_UpdatePalette`, at
+//! +0x232360) runs from the screen update (+0x24d550) and compares the cvars
+//! with the values it saw last time -- but its flush is no longer empty: it is a
+//! `jmp` thunk (`D_FlushCaches`, +0x245a70) to `GL_BuildLightmaps` itself
+//! (+0x246f80, the function the map load calls at +0x2465e7, with
+//! `R_BuildLightMap` at +0x247b50 reading `lightgammatable` +0xf6d560). So on
+//! that build a gamma change rebuilds every lightmap, and the first screen
+//! update puts the first map right before its first frame draws; the texture
+//! loader (+0x23c0d0) calls `V_CheckGamma` too, which covers `texgamma` as well.
+//! There is nothing to detour. `tools/verify_lightmap_gamma_offsets.py
+//! --anniversary` derives all of this from the binary and proves the signatures
+//! above match nothing in it.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
@@ -68,15 +72,17 @@ use crate::scan;
 
 /// `GL_BuildLightmaps`' entry: the prologue the stub reproduces, then the
 /// `memset` of the lightmap allocation blocks (0x8000 bytes). Unique.
-const BUILD_PATTERN: &str = "55 8B EC 51 53 56 57 68 00 80 00 00 6A 00 68 ?? ?? ?? ?? \
+/// `lightmap_rebuild` finds the function with it too, before the detour.
+pub(crate) const BUILD_PATTERN: &str = "55 8B EC 51 53 56 57 68 00 80 00 00 6A 00 68 ?? ?? ?? ?? \
                              E8 ?? ?? ?? ?? A1 ?? ?? ?? ?? 83 C4 0C BF 01 00 00 00 85 C0 89 3D";
 
 /// `push ebp; mov ebp, esp; push ecx; push ebx`: the five bytes the jump
 /// overwrites. Not relative, and none reads the flags.
 const STOLEN: [u8; 5] = [0x55, 0x8b, 0xec, 0x51, 0x53];
 
-/// `V_CheckGamma`: its call to the cvar clamp, then the first two of its four
-/// "changed since last time?" compares (gamma, lightgamma). Unique.
+/// `V_CheckGamma`: its call to the cvar clamp (`FilterLightParams`), then the
+/// first two of its four "changed since last time?" compares (gamma,
+/// lightgamma). Unique.
 const CHECK_PATTERN: &str = "E8 ?? ?? ?? ?? D9 05 ?? ?? ?? ?? D8 1D ?? ?? ?? ?? DF E0 F6 C4 44 7A ?? \
                              D9 05 ?? ?? ?? ?? D8 1D ?? ?? ?? ?? DF E0 F6 C4 44 7A ?? D9 05";
 

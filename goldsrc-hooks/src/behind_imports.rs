@@ -28,9 +28,6 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows_sys::Win32::System::Memory::{
-    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
-};
 
 use crate::pe;
 
@@ -204,6 +201,7 @@ unsafe extern "system" fn show_window<const M: usize>(hwnd: *mut c_void, cmd: i3
     unsafe { show(hwnd, cmd) }
 }
 
+// A detour: must match the Win32 SetWindowPos signature.
 #[allow(clippy::too_many_arguments)]
 unsafe extern "system" fn set_window_pos<const M: usize>(
     hwnd: *mut c_void,
@@ -235,20 +233,9 @@ fn hook(
     };
     unsafe {
         real_store.store(*slot, Ordering::Release);
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
-            return false;
-        }
-        *slot = replacement;
-        VirtualProtect(slot as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
+        // Left writable: HLAE hooks imports on this page too (#1059).
+        crate::patch::write_pointer(slot, replacement, crate::patch::After::LeaveWritable)
     }
-    true
 }
 
 fn install_one<const M: usize>(module: *mut c_void) {

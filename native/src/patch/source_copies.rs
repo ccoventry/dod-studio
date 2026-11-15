@@ -1,10 +1,13 @@
 //! Demos on another drive than the game, copied as they are into the game's
-//! `dod` folder for a Seek Between Clips batch (#434). `viewdemo` only opens
-//! a demo it can reach by a relative path from that folder, and a relative
-//! path can't cross drive letters; a demo on the game's drive is played where
-//! it is (`preview_in_place::viewdemo_arg`). The copies are the batch's own
-//! scratch: `capture_engine`'s cleanup guard removes them however the batch
-//! ends, and the next batch removes any an aborted one left behind.
+//! `dod` folder for a Seek Between Clips batch (#434), when the hook DLL is
+//! older than #779. A demo on the game's drive is played where it is, by a
+//! path relative to that folder (`preview_in_place::viewdemo_arg`). One on
+//! another drive has no such path: a hook DLL from #779 on sends it to
+//! `viewdemo` by its full path (`preview_in_place::hook_plays_other_drives`),
+//! so nothing is copied; an older DLL can't, and gets a copy. The copies are
+//! the batch's own scratch: `capture_engine`'s cleanup guard removes them
+//! however the batch ends, and the next batch removes any an aborted one left
+//! behind.
 
 use std::path::{Path, PathBuf};
 
@@ -68,15 +71,21 @@ pub fn plan_with<'a>(
     Ok(plan)
 }
 
-/// [`plan_with`] against the filesystem.
+/// [`plan_with`] against the filesystem. With `other_drives` (the hook DLL
+/// plays another drive's demo by its full path) only a demo `viewdemo` can't
+/// reach either way is copied: a path too long or with a character the
+/// console can't take.
 pub fn plan<'a>(
     dod_dir: &Path,
     demos: impl IntoIterator<Item = &'a str>,
+    other_drives: bool,
 ) -> Result<Vec<SourceCopy>, String> {
     plan_with(
         dod_dir,
         demos,
-        |demo| crate::preview_in_place::viewdemo_arg(dod_dir, demo).is_some(),
+        |demo| {
+            crate::preview_in_place::viewdemo_arg_any_drive(dod_dir, demo, other_drives).is_some()
+        },
         |demo| {
             std::fs::metadata(demo)
                 .map(|m| m.len())
@@ -86,12 +95,13 @@ pub fn plan<'a>(
 }
 
 /// Whether `free` bytes on the game's drive take `needed` bytes of copies
-/// and still leave [`COPY_HEADROOM_BYTES`]. `Err` says what's short.
-pub fn space_check(free: u64, needed: u64) -> Result<(), String> {
+/// and still leave [`COPY_HEADROOM_BYTES`]. `Err` says what's short. A drive
+/// whose free space is unknown (`None`) is let through.
+pub fn space_check(free: Option<u64>, needed: u64) -> Result<(), String> {
     let wanted = needed.saturating_add(COPY_HEADROOM_BYTES);
-    if free >= wanted {
+    let Some(free) = free.filter(|&free| free < wanted) else {
         return Ok(());
-    }
+    };
     let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
     Err(format!(
         "the game's drive has {:.1} GB free, and copying the demos there needs {:.1} GB plus {:.0} GB to spare",
@@ -114,11 +124,10 @@ pub fn copy_all(plan: &[SourceCopy]) -> Result<(), String> {
                 item.copy.display()
             ));
         }
-        crate::log_markdown(&format!(
-            "📋 **Copied for the batch** — `{}` is on another drive than the game, so it plays from `{}` ({:.0} MB); the copy goes when the batch ends",
+        crate::log_markdown(&crate::messages::batch_copy_made(
             item.source.display(),
             item.copy.display(),
-            item.bytes as f64 / (1024.0 * 1024.0)
+            item.bytes as f64 / (1024.0 * 1024.0),
         ));
     }
     Ok(())
@@ -129,9 +138,9 @@ pub fn copy_all(plan: &[SourceCopy]) -> Result<(), String> {
 pub fn remove_all<'a>(copies: impl IntoIterator<Item = &'a Path>) {
     for copy in copies {
         if let Some(e) = crate::shared::paths::remove_file_retrying(copy) {
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove the batch's copy {}: {e}",
-                copy.display()
+            crate::log_markdown(&crate::messages::batch_copy_cleanup_failed(
+                copy.display(),
+                e,
             ));
         }
     }
@@ -213,10 +222,10 @@ mod tests {
     #[test]
     fn the_space_check_wants_the_copies_plus_the_headroom() {
         let mb = 1024 * 1024;
-        assert!(space_check(COPY_HEADROOM_BYTES + 300 * mb, 300 * mb).is_ok());
-        let e = space_check(COPY_HEADROOM_BYTES + 299 * mb, 300 * mb).unwrap_err();
+        assert!(space_check(Some(COPY_HEADROOM_BYTES + 300 * mb), 300 * mb).is_ok());
+        let e = space_check(Some(COPY_HEADROOM_BYTES + 299 * mb), 300 * mb).unwrap_err();
         assert!(e.contains("GB free"), "{e}");
-        assert!(space_check(u64::MAX, u64::MAX).is_ok());
+        assert!(space_check(None, u64::MAX).is_ok());
     }
 
     #[test]

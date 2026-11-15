@@ -18,7 +18,6 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <input type="number" id="input-min-kills" value="1" />
   <button id="review-highlights-btn">Review highlights</button>
   <select id="review-covers-select"><option value="all">All</option></select>
   <label>
@@ -26,8 +25,9 @@
     <select id="review-hltv-select"></select>
   </label>
   <span id="review-hltv-pick" class="review-hltv-pick" hidden>
-    <select id="review-hltv-add-player"></select>
-    <select id="review-hltv-add-team"></select>
+    <!-- index.html's padding and font size, so a test can tell whether a line fits. -->
+    <select id="review-hltv-add-player" style="padding: 3px 6px; font-size: 12px;"></select>
+    <select id="review-hltv-add-team" style="padding: 3px 6px; font-size: 12px;"></select>
   </span>
   <select id="review-order-select"><option value="time">Chronological</option></select>
   <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>

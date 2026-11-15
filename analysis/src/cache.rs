@@ -31,7 +31,7 @@ pub mod migrations;
 /// silently deserializing with new fields missing/defaulted. When the new
 /// fields can be worked out from an old entry, add a step to
 /// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 16;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -96,7 +96,9 @@ fn version_dir(root: &Path, version: u32) -> PathBuf {
 /// The file name of `demo_path`'s entry, the same in every `v<N>` folder.
 fn entry_name(demo_path: &Path) -> Option<String> {
     let canonical = std::fs::canonicalize(demo_path).ok()?;
-    let hash = fnv1a(canonical.to_string_lossy().as_bytes());
+    // The same hash `hl_demo_auditor` named every entry with before this
+    // module existed (`native` tests that the names stay).
+    let hash = crate::fnv1a::fnv1a_hash(canonical.to_string_lossy().as_bytes());
     Some(format!("{hash:016x}.json"))
 }
 
@@ -305,6 +307,60 @@ impl WorkPlan {
             .filter(|(fresh, _)| !**fresh)
             .map(|(_, size)| size)
             .sum()
+    }
+}
+
+/// What reading `demo_path` through the cache will take, from the stat and
+/// the first few hundred bytes of each candidate entry; the demo itself is
+/// never opened. `None` when the demo can't be read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheState {
+    /// A current entry for the file as it is now ([`is_fresh`]).
+    Current,
+    /// An older entry a step upgrades ([`has_older_entry`]). The upgrade can
+    /// still ask for a re-parse, which only the whole entry shows.
+    Upgradable,
+    /// Neither, or the demo changed since: a full parse of this many bytes.
+    NeedsParse(u64),
+}
+
+pub fn cache_state(root: &Path, demo_path: &Path) -> Option<CacheState> {
+    let size = std::fs::metadata(demo_path).ok()?.len();
+    Some(if is_fresh(root, demo_path) {
+        CacheState::Current
+    } else if has_older_entry(root, demo_path) {
+        CacheState::Upgradable
+    } else {
+        CacheState::NeedsParse(size)
+    })
+}
+
+/// What a rescan of a list of demos has to do (#937): how many the cache has,
+/// how many it upgrades, and how many need a full parse, and their bytes. A
+/// demo that can't be read is in none of them: the scan skips it at once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct RescanEstimate {
+    pub cached: u32,
+    pub upgradable: u32,
+    pub to_parse: u32,
+    pub bytes_to_parse: u64,
+}
+
+impl RescanEstimate {
+    pub fn new<P: AsRef<Path>>(root: &Path, demos: &[P]) -> Self {
+        let mut estimate = Self::default();
+        for demo in demos {
+            match cache_state(root, demo.as_ref()) {
+                Some(CacheState::Current) => estimate.cached += 1,
+                Some(CacheState::Upgradable) => estimate.upgradable += 1,
+                Some(CacheState::NeedsParse(bytes)) => {
+                    estimate.to_parse += 1;
+                    estimate.bytes_to_parse += bytes;
+                }
+                None => {}
+            }
+        }
+        estimate
     }
 }
 
@@ -559,17 +615,6 @@ pub fn fill_missing_players(root: &Path) -> usize {
     written
 }
 
-/// The same FNV-1a as `hl_demo_auditor::fnv1a_hash`, which named every entry
-/// written before this module existed (`native` tests that the two agree).
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -646,6 +691,7 @@ mod tests {
 
     #[test]
     fn a_miss_upgrades_an_older_entry_and_leaves_the_old_one() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -672,6 +718,7 @@ mod tests {
 
     #[test]
     fn an_older_entry_that_cannot_be_upgraded_is_a_miss() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("no_upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -744,6 +791,74 @@ mod tests {
     }
 
     #[test]
+    fn a_rescan_estimate_sorts_demos_by_what_the_cache_holds() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
+        let dir = scratch("estimate");
+        let root = dir.join("cache");
+        let [current, older, changed, never, unreadable_upgrade] =
+            ["current", "older", "changed", "never", "eight"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&current, b"cached demo").unwrap();
+        std::fs::write(&older, b"cached by v7").unwrap();
+        std::fs::write(&changed, b"changed since").unwrap();
+        std::fs::write(&never, b"a demo never analysed").unwrap();
+        std::fs::write(&unreadable_upgrade, b"v8 never shipped").unwrap();
+        store(
+            &root,
+            &current,
+            &FileInfo::of(&current).unwrap(),
+            &Analysis::default(),
+        )
+        .unwrap();
+        write_old(&root, 7, &older, stamp(&older).unwrap(), &empty_v7());
+        // An entry for the file as it was: both folders miss it.
+        let was = stamp(&changed).unwrap();
+        write_old(&root, 7, &changed, (was.0 + 1, was.1), &empty_v7());
+        write_old(&root, SCHEMA_VERSION, &changed, (was.0 + 1, was.1), "{}");
+        // No step starts at v8, so its entry is a parse.
+        write_old(
+            &root,
+            8,
+            &unreadable_upgrade,
+            stamp(&unreadable_upgrade).unwrap(),
+            &empty_v7(),
+        );
+
+        assert_eq!(cache_state(&root, &current), Some(CacheState::Current));
+        assert_eq!(cache_state(&root, &older), Some(CacheState::Upgradable));
+        assert_eq!(
+            cache_state(&root, &changed),
+            Some(CacheState::NeedsParse(13))
+        );
+        assert_eq!(cache_state(&root, &dir.join("gone.dem")), None);
+
+        let estimate = RescanEstimate::new(
+            &root,
+            &[
+                &current,
+                &older,
+                &changed,
+                &never,
+                &unreadable_upgrade,
+                &dir.join("gone.dem"),
+            ],
+        );
+        assert_eq!(
+            estimate,
+            RescanEstimate {
+                cached: 1,
+                upgradable: 1,
+                to_parse: 3,
+                bytes_to_parse: 13 + 21 + 16,
+            }
+        );
+        assert_eq!(
+            RescanEstimate::new::<&Path>(&root, &[]),
+            RescanEstimate::default()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_demo_with_no_entry_is_not_fresh() {
         let dir = scratch("fresh");
         let demo = dir.join("y.dem");
@@ -770,11 +885,5 @@ mod tests {
         let entry: PlayersEntry = serde_json::from_str(json).unwrap();
         assert!(entry.demo.players[0].recorder);
         assert_eq!(serde_json::to_string(&entry).unwrap(), json);
-    }
-
-    #[test]
-    fn fnv1a_matches_the_published_test_vectors() {
-        assert_eq!(fnv1a(b""), 0xcbf29ce484222325);
-        assert_eq!(fnv1a(b"a"), 0xaf63dc4c8601ec8c);
     }
 }

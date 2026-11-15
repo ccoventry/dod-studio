@@ -1,4 +1,4 @@
-import init, { analyzeDemo } from './pkg/web_analyzer.js';
+import { createAnalyzerClient } from './analyzer_client.js';
 import { STRINGS } from './strings.js';
 import { setReport, initSubtabs, renderActiveTab } from './render.js';
 import { selectDemoFiles, buildExportEntry, toJson, jsonFileNameFor, batchFileName } from './export.js';
@@ -12,7 +12,11 @@ const batchSummary = document.querySelector('#batch-summary');
 const batchList = document.querySelector('#batch-list');
 const batchDownloadAll = document.querySelector('#batch-download-all');
 
-let wasmReady = init({ module_or_path: new URL('./pkg/web_analyzer_bg.wasm', import.meta.url) });
+// The analysis runs in a worker (analyzer_worker.js) so the page stays
+// responsive; the worker loads the wasm itself.
+const analyzer = createAnalyzerClient(
+  () => new Worker(new URL('./analyzer_worker.js', import.meta.url), { type: 'module' }),
+);
 
 // Bumped on every new pick/drop, so a batch still running from an earlier
 // pick stops at its next file instead of writing into the new one's list.
@@ -50,13 +54,8 @@ function showFailed(err) {
   }
 }
 
-async function runAnalysis(file, onPct) {
-  await wasmReady;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  return analyzeDemo(bytes, (processed, total) => {
-    if (!total) return;
-    onPct(Math.min(100, Math.round((processed / total) * 100)));
-  });
+function runAnalysis(file, onPct) {
+  return analyzer.analyze(file, onPct);
 }
 
 function downloadJson(fileName, value) {
@@ -168,12 +167,6 @@ function buildRow(item, index) {
   return li;
 }
 
-// The analysis itself runs synchronously on the main thread, so give the
-// browser a frame to paint the list's status between demos.
-function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-}
-
 async function loadDemoFiles(files) {
   const gen = ++generation;
   batch = files.map((file) => ({ file, analysis: null, error: null, status: 'waiting', pct: null, row: null }));
@@ -196,8 +189,6 @@ async function loadDemoFiles(files) {
     const item = batch[i];
     item.status = 'analyzing';
     updateRow(item, i);
-    await nextFrame();
-    if (gen !== generation) return;
 
     try {
       item.analysis = await runAnalysis(item.file, (pct) => {
@@ -230,6 +221,8 @@ async function loadDemoFiles(files) {
 function handleFiles(fileList) {
   const all = Array.from(fileList || []);
   if (all.length === 0) return;
+  // A new pick replaces whatever is still being analysed.
+  analyzer.cancel();
   const files = selectDemoFiles(all);
   if (files.length === 0) {
     generation++;

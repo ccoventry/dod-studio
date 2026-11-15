@@ -42,11 +42,12 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps five of its 43 slots for our
+//!   `cldll_func_t` table, then swaps ten of its 43 slots for our
 //!   trampolines before handing it back to the engine.
-//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` /
-//!   `"HUD_DirectorMessage"` / `"HUD_GetStudioModelInterface"` (classic
-//!   non-secured builds) -- we return the trampoline directly.
+//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` / `"HUD_Redraw"` /
+//!   `"HUD_Key_Event"` / `"HUD_DirectorMessage"` /
+//!   `"HUD_GetStudioModelInterface"` (classic non-secured builds) -- we
+//!   return the trampoline directly.
 //!
 //! Either way the trampolines receive what we need as ordinary arguments:
 //! `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface` hands
@@ -55,16 +56,15 @@
 //! list -- the first of two that aren't a one-time capture, since it runs the
 //! suppress/forward decision itself, once per entity. `HUD_DirectorMessage`
 //! is the second: it hands us every HLTV director message, so
-//! `hltv_messages.rs` can drop the proxy's on-screen text.
+//! `hltv_messages.rs` can drop the proxy's on-screen text. `HUD_Redraw` and
+//! `HUD_Key_Event` carry the review's on-screen panel and answer keys
+//! (`review_keys.rs`, #660).
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows_sys::Win32::System::Memory::{
-    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
-};
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
 
 use crate::pe;
@@ -199,6 +199,14 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// hook wins, and `client.dll`'s own handler is still reachable by calling it
 /// directly. Verified in `hw.dll` at 0x1d1a830 (hook) and 0x1d1a660
 /// (dispatch), pre-Anniversary. See `deathmsg.rs`.
+///
+/// The engine's *by-name* dispatcher (`hw.dll+0x1a7c0` pre-Anniversary,
+/// `+0x1a9260` 25th Anniversary) is different: it calls **every** record
+/// whose name matches, newest first, and never stops early. Only messages the
+/// engine makes up itself go that way -- the `HudText` that `TE_TEXTMESSAGE`
+/// turns into (`CL_HudMessage`) is the one that matters -- so a hook cannot
+/// drop those: `client.dll`'s own record runs after it anyway (#677,
+/// `plugin_text.rs`).
 /// `gEngfuncs.GetLocalPlayer` (slot 51). Returns the local player's
 /// `cl_entity_t`. Confirmed by the call site at `client.dll+0x20520`, a
 /// three-instruction thunk that calls this slot and immediately
@@ -211,6 +219,40 @@ pub type GetLocalPlayerFn = unsafe extern "C" fn() -> *mut c_void;
 /// `client.dll+0xb4ae`, which passes `(slot, &g_PlayerInfoList[slot])` with a
 /// 0x20-byte stride -- the `hud_player_info_t` that carries `m_nSteamID`.
 pub type GetPlayerInfoFn = unsafe extern "C" fn(slot: i32, info: *mut HudPlayerInfo);
+
+/// `gEngfuncs.pfnTextMessageGet` (slot 25): the `client_textmessage_t` for a
+/// `titles.txt` name, or for one of the engine's own `__NETMESSAGE__1..4`
+/// that a `TE_TEXTMESSAGE` fills in. Confirmed by DoD's own five calls through
+/// `gEngfuncs+0x64` (`CHudMessage` at `client.dll+0x25386`, `+0x25437`,
+/// `+0x254f8`, `CHudTextMessage` at `+0x4c10f`, `+0x4c1cb`): one string
+/// argument, popped by the caller, and the result's `+0x28` read as the text.
+pub type TextMessageGetFn = unsafe extern "C" fn(name: *const c_char) -> *const ClientTextMessage;
+
+/// `client_textmessage_t` (`common/cl_entity.h`'s neighbour `cdll_int.h`).
+/// Only `p_message` is read. Its offset is what `client.dll` reads after
+/// `pfnTextMessageGet` (`mov eax, [eax+0x28]`, `+0x4c11c`) and what the
+/// engine's `TE_TEXTMESSAGE` handler writes the text pointer to (`[esi+0x28]`,
+/// `hw.dll+0x23d8a` pre-Anniversary, `[edi+0x28]` at `+0x1b09f4` Anniversary).
+#[repr(C)]
+pub struct ClientTextMessage {
+    pub effect: i32,
+    pub colour1: [u8; 4],
+    pub colour2: [u8; 4],
+    pub x: f32,
+    pub y: f32,
+    pub fadein: f32,
+    pub fadeout: f32,
+    pub holdtime: f32,
+    pub fxtime: f32,
+    pub p_name: *const c_char,
+    pub p_message: *const c_char,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(std::mem::offset_of!(ClientTextMessage, p_name) == 0x24);
+    assert!(std::mem::offset_of!(ClientTextMessage, p_message) == 0x28);
+};
 
 /// `hud_player_info_t` (`cdll_int.h`), the Steam-era layout: 0x20 bytes, with
 /// `m_nSteamID` at +0x18. The size is what DoD's `client.dll` strides its
@@ -465,15 +507,16 @@ pub struct ClEntityS {
     /// Where the entity is drawn this frame. For the viewmodel,
     /// `V_CalcRefdef` sets it and the renderer reads it next.
     pub origin: Vec3,
-    angles: Vec3,
+    pub angles: Vec3,
     attachment: [Vec3; 4],
     trivial_accept: i32,
     pub model: *mut ModelSPartial,
 }
 
 /// Partial mirror of `ref_params_s` (`common/ref_params.h`) up through the
-/// fields read here: the view's vectors and the frame's time. Its layout is
-/// the same as a demo frame's `refparams` block, which `dem-patch` reads.
+/// fields used here: the view's vectors, the frame's time, `simorg` and
+/// `nextView`. Its layout is the same as a demo frame's `refparams` block,
+/// which `dem-patch` reads.
 #[repr(C)]
 pub struct RefParamsPartial {
     pub vieworg: [f32; 3],
@@ -483,7 +526,48 @@ pub struct RefParamsPartial {
     pub up: [f32; 3],
     pub frametime: f32,
     pub time: f32,
+    intermission: i32,
+    paused: i32,
+    spectator: i32,
+    onground: i32,
+    waterlevel: i32,
+    /// The client's simulated velocity; in a POV demo, the recorder's
+    /// (`pov_crosshair_gap`).
+    pub simvel: [f32; 3],
+    /// The client's simulated origin. The engine copies it back into
+    /// `cl.simorg` after `V_CalcRefdef`, and culls an HLTV demo's entities
+    /// from there (`spectator_chase_pvs`).
+    pub simorg: [f32; 3],
+    viewheight: [f32; 3],
+    idealpitch: f32,
+    cl_viewangles: [f32; 3],
+    health: i32,
+    crosshairangle: [f32; 3],
+    viewsize: f32,
+    punchangle: [f32; 3],
+    maxclients: i32,
+    viewentity: i32,
+    playernum: i32,
+    max_entities: i32,
+    demoplayback: i32,
+    hardware: i32,
+    smoothing: i32,
+    cmd: *mut c_void,
+    movevars: *mut c_void,
+    viewport: [i32; 4],
+    /// 0 for the main view, 1 for a second view (an inset) the client asked
+    /// for on the first.
+    pub next_view: i32,
 }
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    // Offsets from `ref_params.h` on a 32-bit build.
+    assert!(std::mem::offset_of!(RefParamsPartial, time) == 64);
+    assert!(std::mem::offset_of!(RefParamsPartial, simorg) == 100);
+    assert!(std::mem::offset_of!(RefParamsPartial, viewentity) == 176);
+    assert!(std::mem::offset_of!(RefParamsPartial, next_view) == 224);
+};
 
 /// Partial mirror of `model_s` (`common/com_model.h`) -- `name` is its first
 /// field, so this is all we need to identify a model by filename substring.
@@ -584,12 +668,21 @@ pub struct EngineStudioApiPartial {
     pub get_view_info: unsafe extern "C" fn(*mut f32, *mut f32, *mut f32, *mut f32),
 }
 
+impl EngineStudioApiPartial {
+    /// GetCurrentEntity, PlayerInfo, GetPlayerState, GetViewEntity, GetTimes,
+    /// GetCvar, in that order, untyped.
+    pub fn slots_before_view_info(&self) -> &[*mut c_void; 6] {
+        &self._slots_before_view_info
+    }
+}
+
 /// Partial, offset-accurate mirror of `cl_enginefuncs_s` (see
 /// `advancedfx/halflife`'s `engine/cdll_int.h`, whose `k_engdstNull` macro
 /// lists every field of the real struct in declaration order -- confirmed
 /// against it field-by-field. Every field up through `IsSpectateOnly` is
 /// present, in order, so the ones we actually use (`pfn_add_command`,
-/// `pfn_get_player_info`, `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
+/// `pfn_get_player_info`, `pfn_text_message_get`, `pfn_console_print`, `cmd_argc`,
+/// `cmd_argv`, `pfn_weapon_anim`,
 /// `pfn_get_game_directory`, `pfn_get_level_name`, `p_event_api`,
 /// `is_spectate_only`) land at the
 /// correct byte offsets; everything else is kept as an opaque, untyped slot
@@ -604,7 +697,7 @@ pub struct EngineStudioApiPartial {
 #[repr(C)]
 pub struct ClEngineFuncsPartial {
     _slots_before_get_screen_info: [*mut c_void; 12], // pfnSPR_Load .. pfnFillRGBA
-    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::VidInit` (`client+0x36b32`).
+    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::Think` (`client+0x36b32`).
     pub pfn_get_screen_info: GetScreenInfoFn,
     _slot_set_crosshair: *mut c_void,
     pub pfn_register_variable: RegisterVariableFn,
@@ -615,7 +708,10 @@ pub struct ClEngineFuncsPartial {
     _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
     /// Slot 21. See [`GetPlayerInfoFn`].
     pub pfn_get_player_info: GetPlayerInfoFn,
-    _slots_before_draw_console_string: [*mut c_void; 5], // pfnPlaySoundByName .. pfnDrawCharacter
+    _slots_before_text_message_get: [*mut c_void; 3], // pfnPlaySoundByName .. pfnAngleVectors
+    /// Slot 25. See [`TextMessageGetFn`].
+    pub pfn_text_message_get: TextMessageGetFn,
+    _slots_before_draw_console_string: [*mut c_void; 1], // pfnDrawCharacter
     /// Slot 27. See [`DrawConsoleStringFn`]; the kill feed's names go through
     /// it (`CHudDeathNotice::Draw`, `call [gEngfuncs+0x6c]` at
     /// `client.dll+0x2b089` and `+0x2b135`) (#562).
@@ -769,6 +865,13 @@ static TIMER_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by the `HUD_Frame` trampoline the first time the engine actually
 /// renders a frame through us; retires the fallback timer thread.
 static HUD_FRAME_DRIVING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the per-frame callbacks run on the engine's own thread (from
+/// `HUD_Frame`), so they may call into VGUI, rather than on the fallback timer
+/// thread.
+pub(crate) fn hud_frame_driving() -> bool {
+    HUD_FRAME_DRIVING.load(Ordering::Acquire)
+}
 /// Held while the per-frame callbacks run, so the timer thread and
 /// `HUD_Frame` can never run them at the same time, even in the moment a late
 /// hook takes over. A try-lock: whoever finds it taken skips that frame
@@ -831,14 +934,6 @@ static PER_FRAME_PROLOGUE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new(
 
 pub fn set_per_frame_prologue(callback: fn()) {
     let _ = PER_FRAME_PROLOGUE.set(callback);
-}
-
-/// Whether something has called `set_per_frame_prologue` yet -- issue #324's
-/// regression test needs to observe this without a real engine to drive
-/// `run_per_frame_callback` itself.
-#[cfg(test)]
-pub(crate) fn per_frame_prologue_is_set() -> bool {
-    PER_FRAME_PROLOGUE.get().is_some()
 }
 
 pub fn set_per_frame_callback(callback: fn()) {
@@ -908,8 +1003,11 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
-/// `HUD_Redraw` (`+0x2a5b0`): the client's 2D HUD pass, where
-/// `restyled_hud` draws after it (#849).
+/// Checked against both installs' `client.dll` (#660): `F` writes
+/// `HUD_Redraw` here and `HUD_Key_Event` at slot 34. `hw.dll` calls the first
+/// as `(float time, int intermission)` (pre-Anniversary `+0xbec9`, 25th
+/// Anniversary `+0x196f5a`) and the second as `(down, key, binding)` from
+/// `ClientDLL_Key_Event` (`+0xb98f`, `+0x1971d4`).
 const SLOT_HUD_REDRAW: usize = 3;
 /// `V_CalcRefdef`, the slot before `HUD_AddEntity` in `cldll_func_t`
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
@@ -918,7 +1016,10 @@ const SLOT_HUD_ADD_ENTITY: usize = 20;
 /// Checked 2026-10-11: `F` stores `HUD_DrawTransparentTriangles`
 /// (`+0x4c830`) at its table's slot 23.
 const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
+/// `F` stores `HUD_Shutdown` (`+0x2a570`) at slot 26.
+const SLOT_HUD_SHUTDOWN: usize = 26;
 const SLOT_HUD_FRAME: usize = 33;
+const SLOT_HUD_KEY_EVENT: usize = 34;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
 /// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
 const SLOT_HUD_DIRECTOR_MESSAGE: usize = 38;
@@ -926,11 +1027,13 @@ const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
-        && SLOT_HUD_REDRAW < CLDLL_FUNC_SLOTS
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_SHUTDOWN < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_REDRAW < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_KEY_EVENT < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
     "a cldll_func_t slot index is outside the table F actually writes"
@@ -940,6 +1043,9 @@ type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
 /// `int HUD_Redraw(float time, int intermission)`.
 type HudRedrawFn = unsafe extern "C" fn(f32, i32) -> i32;
+/// `int HUD_Key_Event(int down, int keynum, const char *binding)`: 0
+/// swallows the key, so the engine runs no bind for it.
+type HudKeyEventFn = unsafe extern "C" fn(i32, i32, *const c_char) -> i32;
 /// `void V_CalcRefdef(struct ref_params_s *pparams)`.
 type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
@@ -950,6 +1056,8 @@ type GetStudioModelInterfaceFn =
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
 /// `void HUD_DrawTransparentTriangles(void)`.
 type DrawTransparentTrianglesFn = unsafe extern "C" fn();
+/// `void HUD_Shutdown(void)`.
+type HudShutdownFn = unsafe extern "C" fn();
 /// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
 /// message, with the opcode and length byte already stripped.
 type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
@@ -962,9 +1070,11 @@ static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_SHUTDOWN: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_REDRAW: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_KEY_EVENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -1035,6 +1145,8 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
     // this, so the hooks that map handles to paths go in now, not on the
     // first `ds_map_hide_asset add` (#808).
     crate::hud_sprites::install();
+    // Before the first map loads, whose .bsp copy the client would leak.
+    crate::map_file_leak::install();
 
     if !engfuncs.is_null()
         && let Some(callback) = ON_ENGINE_READY.get()
@@ -1253,18 +1365,9 @@ pub(crate) unsafe fn patch_gengfuncs_slot(
         if was.is_null() {
             return Err(format!("slot {slot} is null"));
         }
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            at as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(at, hook, crate::patch::After::Restore) {
             return Err(format!("slot {slot} could not be made writable"));
         }
-        *at = hook;
-        VirtualProtect(at as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         Ok(was)
     }
 }
@@ -1299,19 +1402,14 @@ unsafe fn watch_client_commands() {
     REAL_CLIENT_CMD.store(real, Ordering::Release);
 
     unsafe {
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(
+            slot,
+            hook_client_cmd as *mut c_void,
+            crate::patch::After::Restore,
+        ) {
             crate::debug::report("client-cmd watch: couldn't make the slot writable; not watching");
             return;
         }
-        *slot = hook_client_cmd as *mut c_void;
-        VirtualProtect(slot as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         crate::debug::report(&format!(
             "client-cmd watch: gEngfuncs at {gengfuncs:p}, pfnClientCmd was {real:p} -- now logging what client.dll runs"
         ));
@@ -1339,55 +1437,109 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
         return 0;
     }
     let real: GetStudioModelInterfaceFn = unsafe { std::mem::transmute(real) };
-    unsafe { real(version, ppinterface, pstudio) }
+    // Before the client copies the engine's studio API: x-ray's
+    // `StudioDrawPoints` has to be in the copy.
+    unsafe { crate::spec_xray::install(pstudio) };
+    let result = unsafe { real(version, ppinterface, pstudio) };
+    if result != 0 && !ppinterface.is_null() {
+        // Safety: the client just filled it with its renderer interface,
+        // a static that lives as long as client.dll.
+        unsafe { crate::strafe_twitch::install(*ppinterface as *mut *mut c_void) };
+    }
+    result
 }
 
-/// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
+/// Puts back the HUD's FOV a POV demo played as HLTV left behind
+/// (`hltv_fov`), sets the in-eye camera's crouch height for the frame
+/// (`spectator_eye`), runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
+/// position where the engine culls an HLTV demo's entities from
+/// (`spectator_chase_pvs`), lets the spectated view
 /// replace the camera for a dead player (`spectator_deathcam`, before the
 /// position is recorded, so the recorded view is the drawn one), adjust the
 /// viewmodel it just placed (`spectator_gun`) and keep its live bob for a POV
-/// demo (`pov_live_bob`).
+/// demo (`pov_live_bob`). A POV demo's crosshair takes the main view's
+/// velocity (`pov_crosshair_gap`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
         return;
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    let main_view = unsafe { crate::spectator_chase_pvs::is_main_view(pparams) };
+    crate::spec_xray::before_calc_refdef();
+    if main_view {
+        // Before the viewmodel is drawn, which reads the HUD's FOV.
+        crate::hltv_fov::settle_hud_fov();
+    }
+    // Before: `V_GetInEyePos` reads the height inside `V_CalcRefdef`.
+    unsafe { crate::spectator_eye::before_calc_refdef(pparams) };
     unsafe { real(pparams) };
+    if main_view {
+        // Safety: non-null (`is_main_view`), the engine's for this call.
+        crate::pov_crosshair_gap::note_view(unsafe { &*pparams });
+    }
+    unsafe { crate::spectator_chase_pvs::after_calc_refdef(pparams, main_view) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
         // Safety: the engine's ref_params_s for this view, valid for the call.
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::screen_effects::after_calc_refdef();
     crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
 /// scope is drawn), after `demo_scope` has read the frame's render view, and
 /// with its black fill around the scope (#799).
-/// The client's 2D HUD pass, then whatever we draw over it.
-unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
-    let real = REAL_HUD_REDRAW.load(Ordering::Acquire);
-    if real.is_null() {
-        return 1;
-    }
-    let real: HudRedrawFn = unsafe { std::mem::transmute(real) };
-    // Safety: the client's own export, called on the engine's thread.
-    let result = unsafe { real(time, intermission) };
-    crate::restyled_hud::after_redraw();
-    result
-}
-
 unsafe extern "C" fn tramp_draw_transparent_triangles() {
     let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
     if real.is_null() {
         return;
     }
     crate::demo_scope::before_transparent_triangles();
+    crate::pov_live_bob::before_view_model();
     let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
     // Safety: the client's own export, called on the engine's thread.
     crate::demo_scope::with_black_fill(|| unsafe { real() });
+}
+
+/// Runs `client.dll`'s own `HUD_Redraw`, then draws the players' name
+/// plates (#1130) and the review's panel over the HUD (#660).
+unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
+    let real = REAL_HUD_REDRAW.load(Ordering::Acquire);
+    let result = if real.is_null() {
+        1
+    } else {
+        let real: HudRedrawFn = unsafe { std::mem::transmute(real) };
+        // Safety: the client's own export, called on the engine's thread.
+        unsafe { real(time, intermission) }
+    };
+    // The restyled health readout over the client's HUD (#849).
+    crate::restyled_hud::after_redraw();
+    // Safety: on the engine's thread, inside HUD_Redraw. The plates go
+    // first, so the review's panel covers them.
+    unsafe {
+        crate::nameplates::draw(intermission);
+        crate::review_keys::draw();
+    }
+    result
+}
+
+/// A key the engine is about to run the bind of, only while keys go to the
+/// game (never the console, chat or a window's box). The review's answer
+/// keys take theirs here (#660); everything else goes to the client as is.
+unsafe extern "C" fn tramp_hud_key_event(down: i32, key: i32, binding: *const c_char) -> i32 {
+    if crate::review_keys::key_event(down, key) {
+        return 0;
+    }
+    let real = REAL_HUD_KEY_EVENT.load(Ordering::Acquire);
+    if real.is_null() {
+        return 1;
+    }
+    let real: HudKeyEventFn = unsafe { std::mem::transmute(real) };
+    // Safety: the client's own export, with the engine's own arguments.
+    unsafe { real(down, key, binding) }
 }
 
 /// Called once per entity the engine is about to add to the render list.
@@ -1419,7 +1571,43 @@ unsafe extern "C" fn tramp_hud_add_entity(
         return 1;
     }
     let real: HudAddEntityFn = unsafe { std::mem::transmute(real) };
-    unsafe { real(entity_type, ent, modelname) }
+    let drawn = unsafe { real(entity_type, ent, modelname) };
+    if drawn != 0 {
+        // Safety: the engine's own `cl_entity_t` for this call. The client's
+        // answer counts: it drops the player an HLTV camera watches in-eye.
+        unsafe { crate::nameplates::note_added(ent as *const ClEntityS) };
+    }
+    // Safety: as above; lets a player x-ray glows for past the engine's PVS
+    // check, which runs next.
+    unsafe { crate::spec_xray::after_add_entity(drawn != 0, ent as *const ClEntityS) };
+    drawn
+}
+
+/// Set once `client.dll`'s `HUD_Shutdown` has run: the game is quitting.
+static CLIENT_SHUT_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the client has shut down. Once it has, the engine frees every
+/// cvar the client side registered, ours included, before SDL takes the
+/// window down, so a cvar pointer must not be read any more: `ShowWindow`
+/// reaching `behind_imports` read a freed `ds_capture_stay_behind` and
+/// crashed the game as it quit (#1080).
+pub fn client_shut_down() -> bool {
+    CLIENT_SHUT_DOWN.load(Ordering::Acquire)
+}
+
+/// Marks the client shut down before `client.dll`'s own `HUD_Shutdown` runs,
+/// so nothing reads our cvars past this point.
+unsafe extern "C" fn tramp_hud_shutdown() {
+    if !CLIENT_SHUT_DOWN.swap(true, Ordering::AcqRel) {
+        unsafe {
+            crate::debug::report("HUD_Shutdown: the game is quitting; our cvars are no longer read")
+        };
+    }
+    let real = REAL_HUD_SHUTDOWN.load(Ordering::Acquire);
+    if !real.is_null() {
+        let real: HudShutdownFn = unsafe { std::mem::transmute(real) };
+        unsafe { real() };
+    }
 }
 
 /// Called once per `svc_director` message. Drops the ones
@@ -1475,7 +1663,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the five slots we care about before the engine ever reads them.
+/// replaces the ten slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {
@@ -1504,6 +1692,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
         );
         swap_slot(
             table,
+            SLOT_HUD_FRAME,
+            &REAL_HUD_FRAME,
+            tramp_hud_frame as *mut c_void,
+            "HUD_Frame",
+        );
+        swap_slot(
+            table,
             SLOT_HUD_REDRAW,
             &REAL_HUD_REDRAW,
             tramp_hud_redraw as *mut c_void,
@@ -1511,10 +1706,10 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
         );
         swap_slot(
             table,
-            SLOT_HUD_FRAME,
-            &REAL_HUD_FRAME,
-            tramp_hud_frame as *mut c_void,
-            "HUD_Frame",
+            SLOT_HUD_KEY_EVENT,
+            &REAL_HUD_KEY_EVENT,
+            tramp_hud_key_event as *mut c_void,
+            "HUD_Key_Event",
         );
         swap_slot(
             table,
@@ -1536,6 +1731,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_DRAW_TRANSPARENT_TRIANGLES,
             tramp_draw_transparent_triangles as *mut c_void,
             "HUD_DrawTransparentTriangles",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_SHUTDOWN,
+            &REAL_HUD_SHUTDOWN,
+            tramp_hud_shutdown as *mut c_void,
+            "HUD_Shutdown",
         );
         swap_slot(
             table,
@@ -1652,6 +1854,14 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
             REAL_HUD_FRAME.store(result, Ordering::Release);
             tramp_hud_frame as *mut c_void
         }
+        "HUD_Redraw" => {
+            REAL_HUD_REDRAW.store(result, Ordering::Release);
+            tramp_hud_redraw as *mut c_void
+        }
+        "HUD_Key_Event" => {
+            REAL_HUD_KEY_EVENT.store(result, Ordering::Release);
+            tramp_hud_key_event as *mut c_void
+        }
         "V_CalcRefdef" => {
             REAL_CALC_REFDEF.store(result, Ordering::Release);
             tramp_calc_refdef as *mut c_void
@@ -1663,6 +1873,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_DrawTransparentTriangles" => {
             REAL_DRAW_TRANSPARENT_TRIANGLES.store(result, Ordering::Release);
             tramp_draw_transparent_triangles as *mut c_void
+        }
+        "HUD_Shutdown" => {
+            REAL_HUD_SHUTDOWN.store(result, Ordering::Release);
+            tramp_hud_shutdown as *mut c_void
         }
         "HUD_DirectorMessage" => {
             REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);
@@ -1712,27 +1926,9 @@ fn hook_import(
 
     unsafe {
         real_store.store(*slot, Ordering::Release);
-
-        let mut old_protect: PAGE_PROTECTION_FLAGS = 0;
-        let ok = VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old_protect,
-        );
-        if ok == 0 {
-            return false;
-        }
-        *slot = replacement;
-        VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            old_protect,
-            &mut old_protect,
-        );
+        // Left writable: HLAE hooks imports on this page too (#1059).
+        crate::patch::write_pointer(slot, replacement, crate::patch::After::LeaveWritable)
     }
-
-    true
 }
 
 /// Installs both `hw.dll` IAT hooks: `LoadLibraryA` (to learn `client.dll`'s

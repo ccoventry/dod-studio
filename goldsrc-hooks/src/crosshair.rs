@@ -41,8 +41,8 @@
 //!
 //! Patching the function needs neither: one signature on the function itself,
 //! five bytes, and reverting restores the five bytes the signature already
-//! proves were there. The general `dodstudio_hudelement` command in #265 is
-//! still worth having -- this is not it, and does not block it.
+//! proves were there. The general vftable stub from #265 (`hudelement.rs`)
+//! is a separate thing; this is not it.
 //!
 //! ## It covers both the POV and the spectator crosshair
 //!
@@ -77,7 +77,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name, for status and error text. Registered in `commands.rs`.
+/// The cvar name, for status and error text. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("hud_hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call

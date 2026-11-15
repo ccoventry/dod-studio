@@ -4,7 +4,7 @@
 // drives), what Start Audit sends, the progress bar and step line while it
 // runs, the kept copy and the in-use copies left unticked, and the two
 // deletes: the Recycle Bin by default, permanent as its own choice.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GROUPS = [
   {
@@ -47,7 +47,7 @@ async function runAudit(page) {
   await page.fill('#audit-target-folder-input', 'C:\\Demos');
   await page.click('#run-audit-btn');
   await page.evaluate(() => window.__finishAudit());
-  await expect(page.locator('#audit-status-text')).toHaveText('Done: 5 demos checked, 2 with copies.');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in \d+\.\d s: 5 demos checked, 2 with copies\.$/);
 }
 
 test('the folder list holds the Target Folder and picked folders, once each', async ({ page }) => {
@@ -93,7 +93,7 @@ test('All drives alone can start an audit and dims the list', async ({ page }) =
   await expect(page.locator('#run-audit-btn')).toBeEnabled();
   await page.click('#run-audit-btn');
   const [args] = await calls(page, 'run_demo_audit');
-  expect(args).toEqual({ paths: [], allDrives: true, queued: [] });
+  expect(args).toEqual({ paths: [], allDrives: true, queued: [], lookInZips: false });
 });
 
 test('a running audit shows its step and a bar, and locks its controls', async ({ page }) => {
@@ -103,19 +103,23 @@ test('a running audit shows its step and a bar, and locks its controls', async (
   await page.click('#run-audit-btn');
 
   const [args] = await calls(page, 'run_demo_audit');
-  expect(args).toEqual({ paths: ['C:\\Demos'], allDrives: false, queued: ['G:\\project\\match.dem'] });
+  expect(args).toEqual({ paths: ['C:\\Demos'], allDrives: false, queued: ['G:\\project\\match.dem'], lookInZips: false });
   await expect(page.locator('#run-audit-btn')).toBeDisabled();
   await expect(page.locator('#cancel-audit-btn')).toBeEnabled();
   await expect(page.locator('#audit-all-drives')).toBeDisabled();
   // The harness has no CSS, so the empty bar has no size to be "visible".
   await expect(page.locator('#audit-progress')).not.toHaveAttribute('hidden');
 
+  // The first audit of these folders has no count to measure the walk by:
+  // the bar moves without a width. A clock follows the step line.
   await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 0, done: 0, current: '\\\\?\\C:\\Demos\\x' }));
-  await expect(page.locator('#audit-status-text')).toHaveText('Looking for demos: 12 folders read');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking for demos: 12 folders read · 0:0\d$/);
   await expect(page.locator('#audit-status-current')).toHaveText('C:\\Demos\\x');
+  await expect(page.locator('#audit-progress')).toHaveClass(/indeterminate/);
   await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 4, done: 1, current: 'C:\\Demos\\a.dem' }));
-  await expect(page.locator('#audit-status-text')).toHaveText('Comparing demos: 1 / 4');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Comparing demos: 1 \/ 4 · 0:0\d$/);
   await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await expect(page.locator('#audit-progress')).not.toHaveClass(/indeterminate/);
 
   await page.click('#cancel-audit-btn');
   expect(await calls(page, 'cancel_audit')).toHaveLength(1);
@@ -124,6 +128,21 @@ test('a running audit shows its step and a bar, and locks its controls', async (
   await expect(page.locator('#audit-results-body')).toContainText('cancelled before it finished');
   await expect(page.locator('#audit-progress')).toHaveAttribute('hidden');
   await expect(page.locator('#run-audit-btn')).toBeEnabled();
+});
+
+test('the next audit of the same folders measures its walk against the last one', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 40, total: 0, done: 0 }));
+  await page.evaluate(() => window.__finishAudit());
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in /);
+
+  await page.click('#run-audit-btn');
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 10, total: 0, done: 0 }));
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking for demos: 10 folders read \(about 40 last time\) · /);
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await expect(page.locator('#audit-progress')).not.toHaveClass(/indeterminate/);
 });
 
 test('the kept copy comes first and copies in use start unticked', async ({ page }) => {
@@ -302,4 +321,102 @@ test('a file that fails to delete stays listed and is reported', async ({ page }
   await confirm(page);
   await expect(page.locator('#audit-status-text')).toHaveText('Moved to the Recycle Bin: 1, 1 not deleted.');
   await expect(page.locator('#audit-results-body .audit-file-path')).toContainText(['E:\\old\\a.dem']);
+});
+
+// "Show demos backed up in archives" (#929): an archive is a backup. A
+// loose demo it holds gets a chip naming it, groups hold loose copies only
+// and are ticked as without archives, and a section below the groups lists
+// every backed-up demo, one with no loose copy too.
+const LAN = { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' };
+const OLD = { zip: '\\\\?\\E:\\old\\2022.7z', entry: 'm.dem' };
+const SOLO = { path: '\\\\?\\C:\\demos\\solo.dem', in_use: null, backups: [{ zip: '\\\\?\\D:\\packs\\cup.rar', entry: 'solo.dem' }] };
+const BACKED_UP_GROUPS = [
+  {
+    size: 1024 * 1024,
+    header_hash: 0x123,
+    files: [
+      { path: '\\\\?\\C:\\demos\\m.dem', in_use: null, backups: [LAN] },
+      { path: '\\\\?\\F:\\downloads\\m.dem', in_use: null, backups: [LAN, OLD] },
+    ],
+  },
+];
+const BACKED_UP = [...BACKED_UP_GROUPS[0].files, SOLO];
+
+test('Show demos backed up in archives is sent, saved, and its archives show in the progress line', async ({ page }) => {
+  await loadHarness(page);
+  await expect(page.locator('label:has(#audit-look-in-zips)')).toHaveText('Show demos backed up in archives (.zip, .7z, .rar)');
+  await expect(page.locator('#audit-look-in-zips')).not.toBeChecked();
+  await page.check('#audit-look-in-zips');
+  expect(await page.evaluate(() => window.__settingsSaves)).toBe(1);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  const [args] = await calls(page, 'run_demo_audit');
+  expect(args.lookInZips).toBe(true);
+  await expect(page.locator('#audit-look-in-zips')).toBeDisabled();
+  await page.evaluate(() => window.__mockEmit('audit_progress', {
+    folders: 12, zips_total: 4, zips_done: 1, total: 0, done: 0, current: '\\\\?\\D:\\packs\\lan.zip',
+  }));
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside archives: 1 \/ 4 · 0:0\d$/);
+  await expect(page.locator('#audit-status-current')).toHaveText('D:\\packs\\lan.zip');
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await page.evaluate(() => window.__finishAudit({ groups: [], backed_up: [], demos: 2, cancelled: false }));
+  await expect(page.locator('#audit-look-in-zips')).toBeEnabled();
+});
+
+test('a backed-up demo is marked, and its loose copies are offered as without archives', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate(([groups, backedUp]) => window.__finishAudit({ groups, backed_up: backedUp, demos: 3, archive_demos: 4, cancelled: false }),
+    [BACKED_UP_GROUPS, BACKED_UP]);
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in \d+\.\d s: 3 demos checked and 4 inside archives, \d+ with copies\.$/);
+
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText([
+    'C:\\demos\\m.dem backed up in lan.zip',
+    'F:\\downloads\\m.dem backed up in 2 archives',
+    // The section below the groups: every backed-up demo.
+    'C:\\demos\\m.dem backed up in lan.zip',
+    'F:\\downloads\\m.dem backed up in 2 archives',
+    'C:\\demos\\solo.dem backed up in cup.rar',
+  ]);
+  const chip = rows.nth(1).locator('.audit-backup-chip');
+  await expect(chip).toHaveAttribute('title', /D:\\packs\\lan\.zip › hltv\/m\.dem/);
+  await expect(chip).toHaveAttribute('title', /E:\\old\\2022\.7z › m\.dem/);
+  // The group works as with no archive: kept first, the copy ticked.
+  await expect(rows.nth(0).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(1).locator('input.audit-row-cb')).toBeChecked();
+  // Nothing in the section can be ticked.
+  await expect(rows.nth(4).locator('input')).toHaveCount(0);
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▼ Backed up in archives (3 demos)');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 1.0 MB | Backed up in archives: 3');
+
+  // Open Folder shows the loose demo, not the archive.
+  await rows.nth(4).getByText('Open Folder').click();
+  const [reveal] = await calls(page, 'reveal_in_explorer');
+  expect(reveal.path).toBe('C:\\demos\\solo.dem');
+
+  // The delete is the usual one, checked against the kept loose copy.
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const [del] = await calls(page, 'delete_audit_files');
+  expect(del.copies).toEqual([{ path: '\\\\?\\F:\\downloads\\m.dem', keep: '\\\\?\\C:\\demos\\m.dem' }]);
+  // The deleted copy leaves the section too.
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▼ Backed up in archives (2 demos)');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 0 | Wasted Space: 0.0 MB | Backed up in archives: 2');
+});
+
+test('a backed-up demo with no loose copy shows in the section, which folds', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate((solo) => window.__finishAudit({ groups: [], backed_up: [solo], demos: 1, cancelled: false }), SOLO);
+  await expect(page.locator('#audit-results-body .table-empty')).toHaveText('No duplicates found! Your demos are clean.');
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText(['C:\\demos\\solo.dem backed up in cup.rar']);
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 0 | Wasted Space: 0.0 MB | Backed up in archives: 1');
+  await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
+  await page.click('.audit-backed-up-row .group-toggle-btn');
+  await expect(rows).toHaveCount(0);
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▶ Backed up in archives (1 demo)');
 });

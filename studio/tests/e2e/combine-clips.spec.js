@@ -3,7 +3,7 @@
 // Pins the list (filled from the finished renders, reorder, remove, add
 // files without duplicates), what the plan line says for each way of
 // joining, and what Combine sends: the clips in order and the path saved to.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const A = 'C:\\renders\\anzio_krod_4k.mp4';
 const B = 'C:\\renders\\harrington_krod_3k.mp4';
@@ -80,4 +80,36 @@ test('Combine saves where chosen, sends the clips in order, shows progress, and 
   await expect(page.locator('#combine-cancel-btn')).toBeDisabled();
   await expect(page.locator('#combine-progress')).toHaveAttribute('hidden');
   await expect(page.locator('#combine-add-files-btn')).toBeEnabled();
+});
+
+test('the step line shows from the click: checking the clips, joining, then how long it took (#955)', async ({ page }) => {
+  await loadHarness(page);
+  await page.click('#combine-open-btn');
+  await expect(page.locator('#combine-start-btn')).toBeEnabled();
+  await page.click('#combine-start-btn');
+  // Before any event from the backend.
+  await expect(page.locator('#combine-status')).toHaveText('Checking the clips…');
+  await expect(page.locator('#combine-progress')).toHaveClass(/indeterminate/);
+  await expect(page.locator('#combine-start-btn')).toBeDisabled();
+
+  await page.evaluate(() => window.__mockEmit('combine_progress', { step: 'checking', done: 1, total: 2 }));
+  await expect(page.locator('#combine-status')).toHaveText('Checking the clips (2 of 2)…');
+
+  await page.evaluate(() => window.__mockEmit('combine_progress', { step: 'joining', fraction: 0.5 }));
+  await expect(page.locator('#combine-status')).toHaveText('Joining clips: 0:07 of 0:14');
+  await expect(page.locator('#combine-progress')).not.toHaveClass(/indeterminate/);
+  await expect(page.locator('#combine-progress-fill')).toHaveAttribute('style', /width: 50%/);
+
+  await page.evaluate(() => window.__finishCombine.resolve());
+  await expect(page.locator('#combine-status')).toHaveText(/^Saved in (\d+\.\d s|\d+ min \d+ s)\.$/);
+  await expect(page.locator('#combine-progress')).toHaveAttribute('hidden');
+});
+
+test('a cancelled join says nothing was saved', async ({ page }) => {
+  await loadHarness(page);
+  await page.click('#combine-open-btn');
+  await expect(page.locator('#combine-start-btn')).toBeEnabled();
+  await page.click('#combine-start-btn');
+  await page.click('#combine-cancel-btn');
+  await expect(page.locator('#combine-status')).toHaveText('Cancelled. Nothing was saved.');
 });

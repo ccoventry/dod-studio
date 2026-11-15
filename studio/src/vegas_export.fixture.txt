@@ -1,0 +1,6 @@
+"ID";"Track";"StartTime";"Length";"PlayRate";"Locked";"Normalized";"StretchMethod";"Looped";"OnRuler";"MediaType";"FileName";"Stream";"StreamStart";"StreamLength";"FadeTimeIn";"FadeTimeOut";"SustainGain";"CurveIn";"GainIn";"CurveOut";"GainOut";"Layer";"Color";"CurveInR";"CurveOutR";"PlayPitch";"LockPitch";"FirstChannel";"Channels"
+1; 1; 0.0000; 6000.0000; 1.000000; FALSE; FALSE; 0; TRUE; FALSE; VIDEO; "{DIR}main_1_hud.mov"; 0; 0.0000; 6000.0000; 0.0000; 0.0000; 1.000000; 4; 0.000000; 4; 0.000000; 0; -1; 4; 4; 0.000000; FALSE; 0; 0
+2; 2; 0.0000; 6000.0000; 1.000000; FALSE; FALSE; 0; TRUE; FALSE; VIDEO; "{DIR}main_1.mov"; 0; 0.0000; 6000.0000; 0.0000; 0.0000; 1.000000; 4; 0.000000; 4; 0.000000; 0; -1; 4; 4; 0.000000; FALSE; 0; 0
+3; 2; 6000.0000; 6000.0000; 1.000000; FALSE; FALSE; 0; TRUE; FALSE; VIDEO; "{DIR}main_2.mov"; 0; 0.0000; 6000.0000; 0.0000; 0.0000; 1.000000; 4; 0.000000; 4; 0.000000; 0; -1; 4; 4; 0.000000; FALSE; 0; 0
+4; 0; 0.0000; 6000.0000; 1.000000; FALSE; FALSE; 0; TRUE; FALSE; AUDIO; "{DIR}main_1.mov"; 0; 0.0000; 6000.0000; 0.0000; 0.0000; 1.000000; 4; 0.000000; 4; 0.000000; 0; -1; 4; 4; 0.000000; FALSE; 0; 2
+5; 0; 6000.0000; 6000.0000; 1.000000; FALSE; FALSE; 0; TRUE; FALSE; AUDIO; "{DIR}main_2.mov"; 0; 0.0000; 6000.0000; 0.0000; 0.0000; 1.000000; 4; 0.000000; 4; 0.000000; 0; -1; 4; 4; 0.000000; FALSE; 0; 2

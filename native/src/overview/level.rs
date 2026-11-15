@@ -123,6 +123,14 @@ fn entries<T>(
 
 fn texture_names(data: &[u8]) -> Result<Vec<String>, String> {
     let count = rd_i32(data, 0)?.max(0) as usize;
+    // Check the directory fits before reserving: a corrupt count would
+    // otherwise ask for tens of GB and abort the app (#1236).
+    if count > data.len().saturating_sub(4) / 4 {
+        return Err(format!(
+            "texture lump claims {count} textures but holds only {} bytes",
+            data.len()
+        ));
+    }
     let mut names = Vec::with_capacity(count);
     for i in 0..count {
         let offset = rd_i32(data, 4 + i * 4)?;
@@ -390,5 +398,27 @@ impl Level {
             .filter(|e| e.classname() == class)
             .filter_map(|e| e.get("origin").and_then(parse_origin).map(|o| (e, o)))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texture_count_beyond_the_lump_is_an_error_not_an_allocation() {
+        let mut data = i32::MAX.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0; 8]);
+        assert!(texture_names(&data).is_err());
+    }
+
+    #[test]
+    fn texture_names_reads_a_well_formed_directory() {
+        let mut data = 1i32.to_le_bytes().to_vec();
+        data.extend_from_slice(&8i32.to_le_bytes());
+        let mut name = [0u8; 16];
+        name[..4].copy_from_slice(b"WALL");
+        data.extend_from_slice(&name);
+        assert_eq!(texture_names(&data).unwrap(), vec!["wall".to_string()]);
     }
 }

@@ -1,6 +1,6 @@
 // themed_confirm.js — driven against tests/e2e/themed-confirm.html.
 // See tests/e2e/README.md for what this style of test covers.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/themed-confirm.html');
@@ -105,5 +105,17 @@ test.describe('themed_confirm details (#477)', () => {
     await expect(page.locator('#result')).toHaveText('true');
     await page.locator('#trigger-default-btn').click();
     await expect(page.locator('#themed-confirm-cancel-btn')).toBeVisible();
+  });
+});
+
+test.describe('themed_confirm message updates', () => {
+  test('rewrite the open dialog, and nothing once it has closed (#937)', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-default-btn').click();
+    await page.evaluate(() => window.__setMessage('Delete 3 files? About 3 s.'));
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Delete 3 files? About 3 s.');
+    await page.locator('#themed-confirm-cancel-btn').click();
+    await page.evaluate(() => window.__setMessage('too late'));
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Delete 3 files? About 3 s.');
   });
 });

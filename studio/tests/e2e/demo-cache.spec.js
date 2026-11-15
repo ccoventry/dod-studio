@@ -1,5 +1,5 @@
 // demo_cache.js (#569), driven against tests/e2e/demo-cache.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/demo-cache.html');
@@ -45,6 +45,19 @@ test('Stop asks the backend to stop, and a stopped run says where it stopped', a
   await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 1, total: 3, already: 0, failed: 0, finished: true, cancelled: true }));
   await expect(page.locator('#analyzer-cache-status')).toHaveText('Stopped at 1 / 3');
   await expect(button).toHaveText('Cache all');
+});
+
+// #992: the Analyzer's player read leaves a running run's demos to it.
+test("isCaching names the running run's demos, and none once it ends", async ({ page }) => {
+  await gotoHarness(page);
+  const caching = (path) => page.evaluate((p) => window.__demoCache.isCaching(p), path);
+  await page.evaluate(() => { window.__demoPaths = ['a.dem', 'b.dem']; });
+  expect(await caching('a.dem')).toBe(false);
+  await page.locator('#analyzer-cache-all-btn').click();
+  expect(await caching('a.dem')).toBe(true);
+  expect(await caching('z.dem')).toBe(false);
+  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 2, total: 2, already: 0, failed: 0, finished: true, cancelled: false }));
+  await expect.poll(() => caching('a.dem')).toBe(false);
 });
 
 test('an empty folder says so and starts nothing', async ({ page }) => {

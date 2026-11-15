@@ -1,27 +1,16 @@
 //! Demo analyzer that runs in a terminal and produces text output.
 
-#[cfg(not(target_arch = "wasm32"))]
 use analysis::{Analysis, Mortality, MortalityState, Round, SteamId, Team};
-#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand, ValueEnum};
-#[cfg(not(target_arch = "wasm32"))]
 use humantime::{format_duration, format_rfc3339_seconds};
-#[cfg(not(target_arch = "wasm32"))]
 use native::patch::{PatchOptions, patch_demo_highlights};
-#[cfg(not(target_arch = "wasm32"))]
-use native::{FileInfo, run_analyzer};
-#[cfg(not(target_arch = "wasm32"))]
+use native::{FileInfo, messages, run_analyzer};
 use serde_json::{Value, json};
-#[cfg(not(target_arch = "wasm32"))]
 use std::fmt::{Display, Formatter};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime};
-#[cfg(not(target_arch = "wasm32"))]
 use tabled::{builder::Builder, settings::Style};
 
-#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args = Args::parse();
 
@@ -62,30 +51,27 @@ fn main() {
                     record_stop_trail,
                     post_record_buffer,
                 ) {
-                    eprintln!("Error: {}", e);
+                    eprintln!("{}", messages::cli_error(e));
                     std::process::exit(1);
                 }
             }
         }
     } else {
         if args.demo_paths.is_empty() {
-            eprintln!(
-                "Error: Please specify at least one demo file to analyze, or use a subcommand."
-            );
+            eprintln!("{}", messages::CLI_NO_DEMOS);
             std::process::exit(1);
         }
         run_analyze_subcommand(args.demo_paths, args.output_format);
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat) {
     let mut analyses = vec![];
     for p in &demo_paths {
         match run_analyzer(p) {
             Ok(res) => analyses.push(res),
             Err(e) => {
-                eprintln!("Error analyzing {}: {}", p.display(), e);
+                eprintln!("{}", messages::cli_error_analyzing(p.display(), e));
             }
         }
     }
@@ -102,13 +88,12 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
 /// One read-only stats document per demo, as JSON (#192): the columns a
 /// league scoreboard can take from a demo, keyed by the player's global id
 /// (a SteamID64 when the demo carries one).
-#[cfg(not(target_arch = "wasm32"))]
 fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
     let mut rows = vec![];
     for p in &demo_paths {
         match run_analyzer(p) {
             Ok((file, analysis)) => rows.push(stats_json(&file, &analysis)),
-            Err(e) => eprintln!("Error analyzing {}: {}", p.display(), e),
+            Err(e) => eprintln!("{}", messages::cli_error_analyzing(p.display(), e)),
         }
     }
     println!("{}", Json(json!(rows)));
@@ -116,7 +101,6 @@ fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
 
 /// `1` or `2` from a `_h1`/`_h2` part of a demo's file name, the league's
 /// naming convention. Nothing in the recording itself is checked.
-#[cfg(not(target_arch = "wasm32"))]
 fn half_from_file_name(name: &str) -> Option<u8> {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     stem.to_lowercase()
@@ -128,7 +112,6 @@ fn half_from_file_name(name: &str) -> Option<u8> {
         })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
     let state = &analysis.state;
     let team_name = |team: &Team| format!("{team:?}").to_lowercase();
@@ -202,7 +185,8 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+// The CLI entry point: one flag per argument, each independent.
+#[allow(clippy::too_many_arguments)]
 fn run_patch_streak_subcommand(
     input: PathBuf,
     output: PathBuf,
@@ -217,7 +201,7 @@ fn run_patch_streak_subcommand(
     record_stop_trail: f32,
     post_record_buffer: f32,
 ) -> Result<(), String> {
-    println!("Analyzing input demo: {}", input.display());
+    println!("{}", messages::cli_analyzing_input(input.display()));
     let (_file_info, analysis) = run_analyzer(&input)?;
 
     // Find player
@@ -233,21 +217,20 @@ fn run_patch_streak_subcommand(
     let player = match target_player {
         Some(p) => p,
         None => {
-            return Err(format!(
-                "Could not find player matching query '{}'. Available players: {}",
-                player_query,
+            return Err(messages::cli_no_player_match(
+                &player_query,
                 analysis
                     .state
                     .players
                     .iter()
                     .map(|p| p.name.as_str())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
             ));
         }
     };
 
-    println!("Found player: {} ({})", player.name, player.id);
+    println!("{}", messages::cli_found_player(&player.name, &player.id));
 
     // Collect killstreaks matching weapon & count filters
     let mut intervals = vec![];
@@ -273,21 +256,30 @@ fn run_patch_streak_subcommand(
             let stop_time = last_kill.0.real_offset.as_secs_f32();
             intervals.push((start_time, stop_time));
             println!(
-                "Selected Streak: {} kills starting at {:.2}s, ending at {:.2}s",
-                streak.kills.len(),
-                start_time,
-                stop_time
+                "{}",
+                messages::cli_selected_streak(streak.kills.len(), start_time, stop_time)
             );
         }
     }
 
     if intervals.is_empty() {
-        return Err("No killstreaks found matching the criteria.".to_string());
+        let longest = player
+            .kill_streaks
+            .iter()
+            .map(|s| s.kills.len())
+            .max()
+            .unwrap_or(0);
+        return Err(messages::cli_no_killstreaks(
+            &player.name,
+            min_streak,
+            weapon_query.as_deref(),
+            longest,
+        ));
     }
 
-    println!("Reading raw demo bytes...");
+    println!("{}", messages::CLI_READING_RAW_BYTES);
     let demo_bytes =
-        std::fs::read(&input).map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
+        std::fs::read(&input).map_err(|e| messages::cli_failed_to_read(input.display(), e))?;
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -316,19 +308,18 @@ fn run_patch_streak_subcommand(
         player_deaths: Some(player_deaths),
     };
 
-    println!("Patching demo highlights...");
+    println!("{}", messages::CLI_PATCHING_HIGHLIGHTS);
     let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)
-        .map_err(|e| format!("{}: {}", input.display(), e))?;
+        .map_err(|e| messages::labeled(input.display(), e))?;
 
-    println!("Writing patched demo to: {}", output.display());
+    println!("{}", messages::cli_writing_patched(output.display()));
     std::fs::write(&output, patched_bytes)
-        .map_err(|e| format!("Failed to write {}: {}", output.display(), e))?;
+        .map_err(|e| messages::cli_failed_to_write(output.display(), e))?;
 
-    println!("Successfully exported patched demo!");
+    println!("{}", messages::CLI_EXPORT_DONE);
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Args {
@@ -344,7 +335,6 @@ struct Args {
     output_format: OutputFormat,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Analyze one or more demos
@@ -415,7 +405,6 @@ enum Commands {
     },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, ValueEnum)]
 enum OutputFormat {
     /// Markdown document best used in combination with a Markdown renderer
@@ -425,13 +414,10 @@ enum OutputFormat {
     Json,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 type AnalyzerOutput = (FileInfo, Analysis);
 
-#[cfg(not(target_arch = "wasm32"))]
 struct Json(Value);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl FromIterator<AnalyzerOutput> for Json {
     fn from_iter<T: IntoIterator<Item = AnalyzerOutput>>(iter: T) -> Self {
         let analyses = iter.into_iter();
@@ -485,14 +471,12 @@ impl FromIterator<AnalyzerOutput> for Json {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<Value> for Json {
     fn from(value: Value) -> Self {
         Self(value)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Display for Json {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = serde_json::to_string_pretty(&self.0).map_err(|_| std::fmt::Error)?;
@@ -501,17 +485,14 @@ impl Display for Json {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct Markdown(FileInfo, Analysis);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<AnalyzerOutput> for Markdown {
     fn from(value: AnalyzerOutput) -> Self {
         Self(value.0, value.1)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Markdown {
     fn md_escape(str: &str) -> String {
         str.replace("|", r"\|")
@@ -522,7 +503,6 @@ impl Markdown {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Display for Markdown {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Header section
@@ -822,7 +802,7 @@ impl Display for Markdown {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::half_from_file_name;
 
@@ -844,6 +824,3 @@ mod tests {
         assert_eq!(half_from_file_name("solifotw-greetz1.dem"), None);
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-fn main() {}

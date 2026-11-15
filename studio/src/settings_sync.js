@@ -5,20 +5,33 @@
 // (pinned folders, capture drives, ...) and hands them over through getState().
 
 import { saveSettings } from './ipc_bridge.js';
-import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
+import { getCommandsState, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
+import { renderTimingDiagram } from './timing_diagram.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
+import { readKillGaps, applyKillGaps } from './kill_gaps_setting.js';
+import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
+import { rescanOfferSettings, applyRescanOfferSettings } from './rescan_recent.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
-import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
+import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
+import { readWindowsDriveKeepFree, applyWindowsDriveKeepFree } from './windows_drive_setting.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
+import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
+import { getPickFolders, setPickFolders } from './pick_path.js';
+import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
+import { getKeptJsonProjects, setKeptJsonProjects } from './project_convert.js';
+import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
- *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
+ *   form doesn't hold ({ scanPaths, demoFolderHistory, recentProjects, scanFoldersForDemos,
  *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
  *   setupDismissed }),
  *   and currentCaptureMode().
@@ -32,10 +45,10 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 120, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    // 0 = empty: Start is blocked in AGR mode; elsewhere DEFAULT_AGR_FPS is only a fallback (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRoll = numberField('#config-pre-roll', 2.0);
-    const postRoll = numberField('#config-post-roll', 0.6);
+    const preRoll = numberField('#config-pre-roll', 5.0);
+    const postRoll = numberField('#config-post-roll', 1.0);
 
     const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
     const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
@@ -81,7 +94,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
     const keepGameBehind = document.querySelector('#config-keep-game-behind')?.checked ?? true;
 
-    const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
+    const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores_422';
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
@@ -102,11 +115,17 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
+      recent_projects: state.recentProjects || [],
+      dem_open_target: getDemOpenTarget(),
+      kept_json_projects: getKeptJsonProjects(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
+      capture_split_left_permille: state.captureSplitLeftPermille ?? null,
+      analyzer_demos_height_px: state.analyzerDemosHeightPx ?? null,
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
       agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
@@ -136,15 +155,20 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
+      audit_look_in_zips: !!document.querySelector('#audit-look-in-zips')?.checked,
+      // On unless unticked, matching the backend default (#531).
+      scan_include_subfolders: document.querySelector('#scan-include-subfolders')?.checked ?? true,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
       fast_forward_speed: fastForwardSpeed,
+      kill_gaps: readKillGaps(),
       target_drives: state.targetDrives,
       init_commands,
       custom_commands,
       command_profiles: getCommandProfiles(),
       command_profile_active: getActiveCommandProfile(),
+      builtin_profile_notice: getBuiltinProfileNotice(),
       save_local_patched_copy: saveLocalPatchedCopy,
       hook_runs_batch: hookRunsBatch,
       keep_game_behind: keepGameBehind,
@@ -160,8 +184,19 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
+      pinned_folders_reviewed: getPinnedReviewed(),
       players: getPlayers(),
+      hidden_installs: getHiddenInstalls(),
+      pick_folders: getPickFolders(),
       ...readReviewSettings(),
+      ...scanRateSettings(),
+      // "After a clip is finished" (#644).
+      ...getTakeCleanupSetting(),
+      // "Render while capturing" (#861).
+      ...getRenderWhileCapturing(),
+      // "Keep free on the Windows drive" (#1430).
+      windows_drive_keep_free_gb: readWindowsDriveKeepFree(),
+      ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -200,6 +235,9 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  setHiddenInstalls(settings.hidden_installs);
+  // Each Browse button's last folder (#936).
+  setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;
@@ -208,6 +246,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
     if (inputEl) inputEl.value = settings.goldsrc_hooks_dll_path;
   }
+  // Always: a release build hides the row unless a path is set.
+  refreshHookDllRow();
   if (settings.hlae_path) {
     // Issue #101: this reads both #hlae-path-input and
     // #ffmpeg-override-path-input, so it has to run after *both* are
@@ -231,7 +271,11 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const inputEl = document.querySelector('#config-obs-capture-fps');
     if (inputEl) inputEl.value = settings.obs_capture_fps;
   }
-  // 0 is "the same as Capture FPS" and stays an empty box.
+  if (settings.obs_recording_quality) {
+    const selectEl = document.querySelector('#config-obs-recording-quality');
+    if (selectEl) selectEl.value = settings.obs_recording_quality;
+  }
+  // 0 stays an empty box, whose placeholder is only a hint (config_wiring.js).
   if (settings.agr_fps > 0) {
     const inputEl = document.querySelector('#config-agr-fps');
     if (inputEl) inputEl.value = settings.agr_fps;
@@ -309,10 +353,17 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
   const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
   if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+  applyDemOpenTarget(settings.dem_open_target);
+  setKeptJsonProjects(settings.kept_json_projects);
   setClipNameTemplate(settings.clip_name_template);
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
   );
+  const lookInZipsEl = document.querySelector('#audit-look-in-zips');
+  if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
+  setPinnedReviewed(settings.pinned_folders_reviewed);
+  const subfoldersEl = document.querySelector('#scan-include-subfolders');
+  if (subfoldersEl) subfoldersEl.checked = settings.scan_include_subfolders !== false;
   if (settings.record_start_lead != null) {
     const inputEl = document.querySelector('#config-record-start-lead');
     if (inputEl) inputEl.value = settings.record_start_lead;
@@ -329,10 +380,13 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   // values in the Timings tab's visual timeline (#150).
   renderTimingDiagram();
   setFastForwardStep(settings.fast_forward_speed);
+  applyKillGaps(settings.kill_gaps);
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
   if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
+  // Again: Initial Delay shows only with Seek Between Clips off.
+  renderTimingDiagram();
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {
@@ -353,6 +407,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   }
   setRenderPresets(settings.render_presets);
   applyReviewSettings(settings);
+  applyScanRateSettings(settings);
+  applyRescanOfferSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;
@@ -366,4 +422,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     // Only a value the select offers — assigning an unknown one blanks it.
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
+  setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
+  setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
+  applyWindowsDriveKeepFree(settings.windows_drive_keep_free_gb);
 }

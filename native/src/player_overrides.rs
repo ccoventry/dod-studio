@@ -62,20 +62,34 @@ pub struct PlayerRow {
     /// 1..=16, the tile of the sprite's 4x4 grid; 0 for none.
     #[serde(default)]
     pub crosshair_tile: u8,
+    /// The name `{name}` and `{player}` show for this player in clip and demo
+    /// names (#686), instead of their in-game name. Empty means unset. Only a
+    /// row with a SteamID uses it. Studio-only: [`table_text`] leaves it out,
+    /// the hook has no use for it.
+    #[serde(default)]
+    pub use_as: String,
+    /// The player's nameplate picture (#429): a full path to a PNG anywhere
+    /// on disk, which the VEGAS script puts on its own track above each of
+    /// their clips. Empty means none. Only a row with a SteamID uses it, and
+    /// like [`Self::use_as`] it is Studio-only: [`table_text`] leaves it out.
+    #[serde(default)]
+    pub nameplate: String,
 }
 
-/// What a player not in the table gets for their spray.
+/// What a player not in the table gets for their spray, and what "From the
+/// demo" uses when the demo saved none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SprayFallback {
-    /// The game's own: the spray the demo saved (POV), the bullet hole the
-    /// engine draws when it has no image (HLTV with no PNG picked).
+    /// The one PNG in `*_fallback_png`. With none picked, the game's own.
     #[default]
-    Own,
-    /// The one PNG in `*_fallback_png`.
     Png,
     /// No spray at all.
     None,
+    /// "Their own spray", which only a settings file from before #1322
+    /// holds: [`PlayerTable::retire_own_fallback`] turns it into one of the
+    /// others. It stays a variant so that such a file still loads.
+    Own,
 }
 
 /// What a player not in the table gets for their crosshair.
@@ -96,15 +110,13 @@ pub struct PlayerTable {
     pub use_in_game: bool,
     #[serde(default)]
     pub players: Vec<PlayerRow>,
-    /// POV demos' spray fallback: `own` by default.
+    /// POV demos' fallback spray.
     #[serde(default)]
     pub pov_fallback: SprayFallback,
     #[serde(default)]
     pub pov_fallback_png: String,
-    /// HLTV demos': `png` by default. `own` is never offered (an HLTV demo
-    /// records that a player sprayed, never the image) and reads as the
-    /// game's bullet hole, like `png` with no PNG picked.
-    #[serde(default = "default_hltv_fallback")]
+    /// HLTV demos' fallback spray.
+    #[serde(default)]
     pub hltv_fallback: SprayFallback,
     #[serde(default)]
     pub hltv_fallback_png: String,
@@ -139,10 +151,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_hltv_fallback() -> SprayFallback {
-    SprayFallback::Png
-}
-
 fn default_crosshair_sprite() -> String {
     DEFAULT_CROSSHAIR_SPRITE.to_string()
 }
@@ -156,15 +164,40 @@ impl Default for PlayerTable {
         Self {
             use_in_game: true,
             players: Vec::new(),
-            pov_fallback: SprayFallback::Own,
+            pov_fallback: SprayFallback::Png,
             pov_fallback_png: String::new(),
-            hltv_fallback: default_hltv_fallback(),
+            hltv_fallback: SprayFallback::Png,
             hltv_fallback_png: String::new(),
             crosshair_fallback: CrosshairFallback::Game,
             crosshair_fallback_sprite: default_crosshair_sprite(),
             crosshair_fallback_tile: default_tile(),
             spray_size: DEFAULT_SPRAY_SIZE,
         }
+    }
+}
+
+impl PlayerTable {
+    /// Takes "Their own spray" out of a table saved before #1322, once
+    /// (settings migration 3). A table somebody used gets "No spray", as the
+    /// fallbacks are one picture or no spray now. One nobody touched, with no
+    /// row and no POV picture, gets the default: with no picture picked that
+    /// plays as it always has, and "No spray" would blank every spray for a
+    /// user who has never seen this page. True when the table was used, so
+    /// the change is worth saying.
+    pub fn retire_own_fallback(&mut self) -> bool {
+        if self.hltv_fallback == SprayFallback::Own {
+            self.hltv_fallback = SprayFallback::Png;
+        }
+        if self.pov_fallback != SprayFallback::Own {
+            return false;
+        }
+        let used = !self.players.is_empty() || !self.pov_fallback_png.is_empty();
+        self.pov_fallback = if used {
+            SprayFallback::None
+        } else {
+            SprayFallback::Png
+        };
+        used
     }
 }
 
@@ -312,10 +345,7 @@ pub fn write_table_at(path: &Path, table: &PlayerTable) -> Result<bool, String> 
         return Ok(false);
     }
     std::fs::write(path, text).map_err(|e| {
-        format!(
-            "could not write the Players table to {}: {e}",
-            path.display()
-        )
+        crate::messages::player_overrides::could_not_write_players_table(path.display(), e)
     })?;
     Ok(true)
 }
@@ -404,7 +434,7 @@ fn read_i32(bytes: &[u8], at: usize) -> Result<i32, String> {
     bytes
         .get(at..at.saturating_add(4))
         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .ok_or_else(|| "the file ends early".to_string())
+        .ok_or_else(|| crate::messages::player_overrides::SPRITE_ENDS_EARLY.to_string())
 }
 
 /// Decodes a GoldSrc sprite's first frame (version 2, `IDSP`): the 40-byte
@@ -415,25 +445,27 @@ fn read_i32(bytes: &[u8], at: usize) -> Result<i32, String> {
 /// onto the screen, so black is nothing).
 pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     if bytes.get(..4) != Some(b"IDSP") {
-        return Err("not a sprite (no IDSP header)".into());
+        return Err(crate::messages::player_overrides::SPRITE_NO_IDSP_HEADER.into());
     }
     if read_i32(bytes, 4)? != 2 {
-        return Err("not a version 2 (Half-Life) sprite".into());
+        return Err(crate::messages::player_overrides::SPRITE_NOT_VERSION_2.into());
     }
     let tex_format = read_i32(bytes, 12)?;
     if read_i32(bytes, 28)? < 1 {
-        return Err("the sprite has no frames".into());
+        return Err(crate::messages::player_overrides::SPRITE_NO_FRAMES.into());
     }
     let count = bytes
         .get(40..42)
         .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
-        .ok_or("the file ends early")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_ENDS_EARLY)?;
     if count == 0 || count > 256 {
-        return Err(format!("{count} palette colours"));
+        return Err(crate::messages::player_overrides::sprite_palette_colours(
+            count,
+        ));
     }
     let palette = bytes
         .get(42..42 + 3 * count)
-        .ok_or("the palette runs past the end")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_PALETTE_PAST_END)?;
     // Each frame starts with its type; a single frame's `dspriteframe_t`
     // (origin x, y, width, height, pixels) follows it, while a group has its
     // frame count and one interval per frame first, and its frames carry no
@@ -444,18 +476,20 @@ pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     } else {
         let n = read_i32(bytes, first + 4)?;
         if !(1..=1024).contains(&n) {
-            return Err(format!("a frame group of {n}"));
+            return Err(crate::messages::player_overrides::sprite_frame_group(n));
         }
         first + 8 + 4 * n as usize
     };
     let (width, height) = (read_i32(bytes, frame + 8)?, read_i32(bytes, frame + 12)?);
     if width < 1 || height < 1 || width as u32 > MAX_SIDE || height as u32 > MAX_SIDE {
-        return Err(format!("a {width}x{height} frame"));
+        return Err(crate::messages::player_overrides::sprite_frame_size(
+            width, height,
+        ));
     }
     let (width, height) = (width as u32, height as u32);
     let pixels = bytes
         .get(frame + 16..frame + 16 + (width * height) as usize)
-        .ok_or("the frame runs past the end")?;
+        .ok_or(crate::messages::player_overrides::SPRITE_FRAME_PAST_END)?;
     let colour = |i: u8| {
         let i = (i as usize).min(count - 1);
         [palette[3 * i], palette[3 * i + 1], palette[3 * i + 2]]
@@ -484,9 +518,9 @@ pub fn decode_sprite(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 
 /// [`decode_sprite`] of a file, for the frontend.
 pub fn sprite_image(path: &Path) -> Result<SpriteImage, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| crate::messages::labeled(path.display(), e))?;
     let (width, height, rgba) =
-        decode_sprite(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        decode_sprite(&bytes).map_err(|e| crate::messages::labeled(path.display(), e))?;
     Ok(SpriteImage {
         width,
         height,
@@ -507,6 +541,8 @@ mod tests {
             png: png.into(),
             crosshair_sprite: sprite.into(),
             crosshair_tile: tile,
+            use_as: String::new(),
+            nameplate: String::new(),
         };
         PlayerTable {
             use_in_game: true,
@@ -567,6 +603,72 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_from_before_1322_still_loads_their_own_spray() {
+        let table: PlayerTable = serde_json::from_str(r#"{"pov_fallback":"own"}"#).unwrap();
+        assert_eq!(table.pov_fallback, SprayFallback::Own);
+    }
+
+    #[test]
+    fn a_used_table_with_their_own_spray_becomes_no_spray_and_says_so() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            players: vec![PlayerRow {
+                name: "x".into(),
+                ..PlayerRow::default()
+            }],
+            ..PlayerTable::default()
+        };
+        assert!(table.retire_own_fallback());
+        assert_eq!(table.pov_fallback, SprayFallback::None);
+        assert!(!table.retire_own_fallback(), "said once");
+    }
+
+    #[test]
+    fn a_picked_pov_picture_counts_as_a_used_table() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            pov_fallback_png: "a.png".into(),
+            ..PlayerTable::default()
+        };
+        assert!(table.retire_own_fallback());
+        assert_eq!(table.pov_fallback, SprayFallback::None);
+    }
+
+    #[test]
+    fn a_table_nobody_touched_keeps_playing_as_it_did() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            ..PlayerTable::default()
+        };
+        let before = table_text(&table);
+        assert!(!table.retire_own_fallback());
+        assert_eq!(table, PlayerTable::default());
+        assert_eq!(table_text(&table), before);
+    }
+
+    #[test]
+    fn a_chosen_fallback_is_left_alone() {
+        for kept in [SprayFallback::Png, SprayFallback::None] {
+            let mut table = PlayerTable {
+                pov_fallback: kept,
+                ..PlayerTable::default()
+            };
+            assert!(!table.retire_own_fallback());
+            assert_eq!(table.pov_fallback, kept);
+        }
+    }
+
+    #[test]
+    fn a_hand_edited_hltv_own_becomes_the_default() {
+        let mut table = PlayerTable {
+            hltv_fallback: SprayFallback::Own,
+            ..PlayerTable::default()
+        };
+        assert!(!table.retire_own_fallback());
+        assert_eq!(table.hltv_fallback, SprayFallback::Png);
+    }
+
+    #[test]
     fn cells_never_split_a_line() {
         let table = PlayerTable {
             players: vec![PlayerRow {
@@ -594,6 +696,50 @@ mod tests {
         assert_eq!(partial.pov_fallback, SprayFallback::Png);
         assert_eq!(partial.crosshair_fallback, CrosshairFallback::Sprite);
         assert_eq!(partial.hltv_fallback, SprayFallback::Png);
+    }
+
+    #[test]
+    fn a_row_saved_before_use_as_loads_with_it_unset() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","png":"a.png"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].use_as, "");
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back, table);
+    }
+
+    #[test]
+    fn use_as_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].use_as = "Chris".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].use_as, "Chris");
+        assert_eq!(table_text(&table), plain);
+    }
+
+    #[test]
+    fn a_row_saved_before_nameplates_loads_with_none() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","use_as":"Chris"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].nameplate, "");
+        assert_eq!(table.players[0].use_as, "Chris");
+    }
+
+    #[test]
+    fn a_nameplate_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].nameplate = "D:/movie/nameplates/m00cat.png".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].nameplate, "D:/movie/nameplates/m00cat.png");
+        assert_eq!(table_text(&table), plain);
     }
 
     #[test]

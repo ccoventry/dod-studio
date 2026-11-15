@@ -1,7 +1,7 @@
 // Render Studio frontend behavior, driven against tests/e2e/render-studio.html
 // (a minimal harness — see the comment at the top of that file and
 // tests/e2e/README.md for what this suite covers and what it doesn't).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** A RenderJobView-shaped fixture with sane defaults, overridable per test. */
 function job(overrides = {}) {
@@ -225,7 +225,7 @@ test.describe('issue #772 — Scan for Takes merges into the queue', () => {
     // A render's snapshot mid-scan keeps it off and leaves the scan's status.
     await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 45 })]);
     await expect(page.locator('#scan-render-btn')).toBeDisabled();
-    await expect(page.locator('#render-status')).toContainText('Scanning');
+    await expect(page.locator('#render-status')).toContainText('Looking for takes');
 
     await page.evaluate(() => {
       window.__mockEmit('render_jobs_snapshot', [
@@ -290,6 +290,25 @@ test.describe('Custom codec', () => {
 
     await page.selectOption('#render-codec-select', 'prores');
     await expect(page.locator('#render-custom-codec-group')).toBeHidden();
+  });
+
+  test('the hint under the picker says what each ProRes choice is for', async ({ page }) => {
+    await gotoHarness(page);
+    const hint = page.locator('#render-codec-hint');
+    await expect(hint).toBeVisible();
+    // ProRes 422 is the first option, as in the app.
+    await expect(page.locator('#render-codec-select')).toHaveValue('prores_422');
+    await expect(hint).toContainText('Recommended for most videos');
+
+    await page.selectOption('#render-codec-select', 'prores');
+    await expect(hint).toContainText('the largest of the three 422 choices');
+    await expect(hint).not.toContainText('default');
+
+    await page.selectOption('#render-codec-select', 'prores_lt');
+    await expect(hint).toContainText('About half the size of HQ');
+
+    await page.selectOption('#render-codec-select', 'dnxhr');
+    await expect(hint).toBeHidden();
   });
 
   test('Scan is refused when Custom is selected with no args entered', async ({ page }) => {
@@ -509,6 +528,30 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
   });
 
+  test('Select finished ticks the finished takes for Delete Take folders (#644)', async ({ page }) => {
+    await gotoHarness(page);
+    const recent = [{ ...rendered[0], started_unix_ms: Date.now() - 1000 }];
+    await emitSnapshot(page, [
+      job({ id: '0' }),
+      job({ id: '1', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
+      job({ id: '2', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000', history: recent }),
+    ]);
+    await expect(page.locator('#render-select-finished-btn')).toBeEnabled();
+
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (2)');
+
+    // Over a day old: only the 2023 render.
+    await page.locator('#render-finished-age-select').selectOption('86400000');
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (1)');
+  });
+
   test('the finish toast counts only the rows this batch rendered', async ({ page }) => {
     await gotoHarness(page);
     const before = [
@@ -547,6 +590,25 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#cancel-render-btn')).toHaveText('Cancel (2)');
     await page.locator('#cancel-render-btn').click();
     expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([{ jobIds: ['0', '1'] }]);
+  });
+
+  test('Cancel Queued cancels every queued row and never a rendering one', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Rendering' }),
+      job({ id: '1', status: 'Queued', take_folder: 'D:/captures/demo1/chain_02_b0/take0000' }),
+      job({ id: '2', status: 'Queued', take_folder: 'D:/captures/demo1/chain_03_b0/take0000' }),
+    ]);
+    await expect(page.locator('#cancel-queued-render-btn')).toHaveText('Cancel Queued (2)');
+    await page.locator('#cancel-queued-render-btn').click();
+    expect(await invocationsFor(page, 'cancel_queued_render_jobs')).toHaveLength(1);
+    expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([]);
+  });
+
+  test('Cancel Queued is off with nothing queued', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering' })]);
+    await expect(page.locator('#cancel-queued-render-btn')).toBeDisabled();
   });
 
   test('Delete Take folders lists each ticked take once and skips a busy one', async ({ page }) => {
@@ -704,12 +766,57 @@ test.describe('issue #40 — sortable columns and the batch progress bar', () =>
     expect(await page.locator('#render-jobs-tbody tr').first().getAttribute('data-job-id')).toBe('0');
   });
 
-  test('the batch bar averages the batch and hides with no jobs', async ({ page }) => {
+  test('the batch bar averages the batch and hides with no batch', async ({ page }) => {
     await gotoHarness(page);
     await expect(page.locator('#render-batch-progress')).toBeHidden();
-    await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Rendering', progress: 50 })]);
+    // Rows a scan queued are no batch yet.
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
+    await expect(page.locator('#render-batch-progress')).toBeHidden();
+    // A row that was already Finished isn't this batch's (#954).
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 50 }), job({ id: '1', status: 'Finished', progress: 100 })]);
     await expect(page.locator('#render-batch-progress')).toBeVisible();
-    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 75%');
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 50%');
+    await expect(page.locator('#render-status')).toHaveText(/^Rendering 1 of 1 · 0:0\d$/);
+  });
+
+  test('a second batch\'s bar starts at 0, not at the rows the first one finished (#954)', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 50 }), job({ id: '1', status: 'Queued' })]);
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 25%');
+    await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Finished', progress: 100 })]);
+    await page.evaluate(() => window.__mockEmit('render_batch_finished', {}));
+    // The bar keeps how the batch ended, and the line says how long it took.
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 100%');
+    await expect(page.locator('#render-status')).toHaveText(/^Done in \d+\.\d s: 2 rendered$/);
+
+    // A scan adds two takes and the next batch starts on them.
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Finished', progress: 100 }),
+      job({ id: '2', status: 'Rendering', progress: 0 }), job({ id: '3', status: 'Queued' }),
+    ]);
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 0%');
+    await expect(page.locator('#render-batch-progress .progress-bar-fill')).toHaveAttribute('style', /width:\s*0%/);
+    await expect(page.locator('#render-status')).toHaveText(/^Rendering 1 of 2 · 0:0\d$/);
+  });
+
+  test('Scan for Takes slides a block and counts the takes, then says what it found and how long it took (#954)', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__testCaptureLocations = ['C:\\captures'];
+      window.__mockInvokeHandlers['queue_render_batch'] = () =>
+        new Promise((resolve) => { window.__finishScan = resolve; });
+    });
+    await page.locator('#scan-render-btn').click();
+    await expect(page.locator('#render-scan-progress')).not.toHaveAttribute('hidden');
+    await expect(page.locator('#render-scan-progress')).toHaveClass(/indeterminate/);
+    await expect(page.locator('#render-status')).toHaveText(/^Looking for takes: 0 found so far · 0:0\d$/);
+    // No toast repeats the line.
+    await expect(page.locator('#toast-container', { hasText: 'Scanning' })).toHaveCount(0);
+    await page.evaluate(() => window.__mockEmit('render_scan_status', { found: 14 }));
+    await expect(page.locator('#render-status')).toContainText('Looking for takes: 14 found so far');
+    await page.evaluate(() => window.__finishScan({ total: 14, added: 3, refreshed: 0, kept: 11, gone: 0, gone_queued: 0 }));
+    await expect(page.locator('#render-status')).toHaveText(/^Found 14 takes \(3 new\) in \d+\.\d s$/);
+    await expect(page.locator('#render-scan-progress')).toHaveAttribute('hidden');
   });
 });
 
@@ -846,5 +953,188 @@ test.describe('start-up recovery dialog', () => {
     await expect(page.locator('#render-recovery-modal')).toBeHidden();
     expect(await invocationsFor(page, 'discard_render_autosave')).toHaveLength(1);
     expect(await invocationsFor(page, 'recover_render_batch')).toEqual([]);
+  });
+});
+
+test.describe('take pictures (#1069)', () => {
+  // A 1x1 JPEG is enough for an <img>; the content is never looked at.
+  const PIXEL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+
+  test('each take gets its picture once, and a click shows nine frames across it', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: false });
+      window.__mockInvokeHandlers['take_preview_sheet'] = () => ({
+        kind: 'video',
+        duration_secs: 18,
+        fps: 300,
+        frames: Array.from({ length: 9 }, (_, i) => ({ uri, frame: (2 * i + 1) * 300, secs: 2 * i + 1 })),
+      });
+    }, PIXEL);
+    // A HUD pair: two rows of one take, one picture per stream.
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'hudColor' }),
+      job({ id: '1', stream: 'hudAlpha', stream_folder: 'hudColor' }),
+      job({ id: '2', name: 'other', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'all' }),
+    ]);
+    await expect(page.locator('tr[data-job-id="2"] img.rj-thumb')).toHaveAttribute('src', PIXEL);
+    await expect(page.locator('tr[data-job-id="0"] img.rj-thumb')).toBeVisible();
+    await expect(page.locator('#render-take-preview-progress')).toBeHidden();
+    expect(await invocationsFor(page, 'take_preview_thumb')).toEqual([
+      { takeFolder: 'C:\\captures\\demo1\\chain_01_b0\\take0000', stream: 'hudColor', fps: 300 },
+      { takeFolder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream: 'all', fps: 300 },
+    ]);
+
+    await page.locator('tr[data-job-id="2"] img.rj-thumb').click();
+    await expect(page.locator('#take-sheet-modal')).toBeVisible();
+    await expect(page.locator('#take-sheet-modal .take-sheet-title')).toHaveText('Take pictures: other');
+    await expect(page.locator('#take-sheet-modal figure')).toHaveCount(9);
+    await expect(page.locator('#take-sheet-modal figcaption').nth(4)).toHaveText('9.0 s · frame 2700');
+    await page.locator('#take-sheet-modal .take-sheet-close').click();
+    await expect(page.locator('#take-sheet-modal')).toBeHidden();
+  });
+
+  test('a take FFmpeg can\'t read shows a dash that says why', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
+    });
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-pic');
+    await expect(cell).toHaveText('—');
+    await expect(cell).toHaveAttribute('title', 'No picture: FFmpeg made no picture');
+  });
+
+  test('a failed picture is made on a later refresh, and a re-captured take gets its new one', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
+      window.__fakeNowOffset = 0;
+      const real = Date.now.bind(Date);
+      Date.now = () => real() + window.__fakeNowOffset;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-cell');
+    await expect(cell).toHaveText('—');
+    // A refresh right away asks nothing more.
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    expect(await invocationsFor(page, 'take_preview_thumb')).toHaveLength(1);
+    // After the wait the next refresh tries again, and the picture appears.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: false });
+      window.__fakeNowOffset += 31_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL);
+    // The take is captured again: the next refresh after the minute swaps it.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri: uri + '#new', cached: false });
+      window.__fakeNowOffset += 61_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL + '#new');
+  });
+});
+
+test.describe('take checks (#1084)', () => {
+  const PIXEL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  const HOLDS = { check: 'holds', cause: 'demo', warn: false, at_secs: 7.4, secs: 0.34, count: 9 };
+
+  test('each take is checked after the pictures, and its row and sheet say what was found', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(({ uri, holds }) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_preview_sheet'] = () => ({ kind: 'video', duration_secs: 18, fps: 300, frames: [{ uri, frame: 0, secs: 0 }] });
+      window.__mockInvokeHandlers['take_checks'] = ({ stream }) => ({
+        findings: stream === 'all'
+          ? [holds]
+          : [{ check: 'black', cause: 'capture', warn: true, at_secs: 2, secs: 3.5 }, { check: 'no_sound', cause: 'capture', warn: true }],
+      });
+    }, { uri: PIXEL, holds: HOLDS });
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'all' }),
+      job({ id: '1', name: 'other', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'hudColor' }),
+    ]);
+    const good = page.locator('tr[data-job-id="0"] .rj-check');
+    const bad = page.locator('tr[data-job-id="1"] .rj-check');
+    await expect(good).toHaveText('OK');
+    await expect(good).toHaveAttribute('title', /holds still briefly 9 times/);
+    await expect(bad).toHaveText('⚠ 2');
+    await expect(bad).toHaveAttribute('title', /Black picture for 3\.5 s from 2\.0 s\. \(Capturing again helps\)/);
+    await expect(page.locator('#render-take-checks-progress')).toBeHidden();
+    // The pictures come first: every thumb call is before the first check.
+    const calls = await page.evaluate(() => window.__mockInvocations.map((c) => c.cmd).filter((c) => c === 'take_preview_thumb' || c === 'take_checks'));
+    expect(calls).toEqual(['take_preview_thumb', 'take_preview_thumb', 'take_checks', 'take_checks']);
+
+    await page.locator('tr[data-job-id="1"] img.rj-thumb').click();
+    const list = page.locator('#take-sheet-modal .take-sheet-checks');
+    await expect(list).toBeVisible();
+    await expect(list.locator('li')).toHaveCount(2);
+    await expect(list.locator('li').first()).toContainText('Black picture for 3.5 s from 2.0 s.');
+  });
+
+  test('a take off its planned length or missing a kill warns, and one with no plan says it is unknown', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_checks'] = ({ stream }) => ({
+        findings: stream === 'all'
+          ? [
+              { check: 'length', cause: 'capture', warn: true, frames: 1500, planned_frames: 5700, secs: 5 },
+              { check: 'kill_outside', cause: 'capture', warn: true, count: 1, at_secs: 12, secs: 5 },
+            ]
+          : [{ check: 'no_plan', cause: 'unknown', warn: false }],
+      });
+    }, PIXEL);
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'all' }),
+      job({ id: '1', name: 'old', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'hudColor' }),
+    ]);
+    const bad = page.locator('tr[data-job-id="0"] .rj-check');
+    const unplanned = page.locator('tr[data-job-id="1"] .rj-check');
+    await expect(bad).toHaveText('⚠ 2');
+    await expect(bad).toHaveAttribute('title', /1500 frames \(5\.0 s\) but 5700 were planned/);
+    await expect(bad).toHaveAttribute('title', /A kill is not in the clip/);
+    await expect(unplanned).toHaveText('OK');
+    await expect(unplanned).toHaveAttribute('title', /has no plan recorded/);
+  });
+
+  test('a take that can\'t be checked shows a question mark that says why', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_checks'] = () => { throw 'FFmpeg failed: bad file'; };
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const chip = page.locator('tr[data-job-id="0"] .rj-check');
+    await expect(chip).toHaveText('?');
+    await expect(chip).toHaveAttribute('title', "Couldn't check this take: FFmpeg failed: bad file");
+  });
+});
+
+// #429: the button that copies the VEGAS nameplate script into VEGAS's script menu.
+test.describe('Add Nameplate Script to VEGAS', () => {
+  test('the click asks the backend and the toast says where the script went', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['vegas_install_script'] =
+        () => 'D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs';
+    });
+    await page.locator('#vegas-script-install-btn').click();
+    await expect(page.locator('#toast-container')).toContainText('D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs');
+    await expect(page.locator('#toast-container')).toContainText('Tools > Scripting > Rescan Script Menu Folder');
+    expect(await invocationsFor(page, 'vegas_install_script')).toHaveLength(1);
+    await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();
+  });
+
+  test('a failed copy toasts the backend error naming the path', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['vegas_install_script'] =
+        () => Promise.reject('D:/Documents/Vegas Script Menu: Access is denied.');
+    });
+    await page.locator('#vegas-script-install-btn').click();
+    await expect(page.locator('#toast-container')).toContainText("Couldn't add the script to VEGAS: D:/Documents/Vegas Script Menu: Access is denied.");
+    await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();
   });
 });

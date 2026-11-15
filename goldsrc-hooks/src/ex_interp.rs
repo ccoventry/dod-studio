@@ -2,8 +2,9 @@
 //!
 //! ## `ex_interp` is engine-managed, which is the whole problem
 //!
-//! A clamp at `hw+0x18ee0` runs every frame, forces `ex_interp` into a range,
-//! and writes the clamped result back through `Cvar_Set` -- printing
+//! A clamp at `hw+0x18ee0` (`CL_ComputeClientInterpolationAmount`) runs every
+//! frame, forces `ex_interp` into a range, and writes the clamped result back
+//! through `Cvar_Set` -- printing
 //! `ex_interp forced up to %i msec` or `forced down to %i msec` as it goes.
 //! Setting the cvar by hand and expecting it to stay does not work, and that is
 //! not a DoD quirk: it is the engine.
@@ -84,7 +85,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name. Registered in `commands.rs`.
+/// The cvar name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("demo_ex_interp_max");
 
 /// One engine build's clamp.

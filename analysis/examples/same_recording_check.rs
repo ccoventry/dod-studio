@@ -10,10 +10,10 @@ use dem::types::{Delta, EngineMessage, FrameData, MessageData, NetMessage};
 use std::collections::BTreeMap;
 
 fn canon_delta(d: &Delta) -> String {
-    let mut keys: Vec<&String> = d.keys().collect();
+    let mut keys: Vec<&dem::types::FieldName> = d.keys().collect();
     keys.sort();
     keys.iter()
-        .map(|k| format!("{k}={:?}", d[*k]))
+        .map(|k| format!("{k}={:?}", d.get(k).unwrap()))
         .collect::<Vec<_>>()
         .join(",")
 }

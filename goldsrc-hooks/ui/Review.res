@@ -24,7 +24,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"In DoD Studio, tick demos in the Master Demo Queue and press Review highlights."
+		"labelText"		""
 		"textAlignment"		"west"
 		"helptext"		"Whose highlight it is, and what the review is doing."
 	}
@@ -133,7 +133,7 @@
 		"labelText"		"Yes"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review yes"
-		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight."
+		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight. Key: Y, while it plays or at its end."
 	}
 	"MaybeButton"
 	{
@@ -148,7 +148,7 @@
 		"labelText"		"Maybe"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review maybe"
-		"helptext"		"Not sure yet: the row is marked Maybe, with this kill range and note, to look at again later. Then the next highlight."
+		"helptext"		"Not sure yet: the row is marked Maybe, with this kill range and note, to look at again later. Then the next highlight. Key: M."
 	}
 	"NoButton"
 	{
@@ -163,7 +163,7 @@
 		"labelText"		"No"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review no"
-		"helptext"		"Not this one. The note is still saved. Then the next highlight."
+		"helptext"		"Not this one. The note is still saved. Then the next highlight. Key: N."
 	}
 	"ReplayButton"
 	{
@@ -178,7 +178,7 @@
 		"labelText"		"Replay"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review replay"
-		"helptext"		"Watch this highlight again."
+		"helptext"		"Watch this highlight again. Key: R."
 	}
 	"BackButton"
 	{
@@ -193,7 +193,7 @@
 		"labelText"		"Back"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review back"
-		"helptext"		"The previous highlight, without answering this one."
+		"helptext"		"The previous highlight, without answering this one. Key: B."
 	}
 	"NextButton"
 	{
@@ -208,7 +208,7 @@
 		"labelText"		"Next"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review next"
-		"helptext"		"The next highlight, without answering this one."
+		"helptext"		"The next highlight, without answering this one. Key: Space."
 	}
 	"StopButton"
 	{
@@ -223,7 +223,7 @@
 		"labelText"		"Stop"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review stop"
-		"helptext"		"End the review. Every answer so far is already in DoD Studio."
+		"helptext"		"End the review. Every answer so far is already in DoD Studio. Key: S."
 	}
 	"ReviewHint"
 	{
@@ -235,8 +235,38 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Keys: bind a key to ds_demo_review yes, maybe, no, replay or next in the console."
+		"labelText"		"While a highlight plays or at its end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
 		"textAlignment"		"west"
-		"helptext"		"Bind keys so the mouse isn't needed."
+		"helptext"		"The keys answer on the game screen while a highlight plays or waits at its end, after a second's pause at each start so a double press can't answer the next one, and never while typing in a box. E opens a small form over the demo for the kill range and note, without this menu. X turns X-ray on and off. ds_ui_review_keys 0 turns them off."
+	}
+	"FromStartButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"FromStartButton"
+		"xpos"		"8"
+		"ypos"		"202"
+		"wide"		"120"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"0"
+		"labelText"		"From the start"
+		"textAlignment"		"center"
+		"Command"		"engine ds_demo_review ask start"
+		"helptext"		"Review every highlight of the demo playing, from the first. DoD Studio scans the demo first if it isn't in its Master Demo Queue. Needs DoD Studio running, and a demo playing; greyed otherwise, and the second line at the top says why."
+	}
+	"FromHereButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"FromHereButton"
+		"xpos"		"136"
+		"ypos"		"202"
+		"wide"		"120"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"0"
+		"labelText"		"From here"
+		"textAlignment"		"center"
+		"Command"		"engine ds_demo_review ask here"
+		"helptext"		"Review the demo playing from the next highlight at or after where it is now. The whole demo is the review: Back still reaches the highlights before. Needs DoD Studio running, and a demo playing; greyed otherwise, and the second line at the top says why."
 	}
 }

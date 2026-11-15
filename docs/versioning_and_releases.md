@@ -46,6 +46,16 @@ Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version
 
 Published as a **prerelease** named `DoD Studio <version> (experimental)`, with release notes covering the PRs merged since the **latest stable tag** (so they list what this build has that the stable channel lacks, not what an older stable already shipped), always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
 
+## No tests in the release job: CI's results instead
+
+Neither release workflow runs the tests. Every commit on `dev` and `main` arrives through a PR whose required checks passed, so rerunning them cost 2.5-10 minutes a release for nothing (#915). Instead, a "Require passing CI on this commit" step early in the job runs `.github/scripts/require_ci_passed.py`, which reads the required status checks of the branch's ruleset (`dev` for experimental, `main` for stable) and fails the release, naming each check, unless every one has a passing run by its exact job name:
+
+- **On the commit itself, or on a commit with the same tree.** A stable release builds main's `dev` → `main` merge commit, and CI never runs on main, so its CI is on the merge's second parent (`dev`'s tip) or the PR head. That counts because the rulesets require an up-to-date branch: the merge commit's tree equals the PR head's, and CI's pull_request run tested exactly that tree. A commit no CI run tested (an admin push, say) fails.
+- **The latest run per commit counts**, so a re-run replaces a failure. `success`, `neutral` and `skipped` pass, as in the rulesets.
+- **It waits** (up to 45 minutes) while a run is still going, e.g. dev's push CI right after a merge.
+
+Locally: `python .github/scripts/require_ci_passed.py --sha <commit> --branch main`.
+
 ## Release notes
 
 Both release workflows build their release body with `.github/scripts/release_notes.py` (a "Collect release notes" step early in the job, so a failure costs seconds, not a build) and pass it to `tauri-action` as `releaseBody`, with `generateReleaseNotes` off. GitHub's own generated notes (#165, #490) listed ~290 bare PR titles, mostly under "Other changes" because few PRs carry a label, and the experimental build compared from v0.1.3 instead of the last stable v0.1.4, so it relisted shipped PRs. `.github/release.yml` still groups GitHub's notes, but only for someone clicking "Generate release notes" on the release page.
@@ -56,6 +66,12 @@ Both release workflows build their release body with `.github/scripts/release_no
 
 One plain-language line for players. The optional prefix (`New:`, `Fixed:`, `Changed:`) picks the group; without one, a `bug` label means Fixed, `enhancement` means New, and anything else is Changed. `none` (or an empty or unfilled line) means internal work: the PR appears only in the full list. Only the first such line in a body counts, and HTML comments are ignored, so the template's guidance never becomes a note.
 
+**The `Supersedes release note:` line.** When a PR renames or changes something an earlier PR in the same release added, its body can say so (v0.2.0's notes otherwise named the `dodstudio_*` commands that #719 had renamed to `ds_*`):
+
+    Supersedes release note: #710, #731
+
+Matched like the `Release note:` line (case-insensitive, `notes` too, bold or list forms); numbers with or without `#`, separated by commas or spaces; several such lines add up. Each listed PR that is in the same release range is dropped from the notes and from the full PR list, and this PR's own note stands for it. Chains collapse: if A supersedes B and B supersedes C, only A shows. A listed PR outside the range already shipped, so its note is already out: the script prints a notice and drops nothing. A superseding PR with no note of its own (or `none`) still drops the PRs it lists, with a warning naming the notes lost. Every drop is logged to the job log (`release notes: #731 dropped: superseded by #1013`).
+
 **What the script does:**
 1. **Previous tag.** The highest stable `vX.Y.Z` tag on `origin`: for experimental, the latest one (never `experimental-latest`); for stable, the highest one below the version being released (`--before`). Only tags on the remote count, since a local clone can also carry the upstream dod-tools tags (`v0.2.0` .. `v0.10.0`), which are not this project's releases. `--from` overrides it.
 2. **PRs in the range.** Every `Merge pull request #N` merge commit in `<previous tag>..<target>`, not just first-parent ones (so a stable release on `main` reaches the PRs that landed on `dev`, and a PR merged into another PR's branch counts too), plus squash merges (`... (#N)`) on the target's first-parent history. The range works for experimental even though the last stable tag sits on `main`, not `dev`: the release merge's second parent is `dev`'s tip at that release, so everything shipped is excluded. Release plumbing PRs (`dev` → `main` cutovers and `main` → `dev` syncs) are dropped.
@@ -63,6 +79,8 @@ One plain-language line for players. The optional prefix (`New:`, `Fixed:`, `Cha
 4. **Output.** The workflow's first line ("On-demand experimental build from `dev` …" / "See assets below to download."), then "What's new" (the summary file, below), then `## New`, `## Fixed`, `## Changed` with `- <note> (#N)` bullets, then a collapsed `<details>` list of every merged PR title, then a "Full diff" compare link.
 
 **A hand-written summary per version.** When `.github/release_notes/<version>.md` exists, its content is printed first under "What's new". The version is the experimental workflow's input without the `-<run number>` (an experimental `0.2.0-57` build reads `0.2.0.md`) or the stable workflow's computed version, so one file serves both the experimental builds heading to a version and its stable release. Write it for a release worth a summary (0.2.0 has one); routine patches need none.
+
+**In the app.** The same step copies the body to `studio/public/release_notes.md` (gitignored), which Vite puts beside `index.html`, so the build's What's New window (`whats_new.js`, #1013) shows its own notes offline. The window reads them with `release_notes_view.js`: it leaves out what comes before the first heading (the workflow's first line) and the "Full diff" link, and folds the `<details>` list of PR titles. Other versions come from `GET /repos/ccoventry/dod-studio/releases` (`native::shared::release_history`), so a change to the body's layout shows in the app too.
 
 **Locally** (needs `gh` logged in; prints to stdout without `--output`):
 

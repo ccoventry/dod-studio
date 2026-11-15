@@ -69,7 +69,7 @@ pub fn use_chat_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             // 1. Try to find the split position based on player name first (if player is resolved)
             let mut split_pos = None;
             if say_text.client_index > 0
-                && let Some(player) = state.find_player_by_client_index(say_text.client_index - 1)
+                && let Some(player) = state.find_player_by_wire_index(say_text.client_index)
             {
                 let p_name = &player.name;
                 if let Some(name_pos) = cleaned_raw.find(p_name) {
@@ -142,7 +142,7 @@ pub fn use_chat_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 || sender_block_trimmed.contains("(Spectator)");
 
             let (sender_name, sender_team, is_dead_state) = if say_text.client_index > 0 {
-                let player = state.find_player_by_client_index(say_text.client_index - 1);
+                let player = state.find_player_by_wire_index(say_text.client_index);
                 if let Some(player) = player {
                     (
                         Some(player.name.clone()),
