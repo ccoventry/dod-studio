@@ -173,8 +173,9 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
   `dod\` ("can't open ...\dod\ds1452_tr2.dem"), so the look-ahead part of the
   animation fix is off for such demos.
 - After a backward jump `spectator_input_gate` logs "the demo clock went
-  back" on every frame (217 lines in one session): its log line needs a
-  budget.
+  back" on every frame (217 lines in one session). Fixed in #1471 (#1464): the
+  clock had gone below 0, so the gate's 0 was still ahead of it and was
+  cleared again every frame; it is now cleared to the clock.
 - PR #1458 drops `+map`/`+mapzoom` "while a POV demo plays", judged by
   `IsSpectateOnly()`. Under forcehltv that is true, so the hook counts it as
   HLTV and lets `+map` through; it does not matter, because forcehltv drops
@@ -185,7 +186,7 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
 1. The gun under `ds_spec_match_pov` in a forcehltv view (gap 2).
 2. `lookahead` should open the demo the engine actually opened (`dod_addon`,
    subfolders, `../` paths).
-3. `spectator_input_gate`'s per-frame log line.
+3. `spectator_input_gate`'s per-frame log line: done in #1471.
 4. If Studio offers "watch another player" for POV demos: show the stretches
    where the demo holds that player (`forcehltv_pov_probe` track mode), and
    start forcehltv playback from there.

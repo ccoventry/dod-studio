@@ -33,7 +33,8 @@
 //! ## The fix
 //!
 //! Every frame, when the gate is more than [`SLACK`] ahead of the client
-//! clock, it is set back to 0, which the game's own `InitHUDData` writes (or
+//! clock (or at or above 0 while the clock is below 0: [`is_stale`]), it is
+//! set back to 0, which the game's own `InitHUDData` writes (or
 //! to the clock, while the clock is below 0: [`cleared`]). The
 //! gate is never legitimately more than 0.2 s ahead, so a press made since the
 //! clock went back keeps its 0.2 s. A plain store into `client.dll`'s data,
@@ -107,9 +108,24 @@ fn find_gate(base: usize) -> Result<usize, String> {
     }
 }
 
-/// Whether a gate at `gate` is stale at client time `now`.
+/// Whether a gate at `gate` is stale at client time `now`: more than
+/// [`SLACK`] ahead, or at or above 0 while the clock is below it. The second
+/// is a clock that went below 0 (#1464): the game's own 0 is then ahead of
+/// it, by less than [`SLACK`] once the clock is within a second of 0, and
+/// would hold clicks shut that long. A press the game takes while the clock
+/// is just below 0 can land on it too; it loses its 0.2 s, nothing more.
 fn is_stale(gate: f32, now: f32) -> bool {
-    gate - now > SLACK
+    gate - now > SLACK || (now < 0.0 && gate >= 0.0)
+}
+
+/// The log line for clearing a stale gate at `gate` with the clock at `now`.
+fn cleared_line(gate: f32, now: f32) -> String {
+    let what = if gate == 0.0 {
+        format!("the demo clock is at {now:.2} s, below the game's own 0 s gate")
+    } else {
+        format!("the demo clock went back to {now:.2} s past a click's {gate:.2} s")
+    };
+    format!("spectator_input_gate: {what} -- spectator clicks and keys work again (#1296, #1464)")
 }
 
 /// What a stale gate is set to at client time `now`: 0, as `InitHUDData`
@@ -155,11 +171,7 @@ pub fn poll() {
     let ahead = unsafe { std::ptr::read_volatile(gate as *const f32) };
     if is_stale(ahead, now) {
         unsafe { std::ptr::write_volatile(gate as *mut f32, cleared(now)) };
-        unsafe {
-            crate::debug::report(&format!(
-                "spectator_input_gate: the demo clock went back to {now:.2} s past a click's {ahead:.2} s -- spectator clicks and keys work again (#1296)"
-            ))
-        };
+        unsafe { crate::debug::report(&cleared_line(ahead, now)) };
     }
 }
 
@@ -195,6 +207,21 @@ mod tests {
             );
             assert!(!is_stale(gate, now + 0.01), "{now}");
         }
+    }
+
+    #[test]
+    fn the_games_own_0_is_stale_under_a_negative_clock() {
+        // Within SLACK of 0, which the old test let through.
+        assert!(is_stale(0.0, -0.5));
+        assert!(is_stale(0.0, -6.14));
+        // A press taken under the negative clock is kept.
+        assert!(!is_stale(-0.3, -0.5));
+    }
+
+    #[test]
+    fn the_log_says_whose_gate_it_was() {
+        assert!(cleared_line(0.0, -0.5).contains("the game's own 0 s gate"));
+        assert!(cleared_line(61.49, 1.0).contains("past a click's 61.49 s"));
     }
 
     #[test]
