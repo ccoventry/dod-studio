@@ -4,7 +4,7 @@
 // Pins: the default name and its checks, the size against the free space
 // with and without demos, the controls locked while copying with a bar by
 // bytes and the file, Cancel asking first, and Done picking the copy.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function openDialog(page) {
   await page.goto('/tests/e2e/movie-copy.html');

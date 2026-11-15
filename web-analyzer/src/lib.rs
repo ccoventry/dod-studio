@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 use analysis::Analysis;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;

@@ -1,6 +1,6 @@
 // The Demo Auditor's tabs and Split Maps tab (#624) -- driven against
 // tests/e2e/split-maps.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/split-maps.html');

@@ -3,7 +3,7 @@
 // Pins the list appearing as a name is typed, keyboard and mouse picking,
 // that the rest of a line survives, and that a name Studio refuses says so
 // in the list for the list it would be refused in.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.goto('/tests/e2e/command-suggest.html');

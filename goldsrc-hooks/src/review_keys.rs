@@ -1,8 +1,12 @@
 //! The review's on-screen panel and answer keys (#660): while
 //! `ds_demo_review` plays a highlight, a small box on the game screen says
 //! which one it is and lists the keys that answer it, so an answer doesn't
-//! need the ESC menu, nor waiting for the highlight to end (#1141). Under
-//! its title the box lists the highlight's kills, time, victim and weapon,
+//! need the ESC menu, nor waiting for the highlight to end (#1141). Its
+//! header (`review_header`, #1437) says which highlight, whose, the kill
+//! range, with the scan's range in grey beside it when it was changed, and
+//! the whole note (#1399; display only: E's form changes them), in two
+//! colours: labels in orange, values in white, the answer in green, yellow
+//! or red. Then it lists the highlight's kills, time, victim and weapon,
 //! with the next one to come in the key colour behind a `>` (#1140), under
 //! a line with the demo player's clock now, so a kill's time says how soon
 //! it comes.
@@ -16,7 +20,9 @@
 //! form for the kill range and the note over the demo ([`FORM_KEY`],
 //! `review_form`, #1139); while it shows, its boxes take every key, and the
 //! answer keys do nothing. X turns X-ray on and off ([`XRAY_KEY`]): back to
-//! the `ds_spec_xray_show` value it last had on, or `1`. ESC brings up the
+//! the `ds_spec_xray_show` value it last had on, or `1`. Up and Down play
+//! the highlight one step faster or slower ([`SPEED_KEYS`], `review_speed`,
+//! #1437). ESC brings up the
 //! menu as always, and the review opens the DoD Studio window on its Review
 //! tab with it, whose boxes hold the same two: vgui2 takes ESC before any
 //! client hook sees it (seen live on PRE), so the review watches the menu
@@ -102,6 +108,9 @@ pub(crate) enum Action {
     Form,
     /// Turns X-ray on or off.
     Xray,
+    /// Plays the highlight one step faster or slower (#1437).
+    Faster,
+    Slower,
 }
 
 impl Action {
@@ -153,10 +162,39 @@ pub(crate) const FORM_KEY: Key = key(b'e', "E", "kill range and note", Action::F
 /// it is on.
 pub(crate) const XRAY_KEY: Key = key(b'x', "X", "X-ray", Action::Xray);
 
-/// Every key the review takes: the buttons' in order, then [`FORM_KEY`] and
-/// [`XRAY_KEY`].
+/// The engine's key numbers for the Up and Down arrows (`K_UPARROW`,
+/// `K_DOWNARROW` in the SDK's `keydefs.h`).
+const KEY_UP_ARROW: i32 = 128;
+const KEY_DOWN_ARROW: i32 = 129;
+
+/// Up and Down: one step faster or slower (#1437). DoD's default config binds
+/// them to `+forward` and `+back`, which move an HLTV demo's free-roaming
+/// camera; a review highlight holds the camera in first person on its
+/// player, and the keys are swallowed only while one is on. HLAE binds
+/// neither. Rebinding: `ds_demo_review faster` and `slower` do the
+/// same from any bind.
+pub(crate) const SPEED_KEYS: [Key; 2] = [
+    Key {
+        code: KEY_UP_ARROW,
+        label: "Up",
+        word: "faster",
+        action: Action::Faster,
+    },
+    Key {
+        code: KEY_DOWN_ARROW,
+        label: "Down",
+        word: "slower",
+        action: Action::Slower,
+    },
+];
+
+/// Every key the review takes: the buttons' in order, then [`FORM_KEY`],
+/// [`XRAY_KEY`] and the [`SPEED_KEYS`].
 fn all_keys() -> impl Iterator<Item = &'static Key> {
-    KEYS_LIST.iter().chain([&FORM_KEY, &XRAY_KEY])
+    KEYS_LIST
+        .iter()
+        .chain([&FORM_KEY, &XRAY_KEY])
+        .chain(SPEED_KEYS.iter())
 }
 
 /// The action a key stands for, and its place in [`all_keys`], which is its
@@ -247,8 +285,13 @@ pub(crate) fn forget_held() {
 }
 
 /// The Windows virtual-key code of an engine key number: a letter's is its
-/// upper-case ASCII code, Space's 0x20.
+/// upper-case ASCII code, Space's 0x20, the arrows' `VK_UP` and `VK_DOWN`.
 fn virtual_key(key: i32) -> Option<i32> {
+    match key {
+        KEY_UP_ARROW => return Some(0x26),
+        KEY_DOWN_ARROW => return Some(0x28),
+        _ => {}
+    }
     match u8::try_from(key).ok()? {
         c @ b'a'..=b'z' => Some(i32::from(c.to_ascii_uppercase())),
         b' ' => Some(0x20),
@@ -324,12 +367,14 @@ pub(crate) fn take_pending() -> Option<Action> {
     Action::from_code(PENDING.swap(0, Ordering::AcqRel))
 }
 
-/// What the box shows: one line, or one line and the keys.
+/// What the box shows: its header, or its header and the keys.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Panel {
-    /// `Highlight 3 of 12 | m00cat | 4 kills`; empty hides the box.
-    pub title: String,
-    /// A second line in plain text ("Loading the demo..."), or empty.
+    /// The lines above the kills (`review_header`, #1437): which highlight,
+    /// whose, the kill range, the note and the clock; empty hides the box.
+    pub header: Vec<crate::review_header::Line>,
+    /// A line in plain text under the header ("Loading the demo..."), or
+    /// empty.
     pub status: String,
     /// The answer keys' lines.
     pub keys: bool,
@@ -343,6 +388,9 @@ pub(crate) struct Panel {
     pub kills: Vec<KillLine>,
     /// Whether X-ray is on, said beside its key.
     pub xray: bool,
+    /// Whether the highlight is playing, the one time the speed keys do
+    /// something: at its end it is paused.
+    pub playing: bool,
 }
 
 /// Where a kill is against the demo clock, which sets how its line is drawn.
@@ -366,7 +414,12 @@ pub(crate) struct KillLine {
 impl Panel {
     /// Whether a key does something now, so the box draws it in full colour.
     pub(crate) fn key_live(&self, action: Action) -> bool {
-        self.live && (action != Action::Back || self.can_go_back)
+        self.live
+            && match action {
+                Action::Back => self.can_go_back,
+                Action::Faster | Action::Slower => self.playing,
+                _ => true,
+            }
     }
 }
 
@@ -388,11 +441,12 @@ pub(crate) fn publish(panel: Option<Panel>, mode: KeyMode) {
 
 /// The line under the keys, each key in the key colour, then what it does:
 /// E opens the kill range and note form (#1139), X turns X-ray on or off,
-/// ESC opens the menu on the Review tab, as before. The action is `None` for
-/// ESC, which always works.
-pub(crate) const LAST_LINE: [(&str, &str, Option<Action>); 3] = [
+/// Up and Down change the speed (#1437), ESC opens the menu on the Review
+/// tab, as before. The action is `None` for ESC, which always works.
+pub(crate) const LAST_LINE: [(&str, &str, Option<Action>); 4] = [
     (FORM_KEY.label, FORM_KEY.word, Some(Action::Form)),
     (XRAY_KEY.label, XRAY_KEY.word, Some(Action::Xray)),
+    ("Up/Down", "speed", Some(Action::Faster)),
     ("ESC", "Review tab", None),
 ];
 
@@ -421,6 +475,7 @@ mod draw {
     use std::ffi::CString;
 
     use super::{Action, KEYS_LIST, KillState, LAST_LINE, Panel};
+    use crate::review_header::{NOTE_LABEL, Tone};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -429,8 +484,19 @@ mod draw {
     /// A key that does nothing now, and its word (B Back on the first
     /// highlight): greyed rather than hidden, so the keys keep their places.
     const DIM: (f32, f32, f32) = (0.4, 0.4, 0.4);
-    /// A kill already played (#1140): readable, but quieter than the rest.
+    /// A kill already played (#1140), and the scan's kill range beside a
+    /// changed one (#1399): readable, but quieter than the rest.
     const PAST: (f32, f32, f32) = (0.55, 0.55, 0.55);
+    /// The header's labels (#1437): orange, apart from the keys' amber and
+    /// the kills' white and grey. `pfnDrawSetTextColor` takes any colour on
+    /// both builds, and the box's dark fill keeps each one readable over
+    /// bright and dark maps alike.
+    const LABEL: (f32, f32, f32) = (1.0, 0.5, 0.1);
+    /// The answer in the header, by what it says. No is a full red: a pinker
+    /// one read as the labels' orange in the game.
+    const YES: (f32, f32, f32) = (0.35, 1.0, 0.35);
+    const MAYBE: (f32, f32, f32) = (1.0, 0.9, 0.2);
+    const NO: (f32, f32, f32) = (1.0, 0.15, 0.15);
     /// The mark in front of the next kill, and the gap that keeps the other
     /// lines in step with it.
     const NEXT_MARK: &str = "> ";
@@ -448,11 +514,45 @@ mod draw {
         CString::new(text).ok().map(|text| Run { text, colour })
     }
 
-    fn lines(panel: &Panel) -> Vec<Vec<Run>> {
+    fn colour(tone: Tone) -> (f32, f32, f32) {
+        match tone {
+            Tone::Label => LABEL,
+            Tone::Value => WHITE,
+            Tone::Quiet => PAST,
+            Tone::Yes => YES,
+            Tone::Maybe => MAYBE,
+            Tone::No => NO,
+        }
+    }
+
+    /// One line of the box: its runs, and whether it starts under the note's
+    /// text rather than at the box's left (a wrapped note's later lines).
+    struct BoxLine {
+        runs: Vec<Run>,
+        under_note: bool,
+    }
+
+    fn plain(runs: Vec<Run>) -> BoxLine {
+        BoxLine {
+            runs,
+            under_note: false,
+        }
+    }
+
+    fn lines(panel: &Panel) -> Vec<BoxLine> {
         let mut lines = Vec::new();
-        lines.push(run(&panel.title, WHITE).into_iter().collect());
+        for line in &panel.header {
+            lines.push(BoxLine {
+                runs: line
+                    .spans
+                    .iter()
+                    .filter_map(|s| run(&s.text, colour(s.tone)))
+                    .collect(),
+                under_note: line.under_note,
+            });
+        }
         if !panel.status.is_empty() {
-            lines.push(run(&panel.status, GREY).into_iter().collect());
+            lines.push(plain(run(&panel.status, GREY).into_iter().collect()));
         }
         // The console font has one size and no bold, so the next kill stands
         // out by colour and a mark (#1140).
@@ -462,11 +562,11 @@ mod draw {
                 KillState::Later => (NO_MARK, WHITE),
                 KillState::Past => (NO_MARK, PAST),
             };
-            lines.push(
+            lines.push(plain(
                 run(&format!("{mark}{}", kill.text), colour)
                     .into_iter()
                     .collect(),
-            );
+            ));
         }
         if panel.keys {
             let mut keys = Vec::new();
@@ -481,9 +581,9 @@ mod draw {
                 keys.extend(run(&format!("{gap}{}", k.label), key));
                 keys.extend(run(&format!(" {}", k.word), word));
             }
-            lines.push(keys);
-            // E and X are greyed with the rest during the lockout; ESC always
-            // works.
+            lines.push(plain(keys));
+            // E, X and the speed keys are greyed with the rest during the
+            // lockout, the speed keys at the end too; ESC always works.
             let mut last = Vec::new();
             for (i, (key, word, action)) in LAST_LINE.iter().enumerate() {
                 let gap = if i == 0 { "" } else { "    " };
@@ -500,7 +600,7 @@ mod draw {
                 last.extend(run(&format!("{gap}{key}"), key_colour));
                 last.extend(run(&format!(" {word}"), word_colour));
             }
-            lines.push(last);
+            lines.push(plain(last));
         }
         lines
     }
@@ -509,7 +609,7 @@ mod draw {
     ///
     /// On the engine's thread, inside `HUD_Redraw`.
     pub(super) unsafe fn panel(panel: &Panel) {
-        if panel.title.is_empty() {
+        if panel.header.is_empty() {
             return;
         }
         let Some(e) = crate::engine::engfuncs() else {
@@ -530,10 +630,18 @@ mod draw {
                 return;
             }
             let lines = lines(panel);
+            // A wrapped note's later lines start where its first line's text
+            // does, after the label.
+            let note_indent = CString::new(NOTE_LABEL).map_or(0, |label| {
+                let (mut w, mut h) = (0, 0);
+                (e.pfn_draw_console_string_len)(label.as_ptr(), &mut w, &mut h);
+                w
+            });
             let mut sizes = Vec::with_capacity(lines.len());
             for line in &lines {
-                let (mut width, mut height) = (0, 0);
-                for r in line {
+                let mut width = if line.under_note { note_indent } else { 0 };
+                let mut height = 0;
+                for r in &line.runs {
                     let (mut w, mut h) = (0, 0);
                     (e.pfn_draw_console_string_len)(r.text.as_ptr(), &mut w, &mut h);
                     width += w;
@@ -561,8 +669,8 @@ mod draw {
             );
             let mut top = y;
             for (line, (_, h)) in lines.iter().zip(&sizes) {
-                let mut left = x;
-                for r in line {
+                let mut left = if line.under_note { x + note_indent } else { x };
+                for r in &line.runs {
                     (e.pfn_draw_set_text_color)(r.colour.0, r.colour.1, r.colour.2);
                     left = (e.pfn_draw_console_string)(left, top, r.text.as_ptr());
                 }
@@ -587,11 +695,6 @@ pub(crate) enum KillClock {
 pub(crate) fn clock_text(seconds: f64) -> String {
     let whole = seconds.max(0.0) as u64;
     format!("{}:{:02}", whole / 60, whole % 60)
-}
-
-/// The box's clock line: `Now 5:41`, on the same clock as the kills' times.
-pub(crate) fn now_text(seconds: f64) -> String {
-    format!("Now {}", clock_text(seconds))
 }
 
 /// The box's kill list (#1140): each kill's number, time, victim and weapon,
@@ -714,6 +817,30 @@ mod tests {
     }
 
     #[test]
+    fn up_and_down_change_the_speed_only_while_the_keys_are_live() {
+        let bit = 1 << (KEYS_LIST.len() + 2);
+        assert_eq!(
+            decide(true, KEY_UP_ARROW, KeyMode::Live, 0),
+            (true, Some(Action::Faster), bit)
+        );
+        assert_eq!(
+            decide(true, KEY_DOWN_ARROW, KeyMode::Live, 0),
+            (true, Some(Action::Slower), bit << 1)
+        );
+        // The arrows are +forward and +back with no review highlight on.
+        assert_eq!(
+            decide(true, KEY_UP_ARROW, KeyMode::Off, 0),
+            (false, None, 0)
+        );
+        assert_eq!(
+            decide(true, KEY_DOWN_ARROW, KeyMode::Locked, 0),
+            (true, None, bit << 1)
+        );
+        assert_eq!(virtual_key(KEY_UP_ARROW), Some(0x26));
+        assert_eq!(virtual_key(KEY_DOWN_ARROW), Some(0x28));
+    }
+
+    #[test]
     fn a_key_mode_survives_its_atomic() {
         for mode in [KeyMode::Off, KeyMode::Locked, KeyMode::Live] {
             assert_eq!(KeyMode::from_code(mode.code()), mode);
@@ -723,13 +850,13 @@ mod tests {
     #[test]
     fn the_lockout_greys_every_key() {
         let panel = Panel {
-            title: "t".into(),
             keys: true,
             live: false,
             can_go_back: true,
+            playing: true,
             ..Panel::default()
         };
-        for k in &KEYS_LIST {
+        for k in all_keys() {
             assert!(!panel.key_live(k.action));
         }
     }

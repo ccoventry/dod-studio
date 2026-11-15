@@ -1,3 +1,6 @@
+// Lock unwraps are exempt from the unwrap rule (coding standards, section 4); the one Option unwrap below is guarded by the write above it.
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashMap;
 use std::sync::RwLock;
 

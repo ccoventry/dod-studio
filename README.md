@@ -25,8 +25,10 @@ download `DoD.Studio_<version>_x64-setup.exe` and run it. Windows 10 or 11, 64-b
 
 - **Day of Defeat on Steam.** Pre-Anniversary and 25th Anniversary are both
   supported.
-- **A separate copy of Half-Life just for movies** is recommended. It keeps your
-  movie configs, models and sounds away from the game you play online.
+- **A movie copy of your `dod` folder** is recommended. It keeps your
+  movie configs, models and sounds away from the game you play online. Setup's
+  **Make a movie copy...** button makes one for you; copying the whole
+  Half-Life folder by hand works too.
 - **[HLAE](https://www.advancedfx.org/)**, which records the game. Required.
 - **[FFmpeg](https://ffmpeg.org/)** for video capture and for rendering clips.
   Optional, but you'll want it.
@@ -74,9 +76,9 @@ memory, which is exactly what VAC looks for. So:
 - **Never load the hook DLL by hand** (with HLAE or any injector) into a game
   you then play online with.
 - **To play online, start Day of Defeat from Steam, without DoD Studio.** A
-  separate copy of Half-Life for movies is recommended but never required: it
-  keeps your movie configs, models, sprites and sounds out of the game you
-  play online. It protects those files, not your account.
+  movie copy of your `dod` folder (or of the whole Half-Life folder) is
+  recommended but never required: it keeps your movie configs, models, sprites
+  and sounds out of the game you play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 

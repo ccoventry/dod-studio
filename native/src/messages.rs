@@ -24,8 +24,10 @@ pub mod menu_scale;
 pub mod movie_copy;
 pub mod player_overrides;
 pub mod render;
+pub mod repair;
 pub mod schedule;
 pub mod take_delete;
+pub mod windows_drive;
 
 use std::fmt::Display;
 
@@ -1236,6 +1238,18 @@ pub fn obs_scene_switched(scene: &str) -> String {
     format!("🎬 **OBS** — switched to scene `{scene}` (restored afterwards).")
 }
 
+pub fn obs_audio_offset_set(source: &str, ms: i64) -> String {
+    format!(
+        "🎬 **OBS** — set `{source}`'s sync offset to {ms} ms, so its sound lines up with the picture."
+    )
+}
+
+pub fn obs_audio_offset_not_set(source: &str, e: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — could not set `{source}`'s sync offset, so its sound may be about 0.3 s late: {e}"
+    )
+}
+
 pub fn obs_preflight_warning(warning: impl Display) -> String {
     format!("⚠️ **OBS** — {warning}")
 }
@@ -1648,6 +1662,12 @@ pub fn demo_bar_skipped(why: impl std::fmt::Display) -> String {
 }
 
 // ── Activity-log lines of the small native files (#237) ───────────────────
+
+pub fn game_window_borderless(width: i32, height: i32) -> String {
+    format!(
+        "Game window: {width}x{height} doesn't fit the screen with a title bar on the pre-Anniversary build, so it opens borderless (-noborder) and every frame is whole"
+    )
+}
 
 pub fn hooks_injecting(dll: impl std::fmt::Display) -> String {
     format!("goldsrc-hooks: injecting {dll}")

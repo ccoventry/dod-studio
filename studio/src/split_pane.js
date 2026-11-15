@@ -6,7 +6,7 @@
 // map lengths), and a demo's card appears once its lengths are in, ready to
 // use: nothing on it changes after it shows (#844). While a split runs, each
 // ticked map's row shows its Status, bar, size and Show in folder, like a
-// Render tab job (#876, split_status.js).
+// Render tab job (#876, split_job_rows.js).
 
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -16,7 +16,7 @@ import { escapeHtml } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import {
   startRows, applyProgress, applyOutcome, applyError, statusText, summaryText,
-} from './split_status.js';
+} from './split_job_rows.js';
 import { STRINGS } from './strings.js';
 import { clockLong } from './time_format.js';
 import { setAuditorFooter } from './auditor_footer.js';

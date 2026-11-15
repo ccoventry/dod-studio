@@ -225,7 +225,7 @@ and branches on the result:
 
 ```asm
 client.dll+0x228e0
-  call [+0x195e40]             ; a spectator predicate (see below)
+  call [+0x195e40]             ; engine_studio_api_t.IsHardware (see below)
   test eax, eax
   je   .zero
   cmp  dword [gHUD+0x234], 0x5a  ; the FOV field -- 90 unless something zoomed
@@ -321,15 +321,18 @@ unless set).
 
 ## What is not proven
 
-- **`+0x195e40`**, the predicate `+0x228e0` calls. It is a `.data` function
+- **`+0x195e40`**, the function `+0x228e0` calls. It is a `.data` function
   pointer, zero in the image, and `client.dll`'s code only ever *calls* it —
   there is no store to it anywhere. It is filled by the 46-dword `rep movsd` at
-  `+0x362f3`, which copies an engine interface handed to `client.dll` during
-  initialisation into `+0x195da0`; the predicate is that table's slot 40. Which
-  interface that is was not chased further. It is not `gEngfuncs` (that is a
-  separate 135-dword copy at `+0x176388`, and DoD calls its `IsSpectateOnly`
-  slot 35 times by the ordinary route), so this is a second mechanism, not the
-  same one.
+  `+0x362f3`, which copies the engine's studio interface handed to `client.dll`
+  during initialisation into `+0x195da0`; the function is that table's slot 40.
+  A 46-slot table is `engine_studio_api_t`, whose slot 40 is `IsHardware`
+  (inferred from the slot count, #897 and the 11-10 engine survey): it answers
+  "is the renderer hardware", not "is this a spectator", so it is not a
+  spectator gate. An earlier version of this note called it a spectator
+  predicate. It is not `gEngfuncs` (that is a separate 135-dword copy at
+  `+0x176388`, and DoD calls its `IsSpectateOnly` slot 35 times by the ordinary
+  route).
 - **Slot 6 of `CHudBase`'s vftable** — an extra virtual DoD added, which no HUD
   element in this build overrides.
 - **Live behaviour.** As of writing, the two detours are proven offline — unique

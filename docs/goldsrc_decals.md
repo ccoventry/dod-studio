@@ -89,7 +89,7 @@ gDecalCount = 0;
 
 Nothing is invented — it is byte-for-byte what `hw+0x4a000` does, minus
 `if (flags & mask)`. Dropping that test is deliberate: a decal whose flags are
-zero would survive `R_DecalRemoveAll(0xffff)`, and "clear all" that leaves some
+zero would survive `R_DecalRemoveWithFlag(0xffff)`, and "clear all" that leaves some
 behind is worse than not having it.
 
 The flag test being dropped also means **permanent decals go too**

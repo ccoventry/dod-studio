@@ -1,7 +1,6 @@
 // patch/types.rs
 // Pure data layer: structs, enums, and their direct impl blocks.
-// No file I/O, no thread spawning. All types except PatchEvent and
-// CaptureWorker are WASM-safe.
+// No file I/O, no thread spawning.
 
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -191,6 +190,11 @@ impl CaptureStreak {
         self.end_tick = slice[slice.len() - 1].0;
         self.kill_count = slice.len();
 
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "the slice has at least one kill"
+        )]
         let total_secs = (slice.last().unwrap().1 - slice[0].1).max(0.0).round() as i32;
         self.duration_string = format!("{}:{:02}", total_secs / 60, total_secs % 60);
 
@@ -422,9 +426,16 @@ impl KillGaps {
 /// container, the cost of being wrong is a lost take, and the cost of being
 /// generous is a second of connective footage inside a merged clip.
 ///
-/// Lives here rather than beside the client so the patcher can read it on every
-/// target — `patch` compiles for wasm32, `obs` does not.
+/// Lives here rather than beside the client so the patcher can read it without
+/// depending on the `obs` module.
 pub const OBS_TAKE_SEPARATION_SECONDS: f32 = 2.0;
+
+/// The rate AGR mode records at when `PatcherConfig::agr_fps` is 0 or absent.
+/// AGR's own rate rather than Capture FPS: an AGR take is rebuilt in Blender,
+/// and a high recorded rate makes those renders far slower, so following a
+/// 300 fps Capture FPS was the wrong default for it. Studio's
+/// `DEFAULT_AGR_FPS` in `studio/src/agr_rate.js` mirrors it (a test checks).
+pub const DEFAULT_AGR_FPS: i32 = 30;
 
 /// Where OBS is and how to talk to it.
 ///
@@ -531,7 +542,7 @@ pub struct PatcherConfig {
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
     /// AGR mode's recorded rate, in frames per game second. `0` (the default)
-    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// means `DEFAULT_AGR_FPS` — see `effective_agr_fps`. Its own
     /// setting because the cost is different: an AGR frame is a few KB, so a
     /// preview can drop to 30 while a slow-motion take wants 300.
     #[serde(default)]
@@ -732,13 +743,14 @@ impl PatcherConfig {
             })
     }
 
-    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
-    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise
+    /// `DEFAULT_AGR_FPS`. Never `capture_fps`: AGR's rate is its own, and
+    /// following a 300 fps Capture FPS made Blender renders far slower.
     pub fn effective_agr_fps(&self) -> i32 {
         if self.agr_fps > 0 {
             self.agr_fps
         } else {
-            self.capture_fps.max(1)
+            DEFAULT_AGR_FPS
         }
     }
 
@@ -887,9 +899,29 @@ impl PatcherConfig {
         // was on the command line once and fell off when the launchers were
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
+        //
+        // `-noborder` only on the pre-Anniversary build, and only when the
+        // window wouldn't fit the screen with its title bar: its client area
+        // then loses the caption's rows and every frame gets a black band on
+        // top (#1337). The Anniversary build's window isn't capped, and this
+        // line also serves Launch Game, Review and Launch Preview, where a
+        // borderless window would only lose its title bar.
+        let window_args =
+            if !crate::sys::packet_limit::is_anniversary(std::path::Path::new(&hl_exe))
+                && crate::sys::screen::needs_borderless_window(
+                    (width, height),
+                    crate::sys::screen::primary_screen_size(),
+                )
+            {
+                crate::log_markdown(&crate::messages::game_window_borderless(width, height));
+                "-windowed -noborder"
+            } else {
+                "-windowed"
+            };
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
+            "-game {} -insecure -addons -demoedit {} -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
             game_folder,
+            window_args,
             width,
             height,
             crate::sys::studio_pipe::launch_arg(),
@@ -1002,7 +1034,6 @@ pub struct HighlightRules {
 
 // ── Worker event channel types (native-only: require std threading) ───────────
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub enum PatchEvent {
     Starting(usize),
@@ -1012,7 +1043,6 @@ pub enum PatchEvent {
     Error(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct CaptureWorker {
     pub receiver: std::sync::mpsc::Receiver<PatchEvent>,
     pub is_running: bool,
@@ -1164,6 +1194,52 @@ mod launch_args_tests {
             .position(|a| a == "-cmdLine")
             .expect("build_hlae_process must pass -cmdLine");
         args[at + 1].clone()
+    }
+
+    /// A config whose `hl.exe` sits beside a `hw.dll` holding `hw_dll`, at
+    /// `width`x`height`.
+    fn config_in(
+        dir: &crate::test_support::Scratch,
+        hw_dll: &[u8],
+        width: i32,
+        height: i32,
+    ) -> PatcherConfig {
+        std::fs::write(dir.join("hw.dll"), hw_dll).unwrap();
+        PatcherConfig {
+            game_path: dir.join("hl.exe").display().to_string(),
+            resolution_width: width,
+            resolution_height: height,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_pre_anniversary_window_goes_borderless_only_when_it_would_not_fit_the_screen() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_pre");
+        let screen = crate::sys::screen::primary_screen_size();
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let line = cmd_line_of(&config_in(&dir, b"MAX_PACKET_ENTITIES", width, height), "");
+            assert!(line.contains("-windowed"), "{line}");
+            assert_eq!(
+                line.contains("-noborder"),
+                crate::sys::screen::needs_borderless_window((width, height), screen),
+                "{width}x{height} on {screen:?}: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_anniversary_window_keeps_its_title_bar_at_any_size() {
+        let dir = crate::test_support::Scratch::new("launch_borderless_post");
+        for (width, height) in [(1280, 720), (2560, 1440), (7680, 4320)] {
+            let cfg = config_in(&dir, b"MAX_PACKET_ENTITIES sv_allow_shaders", width, height);
+            let line = cmd_line_of(&cfg, "");
+            assert!(
+                line.contains(&format!("-windowed -w {width} -h {height}")),
+                "{line}"
+            );
+            assert!(!line.contains("-noborder"), "{line}");
+        }
     }
 
     #[test]

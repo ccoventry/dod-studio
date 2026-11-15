@@ -1,6 +1,6 @@
 // themed_confirm.js — driven against tests/e2e/themed-confirm.html.
 // See tests/e2e/README.md for what this style of test covers.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/themed-confirm.html');

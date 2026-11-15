@@ -264,16 +264,11 @@ pub fn set_in(game_dir: &Path, on: bool, applies: bool) -> Result<MenuScaleStatu
     Ok(status_in(game_dir, applies))
 }
 
-fn is_anniversary(hl_exe: &Path) -> bool {
-    crate::sys::packet_limit::packet_entity_limit(hl_exe)
-        == Some(crate::sys::packet_limit::ANNIVERSARY_PACKET_ENTITIES)
-}
-
 /// The setting's state for `hl_exe`'s `game_folder`. When our copy is on, it
 /// is brought up to date with the game's own scheme (a game update), which
 /// writes only when it changed.
 pub fn status(hl_exe: &Path, game_dir: &Path) -> MenuScaleStatus {
-    let applies = is_anniversary(hl_exe);
+    let applies = crate::sys::packet_limit::is_anniversary(hl_exe);
     let now = status_in(game_dir, applies);
     if now.on && applies {
         return set_in(game_dir, true, applies).unwrap_or(now);
@@ -284,7 +279,7 @@ pub fn status(hl_exe: &Path, game_dir: &Path) -> MenuScaleStatus {
 /// Turns the setting on or off. On is refused for a pre-Anniversary install;
 /// off always removes our copy.
 pub fn set(hl_exe: &Path, game_dir: &Path, on: bool) -> Result<MenuScaleStatus, String> {
-    let applies = is_anniversary(hl_exe);
+    let applies = crate::sys::packet_limit::is_anniversary(hl_exe);
     if on && !applies {
         return Err(crate::messages::menu_scale::not_an_anniversary_install(
             hl_exe.display(),

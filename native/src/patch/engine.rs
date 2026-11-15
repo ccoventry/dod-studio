@@ -1,3 +1,6 @@
+// Fixed-width header slices and queues just peeked; error paths for these are tracked on #1179.
+#![allow(clippy::unwrap_used)]
+
 // patch/engine.rs
 // Binary stream manipulation against the GoldSrc .dem wire format.
 // Reads/writes to disk — native-only.

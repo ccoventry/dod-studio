@@ -23,7 +23,6 @@ chrono = "0.4.45"
 log = { workspace = true }
 dirs = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "io-util", "time"] }
 walkdir = "2.5.0"
 hl-demo-auditor = { path = "../hl-demo-auditor" }
@@ -50,13 +49,6 @@ trash = "5.2"
 # backend, which zip's own dependency leaves off) and STORE are needed.
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1.1"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { workspace = true }
-wasm-bindgen-futures = "0.4.50"
-console_error_panic_hook = { workspace = true }
-js-sys = { workspace = true }
-web-sys = { version = "0.3.77", features = ["HtmlCanvasElement", "Window", "Document", "Element", "File", "Storage", "Worker", "Blob", "Url", "DedicatedWorkerGlobalScope", "MessageEvent", "HtmlCollection", "NodeList"] }
 
 # ── Binaries ────────────────────────────────────────────────────────────────
 # Real tools, not probes. Anything exploratory belongs in native/examples/,

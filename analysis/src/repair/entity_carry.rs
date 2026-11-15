@@ -1,6 +1,6 @@
 //! The set of entities each snapshot holds, carried forward the way the engine
-//! does, for the probes that rewrite packet entities (`packet_entity_trim`,
-//! `entity_count_fix`).
+//! does (#15). Used by the repair's entity-count step and by the
+//! `packet_entity_trim` probe.
 //!
 //! A packet's `entity_count` is the size of the snapshot that results from
 //! applying it, not the number of entities it lists. A full packet's snapshot is
@@ -10,7 +10,7 @@
 //! `incoming_sequence & 63` (`CL_UPDATE_MASK`), and a delta packet whose base is
 //! 63 or more sequences back is thrown away (`CL_FlushEntityPacket`), leaving an
 //! empty frame (`docs/goldsrc_demo_salvage.md`, "The flush predicate"). After a
-//! jump in `incoming_sequence` (a salvaged demo's join), a slot can hold a
+//! jump in `incoming_sequence` (a repaired demo's join), a slot can hold a
 //! different snapshot than the one with the same low byte: keying by the whole
 //! byte disagreed with the engine there and missed `m3_h1-1`'s overrun at 850 s.
 //!
@@ -22,6 +22,7 @@ use std::collections::{BTreeSet, HashMap};
 /// `hw.dll`'s `CL_UPDATE_MASK` (`CL_UPDATE_BACKUP` 64 - 1).
 const CL_UPDATE_MASK: i32 = 63;
 
+/// The engine's ring of recent snapshots' entity sets.
 #[derive(Default)]
 pub struct Carry {
     ring: HashMap<i32, BTreeSet<u16>>,
@@ -34,14 +35,19 @@ pub struct Carry {
 }
 
 impl Carry {
+    /// A full packet at sequence `seq` listing `listed`: its snapshot.
     pub fn full(&mut self, seq: i32, listed: impl Iterator<Item = u16>) -> &BTreeSet<u16> {
         self.store(seq, listed.collect())
     }
 
-    /// `entries` are (entity index, removed) in the order the packet lists them.
-    /// `None` when the engine throws the packet away.
+    /// A delta packet at sequence `seq` from `from`: its snapshot, or `None`
+    /// when the engine throws the packet away. `entries` are (entity index,
+    /// removed) in the order the packet lists them.
     pub fn delta(&mut self, seq: i32, from: u8, entries: &[(u16, bool)]) -> Option<&BTreeSet<u16>> {
-        if (seq - from as i32) & 0xFF >= CL_UPDATE_MASK {
+        // Wrapping, as the engine's own int arithmetic does: only the low
+        // byte counts, and a bit-flipped `seq` near `i32::MIN` would
+        // otherwise overflow (a panic in a debug build).
+        if seq.wrapping_sub(from as i32) & 0xFF >= CL_UPDATE_MASK {
             self.flushed += 1;
             self.store(seq, BTreeSet::new());
             return None;
@@ -67,5 +73,36 @@ impl Carry {
         self.ring.insert(seq & CL_UPDATE_MASK, set.clone());
         self.last = set;
         &self.last
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_delta_carries_its_base_snapshot_forward() {
+        let mut carry = Carry::default();
+        carry.full(10, [1, 2, 3].into_iter());
+        let set = carry.delta(11, 10, &[(4, false), (2, true)]).cloned();
+        assert_eq!(set, Some(BTreeSet::from([1, 3, 4])));
+    }
+
+    #[test]
+    fn a_delta_63_sequences_past_its_base_is_thrown_away() {
+        let mut carry = Carry::default();
+        carry.full(10, [1].into_iter());
+        assert!(carry.delta(73, 10, &[]).is_none());
+        assert_eq!(carry.flushed, 1);
+    }
+
+    #[test]
+    fn a_bit_flipped_sequence_near_i32_min_does_not_overflow() {
+        let mut carry = Carry::default();
+        carry.full(i32::MIN + 2, [1].into_iter());
+        // i32::MIN + 2 - 10 overflows plain subtraction; its low byte is
+        // 0xF8, far past the base, so the engine throws the packet away.
+        assert!(carry.delta(i32::MIN + 2, 10, &[]).is_none());
+        assert_eq!(carry.flushed, 1);
     }
 }

@@ -166,9 +166,48 @@ pub fn group_by_volume(
 }
 
 /// Free bytes across `paths`, counting each volume once and skipping paths
-/// whose free space is unknown (`None`).
+/// whose free space is unknown (`None`). The drives' real free space, as
+/// Explorer shows it: the "Capture Output Free" figures and the setup window
+/// show this, and a drive that is there never reads as empty or missing just
+/// because "Keep free on the Windows drive" holds it back (#1430).
 pub fn pool_free_bytes(paths: &[std::path::PathBuf]) -> u64 {
     pool_free_bytes_with(paths, get_available_bytes)
+}
+
+/// [`pool_free_bytes`], and how much of it captures may use: the Windows
+/// drive counts only above what "Keep free on the Windows drive" keeps there
+/// (#1430), since no capture writes below it. Start Capture Batch's check
+/// compares the two to tell the user when the setting is what's short.
+pub fn pool_room(paths: &[std::path::PathBuf]) -> PoolRoom {
+    pool_room_with(paths, get_available_bytes, |path, free| {
+        super::windows_drive::free_for(path, 0, free)
+    })
+}
+
+/// What [`pool_room`] returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PoolRoom {
+    /// The drives' real free space.
+    pub free_bytes: u64,
+    /// The part of it captures may use.
+    pub usable_bytes: u64,
+}
+
+fn pool_room_with(
+    paths: &[std::path::PathBuf],
+    mut free_of: impl FnMut(&std::path::Path) -> Option<u64>,
+    mut usable_of: impl FnMut(&std::path::Path, u64) -> u64,
+) -> PoolRoom {
+    let mut usable_bytes = 0;
+    let free_bytes = pool_free_bytes_with(paths, |path| {
+        let free = free_of(path)?;
+        usable_bytes += usable_of(path, free);
+        Some(free)
+    });
+    PoolRoom {
+        free_bytes,
+        usable_bytes,
+    }
 }
 
 fn pool_free_bytes_with(
@@ -196,24 +235,18 @@ const TTL_MS: u128 = 2_000;
 
 /// Bumped by [`forget_free_space`]; a cached answer or disk list from an
 /// older epoch is re-read.
-#[cfg(not(target_arch = "wasm32"))]
 static FREE_SPACE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Drops every cached free-space answer, so the next [`get_available_bytes`]
 /// asks the OS again. Call it after deleting files on purpose to make room:
 /// the take cleanup (#644) deletes a take and `build_batch_queue` reads the
 /// drive within the 2 s cache, which then still reported the space as taken.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn forget_free_space() {
     FREE_SPACE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn forget_free_space() {}
-
 /// Free bytes on the volume `path` is on, or `None` when that can't be told:
 /// a malformed, relative or non-directory path, or one under no known mount.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn get_available_bytes(path: &std::path::Path) -> Option<u64> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -319,14 +352,8 @@ pub fn get_available_bytes(path: &std::path::Path) -> Option<u64> {
 
 /// Whether a disk list re-listed at `refreshed_at` is still young enough at
 /// `now` to answer from without re-listing every volume.
-#[cfg(not(target_arch = "wasm32"))]
 fn list_is_fresh(refreshed_at: std::time::Instant, now: std::time::Instant) -> bool {
     now.saturating_duration_since(refreshed_at).as_millis() < TTL_MS
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn get_available_bytes(_path: &std::path::Path) -> Option<u64> {
-    None
 }
 
 /// Why a configured output path can't be used, for surfacing a specific
@@ -348,7 +375,6 @@ pub enum PathStatus {
     NotADirectory,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn diagnose_path(path: &std::path::Path) -> PathStatus {
     if !path.is_absolute() {
         return PathStatus::NotAbsolute;
@@ -370,12 +396,7 @@ pub fn diagnose_path(path: &std::path::Path) -> PathStatus {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn diagnose_path(_path: &std::path::Path) -> PathStatus {
-    PathStatus::Ok
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -438,6 +459,48 @@ mod tests {
         let reversed: Vec<PathBuf> = paths.iter().rev().cloned().collect();
         assert_eq!(pool_free_bytes_with(&reversed, free), 140);
         assert_eq!(pool_free_bytes_with(&[], free), 0);
+    }
+
+    /// #1430's live test: C: below the setting read "Drive not found" in the
+    /// setup window and "0.0 GB" free. The free figure stays the drive's own;
+    /// only the usable one drops.
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_held_back_by_the_setting_keeps_its_real_free_space() {
+        use std::path::PathBuf;
+        let free = |p: &std::path::Path| match p.to_string_lossy().to_lowercase().chars().next() {
+            Some('c') => Some(30),
+            Some('d') => Some(40),
+            _ => None,
+        };
+        // C: plays the Windows drive, keeping 50 free.
+        let usable = |p: &std::path::Path, free: u64| {
+            if p.to_string_lossy().to_lowercase().starts_with('c') {
+                free.saturating_sub(50)
+            } else {
+                free
+            }
+        };
+        let paths: Vec<PathBuf> = [r"C:\a", r"c:\b", r"D:\x", r"Z:\gone"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let room = pool_room_with(&paths, free, usable);
+        assert_eq!(
+            room,
+            PoolRoom {
+                free_bytes: 70,
+                usable_bytes: 40
+            }
+        );
+        let only_c = pool_room_with(&paths[..2], free, usable);
+        assert_eq!(
+            only_c,
+            PoolRoom {
+                free_bytes: 30,
+                usable_bytes: 0
+            }
+        );
     }
 
     #[cfg(windows)]

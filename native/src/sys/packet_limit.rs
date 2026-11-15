@@ -5,6 +5,10 @@
 //! build's bounds check; the measurements are on #207). A demo whose snapshot
 //! goes over the limit closes the game to the desktop the moment it gets
 //! there, so Studio warns before a capture instead.
+//!
+//! The limit is also how Studio tells the two builds apart
+//! ([`is_anniversary`]): the menu scale (`menu_scale`) and the borderless
+//! window a tall pre-Anniversary capture needs (#1337).
 
 use std::path::Path;
 
@@ -24,6 +28,12 @@ const ENGINE_MARKER: &[u8] = b"MAX_PACKET_ENTITIES";
 pub fn packet_entity_limit(game_exe: &Path) -> Option<u32> {
     let bytes = std::fs::read(game_exe.parent()?.join("hw.dll")).ok()?;
     limit_of(&bytes)
+}
+
+/// Whether the `hw.dll` beside `game_exe` is the 25th Anniversary build.
+/// False for the pre-Anniversary build and for no readable `hw.dll`.
+pub fn is_anniversary(game_exe: &Path) -> bool {
+    packet_entity_limit(game_exe) == Some(ANNIVERSARY_PACKET_ENTITIES)
 }
 
 fn limit_of(hw_dll: &[u8]) -> Option<u32> {

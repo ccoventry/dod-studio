@@ -127,7 +127,9 @@ export function recordTake(takeIndex, takeKey, uids, meta) {
  * It also records when and how the take was captured (#439): `block` is a
  * verified block or a `capture_clip_ready` payload (which carries its own
  * rate); the dispatch's own rate (what the mode really records at) wins, then
- * `captureFps` for a block that carries none.
+ * `captureFps` for a block that carries none. `block.capture_settings`, when
+ * there, is the full settings record (part of #1085); a block without it
+ * leaves an earlier one in place.
  */
 export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
   let advanced = 0;
@@ -168,6 +170,7 @@ export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
       capture_mode: block.capture_mode ?? dispatch?.captureMode,
       capture_fps: dispatch?.captureFps ?? block.capture_fps ?? captureFps,
       take_folder: block.take_folder,
+      settings: block.capture_settings,
     });
   }
   return { advanced, markCleared };

@@ -206,6 +206,11 @@ pub fn segments(demo: &Demo) -> Vec<MapSegment> {
             let (map, crc) = if i == 0 {
                 (header_map.clone(), demo.header.map_checksum)
             } else {
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "the first segment of a split always starts with a server-info frame"
+                )]
                 let info = server_info(&demo.directory.entries[ei].frames[fi]).expect("a start");
                 (
                     map_stem(&String::from_utf8_lossy(&info.map_file_name)),
@@ -394,6 +399,20 @@ pub fn old_split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String
     }
 }
 
+/// Why the demo in `bytes` does not read. A damaged one (#15) says where it
+/// breaks and points at the repair, which a split of the repaired copy
+/// follows; anything else keeps the parser's reason.
+fn read_error(bytes: &[u8], err: impl std::fmt::Display) -> String {
+    match analysis::repair::find_first_hole(bytes) {
+        Some(hole) => crate::messages::repair::split_needs_repair(&analysis::integrity::clock(
+            hole.after_secs,
+        )),
+        None => crate::messages::repair::split_could_not_read(
+            analysis::integrity::parse_error_reason(&err.to_string()),
+        ),
+    }
+}
+
 /// The maps of the demo at `path`, without a full parse when it can: the
 /// frame headers and the signons are enough for [`segments`]' answer, in
 /// well under a second where a full parse takes 5-10 s (#844). Falls back to
@@ -404,8 +423,7 @@ pub fn quick_demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, St
     match quick_segments(&bytes) {
         Some(segs) => Ok(segs),
         None => {
-            let demo = dem::open_demo_from_bytes(&bytes)
-                .map_err(|e| format!("could not read the demo: {e}"))?;
+            let demo = dem::open_demo_from_bytes(&bytes).map_err(|e| read_error(&bytes, e))?;
             Ok(segments(&demo))
         }
     }
@@ -569,8 +587,7 @@ fn segments_from_frames(
 pub fn demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    let demo =
-        dem::open_demo_from_bytes(&bytes).map_err(|e| format!("could not read the demo: {e}"))?;
+    let demo = dem::open_demo_from_bytes(&bytes).map_err(|e| read_error(&bytes, e))?;
     Ok(segments(&demo))
 }
 
@@ -728,7 +745,13 @@ fn run_bounded<J: Send, R: Send>(
         for job in jobs {
             running.push_back(s.spawn(move || work(job)));
             while running.len() >= max {
-                results.push(join(running.pop_front().expect("one running")));
+                #[allow(
+                    clippy::unwrap_used,
+                    clippy::expect_used,
+                    reason = "the loop runs only while `running` holds at least `max` (1 or more)"
+                )]
+                let oldest = running.pop_front().expect("one running");
+                results.push(join(oldest));
             }
         }
         while let Some(h) = running.pop_front() {
@@ -889,7 +912,7 @@ pub fn split_file_report(
             error: None,
         })
     })
-    .map_err(|e| format!("could not read the demo: {e}"))?;
+    .map_err(|e| read_error(&bytes, e))?;
     let segs = segments(&demo);
     let mut keep: Vec<usize> = match keep {
         Keep::These(k) => k.to_vec(),
@@ -1047,6 +1070,61 @@ mod tests {
             "/../test-fixtures/ci_fixture.dem"
         ))
         .expect("test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn a_damaged_demo_split_points_at_the_repair() {
+        let dir =
+            std::env::temp_dir().join(format!("dodstudio-split-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("damaged.dem");
+        let mut bytes = ci_fixture();
+        let at = bytes.len() / 2;
+        bytes[at..at + 300_000].fill(0xEE);
+        std::fs::write(&demo, &bytes).unwrap();
+        let err = demo_segments(&demo).unwrap_err();
+        assert!(
+            err.contains("damaged") && err.contains("Repair it first"),
+            "{err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Damage inside one network frame's messages, its header intact: the
+    /// repair finds no hole in it, so Studio offers no Repair and leaves
+    /// Split on. The split's strict parse still stops at the damage; what it
+    /// says must not send the user to Repair.
+    #[test]
+    fn a_demo_damaged_inside_a_frame_split_does_not_point_at_the_repair() {
+        let dir = std::env::temp_dir().join(format!(
+            "dodstudio-split-frame-damaged-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("damaged.dem");
+        let mut bytes = ci_fixture();
+        let parsed = dem::open_demo_from_bytes(&bytes).unwrap();
+        let spans: Vec<_> = parsed
+            .directory
+            .entries
+            .iter()
+            .flat_map(|e| &e.frames)
+            .filter_map(|f| match &f.frame_data {
+                FrameData::NetworkMessage(n) => n.1.source_span.clone(),
+                _ => None,
+            })
+            .filter(|span| span.len() > 64)
+            .collect();
+        bytes[spans[spans.len() / 2].clone()].fill(0xEE);
+        std::fs::write(&demo, &bytes).unwrap();
+        assert_eq!(analysis::repair::find_first_hole(&bytes), None);
+        let err = split_file_with_progress(&demo, Keep::AtLeast(60.0), &[], &mut |_| {})
+            .expect_err("the strict parse stops at the damage");
+        assert!(err.starts_with("could not read the demo"), "{err}");
+        assert!(!err.contains("Repair"), "{err}");
+        // The parser's reason, not its dump of every byte after the damage.
+        assert!(err.chars().count() < 300, "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

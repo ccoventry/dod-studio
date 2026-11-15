@@ -52,8 +52,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Re-exported so callers holding an `ObsClient` do not have to reach into the
-/// patcher for it. Defined in `patch::types` because the patcher reads it on
-/// every target, including wasm32, where this module does not exist.
+/// patcher for it. Defined in `patch::types` because the patcher reads it
+/// without depending on this module.
 pub use crate::patch::types::OBS_TAKE_SEPARATION_SECONDS;
 
 #[derive(Debug)]
@@ -612,6 +612,12 @@ impl ObsClient {
             json!({ "inputName": name, "inputAudioSyncOffset": ms }),
         )?;
         Ok(())
+    }
+
+    /// An audio source's current sync offset, in milliseconds.
+    pub fn input_audio_sync_offset(&mut self, name: &str) -> Result<i64, ObsError> {
+        let reply = self.request("GetInputAudioSyncOffset", json!({ "inputName": name }))?;
+        Ok(reply["inputAudioSyncOffset"].as_i64().unwrap_or_default())
     }
 
     /// OBS's own version, e.g. `32.2.2`.

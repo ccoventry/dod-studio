@@ -21,8 +21,9 @@
 //!
 //! ## Keys and buttons
 //!
-//! A box passes the keys it doesn't use (Enter, Esc) up to the window, whose
-//! `OnKeyCodeTyped` (slot [`PANEL_SLOT_ON_KEY_CODE_TYPED`]) is ours in a
+//! A box passes every key press up to the window (`TextEntry` doesn't override
+//! `OnKeyCodePressed`, so `Panel`'s forwards it to the parent), whose
+//! `OnKeyCodePressed` (slot [`PANEL_SLOT_ON_KEY_CODE_PRESSED`]) is ours in a
 //! copied vftable; its Save and Cancel buttons send `save` and `cancel` to
 //! its `OnCommand`, ours too. A kill range outside the highlight keeps the
 //! form open with what to type on its last line.
@@ -63,8 +64,8 @@ const TOP_PERCENT: i32 = 55;
 
 /// The form we built, or 0.
 static FORM: AtomicUsize = AtomicUsize::new(0);
-/// The class's own `OnKeyCodeTyped` and `OnCommand`, for what isn't ours.
-static OWN_ON_KEY: AtomicUsize = AtomicUsize::new(0);
+/// The class's own `OnKeyCodePressed` and `OnCommand`, for what isn't ours.
+static OWN_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
 static OWN_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
 /// The highlight the form shows, while it shows. Read every frame it shows,
 /// so an `RwLock` (CLAUDE.md: no blocking mutex per frame).
@@ -219,13 +220,13 @@ unsafe fn build(vgui: &Vgui) -> Result<*mut c_void, String> {
             &[
                 (FRAME_SLOT_ON_COMMAND, form_on_command as *const () as usize),
                 (
-                    PANEL_SLOT_ON_KEY_CODE_TYPED,
-                    form_on_key as *const () as usize,
+                    PANEL_SLOT_ON_KEY_CODE_PRESSED,
+                    form_on_key_pressed as *const () as usize,
                 ),
             ],
         );
         OWN_ON_COMMAND.store(own[0], Ordering::Release);
-        OWN_ON_KEY.store(own[1], Ordering::Release);
+        OWN_ON_KEY_PRESSED.store(own[1], Ordering::Release);
         let load: LoadSettingsFn = std::mem::transmute(base + build.load_control_settings);
         load(frame, FORM_RES.0.as_ptr(), std::ptr::null());
         vgui.set_visible(vpanel_of(frame), false);
@@ -408,9 +409,9 @@ unsafe fn cancel() {
     close("cancelled");
 }
 
-/// The form's `OnKeyCodeTyped`: a key its boxes passed up. Enter saves, Esc
+/// The form's `OnKeyCodePressed`: a key its boxes passed up. Enter saves, Esc
 /// cancels, anything else goes to the class's own.
-unsafe extern "thiscall" fn form_on_key(this: *mut c_void, code: i32) {
+unsafe extern "thiscall" fn form_on_key_pressed(this: *mut c_void, code: i32) {
     match code {
         KEY_ENTER | KEY_PAD_ENTER => unsafe { submit() },
         KEY_ESCAPE => {
@@ -418,9 +419,9 @@ unsafe extern "thiscall" fn form_on_key(this: *mut c_void, code: i32) {
             unsafe { cancel() }
         }
         _ => {
-            let own = OWN_ON_KEY.load(Ordering::Acquire);
+            let own = OWN_ON_KEY_PRESSED.load(Ordering::Acquire);
             if own != 0 {
-                // Safety: the class's own OnKeyCodeTyped, from its vftable.
+                // Safety: the class's own OnKeyCodePressed, from its vftable.
                 let own: KeyFn = unsafe { std::mem::transmute(own) };
                 unsafe { own(this, code) };
             }

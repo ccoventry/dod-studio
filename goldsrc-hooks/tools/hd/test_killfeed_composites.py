@@ -22,6 +22,8 @@ class TableTest(unittest.TestCase):
             "d_garandbutt_us": ("garand", "us"),
             "d_k43butt_axis": ("k43", "axis"),
             "d_k43butt_us": ("k43", "us"),
+            "d_garandbutt_brit": ("garand", "brit"),
+            "d_k43butt_brit": ("k43", "brit"),
         })
         self.assertIn(KC.BUTT_RECT, KC.BUTT_VARIANTS, "hud.txt's own name is one of them")
         for name in KC.BUTT_VARIANTS:
