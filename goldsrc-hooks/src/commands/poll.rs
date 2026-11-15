@@ -446,6 +446,8 @@ pub fn poll() {
     // Only until connect is wrapped, normally already done at install.
     crate::connect_guard::poll();
     crate::events::poll();
+    // Only until +map is wrapped (#1441).
+    crate::pov_map_keys::poll();
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();

@@ -484,6 +484,13 @@ there but not in an HLTV demo (#894): one byte, both builds
 (`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
 On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
+`src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo
+plays (#1441). The recorder's presses replay there and cycle the viewer's
+`_cl_minimap`; the map never draws in POV playback (#897), so all that shows
+is the full map's side effects: no crosshair and no flag row, for the rest of
+the session. Wrapped through the command list, no code patch. On by default;
+`GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise
