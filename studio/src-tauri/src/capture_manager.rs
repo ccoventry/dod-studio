@@ -712,9 +712,20 @@ pub(crate) struct Records {
 }
 
 impl Records {
-    /// How many clips the game started recording.
-    pub(crate) fn started(&self) -> usize {
-        self.started
+    /// The demo playing, by `DEMO_START`'s 1-based index; `None` before the
+    /// first one, or without markers.
+    pub(crate) fn demo(&self) -> Option<u32> {
+        self.demo
+    }
+
+    /// The demo the last `START_RECORD` came from.
+    pub(crate) fn last_start_demo(&self) -> Option<u32> {
+        self.last_start_demo
+    }
+
+    /// The demo tick the last `START_RECORD` named.
+    pub(crate) fn last_start_tick(&self) -> Option<i64> {
+        self.last_start_tick
     }
 
     /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
@@ -779,6 +790,12 @@ impl<'a> BatchEnd<'a> {
             cut_by: CutBy::Cancel,
             clips: ClipEvidence::default(),
         }
+    }
+
+    /// What ended a batch that stopped early; `None` for a complete one,
+    /// whose `cut_by` is only a default.
+    fn ended_by(&self) -> Option<CutBy> {
+        (self.outcome != "complete").then_some(self.cut_by)
     }
 
     fn with_clips(self, clips: ClipEvidence) -> BatchEnd<'a> {
@@ -1087,7 +1104,7 @@ fn check_takes(
     // reached them all, and a take it lacks is missing.
     if outcome != "complete" {
         let not_reached =
-            crate::unreached_clips::mark_not_reached(&manifest, &mut blocks, end.records.started());
+            crate::unreached_clips::mark_not_reached(&manifest, &mut blocks, &end.records);
         if not_reached > 0 {
             log_markdown(&crate::messages::capture::take_verify_not_reached(
                 not_reached,
@@ -1149,7 +1166,7 @@ fn check_takes(
             "outcome": outcome,
             // What ended a batch that stopped early, for its clips it never
             // reached (#1434).
-            "ended_by": end.cut_by,
+            "ended_by": end.ended_by(),
             "capture_fps": manifest.capture_fps,
             // The project's record of each take (part of #1085).
             "capture_settings": manifest.settings,
@@ -2989,6 +3006,20 @@ mod tests {
         assert_eq!(stalled.cut_by, CutBy::Stopped);
         let cancelled = BatchEnd::cancelled(records);
         assert_eq!((cancelled.error, cancelled.cut_by), (false, CutBy::Cancel));
+    }
+
+    /// #1434: only a batch that stopped early says what ended it.
+    #[test]
+    fn a_complete_batch_names_nothing_as_what_ended_it() {
+        assert_eq!(BatchEnd::complete().ended_by(), None);
+        assert_eq!(
+            BatchEnd::cancelled(Records::default()).ended_by(),
+            Some(CutBy::Cancel)
+        );
+        assert_eq!(
+            BatchEnd::failed("x", Records::default(), true).ended_by(),
+            Some(CutBy::GameClosed)
+        );
     }
 
     /// A demo the hook's batch skipped sends no markers (#861), so the count

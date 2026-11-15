@@ -7,16 +7,22 @@
 //! had their say, so the toast and Last Batch can tell them from a take that
 //! should be on disk and isn't.
 //!
-//! A clip counts as reached when the game started recording it (the hook's
-//! `START_RECORD` markers), or when anything shows it was: a take on disk, a
-//! cut-short or late take, or a report from the game. Every clip before the
-//! last reached one in recording order was reached too, which covers a demo
-//! the hook's batch skipped (it sends no markers, so the marker count runs
-//! behind the clips it passed).
+//! Where the batch stopped comes from the hook's markers, as
+//! `capture_manager::mark_cut_short` reads them: the demo playing (the last
+//! `DEMO_START`) and the last clip it started (`START_RECORD`'s demo and
+//! tick). Every clip of an earlier demo was reached, so a demo the hook's
+//! batch skipped (it sends no markers for it) stays missing, an error. In the
+//! demo playing, the clips up to the last one started were reached. Anything
+//! on disk or reported by the game also counts as reached, wherever it is.
+//!
+//! A batch with no markers at all (nothing reached the game's pipe) can't say
+//! where it stopped, so a clip it never reached can't be told from one it
+//! reached and lost: there, only the clips after the last one with anything
+//! to show for it count as not reached.
 
-use native::capture_engine::clip_verdict::recording_order;
+use native::capture_engine::clip_verdict::{demo_ordinals, recording_order};
 
-use crate::capture_manager::{CaptureManifest, VerifiedBlock};
+use crate::capture_manager::{CaptureManifest, Records, VerifiedBlock};
 
 /// Whether anything on disk or from the game shows the batch got to `block`.
 fn shows_it_was_reached(block: &VerifiedBlock) -> bool {
@@ -29,23 +35,52 @@ fn shows_it_was_reached(block: &VerifiedBlock) -> bool {
         || block.clip_verdict.is_some()
 }
 
+/// The first position in recording order the batch did not reach, from its
+/// markers: past the last clip the demo playing started, or that demo's
+/// first clip when it started none. `None` without markers.
+fn first_unreached_by_markers(
+    manifest: &CaptureManifest,
+    order: &[usize],
+    records: &Records,
+) -> Option<usize> {
+    let playing = records.demo()?;
+    let demo = demo_ordinals(&manifest.blocks);
+    let demo_first = order
+        .iter()
+        .position(|&i| demo[i] >= playing)
+        .unwrap_or(order.len());
+    if records.last_start_demo() != Some(playing) {
+        return Some(demo_first);
+    }
+    let last_started = records.last_start_tick().and_then(|tick| {
+        order.iter().position(|&i| {
+            demo[i] == playing && i64::from(manifest.blocks[i].record_start_tick) == tick
+        })
+    });
+    // A start with no tick, or none matching: at least the demo's first clip.
+    Some(last_started.unwrap_or(demo_first) + 1)
+}
+
 /// Marks every clip of a batch that ended early that it never reached, and
-/// returns how many. `started` is how many clips the game started recording
-/// (0 when it sent no markers). Only for a batch that ended before its last
-/// clip: a complete batch reached every clip, and a take it left out is
-/// missing.
+/// returns how many. `records` are the batch's markers. Only for a batch that
+/// ended before its last clip: a complete batch reached every clip, and a
+/// take it left out is missing.
 pub(crate) fn mark_not_reached(
     manifest: &CaptureManifest,
     verified: &mut [VerifiedBlock],
-    started: usize,
+    records: &Records,
 ) -> usize {
     let order = recording_order(&manifest.blocks);
-    let last_reached = order
+    let last_with_evidence = order
         .iter()
-        .rposition(|&i| verified.get(i).is_some_and(shows_it_was_reached));
-    let reached = started.max(last_reached.map_or(0, |at| at + 1));
+        .rposition(|&i| verified.get(i).is_some_and(shows_it_was_reached))
+        .map_or(0, |at| at + 1);
+    let first_unreached = match first_unreached_by_markers(manifest, &order, records) {
+        Some(at) => at,
+        None => last_with_evidence,
+    };
     let mut marked = 0;
-    for &i in order.iter().skip(reached) {
+    for &i in order.iter().skip(first_unreached) {
         let Some(block) = verified.get_mut(i) else {
             continue;
         };
@@ -63,15 +98,25 @@ mod tests {
 
     /// A batch of `clips` clips over one demo, in recording order.
     fn manifest(clips: usize) -> CaptureManifest {
+        manifest_of(&[clips])
+    }
+
+    /// A batch over several demos with `clips[d]` clips each, in recording
+    /// order; a demo's clips start at ticks 100, 200, ...
+    fn manifest_of(clips: &[usize]) -> CaptureManifest {
+        let blocks = clips
+            .iter()
+            .enumerate()
+            .flat_map(|(d, &n)| (0..n).map(move |i| (d, i)));
         CaptureManifest {
             session_id: "s".into(),
-            blocks: (0..clips)
-                .map(|i| native::patch::types::CaptureBlock {
-                    demo_name: "a".into(),
+            blocks: blocks
+                .map(|(d, i)| native::patch::types::CaptureBlock {
+                    demo_name: format!("demo{d}"),
                     block_index: i,
                     drive_index: 0,
-                    take_folder: format!("a_b{i}").into(),
-                    take_key: format!("s/a_b{i}"),
+                    take_folder: format!("demo{d}_b{i}").into(),
+                    take_key: format!("s/demo{d}_b{i}"),
                     source_streak_indices: vec![i],
                     start_tick: 0,
                     end_tick: 0,
@@ -122,12 +167,26 @@ mod tests {
         blocks.iter().map(|b| b.not_reached).collect()
     }
 
+    /// The markers of a batch stopped while demo `demo` (1-based) played,
+    /// after it started its clip at `last_tick`, if any.
+    fn stopped_in(demo: u32, last_tick: Option<i64>) -> Records {
+        let mut records = Records::default();
+        records.demo_started(demo);
+        if let Some(tick) = last_tick {
+            records.clip_started(Some(tick));
+        }
+        records
+    }
+
     /// The issue's case: cancelled after clip 1 of 3.
     #[test]
     fn a_cancel_after_the_first_clip_leaves_the_rest_not_reached() {
         let m = manifest(3);
         let mut blocks = verified(&m, 1);
-        assert_eq!(mark_not_reached(&m, &mut blocks, 1), 2);
+        assert_eq!(
+            mark_not_reached(&m, &mut blocks, &stopped_in(1, Some(100))),
+            2
+        );
         assert_eq!(not_reached(&blocks), [false, true, true]);
     }
 
@@ -136,19 +195,11 @@ mod tests {
     fn a_clip_the_game_started_is_reached_even_with_nothing_on_disk() {
         let m = manifest(3);
         let mut blocks = verified(&m, 1);
-        assert_eq!(mark_not_reached(&m, &mut blocks, 2), 1);
+        assert_eq!(
+            mark_not_reached(&m, &mut blocks, &stopped_in(1, Some(200))),
+            1
+        );
         assert_eq!(not_reached(&blocks), [false, false, true]);
-    }
-
-    /// A take missing before one on disk: the batch passed it, so it is
-    /// missing, even when the marker count runs behind (a skipped demo).
-    #[test]
-    fn a_gap_before_a_later_take_is_missing_not_unreached() {
-        let m = manifest(4);
-        let mut blocks = verified(&m, 0);
-        blocks[2].captured = true;
-        assert_eq!(mark_not_reached(&m, &mut blocks, 0), 1);
-        assert_eq!(not_reached(&blocks), [false, false, false, true]);
     }
 
     /// The clip Cancel cut short was reached, and so was everything before it.
@@ -157,16 +208,65 @@ mod tests {
         let m = manifest(4);
         let mut blocks = verified(&m, 1);
         blocks[1].cut_short = true;
-        assert_eq!(mark_not_reached(&m, &mut blocks, 0), 2);
+        assert_eq!(
+            mark_not_reached(&m, &mut blocks, &stopped_in(1, Some(200))),
+            2
+        );
         assert_eq!(not_reached(&blocks), [false, false, true, true]);
     }
 
-    /// Cancelled before the first clip started: nothing was reached.
+    /// Cancelled once the demo loaded, before its first clip started.
     #[test]
     fn a_cancel_before_any_clip_leaves_every_clip_not_reached() {
         let m = manifest(2);
         let mut blocks = verified(&m, 0);
-        assert_eq!(mark_not_reached(&m, &mut blocks, 0), 2);
+        assert_eq!(mark_not_reached(&m, &mut blocks, &stopped_in(1, None)), 2);
         assert_eq!(not_reached(&blocks), [true, true]);
+    }
+
+    /// Demo 2 skipped by the hook (no markers), cancelled in demo 3's first
+    /// clip: demo 2's clips were passed, so they stay missing (an error).
+    #[test]
+    fn a_skipped_demo_before_the_stop_stays_missing() {
+        let m = manifest_of(&[2, 2, 2]);
+        let mut blocks = verified(&m, 2);
+        let mut records = Records::default();
+        records.demo_started(1);
+        records.clip_started(Some(100));
+        records.clip_started(Some(200));
+        records.demo_started(3);
+        records.clip_started(Some(100));
+        assert_eq!(mark_not_reached(&m, &mut blocks, &records), 1);
+        assert_eq!(
+            not_reached(&blocks),
+            [false, false, false, false, false, true]
+        );
+    }
+
+    /// Demo 1 skipped, cancelled as demo 2's first clip started with nothing
+    /// on disk yet: demo 1's clips are missing, only demo 2's later clips
+    /// were not reached.
+    #[test]
+    fn a_skipped_first_demo_is_missing_when_the_next_one_has_just_started() {
+        let m = manifest_of(&[3, 3]);
+        let mut blocks = verified(&m, 0);
+        assert_eq!(
+            mark_not_reached(&m, &mut blocks, &stopped_in(2, Some(100))),
+            2
+        );
+        assert_eq!(
+            not_reached(&blocks),
+            [false, false, false, false, true, true]
+        );
+    }
+
+    /// No markers at all: only the clips after the last one with a take.
+    #[test]
+    fn without_markers_only_clips_after_the_last_take_are_not_reached() {
+        let m = manifest(4);
+        let mut blocks = verified(&m, 0);
+        blocks[1].captured = true;
+        assert_eq!(mark_not_reached(&m, &mut blocks, &Records::default()), 2);
+        assert_eq!(not_reached(&blocks), [false, false, true, true]);
     }
 }
