@@ -1389,10 +1389,29 @@ fn write_checked(demo: &mut Demo, source: &[u8], out: &str, entity: u16, from: f
     }
 }
 
+/// The edit modes write a new demo; refuse an `out` that is the input or any
+/// file already there, so a slip on the command line never overwrites a
+/// demo (the originals are the user's).
+fn refuse_existing_out(input: &str, out: &str) {
+    let same = match (std::fs::canonicalize(input), std::fs::canonicalize(out)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => input == out,
+    };
+    if same || std::path::Path::new(out).exists() {
+        eprintln!(
+            "refusing to write {out}: it is the input demo or already exists; pick a new file"
+        );
+        std::process::exit(2);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
     let path: String = arg(&args, 1, "demo");
+    if matches!(mode, "bend" | "bend-recorder" | "fill") {
+        refuse_existing_out(&path, &arg::<String>(&args, 2, "out"));
+    }
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) => {
@@ -1499,7 +1518,9 @@ fn main() {
             );
         }
         _ => {
-            eprintln!("usage: entity_edit_probe find|track|deaths|bend|fill|roundtrip <demo> ...");
+            eprintln!(
+                "usage: entity_edit_probe find|track|deaths|heard|roundtrip|bend|bend-recorder|fill <demo> ..."
+            );
             std::process::exit(2);
         }
     }
