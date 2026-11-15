@@ -169,7 +169,9 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
 
 - **`dem_jump <t>`** (the demo player's own jump-and-pause) backwards in a
   POV demo landed at the demo's start, not at `t` (PRE). Seek forward with
-  `ds_demo_seek_to`.
+  `ds_demo_seek_to`. Cause (#1465): `dem_jump` is relative, so these
+  absolute times ran past the demo's end, where the view shows its first
+  frames; see `docs/goldsrc_viewdemo.md` (Jumping).
 - A `viewdemo` of a demo in `dod_addon` leaves `lookahead` looking for it in
   `dod\` ("can't open ...\dod\ds1452_tr2.dem"), so the look-ahead part of the
   animation fix is off for such demos.
