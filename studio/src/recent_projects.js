@@ -3,6 +3,8 @@
 // first, kept in the settings file as `recent_projects`. Opening one goes
 // through project_session.js's openProject, the same path as Load Session
 // (unsaved-changes prompt, then the missing-demo check and rescan offer).
+// The menu rebuilds each time it opens, so a batch greys its rows from here;
+// batch_guard.js refuses their clicks.
 
 import { filesExist } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -38,12 +40,14 @@ export function normalizeRecent(raw, cap = RECENT_PROJECTS_CAP) {
  *   project_session.js, which asks about unsaved changes first and resolves
  *   whether it opened, and persistAppSettings(), which reads list() back
  *   through settings_sync.js's getState().
- *   `exists(paths)` resolves one boolean per path (the files_exist command);
- *   `confirm` is themedConfirm. Both are swappable for tests.
+ *   heldReason() from batch_guard.js is why the rows can't be opened now, or
+ *   null. `exists(paths)` resolves one boolean per path (the files_exist
+ *   command); `confirm` is themedConfirm. Both are swappable for tests.
  */
 export function createRecentProjects({
   openProject,
   persistAppSettings,
+  heldReason = () => null,
   exists = filesExist,
   confirm = themedConfirm,
 }) {
@@ -68,7 +72,9 @@ export function createRecentProjects({
       const item = document.createElement('button');
       item.className = 'menu-dropdown-item recent-project-item';
       item.dataset.path = path;
-      item.title = path;
+      const held = heldReason();
+      item.title = held ?? path;
+      item.classList.toggle('batch-held', !!held);
       const isMissing = missing.has(path);
       item.classList.toggle('missing', isMissing);
       const name = document.createElement('span');

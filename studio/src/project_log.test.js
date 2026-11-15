@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import {
   projectSavedLine, projectOpenedLine, projectFailedLine, missingDemosLine, changedDemosLine,
+  projectBackupStartedLine, projectBackedUpLine, projectUpdatedLine, projectNewerLine, projectNeedsCopyLine,
 } from './project_log.js';
+
+describe('project format lines', () => {
+  it('say what is being backed up and where it went, with how long it took', () => {
+    expect(projectBackupStartedLine('D:/p/a.json', 1, 2)).toBe('[project] updating D:/p/a.json from format 1 to 2: backing it up first');
+    expect(projectBackedUpLine('D:/p/a.before-v2.dodstudio', 7)).toBe('[project] backed up to D:/p/a.before-v2.dodstudio (7 ms)');
+  });
+
+  it('give the summary\'s counts, or say the takes were not checked', () => {
+    expect(projectUpdatedLine('a.json', { clips: 3, takesFound: 2, takesNotFound: 1 }, 'b'))
+      .toBe('[project] updated a.json: 3 clip(s), 2 take(s) found, 1 not found, backup b');
+    expect(projectUpdatedLine('a.json', { clips: 3, takesFound: null, takesNotFound: null }, 'b'))
+      .toBe('[project] updated a.json: 3 clip(s), takes not checked, backup b');
+  });
+
+  it('name a newer file and a refused save', () => {
+    expect(projectNewerLine('a.json', 5, 2)).toContain('format 5');
+    expect(projectNeedsCopyLine('a.json')).toContain('a.json');
+  });
+});
 
 describe('project log lines', () => {
   it('say what was saved or opened, with the demo count', () => {

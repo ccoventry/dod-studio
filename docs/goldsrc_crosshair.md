@@ -1,7 +1,8 @@
 # The crosshair: hiding it, and matching it while spectating
 
 `ds_hud_hide_crosshair`, the crosshair half of `ds_spec_match_pov`,
-and each player's crosshair from Studio's Players table (§3).
+each player's crosshair from Studio's Players table (§3),
+`ds_hud_crosshair_scale` (§4) and the drawn border (§5).
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -406,3 +407,158 @@ table's crosshair does not appear.
 
 The draw path reads three atomics; the decision (the player, their row, the
 handle) is made once a frame in `HUD_Frame`.
+
+---
+
+## 4. `ds_hud_crosshair_scale` (#1335)
+
+Every crosshair draw is a small rect's pixels, and a `customXHair.spr`
+tile is 64x64, so at 2560x1440 no crosshair can pass 4% of the frame's height.
+Vertex's creator stops at the tile too: fully cranked, the arms reach the
+tile's edge and leave no room for a border.
+
+`crosshair_scale.rs` wraps each of the crosshair's draws in `gl_zoom`, the
+modelview zoom the kill feed's scale uses, about the screen's centre. Both
+paths in §1's fork centre on that point, so one centre serves the tile, the
+spectator rect and all five pieces of the red crosshair, whose gap scales with
+it. The zoom sits in `hud_sprites::draw_through`, around §3's swap, so what is
+drawn and when are decided as before, and §1's hide and §2's gate still win.
+
+### The engine's sprite draw is not pixel for pixel
+
+The game's own draw, at any scale and on both builds, does not put a rect's
+texels on its pixels. For a draw of a `w`-px rect at `(x, y)` the engine draws
+a `w`-px quad from `(x + 0.5, y + 0.5)`, textured from half a texel inside the
+rect's left edge to half a texel inside its right, so `w - 1` texels cover
+`w` px with linear filtering. Screen point `p` (pixel `px`'s middle is
+`px + 0.5`) samples texel coordinate `0.5 + (p - x - 0.5) * (w - 1) / w`,
+where texel `j`'s middle is `j + 0.5`. So a 64x64 tile:
+
+- draws a pixel bigger than its art, and about every second pixel is a
+  near half-and-half blend of two texels (a 23-px crosshair came out 24 px,
+  with a 1 px black outline smeared over 2 px);
+- has its middle half a pixel down and right of the centre the game gave
+  it: texel 32's middle lands on the corner (1281, 721) at 2560x1440, not
+  on pixel (1280, 720). The game centres the tile at (1248, 688), so texel
+  32 should be pixel 1280.
+
+Measured from `customxhair-diceWSOD2.spr` captures at scale 1: every blend
+checked matches the formula to within 0.02 (tile 7's left tip predicts 0.76
+of the pink and measured 0.77), the same on the 25th Anniversary and the
+pre-Anniversary builds.
+
+The colours alone cannot tell this draw from a quad at `(x, y)` textured
+over texels 0 to 63: both give the same picture. The alpha test can. With
+the fix below zoomed about `(x, y)`, every colour texel landed exactly, but
+each pixel's sample sat `1 / (2w)` of a texel past its texel's middle, and
+with `gl_spriteblend 0` the alpha test let that sliver of the next texel
+through: every left and top edge of the art grew one black pixel, and no
+right or bottom edge did. Moving the zoom's point right and down showed the
+only point with no extra pixel on any side at 1/128 px past `(x, y)` for a
+64-px tile, `0.5 * (1 - 63/64)`: the zoom about `(x + 0.5, y + 0.5)`, the
+quad's own corner. 1/256 px still grew the left and top pixels and 1/64 px
+grew the right and bottom ones instead (POST, `gl_spriteblend 0`). With
+`gl_spriteblend 1` (blending, no alpha test) the sliver is invisible, so
+PRE's default showed no extra pixel either way.
+
+### The fit, and the zoom about the centre corner
+
+`crosshair_scale.rs` zooms every crosshair draw, at the game's size too, by
+`(w - 1) / w` across and `(h - 1) / h` down about `(x + 0.5, y + 0.5)`, the
+rect it draws being the one that is drawn (the Players table's 64x64 tile
+when §3 swaps it, the stock spectator's 24x24, each red crosshair piece's
+own). Texel `j` then lands on the middle of pixel `x + j`: the art draws at
+exactly its own pixels, an odd-sized crosshair centred on texel 32 centres on
+pixel (W/2, H/2), and an even one on that corner. The rect's last texel row
+and column (texel 63 of a tile) are no longer drawn; the creator's tiles
+leave them clear, but `dodcross.spr`'s pieces don't: its arms are 10 texels
+of red end to end, so the red crosshair now draws 9 px arms 1 px thick
+(before, 10 px smeared over two rows at about 67%), a 1 px dot on
+(W/2, H/2) and four equal gaps of `gap - 1` px (before, `gap - 2` left and
+top, `gap - 1` right and bottom). Which edge texel drops depends on how the
+GPU settles pixels exactly on a quad's edge: measured on NVIDIA only; a GPU
+that settles them the other way drops texel 0 instead, which leaves the
+tiles exact but the red crosshair's gaps a pixel uneven.
+
+At a scale above 1 the zoom is about the centre corner (W/2, H/2), which
+keeps even-sized art where it is; odd-sized art (centred on texel 32's
+middle) moves (S - 1) / 2 px right and down as the scale grows, as it did
+before the fit (1.5 px at 4, 3.5 px at 8). Its sampling stays mirror
+symmetric either way.
+
+Nothing turns the fit off: `ds_hud_crosshair_scale 1` means the art at its
+own pixels, not the engine's untouched draw.
+
+Measured at scale 1 on both builds (`wsod25_grp5_h1_m00cat` and
+`wsod25_grp5_h1_hltv`, 2560x1440): tiles 6, 8 and 9 of
+`customxhair-diceWSOD2.spr` (27, 23 and 25 px) and tile 8 of
+`customxhair-diceWSOD.spr` draw every colour and black texel on its own
+pixel with no blend and nothing outside the art, the odd ones centred on
+pixel (1280, 720) and the even one on that corner, with `gl_spriteblend` 0
+and 1. Before, the same tiles came out 24, 26, 28 and 33 px with 76 to 88
+blended pixels each. The stock spectator `+` of `crosshairs.spr` (POST: 13
+px, 1 px lines) drew as 36 px, every line 2 px thick, and now as its 13; the
+spectator's matched `customXHair.spr` tile and the Players table's swapped
+tile draw exactly too. PRE's crosshair sits 9 px lower than POST's (pixel
+row 729 at 1440p) and PRE's `crosshairs.spr` is its own smaller `+`; both
+draw exactly. The red `dodcross.spr` pieces get the same fit by their own
+rect sizes but no capture caught them.
+
+At any other scale S the same fit is folded into the zoom: the draw is
+fitted, then zoomed S times about the screen's centre corner (W/2, H/2).
+Fitted, the tile's middle (texel 32's left and top edge, the corner the
+creator draws its crosshairs about) is exactly on that corner, so it stays
+there at any scale and the crosshair mirrors both ways (#1348). Before the
+fit the zoom point had to be worked out so the unfitted middle, which sat
+half a pixel off, landed on the corner; at 1.25 a zoom about the corner
+itself had left a sheet's 1-texel border 1.5 px on the top and left and 2.3
+px on the bottom and right.
+
+Away from scale 1 linear filtering still blends: at 2 every pixel samples a
+quarter-texel from a texel's middle, so each texel edge is a 25% blend, and
+at 0.7 a 2-texel arm covers 1.4 px. Measured on tile 8 of
+`customxhair-diceWSOD.spr`: at 1.5 and 2 the arms' tips now come out the
+same as their sides (1.5: 2 black px then 49% colour at both, where the
+tips were 1 px then 7% before), and at 0.7 the tip's pixel inside the black
+fell from 73% colour to 50% while the sides stay full colour. Every edge at
+0.7 lands at a different fraction of a pixel, so its tips cannot match its
+sides under linear filtering; it mirrors both ways. Drawing scaled
+crosshairs crisp would take nearest filtering on the sheet's texture,
+which this does not change.
+
+`ds_debug_status` says the fit applied to the last crosshair rect, e.g.
+`ds_hud_crosshair_scale 1: the crosshair draws pixel for pixel, its 64x64
+rect fitted by 63/64 x 63/64 so each texel is one pixel`.
+
+The bars and any border in the sheet scale with the crosshair. A thin border
+on a big crosshair is §5's job.
+
+---
+
+## 5. `ds_hud_crosshair_outline_size` and `_color`
+
+The kill-feed icons' outline is part of their art. A crosshair sheet has no room
+for one, and a border in a sheet doubles with §4's scale, so `crosshair_outline.rs`
+draws it: the crosshair's own `SPR_DrawHoles`, once for each pixel offset out to
+the size, then the crosshair on top. The offsets are applied outside §4's zoom,
+so the border stays that many of the frame's pixels at any scale, and a 128 px
+crosshair can have a 2 px edge. The offsets are also applied after §4's fit,
+so at scale 1 a copy lands on whole pixels like the crosshair: a 1 px border
+is exactly the art's 1 px dilation (144 of 144 pixels on tile 9 of
+`customxhair-diceWSOD2.spr`, both builds).
+
+They fill the whole square, not its rim: an arm thinner than the border would
+otherwise leave a gap to its copy. That makes corners square, like the borders
+in the creator's sheets.
+
+`SPR_Set`'s tint multiplies the sprite, so it can make a tile black but not
+white. A `GL_COMBINE` texture stage set before the draw changes nothing: the
+engine's draw sets the stage itself (measured on both builds). So the copies
+draw under GL fog at full strength, which replaces a fragment's colour after
+texturing and leaves its alpha, the crosshair's shape, alone.
+
+`SPR_Draw` and `SPR_DrawAdditive` draws get no border: `SPR_DrawAdditive` has no
+mask, so a copy would be the whole rect.
+
+Each of the red crosshair's five pieces gets its own border, so a border wider
+than half the gap covers the piece next to it where the two meet.

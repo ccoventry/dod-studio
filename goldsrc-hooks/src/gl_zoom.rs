@@ -50,6 +50,21 @@ pub(crate) unsafe fn about(cx: f32, cy: f32, s: f32, draw: impl FnOnce()) -> boo
 ///
 /// Safety: as [`about`].
 pub(crate) unsafe fn mapped(from: (f32, f32), to: (f32, f32), s: f32, draw: impl FnOnce()) -> bool {
+    // Safety: the caller's.
+    unsafe { mapped_xy(from, to, (s, s), draw) }
+}
+
+/// [`mapped`] with its own scale across and down, `(sx, sy)`: the
+/// crosshair's draws (`crosshair_scale`) take each rect's width and height
+/// apart, since a red crosshair piece is not square.
+///
+/// Safety: as [`about`].
+pub(crate) unsafe fn mapped_xy(
+    from: (f32, f32),
+    to: (f32, f32),
+    scale: (f32, f32),
+    draw: impl FnOnce(),
+) -> bool {
     #[cfg(target_arch = "x86")]
     {
         let Ok(gl) = gl::get() else {
@@ -57,12 +72,12 @@ pub(crate) unsafe fn mapped(from: (f32, f32), to: (f32, f32), s: f32, draw: impl
         };
         // Safety: see the function's own; balanced push/pop, the matrix mode
         // put back if it was changed.
-        unsafe { gl.zoomed(from, to, s, draw) };
+        unsafe { gl.zoomed(from, to, scale, draw) };
         true
     }
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = (from, to, s, draw);
+        let _ = (from, to, scale, draw);
         false
     }
 }
@@ -95,7 +110,7 @@ mod gl {
             &self,
             from: (f32, f32),
             to: (f32, f32),
-            s: f32,
+            (sx, sy): (f32, f32),
             draw: impl FnOnce(),
         ) {
             // Safety: the caller's (engine thread, context current).
@@ -107,7 +122,7 @@ mod gl {
                 }
                 (self.push_matrix)();
                 (self.translatef)(to.0, to.1, 0.0);
-                (self.scalef)(s, s, 1.0);
+                (self.scalef)(sx, sy, 1.0);
                 (self.translatef)(-from.0, -from.1, 0.0);
                 draw();
                 (self.pop_matrix)();

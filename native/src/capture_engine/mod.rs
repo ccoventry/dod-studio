@@ -12,6 +12,7 @@
 //! 6. The teardown here: late markers, OBS's stop, the batch's files, the
 //!    last event.
 
+pub mod clip_verdict;
 mod game;
 mod launch;
 mod leftovers;
@@ -22,6 +23,7 @@ mod processes;
 mod watch;
 mod workspace;
 
+pub use markers::ClipSummary;
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -69,6 +71,10 @@ pub enum EngineEvent {
     Held,
     /// The hook's batch went on after `go`.
     Going,
+    /// What the kill feed's layout shows, from the hook (#1339): the
+    /// warning to show while `ds_hud_deathmsg layout even` can't draw and
+    /// the game's own layout shows, or `None` once nothing is wrong.
+    KillfeedLayout(Option<String>),
     /// OBS mode: OBS started recording a clip after the clip's first frame
     /// (#1109), so its take is missing the opening and isn't captured.
     ObsStartedLate(crate::obs::LateStart),
@@ -76,6 +82,10 @@ pub enum EngineEvent {
     /// Process) or crashed. Sent just before the `Error` that ends the batch,
     /// so the clip it cut short says the game closed.
     GameClosed,
+    /// The hook's summary of one clip it recorded (#1221): whether its start
+    /// and stop markers came and how many frames it wrote, for judging its
+    /// take (#1401, `clip_verdict`).
+    ClipReported(ClipSummary),
 }
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.

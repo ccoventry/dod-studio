@@ -177,6 +177,11 @@ impl Workspace {
             cleanup.source_copies = batch.source_copies.clone();
         }
 
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "start-up path: Studio's own exe always has a path and a parent folder"
+        )]
         let export_dir = config.primary_media_dir.clone().unwrap_or_else(|| {
             let exe_path = std::env::current_exe().expect("Failed to resolve absolute exe path");
             exe_path
@@ -433,7 +438,16 @@ fn copy_demo(
     }
 
     if save_local_patched_copy {
+        #[allow(
+            clippy::unwrap_used,
+            clippy::expect_used,
+            reason = "start-up path: Studio's own exe always has a path and a parent folder"
+        )]
         let exe_path = std::env::current_exe().expect("Failed to resolve absolute exe path");
+        #[allow(
+            clippy::expect_used,
+            reason = "a running exe always has a parent folder"
+        )]
         let base_dir = exe_path
             .parent()
             .expect("Exe has no parent directory")

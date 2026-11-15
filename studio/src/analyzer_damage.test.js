@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { damageNotice, sizeText } from './analyzer_damage.js';
+import { alreadySplitNote, damageNotice, sizeText } from './analyzer_damage.js';
 
 describe('damageNotice', () => {
   it('says where a damaged demo stopped being read, and why', () => {
@@ -24,6 +24,29 @@ describe('damageNotice', () => {
     expect(damageNotice({ demo_info: { damage: null } })).toBeNull();
     expect(damageNotice({ demo_info: {} })).toBeNull();
     expect(damageNotice(null)).toBeNull();
+  });
+});
+
+describe('alreadySplitNote', () => {
+  const MAPS = ['dod_anzio', 'dod_pandemic_aim', 'dod_thunder2_b5a'];
+  const SPLIT = { split: true, files: ['m1_h2_repaired_split1_anzio.dem', 'm1_h2_repaired_split3_thunder2_b5a.dem'] };
+
+  it('says a demo damaged before its level change was repaired and split, naming the pieces', () => {
+    // The analysis stops at the damage, so it knows one map; the repair
+    // check's scan found the other two.
+    expect(alreadySplitNote(['dod_anzio'], MAPS, SPLIT)).toEqual({
+      text: 'Already repaired and split into its 3 maps (dod_anzio, dod_pandemic_aim, dod_thunder2_b5a) next to it.',
+      title: 'Split next to it into: m1_h2_repaired_split1_anzio.dem, m1_h2_repaired_split3_thunder2_b5a.dem',
+    });
+  });
+
+  it('adds nothing when the multi-map notice above already says it was split', () => {
+    expect(alreadySplitNote(['dod_anzio', 'dod_pandemic_aim'], MAPS, SPLIT)).toBeNull();
+  });
+
+  it('adds nothing until the maps are split', () => {
+    expect(alreadySplitNote(['dod_anzio'], MAPS, { split: false, files: [] })).toBeNull();
+    expect(alreadySplitNote(['dod_anzio'], MAPS, null)).toBeNull();
   });
 });
 

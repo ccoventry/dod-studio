@@ -81,6 +81,7 @@ mod clear;
 mod colour;
 mod even;
 mod font;
+mod layout_report;
 mod name_cap;
 mod replace;
 mod scale;
@@ -89,6 +90,7 @@ mod scale;
 #[cfg(target_arch = "x86")]
 pub(crate) use backdrop::fill as fill_box;
 pub(crate) use clear::on_round_state;
+pub(crate) use layout_report::report_again as report_layout_again;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -944,6 +946,20 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     handled
 }
 
+/// Whether player `index` is the one whose view the demo shows: the POV
+/// recorder, or the player an HLTV demo watches in first person. Used by
+/// `clear_on death` and `ds_sound_headshot_pov_farther` (#1353).
+pub(crate) fn is_watched_player(index: i32) -> bool {
+    if index <= 0 {
+        return false;
+    }
+    if is_hltv() {
+        crate::spectator_target::in_eye_target() == Some(index)
+    } else {
+        resolve(index, false).is_own_pov
+    }
+}
+
 /// [`hooked_death_msg`]'s filtering and forwarding: what the game's handler
 /// returned, and the three bytes it was handed (`None` when the message was
 /// hidden, blocked or too short to read).
@@ -960,6 +976,7 @@ unsafe fn forward_death_msg(
         // The death happened whether or not the feed shows it, and as it was
         // recorded, whatever `replace` shows.
         crate::spectator_deathcam::note_death(original[0] as i32, original[1] as i32);
+        crate::headshot_sound::note_kill(original[0] as i32, original[1] as i32);
         let rules = replace::live();
         let shown = if rules.is_empty() {
             original
@@ -1032,11 +1049,13 @@ fn install_hook() {
 pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
     // installed while that switch is on too, with an empty block list; so
-    // does the even layout, for the butt stroke's per-line icon (#1088).
+    // does the even layout, for the butt stroke's per-line icon (#1088), and
+    // the headshot sound kept to the POV player's kills (#1353).
     if HOOK_WANTED.load(Ordering::Relaxed)
         || crate::spectator_deathcam::enabled()
         || clear::wants_death_msg()
         || even::wanted()
+        || crate::headshot_sound::wants_kills()
     {
         install_hook();
     }

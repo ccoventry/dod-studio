@@ -27,8 +27,7 @@
 //! hard kill or a power cut. `recover` handles those on the next start
 //! instead, because from outside the process they are indistinguishable.
 
-#![cfg(not(target_arch = "wasm32"))]
-
+pub mod audio_sync;
 pub mod bench;
 pub mod client;
 pub mod drop_rate;
@@ -36,15 +35,18 @@ pub mod encoder;
 #[cfg(test)]
 mod fake_obs;
 pub mod log_tail;
+pub mod marker_gate;
 pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
 pub mod session;
 pub mod take_state;
 
+pub use audio_sync::GAME_AUDIO_SYNC_OFFSET_MS;
 pub use client::{ObsClient, ObsError};
 pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};
-pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};
+pub use log_tail::{LogTailer, Marker, MarkerKind};
+pub use marker_gate::MarkerGate;
 pub use pipe_tail::PipeTailer;
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};
 pub use recover::{OrphanReport, check as check_orphan, recover as recover_orphan};
@@ -86,13 +88,3 @@ pub const STOP_MARKER: MarkerKind = MarkerKind::StopRecord;
 /// waveOut, which keeps playing behind other windows. Its cost is latency,
 /// which [`GAME_AUDIO_SYNC_OFFSET_MS`] takes back out.
 pub const GAME_ARGS: &str = "-wavonly";
-
-/// The sync offset `provision` gives the game audio source, in ms.
-///
-/// waveOut plays the game's sound about a quarter second after the frame it
-/// belongs to. Measured on POST against HLAE takes of the same three clips
-/// (sound.wav is timed from the frames, so it is the reference): OBS's sound
-/// was 241-299 ms late with no offset, and -36 to +5 ms with -270; on PRE,
-/// +20 to +29 ms with -270. All on one PC; another
-/// PC's waveOut latency may differ (#646).
-pub const GAME_AUDIO_SYNC_OFFSET_MS: i64 = -270;

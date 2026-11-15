@@ -14,6 +14,8 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+import { DEFAULT_AGR_FPS } from './agr_rate.js';
+
 /**
  * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
  * (#569). `already` counts the upgraded ones too: they are in the cache by
@@ -198,6 +200,11 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // The totals row under the queue's header (queue_totals.js).
+    totalsLabel: (shown, queued) => (shown === queued
+      ? `Total: ${shown} demo${shown === 1 ? '' : 's'}`
+      : `Total: ${shown} of ${queued} demos`),
+    TOTALS_TITLE: 'Totals of the demos listed below, with the search and filters applied. Hover Status or Review for the numbers in words.',
     // #21: a project demo that is not at its saved path.
     MISSING_BADGE: 'missing',
     missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
@@ -209,8 +216,12 @@ export const STRINGS = {
     // #217: a queued demo that recorded more than one map.
     multiMapSplitButton: (count) => `${count} maps · Split`,
     multiMapSplitTitle: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'The game stops playing it at the first map change, so nothing past it can be captured, and its highlights cover one map only. '
+      + 'Its highlights and captures use the first map only; the maps after it are left out. '
       + 'Click to split it: each map of a minute or more becomes a demo of its own in the queue, in place of this one. The file itself is kept.',
+    MULTI_MAP_ALREADY_SPLIT: 'Already split',
+    multiMapAlreadySplitTitle: (maps, files) => `This demo recorded ${maps.length} maps (${maps.join(', ')}), already split next to it: `
+      + `${files.join(', ')}. This row uses the first map only.`,
+    MULTI_MAP_SPLITTING: 'This demo is being split.',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
@@ -245,6 +256,24 @@ export const STRINGS = {
     UNKNOWN_HIGHLIGHT: 'a highlight no longer in the queue',
     NO_RENDERS: 'not rendered',
     REVEAL_FAILED: 'Could not show that in Explorer.',
+    // The full settings a take was captured with (part of #1085).
+    capturedWith: (text) => `Captured with: ${text}`,
+    NOT_RECORDED: 'not recorded',
+    NOT_RECORDED_TITLE: 'This take was captured before Studio kept the full settings of each capture. It is never marked as different from another take.',
+    size: (width, height) => `${width}×${height}`,
+    fov: (degrees) => `FOV ${degrees}`,
+    hook: (name) => `hook ${name}`,
+    NO_HOOK: 'no hook DLL',
+    clipLength: (before, after) => `${before} s before, ${after} s after`,
+    gapsFastForward: (speed, over) => `gaps over ${over} s at ${speed}x`,
+    commandCounts: (initial, scheduled) =>
+      `${initial} Initial ${initial === 1 ? 'Command' : 'Commands'}, ${scheduled} Scheduled`,
+    INITIAL_HEADING: 'Initial Commands:',
+    SCHEDULED_HEADING: 'Scheduled Commands:',
+    NONE: '  (none)',
+    initialLine: (line) => `  ${line}`,
+    scheduledCommand: (after, seconds, command) => `  ${seconds} s ${after ? 'after the clip' : 'before the clip'}: ${command}`,
+    hash: (hash, version) => `Settings hash ${hash}${version ? ` · DoD Studio ${version}` : ''}`,
   },
 
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────
@@ -431,8 +460,9 @@ export const STRINGS = {
     CAPTURE_MODE_AGR_TITLE:
         'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The sound of each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
     AGR_FPS_LABEL: 'AGR FPS:',
+    AGR_FPS_PLACEHOLDER: `e.g. ${DEFAULT_AGR_FPS}`,
     AGR_FPS_TITLE:
-        'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
+        `How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300, and a high rate makes Blender renders far slower. Required in AGR mode: Studio won't start an AGR capture without it, and it never follows Capture FPS.`,
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
@@ -726,10 +756,12 @@ export const STRINGS = {
     HL_PATH_EMPTY: 'Choose your Half-Life install: Start Capture needs hl.exe.',
     HLAE_PATH_EMPTY: 'Set the path to hlae.exe: Start Capture needs it.',
     OUTPUT_DIR_EMPTY: 'Add a Capture Output folder: Start Capture needs somewhere to write.',
+    AGR_FPS_EMPTY: 'Set AGR FPS: AGR captures need their own rate.',
   },
 
   CAPTURE: {
     andNMore: (n) => `...and ${n} more`,
+    AGR_FPS_REQUIRED_WARNING: 'AGR FPS is empty: set it on Configuration → Output Format (marked in red) before starting an AGR capture.',
     PATHS_MISSING_WARNING: 'Set hl.exe and hlae.exe on Configuration → Paths (marked in red) before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
@@ -773,18 +805,29 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
+    // A batch that ran to its end but left clips uncaptured, or short (#1401).
+    batchFinishedWithFailures: (failed, total) => `Batch capture finished, but ${failed} of ${total} clip${total === 1 ? '' : 's'} failed: not marked Captured. See Last Batch and the activity log.`,
+    batchFinishedShort: (short, total) => `Batch capture finished: ${short} of ${total} clip${total === 1 ? ' is' : 's are'} shorter than planned. Check ${short === 1 ? 'it' : 'them'} before using ${short === 1 ? 'it' : 'them'}.`,
+    // The highlights of the clips the game reported as failed or short (#1401).
+    clipsFailed: (labels, more) => `Failed in the game (nothing usable recorded), not marked Captured: ${labels.join('; ')}${more > 0 ? ` and ${more} more` : ''}.`,
+    clipsShort: (labels, more) => `Shorter than planned or missing a kill, marked Captured, check before using: ${labels.join('; ')}${more > 0 ? ` and ${more} more` : ''}.`,
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
-      const missing = total - captured - cutShort - stoppedEarly - startedLate;
+    // Nor is a clip the batch ended before reaching (#1434): `endedBy` says why.
+    // The counts are takes_shortfall_toast.js's `takeShortfall`.
+    takesFoundMissing: (captured, total, { missing = 0, cutShort = 0, cutBy, stoppedEarly = 0, startedLate = 0, failed = 0, notReached = 0, endedBy } = {}) => {
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
+      const endedWhy = { game_closed: 'the game closed', stopped: 'the batch stopped', studio_closed: 'DoD Studio closed' }[endedBy] || 'batch cancelled';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
+      if (notReached > 0) parts.push(`${notReached} not reached (${endedWhy})`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       // OBS started recording after the clip's first frame (#1109).
       if (startedLate > 0) parts.push(`${startedLate} OBS started recording late (missing the clip's opening, not captured)`);
+      // The game recorded no start, no stop or no frames (#1401).
+      if (failed > 0) parts.push(`${failed} failed in the game (not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -849,6 +892,41 @@ export const STRINGS = {
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #1264: every video rendered for the loaded project, as one EDL.
+    EXPORT_PROJECT_EDL_BUTTON: 'Export Project to VEGAS…',
+    EXPORT_PROJECT_EDL_TITLE: "Save an EDL with every video rendered for the loaded project that is still on disk, even when its take was deleted, in movie order, with HUD passes laid over their clips. When highlights are ticked, only their videos go in. A video you moved is found again by its name in the render export folders. Same import as Export VEGAS EDL.",
+    exportProjectNone: (total) => total > 0
+      ? `None of the ${total} video${total === 1 ? '' : 's'} rendered for this project could be found. Add the folder they are in to the render export folders in Configuration.`
+      : 'No videos have been rendered for the loaded project yet, so there is nothing to export.',
+    exportProjectLooking: (count) => `Finding ${count} rendered video${count === 1 ? '' : 's'} on disk…`,
+    exportProjectReading: (n, total) => `Reading the length of video ${n} of ${total} for the EDL…`,
+    EXPORT_PROJECT_PICKING: 'Choose where to save the EDL…',
+    EXPORT_PROJECT_WRITING: 'Writing the EDL and the clip list…',
+    exportProjectLookFailed: "Couldn't look for the project's videos on disk.",
+    exportProjectDone: (count, scope, missing, skipped, nameplates = 0) => `EDL saved (${count} video${count === 1 ? '' : 's'}${scope === 'ticked' ? ' from the ticked highlights' : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${missing > 0 ? `, ${missing} missing` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    // #1442: find the project's videos again by the DoD Studio tag on each.
+    FIND_MOVED_BUTTON: 'Find Moved Videos',
+    FIND_MOVED_TITLE: "Find the videos rendered for the loaded project after you moved or renamed them, by the DoD Studio tag on each video, and point the project at their new place. Looks in the render export folders and their subfolders; when some still aren't found, you can pick another folder. Videos still where they were rendered get the tag too, so they can be found after a move. Tagging never changes the video.",
+    findMovedNone: 'No videos have been rendered for the loaded project yet, so there is nothing to find.',
+    findMovedTagging: (n, total) => `Looking at video ${n} of ${total} where it was rendered…`,
+    findMovedListing: (files) => `Listing the folders: ${files} video file${files === 1 ? '' : 's'} so far…`,
+    findMovedChecking: (n, total) => `Reading the tag of file ${n} of ${total}…`,
+    findMovedDone: ({ moved, notFound, total, complete = true, cloudSkipped = 0, cancelled = false }) => {
+      const found = moved > 0
+        ? `Found ${moved} moved video${moved === 1 ? '' : 's'} and pointed the project at ${moved === 1 ? 'it' : 'them'}.`
+        : `No moved videos found${notFound === 0 && !cancelled ? `: all ${total} are where they were rendered` : ''}.`;
+      const cloud = cloudSkipped > 0
+        ? ` ${cloudSkipped} file${cloudSkipped === 1 ? ' is' : 's are'} only in the cloud, so ${cloudSkipped === 1 ? 'it was' : 'they were'} left unread (reading would download ${cloudSkipped === 1 ? 'it' : 'them'}).`
+        : '';
+      if (cancelled) return `Stopped. ${found}${cloud}`;
+      if (notFound === 0) return `${found}${cloud}`;
+      const stopped = complete ? '' : ' The search stopped at its limit, so look in a smaller folder.';
+      return `${found} ${notFound} of ${total} still not found.${stopped}${cloud}`;
+    },
+    FIND_MOVED_CANCEL_BUTTON: 'Cancel',
+    FIND_MOVED_PICK_ACTION: 'Look in a folder…',
+    FIND_MOVED_PICK_TITLE: 'Folder to look for the videos in',
+    findMovedFailed: (err) => `Couldn't look for the project's videos: ${err}`,
     // #429: the nameplate script into VEGAS's script menu.
     VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
     VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
@@ -902,6 +980,8 @@ export const STRINGS = {
     START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    cancelQueued: (n) => `Cancel Queued (${n})`,
+    CANCEL_QUEUED_TITLE: 'Stop every row that is waiting to render. Rows already rendering keep going.',
     retrySelected: (n) => `Retry (${n})`,
     RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
     removeSelected: (n) => `Remove (${n})`,
@@ -1100,6 +1180,22 @@ export const STRINGS = {
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
   },
 
+  // ── Keep free on the Windows drive (#1430) + windows_drive_setting.js ────
+  WINDOWS_DRIVE: {
+    KEEP_FREE_LABEL: 'Keep free on the Windows drive:',
+    KEEP_FREE_TITLE:
+        'Captures and renders skip the drive Windows is installed on once writing there would leave less than this free, so Windows keeps room for updates, its page file and temp files. A capture or export folder on that drive is used only while it has room above this; other drives are not affected. A change applies to the next render, even during a batch; a capture batch picks each clip\'s drive when it starts. 0 turns it off.',
+    KEEP_FREE_UNIT: 'GB',
+    // Start Capture Batch's banner when the setting is what's short.
+    noneUsableWarning: (required, free, keepGb) =>
+      `Capture needs ~${required} GB, and the only free space in the Capture Output folders is on the Windows drive: ${free} GB, below the ${keepGb} GB that "Keep free on the Windows drive" keeps free there. Lower that setting on Configuration → Destinations, or add a Capture Output folder on another drive.`,
+    someUsableWarning: (required, free, usable, keepGb) =>
+      `Capture needs ~${required} GB. The Capture Output folders have ${free} GB free, but only ${usable} GB of it can be used: "Keep free on the Windows drive" keeps ${keepGb} GB free on the Windows drive. Lower that setting on Configuration → Destinations, or add a Capture Output folder on another drive.`,
+    // Appended to the "will make room" heads-ups, whose figure leaves it out.
+    keptFreeNote: (keepGb) =>
+      `That leaves out the ${keepGb} GB kept free on the Windows drive ("Keep free on the Windows drive", Configuration → Destinations).`,
+  },
+
   // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
   TAKE_CLEANUP: {
     AFTER_LABEL: 'After a clip is finished:',
@@ -1151,7 +1247,11 @@ export const STRINGS = {
   RENDER_WHILE_CAPTURING: {
     LABEL: 'Render while capturing',
     TITLE:
-        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+        'Each clip renders as soon as the batch has recorded it, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    AT_ONCE_LABEL: 'Renders at once:',
+    atOnceOption: (renders, percent) => `${renders} (about ${percent}% of the CPU)`,
+    AT_ONCE_TITLE:
+        'How many clips render at the same time while the batch captures, never more than the Render tab\'s own number. Each takes the share of the CPU one of the Render tab\'s renders gets (a quarter at 4 at once), so this is also how much of the CPU the renders take from the capture. One leaves most of the CPU idle, so the renders fall behind the capture; more keep up better but slow the capture down. The capture never drops frames, it only takes longer.',
     HINT_OFF: 'Clips render after the batch.',
     HINT_ON_KEEP:
         'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
@@ -1224,6 +1324,108 @@ export const STRINGS = {
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
     SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
+  },
+
+  // #15: repairing a demo damaged partway (repair_view.js, repair_pane.js,
+  // queue_repair.js, analyzer_damage.js).
+  REPAIR: {
+    TAB: 'Damaged Demos',
+    TITLE: 'Damaged Demos',
+    HINT: 'A demo damaged on disk stops playing (or crashes the game) at its first gap. Repair cuts the gaps out and joins the rest so it plays to the end. The repair is saved next to the original as <name>_repaired.dem; the original is never changed.',
+    RECURSIVE: 'Include subfolders',
+    FIND_BUTTON: 'Find Damaged Demos',
+    CANCEL_BUTTON: 'Cancel',
+    REPAIR_CHECKED_BUTTON: 'Repair Checked',
+    REPAIR_BUTTON: 'Repair',
+    CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
+    CANCELLING: 'Cancelling…',
+    COL_DEMO: 'Demo',
+    COL_BREAKS: 'Breaks at',
+    COL_SIZE: 'Size',
+    COL_RESULT: 'Repair',
+    BREAKS_TITLE: 'Where the first gap starts, in time since the recording started. Everything after it is unreadable until repaired.',
+    breaksAt: (clock, rest) => `${clock} (${rest} unread)`,
+    scanning: (done, total, demo) => `Checking demos: ${done} of ${total}${demo ? ` (${demo})` : ''}`,
+    found: (n) => (n === 0 ? 'No damaged demo here.' : `${n} damaged demo${n === 1 ? '' : 's'}.`),
+    cancelledFound: (n) => `Cancelled: ${n} damaged demo${n === 1 ? '' : 's'} found before it stopped.`,
+    scanFailed: (e) => `Couldn't check the folder: ${e}`,
+    footer: (damaged, repaired) => `Damaged demos: ${damaged} | Repaired: ${repaired}`,
+    ALREADY_REPAIRED_CHIP: 'Repaired before',
+    alreadyRepairedTitle: (name) => `A repair is already saved next to it: ${name}. Repairing again saves a new copy beside it.`,
+    NOTHING_TICKED: 'Tick at least one demo to repair.',
+    repairingN: (i, n, name) => `Repairing ${i} of ${n}: ${name}`,
+    repairedN: (done, n) => `Repaired ${done} of ${n} demo${n === 1 ? '' : 's'}.`,
+    // A repair's progress line, one per step (analysis::repair::RepairStep).
+    STEP: {
+      finding_holes: 'Finding the gaps',
+      reading: 'Reading the recording',
+      rebuilding_joins: 'Joining the recording across the gaps',
+      writing: 'Writing the repaired demo',
+      checking: 'Checking the repaired demo',
+    },
+    progressLine: (step, pct) => `${step}… ${pct}%`,
+    // What a repair came to.
+    gap: (from, to, lost) => `${from}–${to} (${lost} s)`,
+    repaired: (gaps, lost, kept, name) => `Repaired: ${gaps} gap${gaps === 1 ? '' : 's'} cut out (${gaps === 1 ? '' : 'in all '}${lost} s of recording lost, ${kept}% kept). Saved as ${name}.`,
+    gapsTitle: (list) => `Gaps, in time since the recording started: ${list}`,
+    ENDS_AT_LAST_GAP: 'After that the recording breaks once more and never resumes, so the repair ends at that break.',
+    repairedEndCutOff: (kept, name) => `Repaired: the recording breaks and never resumes, so the repair ends at the break (${kept}% kept). Saved as ${name}.`,
+    NOT_DAMAGED: 'Not damaged: nothing to repair, nothing saved.',
+    refused: (reasons) => `Not saved: the repaired demo failed a check (${reasons.join('; ')}).`,
+    CANCELLED: 'Cancelled. Nothing was saved.',
+    failed: (e) => `Repair failed: ${e}`,
+    SHOW_IN_FOLDER: 'Show in folder',
+    // The Master Queue's row button (queue_repair.js).
+    QUEUE_BUTTON: 'Damaged · Repair',
+    queueButtonTitle: (clock) => `This demo is damaged at ${clock} on the playback clock: it plays, and its highlights cover it, up to there. Repair cuts the damage out and swaps in the repaired copy (saved next to it as <name>_repaired.dem), keeping the highlights' marks, notes and status.`,
+    queueHead: (name) => `Repairing ${name}`,
+    QUEUE_ADDING: 'adding the repaired demo to the queue',
+    queueDoneLine: (elapsed) => `Done in ${elapsed}: repaired 1 demo`,
+    queueFailed: (name, err) => `Could not repair ${name}: ${err}`,
+    queueNotSaved: (name, why) => `${name} was not repaired: ${why}`,
+    carryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the repaired demo; their marks and notes are listed in the activity log (View Logs).`,
+    carryLog: (name, kept, total, repaired) => `[repair] ${name} -> ${repaired}: kept the work on ${kept} of ${total} highlight(s)`,
+    narrowedLog: (time, player, piece) => `[repair]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    uncarriedLog: (time, player, timeline, reason, work) => `[repair]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    UNCARRIED_REASON: {
+      'no-piece': 'the repaired demo did not scan',
+      'not-found': 'no highlight in the repaired demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: "another highlight's work went to the same highlight",
+    },
+    queueStartLog: (name) => `[repair] queue: repairing ${name}`,
+    queueEndLog: (name, elapsed) => `[repair] queue: ${name} swapped for its repair in ${elapsed}`,
+    // The Demo Analyzer's damaged-demo notice (analyzer_damage.js).
+    ANALYZER_BUTTON: 'Repair now',
+    ANALYZER_BUTTON_TITLE: 'Cut the damage out and save the repaired demo next to this one (<name>_repaired.dem), then open it. This demo is not changed.',
+    analyzerDone: (name) => `Repaired, saved as ${name}`,
+    // A demo both damaged and multi-map: repair first, then split (#15).
+    SPLIT_NEEDS_REPAIR: 'Repair it first: the damage stops a split. Repair & Split does both.',
+    // A damaged demo with no break for the repair to cut out (repair_status.js):
+    // the damage is inside a frame, so Repair is not offered.
+    CANNOT_REPAIR: "Repair can't fix this one: the damage is inside the recording rather than a break in it, so there is no gap to cut out.",
+    // Its Split stays greyed out too: the split parses the whole demo and
+    // stops at the same damage.
+    SPLIT_DAMAGE_CANNOT_REPAIR: "The damage stops a split, and Repair can't cut it out.",
+    // The Demo Analyzer's damage notice once the repair's maps were split
+    // next to the demo (analyzer_damage.js): nothing is left to repair.
+    analyzerAlreadySplit: (maps) => `Already repaired and split into its ${maps.length} maps (${maps.join(', ')}) next to it.`,
+    cannotRepairLog: (path) => `Repair: ${path} is damaged inside a frame, with no gap to cut out; Repair is not offered for it, and Split stays greyed out (the damage stops a split too)`,
+    // The analyzer's map list stops at the damage; the repair check's byte
+    // scan found the maps after it (repair_status.js).
+    mapsPastDamageLog: (path, maps) => `Repair: ${path} recorded ${maps.length} maps (${maps.join(', ')}), some after its damage; Repair & Split is offered for it`,
+    REPAIR_SPLIT_BUTTON: 'Repair & Split',
+    REPAIR_SPLIT_TITLE: 'Repair the damage, then split the repaired demo into one demo per map. Both are saved next to this one, which is not changed.',
+    repairSplitRepairing: (text) => `Repairing: ${text}`,
+    repairSplitSplitting: (text) => `Splitting the repaired demo: ${text}`,
+    repairSplitDone: (gaps, names) => `Repaired (${gaps} gap${gaps === 1 ? '' : 's'} cut out) and split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    queueRepairSplitHead: (name) => `Repairing and splitting ${name}`,
+    QUEUE_REPAIR_SPLIT_ADDING: 'adding its maps to the queue',
+    queueRepairSplitDoneLine: (elapsed, pieces) => `Done in ${elapsed}: repaired 1 demo and split it into ${pieces}`,
+    repairSplitFailed: (e) => `Repair & Split failed: ${e}`,
+    mapsCount: (n) => `${n} maps`,
   },
 
   AUDITOR: {
@@ -1524,7 +1726,10 @@ export const STRINGS = {
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
     multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'Only the first is analysed: the game stops playing it at the map change. Split it to use the rest.',
+      + 'Only the first is analysed, and highlights and captures use it too. Split it to use the rest.',
+    multiMapAlreadySplit: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}) and was already split. `
+      + 'This report covers the first.',
+    multiMapAlreadySplitTitle: (files) => `Split next to it into: ${files.join(', ')}`,
     MULTI_MAP_SPLIT_BUTTON: 'Split now',
     MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
       + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
@@ -1778,15 +1983,54 @@ export const STRINGS = {
     CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
+  // ── Closing while renders run (render_close_prompt.js, #1439) ──
+  RENDER_CLOSE_MODAL: {
+    TITLE: 'Renders running',
+    message: (running) => `${running === 1 ? 'A render is' : `${running} renders are`} running. Closing DoD Studio stops ${running === 1 ? 'it' : 'them'} and removes the unfinished clip${running === 1 ? '' : 's'}.`,
+    CLOSE_BUTTON: 'Stop renders and close',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+    logLine: (running, closed) => `Close asked while ${running} render(s) ran: ${closed ? 'closed, stopping them' : 'kept Studio open'}`,
+  },
+
+  // ── What a running batch holds back (batch_guard.js, #1085) ──
+  BATCH_GUARD: {
+    HELD_TITLE: 'A capture batch is running. Wait for it to finish, or cancel it.',
+    REFUSED_TOAST: 'A capture batch is running: this project stays open until it ends.',
+  },
+
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked, rendered = 0) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.`
+      + (marked > rendered ? ` ${marked - rendered} highlight(s) marked Captured.` : '')
+      + (rendered > 0 ? ` ${rendered} highlight(s) marked Rendered: their clips were finished before it closed.` : ''),
     projectUpdated: (name) => `Marked them in the project ${name}.`,
+    SAVED_OPEN_PROJECT: 'Saved them in the open project.',
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
     // The game is open, so the batch may still be capturing in it (#20).
     WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
     STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── The project file's format, backup and newer-build notes (project_file.js, #1085) ──
+  PROJECT_FILE: {
+    MADE_WITH_NEWER: 'Made with a newer DoD Studio',
+    NEWER_TITLE: 'This project was saved by a newer DoD Studio. Its new settings are kept when you save here, but not used.',
+    NEEDS_COPY_TITLE: 'This project was saved by a newer DoD Studio that asks older builds not to save over it. Save makes a copy instead.',
+    NEWER_SAVED_TOAST: 'This project was made with a newer DoD Studio: its new settings are kept, but not used here.',
+    SAVE_COPY_DIALOG_TITLE: 'Save a copy',
+    copyName: (stem) => `${stem} copy`,
+    updatedToast: ({ clips, takesFound, takesNotFound }, backup) => {
+      const takes = takesFound === null ? '' : `, ${takesFound} take${takesFound === 1 ? '' : 's'} found, ${takesNotFound} not found`;
+      return `Updated: ${clips} clip${clips === 1 ? '' : 's'}${takes}. Backup: ${backup}`;
+    },
+    backupFailed: (path, err) => `Not saved: could not back up ${path} first: ${err}`,
+    needsNewerBuild: (path) => `Not saved: ${path} needs a newer DoD Studio to save over it. Use Save a copy.`,
+    newerOnDisk: (path) => `Not saved: a newer DoD Studio saved ${path} after you opened it, and saving here would erase what it added. Save a copy, or open the file again.`,
+    writeFailed: (path, err) => `Not saved: could not write ${path}: ${err}`,
+    CANT_CHECK: 'could not check whether the file is there',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    noMigrationStep: (schema) => `This build has no way to update a project from format ${schema}.`,
   },
 
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
@@ -1800,6 +2044,11 @@ export const STRINGS = {
     CAPTURE_BUTTON: 'Capture them now',
     NOT_NOW_BUTTON: 'Not now',
     NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
+  },
+
+  // ── Highlights unticked once a batch has captured them (batch_untick.js) ──
+  BATCH_UNTICK: {
+    logLine: (unticked, shortLeft) => `Capture batch ended: unticked ${unticked} captured highlight(s), left ${shortLeft} short one(s) ticked.`,
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2111,14 +2360,20 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
-    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    // The queue's line while a split runs (#951).
+    queueSplitHead: (name) => `Splitting ${name}`,
     QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
-    queueSplitDoneLine: (elapsed, demos) => `Done in ${elapsed}: split ${demos} demo${demos === 1 ? '' : 's'}`,
-    MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
-    MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
-    MULTI_MAP_PICKED_SPLIT: 'Split Them',
+    queueSplitDoneLine: (elapsed) => `Done in ${elapsed}: split 1 demo`,
+    // #217: the activity log's lines when picks are in demos with several
+    // maps: one per demo naming what is captured and what is left out, or
+    // one count when there are more than queue_split.js's FIRST_MAP_LINES_MAX.
+    captureFirstMapOnlyDemo: (name, maps) => {
+      const rest = maps.slice(1);
+      return `[capture] ${name} recorded ${maps.length} maps: capturing ${maps[0]} only; `
+        + `${rest.join(', ')} ${rest.length === 1 ? 'is' : 'are'} left out (split the demo to capture ${rest.length === 1 ? 'it' : 'them'})`;
+    },
+    captureFirstMapOnly: (n) => `[capture] Capturing only the first map of ${n} demos that recorded more than one map; `
+      + 'split them to capture the maps after it',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
@@ -2288,7 +2543,7 @@ export const STRINGS = {
     MODE_FRAMES: 'Frame sequence',
     modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
     modeObs: (fps) => `OBS @ ${fps} fps`,
-    modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
+    modeAgr: (fps) => (fps > 0 ? `AGR for Blender @ ${fps} fps` : 'AGR for Blender (AGR FPS not set)'),
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
     commands: (name, edited) => `Commands: ${name}${edited ? ' (edited)' : ''}`,
     COMMANDS_NONE: 'Commands: none',
@@ -2570,6 +2825,8 @@ export const STRINGS = {
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
+      // What the game reported about the clip (#1401).
+      failed: 'Failed in the game: nothing usable recorded (not captured)',
       late: 'OBS started late (missing the opening, not captured)',
     },
     // A clip the batch's end cut short, by what ended it (#1081).
@@ -2579,8 +2836,24 @@ export const STRINGS = {
       // An OBS recording nobody stopped: Studio closed mid-clip (#20).
       studio_closed: 'Cut short: DoD Studio closed while OBS recorded it (not captured)',
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
+    // A clip the batch ended before reaching (#1434), by what ended it.
+    notReachedBy: (endedBy) => ({
+      game_closed: 'Not reached: the game closed first',
+      stopped: 'Not reached: the batch stopped first',
+      studio_closed: 'Not reached: DoD Studio closed first',
+    })[endedBy] || 'Not reached: the batch was cancelled first',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
+    // Why the game's clip failed (#1401).
+    clipFailed: (why) => ({
+      no_start: 'Failed: the game never started recording it (not captured)',
+      no_stop: 'Failed: the game never stopped recording it (not captured)',
+      no_frames: 'Failed: the game recorded no frames (not captured)',
+    })[why] || 'Failed in the game: nothing usable recorded (not captured)',
+    // A take shorter than its plan, or missing a kill: still captured (#1401).
+    clipShort: (recorded, planned, killsOutside) => killsOutside > 0
+      ? `Captured, but missing ${killsOutside} kill${killsOutside === 1 ? '' : 's'}: ${recorded.toFixed(2)} s of ${planned.toFixed(2)} s planned`
+      : `Captured, but short: ${recorded.toFixed(2)} s of ${planned.toFixed(2)} s planned`,
     // A take OBS started recording after its clip's first frame (#1109).
     startedLate: (ms) => `OBS started ${ms} ms late: missing the clip's opening (not captured)`,
     OPEN_FOLDER: 'Open folder',
@@ -2599,6 +2872,12 @@ export const STRINGS = {
     fix: (fps) => (fps > 60
       ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
       : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
+  },
+
+  // ── killfeed_layout_warning.js: the even kill feed can't draw (#1339) ──
+  // The warning itself comes from the backend (native messages/killfeed_layout.rs).
+  KILLFEED_LAYOUT: {
+    LINE_TITLE: "The hook DLL said so while the batch ran: clips captured while this shows have the game's own kill-feed layout, not the even one. The activity log has the hook's own words.",
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
@@ -2898,12 +3177,13 @@ export const STRINGS = {
     BUTTON: 'Review highlights',
     TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer each in the game with Y (Yes), M (Maybe) or N (No); R replays it, B goes back, Space goes on without answering, S stops the review, ESC opens the DoD Studio window\'s Review tab for the kill range and note. Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
     // #661: which Review marks a review plays.
-    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those; Ticked plays only the highlights ticked for capture, a last look before a batch.',
     COVERS_ALL: 'All',
     COVERS_UNMARKED: 'Unmarked',
     COVERS_KEEP: 'Keep',
     COVERS_MAYBE: 'Maybe',
     COVERS_SKIP: 'Skip',
+    COVERS_TICKED: 'Ticked',
     // #822: whose highlights an HLTV demo's review plays.
     HLTV_LABEL: 'HLTV:',
     HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; any players you pick from the HLTV demos (a whole team at once from the Teams list), kept in the project; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
@@ -2938,7 +3218,7 @@ export const STRINGS = {
       return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
     },
     nothingCovered: (covers, ticked) => {
-      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip', ticked: 'ticked for capture' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
     // #848: marks saved outside the project, brought onto demos a scan adds.
@@ -3052,6 +3332,8 @@ export const STRINGS = {
     AVAILABLE_TITLE: 'A new version of DoD Studio is out. Click to download and install it.',
     READY: 'Restart to update',
     READY_TITLE: 'The update has downloaded. Click, then Restart to Apply.',
+    RESTART_AFTER_BATCH: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'The update has downloaded. A capture batch is running, so it waits for the batch to end.',
   },
 
   // ── About modal (issue #122) ─────────────────────────────────────────────
@@ -3104,6 +3386,9 @@ export const STRINGS = {
     CHECK_NOW_BUTTON: 'Check for Updates Now',
     DOWNLOAD_INSTALL_BUTTON: 'Download & Install',
     RESTART_BUTTON: 'Restart to Apply',
+    RESTART_AFTER_BATCH_BUTTON: 'Restart after the batch',
+    RESTART_AFTER_BATCH_TITLE: 'A capture batch is running: restarting now would stop Studio watching it.',
+    INSTALL_AFTER_BATCH_TITLE: 'A capture batch is running: installing closes DoD Studio, so this waits for the batch to end.',
     CLOSE_BUTTON: 'Close',
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',
@@ -3195,7 +3480,6 @@ export const STRINGS = {
     SCAN_FAILED: 'the scan failed',
     SAVE_FAILED: "the session wasn't saved",
     SESSION_CHANGED: 'another session was opened while it scanned',
-    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
     SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
@@ -3206,15 +3490,23 @@ export const STRINGS = {
 
   // ── capture_progress.js: the capture batch's footer line and bar (#952)
   CAPTURE_PROGRESS: {
-    done: (duration, captured, total) => {
+    // A clip not captured in a batch that ran to its end failed; a short one
+    // is captured but shorter than planned (#1401).
+    done: (duration, captured, total, short = 0) => {
       if (total == null) return `Done in ${duration}`;
       const clips = total === 1 ? 'clip' : 'clips';
-      return captured === total
+      const head = captured === total
         ? `Done in ${duration}: ${total} ${clips} captured`
-        : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
+        : `Done in ${duration}: ${captured} of ${total} ${clips} captured, ${total - captured} failed`;
+      return short > 0 ? `${head}, ${short} shorter than planned` : head;
     },
     startLog: () => '[capture] started',
-    endLog: (outcome, elapsed, captured, total) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
+    // Same wording as the footer: failed only for a batch that ran to its end.
+    endLog: (outcome, elapsed, captured, total, short = 0) => {
+      const failed = outcome === 'completed' && total != null ? total - captured : 0;
+      const counts = total == null ? '' : `: ${captured} of ${total} clip(s) captured`;
+      return `[capture] ${outcome} after ${elapsed}${counts}${failed > 0 ? `, ${failed} failed` : ''}${short > 0 ? `, ${short} shorter than planned` : ''}`;
+    },
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
@@ -3430,13 +3722,13 @@ export const STRINGS = {
     pngsMissing: (names) => `Not in the logos folder: ${names.join(', ')}. Those sprays stay as the game draws them.`,
     spritesMissing: (names) => `Not in the sprites folder: ${names.join(', ')}. Those crosshairs stay the game's own.`,
     HLTV_FALLBACK_UNSET: 'HLTV demos: pick the fallback spray. Without one, players not listed show no spray (with nobody listed at all, the game\'s bullet hole).',
-    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray, or players not listed keep their own (no spray where the demo saved none).',
+    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray. Without one, players not listed keep the spray the demo saved, and show none where it saved none.',
     NOT_IN_GAME: "Use in the game is off: the game draws its own sprays and crosshairs.",
-    POV_FALLBACK_LABEL: 'Spray, players not listed, POV demos:',
-    POV_FALLBACK_TITLE: 'Their own spray is the one the demo saved, drawn as it is. A player who joined before the recording started has none saved and shows no spray, never a bullet hole.',
-    HLTV_FALLBACK_LABEL: 'Spray, players not listed, HLTV demos:',
-    HLTV_FALLBACK_TITLE: 'An HLTV demo records that a player sprayed, never the picture, so "their own" is not offered.',
-    FALLBACK_OWN: 'Their own spray',
+    POV_FALLBACK_LABEL: 'Fallback spray, POV demos:',
+    HLTV_FALLBACK_LABEL: 'Fallback spray, HLTV demos:',
+    FALLBACK_HINT: 'Used for players not listed, and when From the demo finds none.',
+    FALLBACK_TITLE: "Used for players not listed, and when From the demo finds none. A stock lambda spray names no player, so it gets this too, unless it's the POV recorder's own, which gets their row.",
+    POV_OWN_SPRAY_RETIRED: 'Your POV fallback spray was "Their own spray", which is gone, so it is now "No spray". Change it in Configuration > Players.',
     FALLBACK_PNG: 'One fallback spray',
     FALLBACK_NONE: 'No spray',
     CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
@@ -3467,7 +3759,7 @@ export const STRINGS = {
     crosshairAdded: (file) => `Added ${file}. Pick it in a crosshair list above.`,
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
-    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback spray for that demo type.",
   },
   // A file dialog that is slow to appear (dialog_wait.js).
   FILE_DIALOG: {

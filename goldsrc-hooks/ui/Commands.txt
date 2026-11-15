@@ -27,6 +27,12 @@ HUD
       Stop a POV demo's recorded TAB presses showing the scoreboard.
   ds_hud_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
+  ds_hud_crosshair_scale <n>
+      Draw the crosshair n times bigger, for movies at high resolutions (default 1, at most 8).
+  ds_hud_crosshair_outline_size <px>
+      Draw a border this many pixels thick around the crosshair (default 0, off; at most 8).
+  ds_hud_crosshair_outline_color "R G B"
+      The crosshair border's colour, three whole numbers 0-255 (default "0 0 0", black).
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   ds_hud_hide_hints 0/1
@@ -89,10 +95,14 @@ MAP
       25th Anniversary only: allow the engine's map-surface shaders during playback.
   ds_map_weather 0-3
       Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
+  ds_map_wind "<x> <y>"|0
+      The wind that blows rain, snow and smoke, in units a second along the map's x and y: "0 0" is calm, 0 the map's own.
   ds_map_run_cfgs 0/1
       Before a demo's map loads, run dodstudio_maps\all_maps.cfg, then dodstudio_maps\<map>.cfg (in dod_addon or dod): per-map brightness and gamma.
   ds_map_apply_lighting 0/1
-      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius). 0 then 1 re-reads the file.
+      As a map loads, multiply its baked lighting inside the boxes and add the lights dodstudio_maps\<map>_light.txt lists (lines x1 y1 z1 x2 y2 z2 scale [fade], or light x y z r g b strength radius).
+  ds_map_reload_lighting
+      Read the map's _light.txt again and apply it now, for trying a new scale without reloading the demo.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
@@ -103,6 +113,14 @@ SOUND
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
   ds_sound_restore_gunshots 0/1
       HLTV and POV demos: play the gunshots a demo left silent, every player's, the recorder's too (on by default).
+  ds_sound_headshot_farther 0/1
+      Hear a headshot (player/helmet_hit.wav) twice as far away: it fades half as fast with distance.
+  ds_sound_headshot_pov_farther 0/1
+      With ds_sound_headshot_farther on, only the headshots the POV player makes carry farther: the POV recorder, or the player an HLTV demo watches in first person. Everyone else's play at the game's distance.
+  ds_sound_headshot_louder 0-3
+      Play a louder headshot: 1 a little louder, 2 louder, 3 loudest (clipped). DoD Studio makes the louder copies from the game's own helmet_hit.wav when it starts the game.
+  ds_sound_headshot_pov_louder 0/1
+      With ds_sound_headshot_louder on, only the headshots the POV player makes play louder. Everyone else's play at the game's level.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
@@ -124,6 +142,8 @@ DEMO PLAYBACK
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   ds_demo_review form
       The kill range and note form over the demo, as E opens it during a review highlight.
+  ds_demo_review faster|slower
+      Play the review highlight one step faster or slower (0.25x to 4x), as Up and Down do; bind them to other keys.
   ds_demo_review ask start|here
       With no review running, ask DoD Studio to review the demo playing, from its first highlight or from the next one from here (the Review tab's From the start and From here).
   ds_demo_ex_interp_max <ms>
@@ -159,9 +179,9 @@ DOD STUDIO WINDOW
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
   ds_ui_review_keys 0/1
-      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; ESC opens the Review tab. 0: the Review tab opens at each end.
+      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; X turns X-ray on and off; Up and Down play it faster or slower; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, its kill range (the original in grey when changed), its whole note and the speed when it isn't 1x, with its kills listed (the next one in amber) under the demo clock now, and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
@@ -198,3 +218,5 @@ DEBUG
       While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.
   ds_debug_record_frame_times 0/1
       Time every frame while 1; at 0, print the average fps, 1% and 0.1% lows and the longest frame, and save the times to %APPDATA%\dod-studio\frame_times.txt (the OBS capture test reads it).
+  ds_debug_hang_report_seconds <seconds>
+      When the game draws no frame for this long (20 by default), log where it is stuck and save a dump to %APPDATA%\dod-studio\logs\dumps; 0 turns it off.

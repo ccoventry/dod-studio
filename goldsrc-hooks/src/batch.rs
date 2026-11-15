@@ -820,6 +820,9 @@ fn start(path: &str) {
     // An earlier batch in this game (#725) ended long ago: its end is not
     // this one's.
     crate::batch_end::reset();
+    // This batch's Studio reads the pipe from now: it hears whether the kill
+    // feed's even layout draws, though nothing changed since (#1339).
+    crate::deathmsg::report_layout_again();
     // Running in the background: out of the user's way from the start.
     if crate::hlae_window::wanted() {
         crate::hlae_window::step_aside();

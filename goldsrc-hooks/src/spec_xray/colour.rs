@@ -27,19 +27,22 @@ pub static AXIS: Cvar = Cvar::new();
 
 /// One team's colour cvar: the string it was last read from (its pointer;
 /// the engine allocates a new one on every change) and what it gave.
-struct Cached {
+pub(crate) struct Cached {
     string: AtomicUsize,
     rgb: AtomicU32,
 }
 
-static ALLIES_CACHE: Cached = Cached {
-    string: AtomicUsize::new(0),
-    rgb: AtomicU32::new(0),
-};
-static AXIS_CACHE: Cached = Cached {
-    string: AtomicUsize::new(0),
-    rgb: AtomicU32::new(0),
-};
+impl Cached {
+    pub(crate) const fn new() -> Self {
+        Self {
+            string: AtomicUsize::new(0),
+            rgb: AtomicU32::new(0),
+        }
+    }
+}
+
+static ALLIES_CACHE: Cached = Cached::new();
+static AXIS_CACHE: Cached = Cached::new();
 
 /// "R G B", each a whole number 0-255, separated by spaces.
 pub fn parse_rgb(text: &str) -> Result<[u8; 3], String> {
@@ -81,7 +84,7 @@ fn default_rgb(default: &str) -> [u8; 3] {
 
 /// The cvar's colour, parsed again only when its string changed; per frame
 /// that is two loads and a compare.
-fn read(cvar: &Cvar, cache: &Cached, name: &str, default: &str) -> [u8; 3] {
+pub(crate) fn read(cvar: &Cvar, cache: &Cached, name: &str, default: &str) -> [u8; 3] {
     let ptr: *mut CvarSPartial = cvar.ptr();
     if ptr.is_null() {
         return default_rgb(default);

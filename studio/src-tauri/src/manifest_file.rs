@@ -42,6 +42,10 @@ struct ManifestFile<'a> {
     streak_sources: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     project_path: Option<&'a str>,
+    /// What the batch captured with (part of #1085), so a batch caught up
+    /// after a restart records the same settings as a watched one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settings: Option<&'a native::hlcr::take_settings::CaptureSettings>,
     /// Present once the batch has ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     verified: Option<&'a [VerifiedBlock]>,
@@ -100,6 +104,7 @@ pub(crate) fn write_in(
         streak_uids: &manifest.streak_uids,
         streak_sources: &manifest.streak_sources,
         project_path: manifest.project_path.as_deref(),
+        settings: manifest.settings.as_ref(),
         verified,
     };
     let result = (|| -> std::io::Result<PathBuf> {
@@ -187,6 +192,7 @@ mod tests {
             streak_uids: Vec::new(),
             streak_sources: Vec::new(),
             project_path: None,
+            settings: None,
         }
     }
 
@@ -217,6 +223,23 @@ mod tests {
     }
 
     #[test]
+    fn a_planned_manifest_reads_back_the_settings_it_captured_with() {
+        let dir = Scratch::new("manifest_file_settings");
+        let mut open = manifest("session_settings");
+        open.streak_uids = vec!["a.dem#1#10#20".to_string()];
+        let settings = native::hlcr::take_settings::CaptureSettings {
+            width: 2560,
+            lines: vec!["mirv_fov 105".to_string()],
+            hash: "v1-0123456789abcdef".to_string(),
+            ..Default::default()
+        };
+        open.settings = Some(settings.clone());
+        write_in(&dir, &open, "planned", None).expect("written");
+        let planned = read_planned_in(&dir);
+        assert_eq!(planned[0].settings, Some(settings));
+    }
+
+    #[test]
     fn a_manifest_from_before_the_highlight_ids_still_reads() {
         let dir = Scratch::new("manifest_file_read_old");
         std::fs::write(
@@ -228,6 +251,7 @@ mod tests {
         assert_eq!(planned.len(), 1);
         assert!(planned[0].streak_uids.is_empty());
         assert!(planned[0].project_path.is_none());
+        assert!(planned[0].settings.is_none());
     }
 
     #[test]

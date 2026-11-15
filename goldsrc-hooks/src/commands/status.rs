@@ -52,6 +52,28 @@ fn status_text() -> String {
             crate::map_sounds::map_status()
         ),
         format!(
+            "{} = {} -- {}",
+            crate::headshot_sound::NAME,
+            bit(crate::headshot_sound::CVAR.on()),
+            crate::headshot_sound::status()
+        ),
+        format!(
+            "{} = {}",
+            crate::headshot_sound::POV_FARTHER_NAME,
+            bit(crate::headshot_sound::POV_FARTHER.on()),
+        ),
+        format!(
+            "{} = {} -- {}",
+            crate::headshot_sound::LOUDER_NAME,
+            crate::headshot_sound::LOUDER.value().unwrap_or(0.0),
+            crate::headshot_sound::louder_status()
+        ),
+        format!(
+            "{} = {}",
+            crate::headshot_sound::POV_LOUDER_NAME,
+            bit(crate::headshot_sound::POV_LOUDER.on()),
+        ),
+        format!(
             "{CROSSHAIR_NAME} = {} -- {}",
             bit(crosshair::hidden()),
             crosshair::status()
@@ -82,6 +104,7 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
+    lines.push(format!("in-eye HUD FOV: {}", crate::hltv_fov::status()));
     lines.push(format!(
         "{} = {} -- strafe twitch: {}",
         crate::strafe_twitch::NAME,
@@ -165,6 +188,12 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(cache) = crate::demoplayer_dict_cache::status_line() {
+        lines.push(cache);
+    }
+    if let Some(hang) = crate::hang::status_line() {
+        lines.push(hang);
+    }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
@@ -173,6 +202,9 @@ fn status_text() -> String {
     }
     if let Some(weather) = crate::map_weather::status_line() {
         lines.push(weather);
+    }
+    if let Some(wind) = crate::map_wind::status_line() {
+        lines.push(wind);
     }
     lines.push(crate::map_light::status_line());
     lines.push(crate::player_overrides::status());
@@ -185,8 +217,17 @@ fn status_text() -> String {
     if let Some(crosshair) = crate::player_crosshair::status_line() {
         lines.push(crosshair);
     }
+    if let Some(outline) = crate::crosshair_outline::status_line() {
+        lines.push(outline);
+    }
+    if let Some(scale) = crate::crosshair_scale::status_line() {
+        lines.push(scale);
+    }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
+    }
+    if let Some(models) = crate::env_models::status_line() {
+        lines.push(models);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);

@@ -6,6 +6,7 @@ import {
   resetRenderJob,
   removeRenderJob,
   cancelRenderJobs,
+  cancelQueuedRenderJobs,
   resetRenderJobs,
   removeRenderJobs,
   clearRenderQueue,
@@ -42,6 +43,8 @@ import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { startVegasEdlExport } from './vegas_edl_export.js';
+import { startProjectVegasExport } from './project_vegas_export.js';
+import { startClipRelink } from './clip_relink.js';
 import { startVegasScriptInstall } from './vegas_script_install.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
@@ -50,13 +53,16 @@ import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
 import { startTakePreview } from './take_preview.js';
 import { startTakeChecks } from './take_checks.js';
 import { renderSizeText } from './byte_size.js';
+
+/** How often the crash-recovery prompt looks again while another dialog is open. */
+const STARTUP_PROMPT_POLL_MS = 500;
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -554,6 +560,7 @@ function syncSelectionControls() {
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
     queued === 0 || rendering > 0 || noExportDir);
   setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
+  setButton('#cancel-queued-render-btn', queued, R.cancelQueued, R.CANCEL_QUEUED_TITLE);
   setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
   setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
   setButton('#delete-takes-render-btn', targets.deleteFolders.length, R.deleteTakesSelected,
@@ -618,6 +625,9 @@ export async function checkRenderRecoveryOnStartup(showRenderTab) {
 
   const modal = document.querySelector('#render-recovery-modal');
   if (!modal) return;
+  // One start-up prompt at a time: a dialog already on screen is answered
+  // first, or this one opens on top of it.
+  while (isAnyDialogOpen()) await new Promise((resolve) => { setTimeout(resolve, STARTUP_PROMPT_POLL_MS); });
   document.querySelector('#render-recovery-source').textContent = summary.source_folder || STRINGS.RENDER.UNKNOWN_SOURCE_FOLDER;
   document.querySelector('#render-recovery-completed').textContent = String(summary.completed_count);
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
@@ -692,6 +702,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
   const cancelRenderBtn = document.querySelector('#cancel-render-btn');
+  const cancelQueuedBtn = document.querySelector('#cancel-queued-render-btn');
   const retryRenderBtn = document.querySelector('#retry-render-btn');
   const removeRenderBtn = document.querySelector('#remove-render-btn');
   const deleteTakesRenderBtn = document.querySelector('#delete-takes-render-btn');
@@ -717,6 +728,15 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
   startVegasScriptInstall();
+  startProjectVegasExport({
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
+  startClipRelink({
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    markDirty: () => takeTracking?.markDirty?.(),
+  });
   startVegasEdlExport({
     getJobs: () => jobs,
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
@@ -1054,6 +1074,22 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         console.error('IPC Execution Error (cancelRenderJobs):', err);
         syncSelectionControls();
       });
+    });
+  }
+
+  if (cancelQueuedBtn) {
+    cancelQueuedBtn.addEventListener('click', () => {
+      const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+      if (!queued) return;
+      cancelQueuedBtn.disabled = true;
+      logFrontendEvent(`[render] Cancel Queued clicked with ${queued} queued row(s)`);
+      cancelQueuedRenderJobs()
+        .then((n) => logFrontendEvent(`[render] Cancel Queued: ${n} row(s) cancelled`))
+        .catch((err) => {
+          console.error('IPC Execution Error (cancelQueuedRenderJobs):', err);
+          logFrontendEvent(`[render] Cancel Queued failed: ${err}`);
+          syncSelectionControls();
+        });
     });
   }
 

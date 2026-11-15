@@ -20,7 +20,9 @@ export function demoMenuItems(demo, a) {
     { label: S.OPEN_IN_ANALYZER, onSelect: a.openInAnalyzer, disabled: gone },
     { label: S.OPEN_FOLDER, onSelect: a.openFolder, disabled: gone },
     { separator: true },
-    a.split && { label: S.SPLIT_MAPS, onSelect: a.split },
+    // `a.splitBlocked`: why the row's split can't run now (already split, or
+    // splitting), so a second split doesn't write copies of the pieces.
+    a.split && { label: S.SPLIT_MAPS, onSelect: a.split, disabled: a.splitBlocked || false },
     a.useFound && { label: S.USE_FOUND_COPY, onSelect: a.useFound },
     a.locate && { label: S.LOCATE, onSelect: a.locate },
     { separator: true },

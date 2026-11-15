@@ -16,8 +16,10 @@ import {
   setPlayerOverrides,
   indexDemoPlayers,
   filesExist,
+  takePovOwnSprayNotice,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { showToast } from './toast.js';
 import { showBar, hideBar } from './progress_view.js';
 import { createCrosshairImport } from './crosshair_import_ui.js';
 import { setUseAsTable } from './player_alias.js';
@@ -40,6 +42,9 @@ import {
   GRID,
   TILES,
 } from './players.js';
+
+// A one-time notice worth reading: longer than a status toast.
+const POV_OWN_SPRAY_TOAST_MS = 15000;
 
 // The setting as last edited or loaded.
 let current = normalizePlayers(null);
@@ -499,6 +504,10 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
   // files dropped in and demos added since show up.
   document.querySelector('.config-tab-btn[data-tab="tab-players"]')
     ?.addEventListener('click', () => { refresh(); });
+
+  takePovOwnSprayNotice().then((changed) => {
+    if (changed) showToast(S().POV_OWN_SPRAY_RETIRED, 'info', POV_OWN_SPRAY_TOAST_MS);
+  });
 
   render();
   return { refresh };

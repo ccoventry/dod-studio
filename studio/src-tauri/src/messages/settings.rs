@@ -4,6 +4,10 @@
 
 use std::fmt::Display;
 
+/// Settings migration 3 changed a used table's POV fallback (#1322).
+pub const POV_OWN_SPRAY_RETIRED: &str =
+    "[settings] POV fallback spray: \"Their own spray\" is gone, so it is now \"No spray\" (#1322)";
+
 pub fn players_table_not_written(err: impl Display) -> String {
     format!("⚠️ **Players** — {err}. The game keeps the table it last read.")
 }
@@ -12,6 +16,14 @@ pub fn players_table_not_written(err: impl Display) -> String {
 pub fn game_folder_fell_back(err: impl Display, default: impl Display) -> String {
     format!(
         "⚠️ **Settings** — {err}. Using `{default}` until it is changed in Configuration → Paths (#402)."
+    )
+}
+
+/// "Keep free on the Windows drive" (#1430) now keeps `bytes`.
+pub fn windows_drive_keep_free(bytes: u64) -> String {
+    format!(
+        "[settings] Keep free on the Windows drive: {} (captures and renders skip the Windows drive once it would drop to this)",
+        native::hlcr::take_cleanup::format_gb(bytes)
     )
 }
 

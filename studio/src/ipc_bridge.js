@@ -397,6 +397,16 @@ export async function setPlayerOverrides(on) {
     });
 }
 
+/** Whether the POV fallback spray was changed for the user and hasn't been
+ *  said yet (#1322). True once. */
+export async function takePovOwnSprayNotice() {
+  return invoke('take_pov_own_spray_notice')
+    .catch((err) => {
+      console.error("IPC Execution Error (take_pov_own_spray_notice):", err);
+      return false;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
@@ -726,6 +736,16 @@ export async function calculateExportPoolSpace(paths) {
     });
 }
 
+/** The capture folders' `{ free_bytes, usable_bytes }`: usable leaves out
+ *  what "Keep free on the Windows drive" keeps there (#1430). */
+export async function capturePoolRoom(paths) {
+  return invoke("capture_pool_room", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (capture_pool_room):", err);
+      throw err;
+    });
+}
+
 /** Per-path reason a Capture Output entry isn't usable — "ok" | "not_absolute"
  *  | "malformed" | "not_found" | "not_a_directory". Only worth calling once
  *  the aggregate space check has already found a problem; a per-path OS stat
@@ -768,6 +788,17 @@ export async function cancelRenderJobs(jobIds) {
   return invoke("cancel_render_jobs", { jobIds })
     .catch((err) => {
       console.error("IPC Execution Error (cancel_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Cancels every Queued row; a Rendering one keeps going. The backend picks
+ *  the rows under its lock, so a row that just started is never caught.
+ *  Resolves to how many were cancelled. */
+export async function cancelQueuedRenderJobs() {
+  return invoke("cancel_queued_render_jobs")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_queued_render_jobs):", err);
       throw err;
     });
 }
@@ -875,6 +906,31 @@ export async function locateRenderedVideos(paths) {
     .catch((err) => {
       console.error("IPC Execution Error (locate_rendered_videos):", err);
       return null;
+    });
+}
+
+/** Find Moved Videos (#1442): where each of the project's rendered `clips`
+ *  (`{ take_key, started_unix_ms, stream, output_path, output_size_bytes,
+ *  content_hash }`) is now, found by its DoD Studio tag in the render export
+ *  folders and `extraFolder` (null for none). Resolves to the report
+ *  (`{ clips: [{ path, found_by, size_bytes, content_hash }], files_checked,
+ *  search_complete, stream_tags_written, stream_tags_failed }`); rejects with
+ *  the reason when the picked folder isn't there. Sends
+ *  `clip_relink_progress` while it runs. */
+export async function relinkRenderedClips(clips, extraFolder) {
+  return invoke("relink_rendered_clips", { clips, extraFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (relink_rendered_clips):", err);
+      throw err;
+    });
+}
+
+/** Find Moved Videos' Cancel (#1442): the running scan stops at its next
+ *  clip or file and resolves with what it found. */
+export async function cancelRelinkRenderedClips() {
+  return invoke("cancel_relink_rendered_clips")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_relink_rendered_clips):", err);
     });
 }
 
@@ -1897,6 +1953,61 @@ export async function splitDemoAuto(path, minSeconds) {
   return invoke("split_demo_auto", { path, minSeconds })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_auto):", err);
+      throw err;
+    });
+}
+
+// #15: damaged demos (demo_repair_manager.rs).
+export async function findDamagedDemos(folder, recursive) {
+  return invoke("find_damaged_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_damaged_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDamagedScan() {
+  return invoke("cancel_damaged_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_damaged_scan):", err);
+      throw err;
+    });
+}
+
+/** Repairs the demo at `path` into `<name>_repaired.dem` beside it; resolves
+ *  its RepairResult. Progress arrives as `repair_progress` events. */
+export async function repairDemo(path) {
+  return invoke("repair_demo_cmd", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (repair_demo_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoRepair(path) {
+  return invoke("cancel_demo_repair", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_repair):", err);
+      throw err;
+    });
+}
+
+// Whether a repair of the demo at `path` has a break to cut out, and every
+// map it recorded, read past the damage (#15): `{ repairable, maps }`.
+export async function demoRepairable(path) {
+  return invoke("demo_repairable", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_repairable):", err);
+      throw err;
+    });
+}
+
+// Whether a multi-map demo's maps were already split next to it:
+// `{ split, files }` (split_status.js).
+export async function demoSplitStatus(path, maps, minSeconds) {
+  return invoke("demo_split_status", { path, maps, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_split_status):", err);
       throw err;
     });
 }

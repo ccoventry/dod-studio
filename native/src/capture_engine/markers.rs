@@ -3,6 +3,9 @@
 //! about each, and OBS mode's go-ahead to the hook's batch.
 
 mod clip_summary;
+mod killfeed_layout;
+
+pub use clip_summary::ClipSummary;
 
 use super::EngineEvent;
 use crate::log_markdown;
@@ -10,16 +13,24 @@ use std::path::Path;
 use std::sync::{Arc, atomic::AtomicBool, mpsc::Sender};
 
 /// The listener's event for one console marker, if it has one: progress,
-/// clip recordings, holds. The hook's per-clip summary (#1221) has none: it
-/// goes straight to the activity log, here, since every marker the batch
-/// reads, late ones too, passes through.
+/// clip recordings, holds, the kill feed's layout. The hook's per-clip
+/// summary (#1221) goes to the activity log here, since every marker the
+/// batch reads, late ones too, passes through, and then to the listener,
+/// which judges each clip's take by it (#1401); so does the kill feed's
+/// layout (#1339), before its warning goes on.
 pub(super) fn marker_event(marker: &crate::obs::Marker) -> Option<EngineEvent> {
     use crate::obs::MarkerKind;
     if marker.kind == MarkerKind::Other
         && let Some(clip) = clip_summary::parse(&marker.label)
     {
         log_markdown(&clip.log_line());
-        return None;
+        return Some(EngineEvent::ClipReported(clip));
+    }
+    if marker.kind == MarkerKind::Other
+        && let Some(layout) = killfeed_layout::parse(&marker.label)
+    {
+        log_markdown(&layout.log_line());
+        return Some(EngineEvent::KillfeedLayout(layout.warning()));
     }
     match marker.kind {
         MarkerKind::DemoStart => marker
@@ -109,7 +120,6 @@ impl RecordingGoAhead {
 /// file's directory entry is not necessarily updated while a handle to it is
 /// open, and the engine holds this one open for the whole session. `LogTailer`
 /// reads its length the same way, for the same reason.
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn console_log_len(path: &Path) -> u64 {
     std::fs::File::open(path)
         .and_then(|f| f.metadata())
@@ -187,6 +197,23 @@ mod tests {
             Some(EngineEvent::ClipStarted(Some(900)))
         ));
         assert!(event("[dod-studio] AUDIO_SYNC - Tick 900").is_none());
+    }
+
+    /// #1339: the kill feed's layout reaches the listener as its warning,
+    /// or as none once the even layout draws.
+    #[test]
+    fn the_kill_feed_layout_becomes_a_warning_or_clears_it() {
+        let warning = event(
+            "[dod-studio] KILLFEED_LAYOUT\twaiting\treason=hd_off\tstyle=ultrasharp\twhy=HD is off",
+        );
+        assert!(matches!(
+            warning,
+            Some(EngineEvent::KillfeedLayout(Some(ref w))) if w.contains("ds_hd_enabled 0")
+        ));
+        assert!(matches!(
+            event("[dod-studio] KILLFEED_LAYOUT\teven"),
+            Some(EngineEvent::KillfeedLayout(None))
+        ));
     }
 
     /// #1081: a `STOP_RECORD` the game ran just before Cancel reaches the

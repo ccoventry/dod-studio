@@ -39,8 +39,8 @@
 //!
 //! - **Not `S_LoadSound`**, the sample cache loader, though returning NULL
 //!   there is a path its play-time callers handle. The mixer
-//!   (pre-Anniversary `hw.dll+0x8e5c0`) also calls it for every playing
-//!   channel on every paint and reads the result without a NULL test, so a
+//!   (`S_MixChannelsToPaintbuffer`, pre-Anniversary `hw.dll+0x8e5c0`) also
+//!   calls it for every playing channel on every paint and reads the result without a NULL test, so a
 //!   sound already playing when a setting went on would crash it.
 //! - **Not `S_StartDynamicSound`'s prologue**: HLAE detours it there while it
 //!   records sound (`docs/goldsrc_hw_dll_survey.md` §12.3). A redirected call

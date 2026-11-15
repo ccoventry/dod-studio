@@ -1901,7 +1901,7 @@ EVEN_HEIGHT = 26
 EVEN_BARREL_ROW = 8
 # Bump when the even atlas's look or rule changes: a style's atlas built by
 # an older one is built again.
-EVEN_VERSION = 3  # 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
+EVEN_VERSION = 4  # 4: British heads in the butt stroke (#1089); 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
 ATLAS_NAME = "dodstudio_killfeed"
 ATLAS_TABLE_VERSION = 1
 ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs
@@ -2182,8 +2182,14 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
         if os.path.basename(old) not in tgas:  # an older geometry's frames: their key matches nothing now
             os.remove(old)
     spr = spr_bytes(stock, pal)
-    if os.path.exists(spr_path) and file_sha(spr_path) != hashlib.sha256(spr).hexdigest():
-        log(f"{ATLAS_NAME}.spr: the rects changed, so atlases built for other styles need building again")
+    new_sha = hashlib.sha256(spr).hexdigest()
+    if os.path.exists(spr_path) and file_sha(spr_path) != new_sha:
+        # Each style's HD frames are keyed to the shared .spr, so the styles
+        # built for the old one draw the game's layout until built again (#1339).
+        stale = sorted(s for s, e in record.items() if s != style and isinstance(e, dict)
+                       and (e.get(ATLAS_NAME) or {}).get("spr_sha") not in (None, new_sha))
+        log(f"{ATLAS_NAME}.spr: the rects changed, so atlases built for other styles need building again"
+            + (f": {', '.join(stale)}" if stale else ""))
     write_whole(spr_path, spr)
     write_whole(txt_path, table_text(rects, count).encode("ascii"))
     record.setdefault(style, {})[ATLAS_NAME] = {"version": [VERSION, EVEN_VERSION], "spr_sha": file_sha(spr_path),

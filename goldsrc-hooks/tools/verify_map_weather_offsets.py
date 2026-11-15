@@ -16,6 +16,14 @@ its own. This proves, on real `client.dll` files:
   4. The sites are the ones #1129 found: the read at +0x4c951, the variable
      at +0x196c74.
 
+And for `map_weather/snow_time.rs` (#1369), the snowflake constructor's
+detour:
+
+  5. Its pattern matches exactly once, the detour starts right after the
+     `call dword ptr [GetClientTime]`, and the span holds the stolen bytes.
+  6. No relative branch or call anywhere in the code lands inside the span
+     (the call's return lands on its first byte, which is fine).
+
 client.dll is byte-identical in both movie installs; both are checked anyway.
 
 Usage:
@@ -44,6 +52,12 @@ PATTERN = ("D8 1D ?? ?? ?? ?? DF E0 25 00 01 00 00 75 31 "
 OPERAND_AT = 16
 KNOWN_READ = 0x4c951
 KNOWN_VARIABLE = 0x196c74
+# Must match `PATTERN`, `DETOUR_AT` and `STOLEN` in goldsrc-hooks/src/map_weather/snow_time.rs.
+SNOW_PATTERN = ("C7 86 88 00 00 00 00 00 96 C2 FF 15 ?? ?? ?? ?? "
+                "8B 4E 04 C7 44 24 08 00 00 00 43 8B 44 24 08 83 E1 9A")
+SNOW_DETOUR_AT = 16
+SNOW_STOLEN = bytes([0x8b, 0x4e, 0x04, 0xc7, 0x44, 0x24, 0x08, 0x00, 0x00, 0x00, 0x43])
+KNOWN_SNOW_DETOUR = 0x52c7a
 
 
 def parse(pattern):
@@ -115,12 +129,63 @@ def check(path):
     return True
 
 
+def branches_into(pe, image, lo, hi):
+    """Raw scan: every E8/E9/EB/Jcc whose target is inside (lo, hi)."""
+    out = []
+    for s in pe.sections:
+        if not s.Characteristics & 0x20000000:
+            continue
+        a, b = s.VirtualAddress, s.VirtualAddress + s.Misc_VirtualSize
+        for k in range(a, b - 6):
+            op = image[k]
+            if op in (0xE8, 0xE9):
+                t = k + 5 + struct.unpack_from("<i", image, k + 1)[0]
+            elif op == 0xEB or 0x70 <= op <= 0x7F:
+                t = k + 2 + struct.unpack_from("<b", image, k + 1)[0]
+            elif op == 0x0F and 0x80 <= image[k + 1] <= 0x8F:
+                t = k + 6 + struct.unpack_from("<i", image, k + 2)[0]
+            else:
+                continue
+            if lo < t < hi:
+                out.append(k)
+    return out
+
+
+def check_snow(path):
+    pe = pefile.PE(str(path), fast_load=True)
+    image = pe.get_memory_mapped_image()
+    pat = parse(SNOW_PATTERN)
+    hits = []
+    for s in pe.sections:
+        if s.Characteristics & 0x20000000:
+            lo = s.VirtualAddress
+            hits += matches(image, lo, lo + s.Misc_VirtualSize, pat)
+    if len(hits) != 1:
+        print(f"  FAIL snowflake pattern matched {len(hits)} times, expected once")
+        return False
+    target = hits[0] + SNOW_DETOUR_AT
+    if image[target - 6:target - 4] != bytes([0xFF, 0x15]):
+        print("  FAIL the snowflake detour does not start right after an indirect call")
+        return False
+    if image[target:target + len(SNOW_STOLEN)] != SNOW_STOLEN:
+        print("  FAIL the snowflake span does not hold the stolen bytes")
+        return False
+    into = branches_into(pe, image, target, target + len(SNOW_STOLEN))
+    if into:
+        print("  FAIL branches into the snowflake span from " + ", ".join(f"+{k:#x}" for k in into))
+        return False
+    known = "as #1369 found" if target == KNOWN_SNOW_DETOUR else "a different build"
+    print(f"  ok   snowflake start-time detour at +{target:#x} ({known}), nothing branches into it")
+    return True
+
+
 def main():
     dlls = [Path(p) for p in sys.argv[1:]] or DEFAULT_DLLS
     ok = True
     for path in dlls:
         print(path)
         ok &= check(path)
+        ok &= check_snow(path)
     sys.exit(0 if ok else 1)
 
 

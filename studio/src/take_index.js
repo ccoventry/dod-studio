@@ -127,7 +127,9 @@ export function recordTake(takeIndex, takeKey, uids, meta) {
  * It also records when and how the take was captured (#439): `block` is a
  * verified block or a `capture_clip_ready` payload (which carries its own
  * rate); the dispatch's own rate (what the mode really records at) wins, then
- * `captureFps` for a block that carries none.
+ * `captureFps` for a block that carries none. `block.capture_settings`, when
+ * there, is the full settings record (part of #1085); a block without it
+ * leaves an earlier one in place.
  */
 export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
   let advanced = 0;
@@ -168,6 +170,7 @@ export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
       capture_mode: block.capture_mode ?? dispatch?.captureMode,
       capture_fps: dispatch?.captureFps ?? block.capture_fps ?? captureFps,
       take_folder: block.take_folder,
+      settings: block.capture_settings,
     });
   }
   return { advanced, markCleared };
@@ -208,6 +211,22 @@ export function renameUidsInTakeIndex(takeIndex, renames) {
 export function resolveTake(takeIndex, takeKey) {
   if (!takeIndex || !takeKey) return [];
   return takeIndex[takeKey] || [];
+}
+
+/**
+ * Marks Rendered every highlight in `demos` the takes `takeKeys` cover, as a
+ * render finishing does (render_pane.js): a verified status, so a hand-set
+ * one is overruled. For renders found in the take folders when a project
+ * opens (#1345). Returns how many changed status.
+ */
+export function markTakesRendered(takeIndex, takeKeys, demos) {
+  const uids = new Set((takeKeys || []).flatMap((key) => resolveTake(takeIndex, key)));
+  if (uids.size === 0) return 0;
+  let changed = 0;
+  (demos || []).forEach((demo) => (demo.streaks || []).forEach((streak) => {
+    if (uids.has(streakUid(demo.path, streak)) && setVerifiedStatus(streak, HIGHLIGHT_STATUS.RENDERED)) changed += 1;
+  }));
+  return changed;
 }
 
 /**
@@ -256,6 +275,16 @@ function isHighlightTracked(streak) {
   if (streak.clipName && streak.clipName.trim()) return true;
   if (streak.curation) return true;
   return isRangeModified(streak);
+}
+
+/**
+ * Whether a highlight is one of the project's clips, which is worked out, not
+ * stored: anything tracked or captured, short of a Skip. `takenUids` is the
+ * Set of uids the take index holds.
+ */
+export function isClipInProject(demoPath, streak, takenUids) {
+  if (isSkipped(streak)) return false;
+  return isHighlightTracked(streak) || takenUids.has(streakUid(demoPath, streak));
 }
 
 /** True if any of a demo's highlights are tracked (see isHighlightTracked). */

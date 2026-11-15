@@ -47,6 +47,7 @@ export const PICK_FIELDS = {
   'capture.import_cfg': 'demos',
   'capture.output_folder': 'videos',
   'render.export_folder': 'videos',
+  'render.find_moved_videos': 'videos',
   'combine.add_files': 'videos',
   'queue.add_files': 'demos',
   'queue.add_folder': 'demos',

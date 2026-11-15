@@ -3,7 +3,7 @@
 // own them, and the app-wide listeners are in place. Every other spec drives
 // one pane in its own harness, so this is the one that notices a main.js
 // wiring slip (#683).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GIB = 1024 ** 3;
 
@@ -42,8 +42,8 @@ test('boots and wires settings into the folder pools', async ({ page }) => {
     .filter((a) => a.includes('G:/more') && a.includes('D:/demos')).length);
   expect(saved).toBeGreaterThan(0);
 
-  // Panes whose boot IPC isn't mocked throw on the undefined it resolves to;
-  // a wiring slip in main.js shows up as one of these instead.
+  // Any uncaught error already fails the test (fixtures.js); this names the
+  // wiring slips main.js can make, for a clearer message.
   expect(errors.filter((m) => /before initialization|is not defined|is not a function/.test(m))).toEqual([]);
 });
 
@@ -70,6 +70,54 @@ test('"After a clip is finished" sits in the Destinations tab, since it acts bef
     await expect(page.locator(`#tab-drive-overrides ${id}`)).toHaveCount(1);
     await expect(page.locator(`#tab-render-output ${id}`)).toHaveCount(0);
   }
+});
+
+test('"Keep free on the Windows drive" loads into Destinations and saves a change (#1430)', async ({ page }) => {
+  await page.addInitScript(() => {
+    const loaded = window.__mockInvokeHandlers.get_settings();
+    window.__mockInvokeHandlers.get_settings = () => ({ ...loaded, windows_drive_keep_free_gb: 80 });
+  });
+  await page.goto('/index.html');
+  const field = page.locator('#tab-drive-overrides #config-windows-drive-keep-free');
+  await expect(field).toHaveValue('80');
+  // The tab is hidden until opened, so the change is made in the page.
+  await field.evaluate((el) => {
+    el.value = '30';
+    el.dispatchEvent(new Event('change'));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const saves = window.__mockInvocations.filter((c) => c.cmd === 'save_settings');
+    return saves.length ? saves[saves.length - 1].args.settings.windows_drive_keep_free_gb : null;
+  })).toBe(30);
+});
+
+test('a Windows drive below "Keep free on the Windows drive" shows its real free space and names the setting (#1430)', async ({ page }) => {
+  await page.addInitScript((gib) => {
+    const loaded = window.__mockInvokeHandlers.get_settings();
+    Object.assign(window.__mockInvokeHandlers, {
+      get_settings: () => ({ ...loaded, target_drives: ['C:/caps'], windows_drive_keep_free_gb: 50 }),
+      calculate_export_pool_space: () => 2 * gib,
+      capture_pool_room: () => ({ free_bytes: 2 * gib, usable_bytes: 0 }),
+    });
+  }, GIB);
+  await page.goto('/index.html');
+  await expect(page.locator('#config-windows-drive-keep-free')).toHaveValue('50');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('2.0');
+  const guard = await page.evaluate(async () => {
+    document.querySelector('#hl-path-input').value = 'C:/Games/Half-Life/hl.exe';
+    document.querySelector('#hlae-path-input').value = 'C:/HLAE/HLAE.exe';
+    const m = await import('/src/capture_pane.js');
+    return m.refreshLaunchGuard({
+      targetDrives: ['C:/caps'],
+      currentScannedDemos: [{ streaks: [{ selected: true, start_tick: 1000, end_tick: 2000 }] }],
+    });
+  });
+  expect(guard.blocked).toBe(true);
+  const banner = page.locator('#disk-space-warning-banner');
+  await expect(banner).toContainText('Keep free on the Windows drive');
+  await expect(banner).toContainText('2.00 GB, below the 50 GB');
+  await expect(banner).toContainText('add a Capture Output folder on another drive');
+  await expect(banner).not.toContainText('have any free space');
 });
 
 test("+ Add Folder's folder shows in the Explorer's Recent list straight away", async ({ page }) => {
@@ -132,4 +180,37 @@ test("Studio's first sub-tab is Highlights, and every queue filter sits in one F
   await expect(row.locator('.queue-filter-tracked-only')).toHaveText('Tracked only');
   await expect(row.locator('.queue-filter-tracked-only')).toHaveAttribute('title', /No demo is tracked yet/);
   await expect(page.locator('#input-min-kills')).toHaveCount(0);
+});
+
+test('Find Moved Videos is wired to the Render tab and says when the project has no videos (#1442)', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  const button = page.locator('#find-moved-videos-btn');
+  await expect(button).toHaveText('Find Moved Videos');
+  await page.evaluate(() => document.querySelector('#find-moved-videos-btn').click());
+  await expect(page.locator('#toast-container')).toContainText('No videos have been rendered for the loaded project yet');
+  await expect(button).toBeEnabled();
+  await expect(page.locator('#find-moved-progress')).toBeHidden();
+  await expect(page.locator('#find-moved-cancel-btn')).toBeHidden();
+  const asked = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'relink_rendered_clips').length);
+  expect(asked).toBe(0);
+});
+
+test('the boot watchdog hears the boot finish and shows nothing', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect.poll(() => page.evaluate(() => window.dodStudioBoot?.state())).toBe('started');
+  await expect(page.locator('#boot-watchdog-banner')).toHaveCount(0);
+});
+
+test('a boot whose scripts never arrive reloads once, then says to restart', async ({ page }) => {
+  await page.addInitScript(() => { window.__dodStudioBootDeadlineMs = 1500; });
+  // One of main.js's imports never answers, as in the tauri dev window that
+  // loaded 76 of the page's scripts after a hard reset.
+  await page.route('**/src/players_ui.js*', () => {});
+  // The page's load event never comes while a module hangs.
+  await page.goto('/index.html', { waitUntil: 'commit' });
+  const banner = page.locator('#boot-watchdog-banner');
+  await expect(banner).toContainText('even after a reload', { timeout: 15000 });
+  expect(await page.evaluate(() => window.dodStudioBoot.state())).toBe('stuck');
+  expect(await page.evaluate(() => sessionStorage.getItem('dodstudio.bootReloaded'))).toBe('1');
 });

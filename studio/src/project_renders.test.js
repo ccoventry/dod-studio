@@ -43,6 +43,13 @@ describe('a render finishing', () => {
     expect(io.log.mock.calls[0][0]).toContain('s/b0');
   });
 
+  it('keeps the fingerprint the backend took as the render finished (#1442)', () => {
+    const { index, renders, fire } = setUp([]);
+    renders.startRecording();
+    fire({ take_key: 's/b0', render: finished(5), content_hash: 'beef' });
+    expect(rendersOf(index, 's/b0')[0].content_hash).toBe('beef');
+  });
+
   it('changes nothing for a take the project does not know, or a payload from an older backend', () => {
     const { renders, markDirty } = setUp([]);
     renders.noteFinished({ take_key: 'elsewhere/b0', render: finished(5) });
@@ -58,24 +65,24 @@ describe('opening a project', () => {
       { exists: true, renders: [finished(1), { ...finished(2), outcome: 'failed', output_path: '' }] },
       { exists: false, renders: [] },
     ]);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(1);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 1, takeKeys: ['s/b0'] });
     expect(io.fetchStates).toHaveBeenCalledWith(['D:/caps/s/b0', 'D:/caps/s/b1']);
     expect(rendersOf(index, 's/b0').map((r) => r.started_unix_ms)).toEqual([1]);
     expect(markDirty).toHaveBeenCalledTimes(1);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(markDirty).toHaveBeenCalledTimes(1);
   });
 
   it('drops the answer when another project opened meanwhile', async () => {
     const setup = setUp([{ exists: true, renders: [finished(1)] }, { exists: true, renders: [] }]);
     setup.io.fetchStates = vi.fn(async () => { setup.swap({}); return [{ exists: true, renders: [finished(1)] }, { exists: true, renders: [] }]; });
-    expect(await setup.renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await setup.renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(rendersOf(setup.index, 's/b0')).toEqual([]);
   });
 
   it('logs a failed check and changes nothing', async () => {
     const { renders, markDirty, io } = setUp(null);
-    expect(await renders.pickUpTakeFolderRenders()).toBe(0);
+    expect(await renders.pickUpTakeFolderRenders()).toEqual({ added: 0, takeKeys: [] });
     expect(markDirty).not.toHaveBeenCalled();
     expect(io.log).toHaveBeenCalledTimes(1);
   });

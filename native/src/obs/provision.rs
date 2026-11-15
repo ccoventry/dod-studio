@@ -400,7 +400,18 @@ fn ensure_game_audio_source(client: &mut ObsClient) -> Result<(), ObsError> {
     ensure_scene_item(client, GAME_AUDIO_SOURCE, existed)?;
     // Best-effort, like the bounds above: a clip a quarter second out of sync
     // still beats no clip.
-    let _ = client.set_input_audio_sync_offset(GAME_AUDIO_SOURCE, super::GAME_AUDIO_SYNC_OFFSET_MS);
+    let target = super::GAME_AUDIO_SYNC_OFFSET_MS;
+    match super::audio_sync::set_offset(client, GAME_AUDIO_SOURCE, target) {
+        Ok(true) => log_markdown(&crate::messages::obs_audio_offset_set(
+            GAME_AUDIO_SOURCE,
+            target,
+        )),
+        Ok(false) => {}
+        Err(e) => log_markdown(&crate::messages::obs_audio_offset_not_set(
+            GAME_AUDIO_SOURCE,
+            e,
+        )),
+    }
     Ok(())
 }
 
@@ -649,7 +660,10 @@ mod tests {
         );
         assert_eq!(obs.sent("SetCurrentProfile"), 3);
         assert!(obs.sent("SetProfileParameter") >= 1);
-        assert_eq!(obs.sent("SetInputAudioSyncOffset"), 1);
+        // The fake reads the offset as 0, so it goes through -1 first
+        // (`audio_sync::steps`).
+        assert_eq!(obs.sent("GetInputAudioSyncOffset"), 1);
+        assert_eq!(obs.sent("SetInputAudioSyncOffset"), 2);
     }
 
     fn value<'a>(wanted: &'a [(&str, &str, String)], name: &str) -> Option<&'a str> {

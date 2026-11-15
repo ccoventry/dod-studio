@@ -4,7 +4,7 @@
 // drives), what Start Audit sends, the progress bar and step line while it
 // runs, the kept copy and the in-use copies left unticked, and the two
 // deletes: the Recycle Bin by default, permanent as its own choice.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GROUPS = [
   {

@@ -303,35 +303,99 @@ fn skip_draw(prc: *const Wrect) -> bool {
     }
 }
 
-/// One of the three draws, through to the engine: the crosshair's own as the
-/// Players table says (`player_crosshair::swap`: the table's sprite set for
-/// this one draw, then the game's set back), anything else as asked.
+/// One of the three draws, through to the engine, under the crosshair's zoom
+/// when it is one of the crosshair's (`crosshair_scale`), over its border when
+/// it has one (`crosshair_outline`).
 ///
 /// # Safety
 ///
 /// `prc` is the rect the game passed, null or valid for the call.
-unsafe fn draw_through(real: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc: *const Wrect) {
-    let real = real.load(Ordering::Acquire);
+unsafe fn draw_through(slot: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc: *const Wrect) {
+    let real = slot.load(Ordering::Acquire);
     if real.is_null() {
         return;
     }
     let real: SprDrawFn = unsafe { std::mem::transmute(real) };
     let sheet = crate::player_crosshair::Sheet::from_u8(CURRENT_SHEET.load(Ordering::Relaxed));
-    let set = REAL_SPR_SET.load(Ordering::Acquire);
-    if !set.is_null()
-        && let Some((handle, rect, nx, ny)) =
-            unsafe { crate::player_crosshair::swap(sheet, prc, x, y) }
+    // The swap is decided once, before the zoom: the zoom fits the rect that
+    // is drawn, the table's tile when it replaces the game's.
+    let swap = if REAL_SPR_SET.load(Ordering::Acquire).is_null() {
+        None
+    } else {
+        unsafe { crate::player_crosshair::swap(sheet, prc, x, y) }
+    };
+    let drawn = match swap {
+        Some((_, rect, nx, ny)) => Some((nx, ny, rect)),
+        // Safety: the game's rect, null or valid for the call.
+        None => (!prc.is_null()).then(|| (x, y, unsafe { *prc })),
+    };
+    let zoom = drawn.and_then(|(dx, dy, rect)| unsafe {
+        crate::crosshair_scale::zoom(sheet, prc, dx, dy, &rect)
+    });
+    if std::ptr::eq(slot, &REAL_SPR_DRAW_HOLES)
+        && let Some(zoom) = zoom
+        && let Some(outline) = unsafe { crate::crosshair_outline::of_draw(sheet, prc) }
     {
-        let set: SprSetFn = unsafe { std::mem::transmute(set) };
-        let [r, g, b] = CURRENT_RGB.each_ref().map(|c| c.load(Ordering::Relaxed));
+        // Safety: a HUD draw, on the engine's GL thread.
         unsafe {
-            set(handle, r, g, b);
+            crate::crosshair_outline::draw(outline, zoom, |tint| {
+                draw_sprite(real, swap, frame, x, y, prc, Some(tint))
+            })
+        };
+    }
+    let draw = || unsafe { draw_sprite(real, swap, frame, x, y, prc, None) };
+    if let Some(zoom) = zoom
+        // Safety: a HUD draw, on the engine's GL thread.
+        && unsafe { zoom.run(draw) }
+    {
+        return;
+    }
+    draw();
+}
+
+/// The crosshair's own draw as the Players table says (`swap`, from
+/// `player_crosshair::swap`: the table's sprite set for this one draw, then
+/// the game's set back), anything else as asked. `tint` draws it in that
+/// colour instead of the game's, for this one draw too.
+///
+/// # Safety
+///
+/// As [`draw_through`].
+unsafe fn draw_sprite(
+    real: SprDrawFn,
+    swap: Option<(i32, Wrect, i32, i32)>,
+    frame: i32,
+    x: i32,
+    y: i32,
+    prc: *const Wrect,
+    tint: Option<[i32; 3]>,
+) {
+    let set = REAL_SPR_SET.load(Ordering::Acquire);
+    if set.is_null() {
+        unsafe { real(frame, x, y, prc) };
+        return;
+    }
+    let set: SprSetFn = unsafe { std::mem::transmute(set) };
+    let [r, g, b] = CURRENT_RGB.each_ref().map(|c| c.load(Ordering::Relaxed));
+    let [tr, tg, tb] = tint.unwrap_or([r, g, b]);
+    let game = CURRENT_HANDLE.load(Ordering::Relaxed);
+    if let Some((handle, rect, nx, ny)) = swap {
+        unsafe {
+            set(handle, tr, tg, tb);
             real(0, nx, ny, &rect);
-            set(CURRENT_HANDLE.load(Ordering::Relaxed), r, g, b);
+            set(game, r, g, b);
         }
         return;
     }
-    unsafe { real(frame, x, y, prc) };
+    if tint.is_none() {
+        unsafe { real(frame, x, y, prc) };
+        return;
+    }
+    unsafe {
+        set(game, tr, tg, tb);
+        real(frame, x, y, prc);
+        set(game, r, g, b);
+    }
 }
 
 unsafe extern "C" fn hook_spr_draw(frame: i32, x: i32, y: i32, prc: *const Wrect) {

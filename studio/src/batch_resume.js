@@ -12,21 +12,17 @@
 // each payload index is and the project it came from (#545). A batch with no
 // project can only be resumed while its demos are in the open queue.
 
-import { themedConfirm, isThemedConfirmOpen } from './themed_confirm.js';
+import { themedConfirm, isAnyDialogOpen } from './themed_confirm.js';
 import { streakUid } from './take_index.js';
 import { showToast } from './toast.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
+import { blockUids } from './batch_untick.js';
 
 /** The ids of the highlights in `batch`'s blocks that have no take. */
 export function uncapturedUids(batch) {
-  const uids = batch?.streak_uids || [];
-  const left = (batch?.blocks || [])
-    .filter((block) => !block.captured)
-    .flatMap((block) => (block.source_streak_indices || []).map((i) => uids[i]))
-    .filter(Boolean);
-  return [...new Set(left)];
+  return blockUids(batch, (batch?.blocks || []).filter((block) => !block.captured));
 }
 
 /** How many of `uids` are highlights in `demos`. */
@@ -62,7 +58,7 @@ const DIALOG_POLL_MS = 500;
 
 const defaultIo = {
   confirm: themedConfirm,
-  dialogOpen: isThemedConfirmOpen,
+  dialogOpen: () => isAnyDialogOpen(),
   wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   toast: showToast,
   showHighlights: () => {

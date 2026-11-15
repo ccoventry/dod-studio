@@ -11,6 +11,7 @@
 //     async Tauri command never parks the main thread.
 // ============================================================
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +25,7 @@ use std::sync::{Arc, Mutex};
 /// real parallelism here.
 const PATCH_CONCURRENCY: usize = 4;
 
+use native::capture_engine::clip_verdict::{demo_ordinals, recording_order};
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
 use native::patch::{
@@ -33,6 +35,7 @@ use native::patch::{
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
+use crate::clip_verdicts::ClipEvidence;
 use crate::game_process_manager::saved_settings;
 
 /// Every patch job's stage, folded into the one status line a batch shows
@@ -201,7 +204,7 @@ pub struct CapturePayload {
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
     /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
-    /// means "the same as `capture_fps`".
+    /// means `native::patch::DEFAULT_AGR_FPS`.
     #[serde(default)]
     pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
@@ -448,7 +451,7 @@ impl CaptureManager {
 
     /// Returns `true` if a batch is currently executing.
     pub fn is_running(&self) -> bool {
-        *self.is_running.lock().unwrap_or_else(|p| p.into_inner())
+        *lock_or_recover(&self.is_running)
     }
 }
 
@@ -560,6 +563,13 @@ pub struct CaptureManifest {
     /// The project file the batch was started from, when it had one.
     #[serde(default)]
     pub project_path: Option<String>,
+    /// The full settings the batch captured with and their hash (part of
+    /// #1085): written beside each take, sent with `capture_takes_verified`
+    /// for the project's take record, and kept in the manifest file so a
+    /// batch caught up after a restart records the same. `None` in
+    /// manifests from before it existed.
+    #[serde(default)]
+    pub settings: Option<native::hlcr::take_settings::CaptureSettings>,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -596,9 +606,15 @@ pub struct VerifiedBlock {
     /// (#1109): the take is missing the clip's opening, so it counts as
     /// neither captured nor renderable, and is left for the user to delete.
     pub started_late_ms: Option<u64>,
+    /// What the game said about the clip when it isn't whole (#1401): failed
+    /// (not captured) or shorter than planned (captured, with a warning).
+    pub clip_verdict: Option<native::capture_engine::clip_verdict::ClipVerdict>,
     /// How many gaps between kills the take recorded sped up (#831), for its
     /// label in the batch results panel.
     pub ramped_gaps: usize,
+    /// The batch ended before it got to this clip (#1434): no take, but
+    /// nothing went wrong with it, so it isn't missing.
+    pub not_reached: bool,
 }
 
 /// What ended a batch while a clip was recording: the Last Batch panel and
@@ -626,6 +642,16 @@ impl CutBy {
             CutBy::GameClosed => "was cut short when the game closed",
             CutBy::Stopped => "was cut short when the batch stopped",
             CutBy::StudioClosed => "was still recording in OBS when DoD Studio closed",
+        }
+    }
+
+    /// Why a batch that ended this way never reached its later clips (#1434).
+    pub(crate) fn not_reached_text(self) -> &'static str {
+        match self {
+            CutBy::Cancel => "the batch was cancelled",
+            CutBy::GameClosed => "the game closed",
+            CutBy::Stopped => "the batch stopped",
+            CutBy::StudioClosed => "DoD Studio closed",
         }
     }
 }
@@ -671,33 +697,6 @@ fn mark_short_takes(
     }
 }
 
-/// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
-/// demo's blocks are contiguous and demos play in the manifest's order.
-pub(crate) fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
-    let mut ordinal = 0u32;
-    blocks
-        .iter()
-        .enumerate()
-        .map(|(i, b)| {
-            if i == 0 || b.demo_name != blocks[i - 1].demo_name {
-                ordinal += 1;
-            }
-            ordinal
-        })
-        .collect()
-}
-
-/// Each manifest block's position in recording order: demos play in the
-/// manifest's order, and a demo's clips by `block_index`. The builder already
-/// sorts a demo's blocks that way; sorting here keeps the order from
-/// depending on it.
-fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..blocks.len()).collect();
-    let demo = demo_ordinals(blocks);
-    order.sort_by_key(|&i| (demo[i], blocks[i].block_index));
-    order
-}
-
 /// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
 /// reported, for a Cancel (#1081).
 #[derive(Debug, Default, Clone, Copy)]
@@ -714,6 +713,22 @@ pub(crate) struct Records {
 }
 
 impl Records {
+    /// The demo playing, by `DEMO_START`'s 1-based index; `None` before the
+    /// first one, or without markers.
+    pub(crate) fn demo(&self) -> Option<u32> {
+        self.demo
+    }
+
+    /// The demo the last `START_RECORD` came from.
+    pub(crate) fn last_start_demo(&self) -> Option<u32> {
+        self.last_start_demo
+    }
+
+    /// The demo tick the last `START_RECORD` named.
+    pub(crate) fn last_start_tick(&self) -> Option<i64> {
+        self.last_start_tick
+    }
+
     /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
     /// playing mid-clip, and the hook's batch skipped on) is over, so a
     /// Cancel later in the batch can't count it as still recording.
@@ -751,9 +766,8 @@ struct BatchEnd<'a> {
     /// The clip recordings the markers reported, for [`mark_cut_short`].
     records: Records,
     cut_by: CutBy,
-    /// The clips OBS started recording late (#1109), for
-    /// [`mark_started_late`].
-    late_starts: Vec<native::obs::LateStart>,
+    /// What the game and OBS said about each clip (#1109, #1401).
+    clips: ClipEvidence,
 }
 
 impl<'a> BatchEnd<'a> {
@@ -764,7 +778,7 @@ impl<'a> BatchEnd<'a> {
             error: false,
             records: Records::default(),
             cut_by: CutBy::Cancel,
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
     }
 
@@ -775,15 +789,18 @@ impl<'a> BatchEnd<'a> {
             error: false,
             records,
             cut_by: CutBy::Cancel,
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
     }
 
-    fn with_late_starts(self, late_starts: Vec<native::obs::LateStart>) -> BatchEnd<'a> {
-        BatchEnd {
-            late_starts,
-            ..self
-        }
+    /// What ended a batch that stopped early; `None` for a complete one,
+    /// whose `cut_by` is only a default.
+    fn ended_by(&self) -> Option<CutBy> {
+        (self.outcome != "complete").then_some(self.cut_by)
+    }
+
+    fn with_clips(self, clips: ClipEvidence) -> BatchEnd<'a> {
+        BatchEnd { clips, ..self }
     }
 
     /// The engine stopped the batch with `message`. `game_closed`: the game
@@ -799,25 +816,8 @@ impl<'a> BatchEnd<'a> {
             } else {
                 CutBy::Stopped
             },
-            late_starts: Vec::new(),
+            clips: ClipEvidence::default(),
         }
-    }
-}
-
-/// Marks each take OBS started recording after its clip's first frame
-/// (#1109) as missing its opening: not captured, not renderable, so the
-/// highlights stay to capture again and the clean-up leaves it alone.
-fn mark_started_late(verified: &mut [VerifiedBlock], late_starts: &[native::obs::LateStart]) {
-    for late in late_starts {
-        let Some(block) = verified
-            .iter_mut()
-            .find(|b| Path::new(&b.take_folder) == late.take_folder)
-        else {
-            continue;
-        };
-        block.started_late_ms = Some(late.late.as_millis() as u64);
-        block.captured = false;
-        block.renderable = false;
     }
 }
 
@@ -963,7 +963,9 @@ pub(crate) fn verify_capture_takes_settling(
                 cut_by: None,
                 short_take: None,
                 started_late_ms: None,
+                clip_verdict: None,
                 ramped_gaps: block.ramped_gaps,
+                not_reached: false,
             }
         })
         .collect();
@@ -1034,6 +1036,8 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
                 .iter()
                 .find(|b| b.take_folder == folder)
                 .and_then(|b| b.plan.clone()),
+            // Everything else the batch captured with (part of #1085).
+            settings: manifest.settings.clone(),
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
@@ -1050,6 +1054,8 @@ struct TakeReport {
     payload: serde_json::Value,
     captured: usize,
     total: usize,
+    /// Captured takes shorter than planned (#1401).
+    short: usize,
 }
 
 /// Runs verification for the batch that just ended, with "Checking the
@@ -1065,7 +1071,7 @@ fn check_takes(
 ) -> Option<TakeReport> {
     let outcome = end.outcome;
     let manifest = {
-        let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(manifest_slot);
         match guard.as_ref() {
             Some(m) if !m.blocks.is_empty() => m.clone(),
             _ => return None,
@@ -1094,13 +1100,17 @@ fn check_takes(
         }
     });
     mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
-    mark_started_late(&mut blocks, &end.late_starts);
-    for block in &blocks {
-        if let Some(ms) = block.started_late_ms {
-            log_markdown(&crate::messages::capture::take_verify_started_late(
-                &block.take_key,
-                ms,
-                &block.take_folder,
+    let short = crate::clip_verdicts::apply(&manifest, &mut blocks, &end.clips);
+    // Only a batch that ended early left clips behind; a complete one
+    // reached them all, and a take it lacks is missing.
+    if outcome != "complete" {
+        let not_reached =
+            crate::unreached_clips::mark_not_reached(&manifest, &mut blocks, &end.records);
+        if not_reached > 0 {
+            log_markdown(&crate::messages::capture::take_verify_not_reached(
+                not_reached,
+                blocks.len(),
+                end.cut_by.not_reached_text(),
             ));
         }
     }
@@ -1155,12 +1165,18 @@ fn check_takes(
             // only finishes a batch that ran to completion, and a frame
             // sequence has to be encoded at the rate it was captured at.
             "outcome": outcome,
+            // What ended a batch that stopped early, for its clips it never
+            // reached (#1434).
+            "ended_by": end.ended_by(),
             "capture_fps": manifest.capture_fps,
+            // The project's record of each take (part of #1085).
+            "capture_settings": manifest.settings,
             // Render While Capturing (#861) queues every take itself, the
             // last ones after this goes out, so the finish step stays out.
             "rendered_while_capturing": rendered_while_capturing,
         }),
         captured: captured_count,
+        short,
         total,
     })
 }
@@ -1178,12 +1194,13 @@ fn finish_batch(
     rendered_while_capturing: bool,
 ) {
     let report = check_takes(app, manifest_slot, &end, rendered_while_capturing);
-    *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
+    *lock_or_recover(is_running) = false;
     let mut status = serde_json::json!({
         "running": false,
         "status": end.status,
         "clips_captured": report.as_ref().map(|r| r.captured),
         "clips_total": report.as_ref().map(|r| r.total),
+        "clips_short": report.as_ref().map(|r| r.short),
     });
     if end.error {
         status["error"] = serde_json::Value::Bool(true);
@@ -1270,6 +1287,9 @@ pub async fn start_capture_batch_impl(
         return Err(err);
     }
 
+    // ── Guard: an AGR batch needs its own rate (the UI blocks it too) ─────────
+    crate::capture_guards::require_agr_rate(&config_from_payload(&payload))?;
+
     // ── Guard: separate HUD cannot be captured through mirv_movie_ffmpeg ──────
     // HLAE writes blank frames to the HUD stream on the FFmpeg path — measured
     // both ways against one demo, see docs/direct_to_video_capture.md. Capture
@@ -1281,7 +1301,7 @@ pub async fn start_capture_batch_impl(
     // leave the manager wedged.
     // ── Guard: reject concurrent batches ──────────────────────────────────────
     {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         if *running {
             return Err(crate::messages::CAPTURE_BATCH_ALREADY_RUNNING.to_string());
         }
@@ -1310,10 +1330,7 @@ pub async fn start_capture_batch_impl(
         && patcher_config.hook_runs_batch
         && saved_settings(&app_handle).take_after_finish == "delete";
     {
-        let mut slot = manager
-            .last_config
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut slot = lock_or_recover(&manager.last_config);
         *slot = Some(patcher_config.clone());
     }
 
@@ -1335,7 +1352,7 @@ pub async fn start_capture_batch_impl(
         .collect();
 
     if raw_streaks.is_empty() {
-        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&manager.is_running);
         *running = false;
         let _ = app_handle.emit(
             "capture_status",
@@ -1379,7 +1396,7 @@ pub async fn start_capture_batch_impl(
             .map_err(crate::messages::failed_to_check_demo_sources)
         {
             log_markdown(&crate::messages::capture::capture_error_line(&e));
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1419,7 +1436,7 @@ pub async fn start_capture_batch_impl(
                 },
             );
             if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1455,7 +1472,7 @@ pub async fn start_capture_batch_impl(
             Ok(v) => v,
             Err(e) => {
                 log_markdown(&crate::messages::capture::build_batch_queue_failed(&e));
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1492,17 +1509,24 @@ pub async fn start_capture_batch_impl(
                 streak_uids,
                 streak_sources,
                 project_path,
+                settings: Some(native::hlcr::take_settings::CaptureSettings::from_config(
+                    &patcher_config,
+                    env!("CARGO_PKG_VERSION"),
+                )),
             };
+            if let Some(settings) = &manifest.settings {
+                log_markdown(&crate::messages::capture::take_settings_recorded(settings));
+            }
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
             crate::manifest_file::write(&manifest, "planned", None);
-            let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut slot = lock_or_recover(&manifest_arc);
             *slot = Some(manifest);
         }
 
         if patch_jobs.is_empty() {
             log_markdown(crate::messages::capture::BUILD_BATCH_QUEUE_NO_JOBS);
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1526,7 +1550,7 @@ pub async fn start_capture_batch_impl(
         ) {
             Ok(batch) => batch,
             Err(status) => {
-                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_arc);
                 *running = false;
                 let _ = app_handle_clone.emit(
                     "capture_status",
@@ -1557,7 +1581,7 @@ pub async fn start_capture_batch_impl(
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
                     log_markdown(&crate::messages::capture::batch_not_started_line(&status));
-                    let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut running = lock_or_recover(&is_running_arc);
                     *running = false;
                     let _ = app_handle_clone.emit(
                         "capture_status",
@@ -1603,7 +1627,7 @@ pub async fn start_capture_batch_impl(
                 log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
                 // The manifest was written before the route was known, and
                 // its blocks carry the plans the takes are checked against.
-                let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+                let mut slot = lock_or_recover(&manifest_arc);
                 if let Some(manifest) = slot.as_mut() {
                     manifest
                         .blocks
@@ -1784,8 +1808,7 @@ pub async fn start_capture_batch_impl(
                             }
                             Err(e) => {
                                 {
-                                    let mut slot =
-                                        first_error.lock().unwrap_or_else(|p| p.into_inner());
+                                    let mut slot = lock_or_recover(first_error);
                                     if slot.is_none() {
                                         *slot = Some((job.source_demo.clone(), e));
                                     }
@@ -1806,14 +1829,14 @@ pub async fn start_capture_batch_impl(
         });
 
         let was_cancelled = cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed);
-        let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let failure = lock_or_recover(&first_error).take();
 
         if let Some((source_demo, e)) = failure {
             log_markdown(&crate::messages::capture::patch_failed_line(
                 &source_demo,
                 &e,
             ));
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1826,7 +1849,7 @@ pub async fn start_capture_batch_impl(
             return;
         }
         if was_cancelled {
-            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let mut running = lock_or_recover(&is_running_arc);
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
@@ -1882,8 +1905,8 @@ pub async fn start_capture_batch_impl(
                 let mut records = Records::default();
                 // The game went away by itself before the batch's end.
                 let mut game_closed = false;
-                // Clips OBS started recording late (#1109).
-                let mut late_starts: Vec<native::obs::LateStart> = Vec::new();
+                // What the game and OBS said about each clip (#1109, #1401).
+                let mut clip_evidence = ClipEvidence::default();
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -2028,12 +2051,20 @@ pub async fn start_capture_batch_impl(
                         EngineEvent::GameClosed => {
                             game_closed = true;
                         }
+                        // Once per change in the game (#1339): no throttle.
+                        EngineEvent::KillfeedLayout(warning) => {
+                            let _ = app_emitter.emit(
+                                "capture_killfeed_layout",
+                                serde_json::json!({ "warning": warning }),
+                            );
+                        }
                         EngineEvent::ObsStartedLate(late) => {
                             if let Some(room) = &room {
                                 room.clip_started_late(&late.take_folder);
                             }
-                            late_starts.push(late);
+                            clip_evidence.late_starts.push(late);
                         }
+                        EngineEvent::ClipReported(clip) => clip_evidence.reports.push(clip),
                         // A batch that played a demo before it failed has
                         // takes to check, like a cancelled one: the finished
                         // ones are real, and the clip recording when it
@@ -2046,14 +2077,13 @@ pub async fn start_capture_batch_impl(
                                 &is_running_clone,
                                 &manifest_for_listener,
                                 BatchEnd::failed(&msg, records, game_closed)
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
                         }
                         EngineEvent::Error(msg) => {
-                            let mut running =
-                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            let mut running = lock_or_recover(&is_running_clone);
                             *running = false;
                             let _ = app_emitter.emit(
                                 "capture_status",
@@ -2070,8 +2100,7 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                BatchEnd::complete()
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                BatchEnd::complete().with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2085,7 +2114,7 @@ pub async fn start_capture_batch_impl(
                                 &is_running_clone,
                                 &manifest_for_listener,
                                 BatchEnd::cancelled(records)
-                                    .with_late_starts(std::mem::take(&mut late_starts)),
+                                    .with_clips(std::mem::take(&mut clip_evidence)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2101,9 +2130,7 @@ pub async fn start_capture_batch_impl(
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
                 log_markdown(&crate::messages::capture::listener_panicked_line(&msg));
-                let mut running = is_running_for_panic
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                let mut running = lock_or_recover(&is_running_for_panic);
                 *running = false;
                 let _ = app_emitter_for_panic.emit(
                     "capture_status",
@@ -2299,6 +2326,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         };
         let verified = verify_capture_takes(&manifest, &mut |_| {});
         assert!(verified[0].captured && verified[0].rendered);
@@ -2366,6 +2394,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         };
         let verified = verify_capture_takes(&manifest, &mut |_| {});
         record_capture_settings(&manifest, &verified);
@@ -2550,11 +2579,32 @@ mod tests {
         assert_eq!(cfg.effective_agr_fps(), 60);
         assert!(!cfg.ffmpeg_capture);
 
-        // Absent from an older frontend: follows Capture FPS.
+        // Absent from an older frontend, or 0 (an empty box): AGR's own 30,
+        // never Capture FPS.
         let mut value = serde_json::to_value(sample_payload()).unwrap();
         value.as_object_mut().unwrap().remove("agr_fps");
         let payload: CapturePayload = serde_json::from_value(value).unwrap();
-        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 300);
+        assert_eq!(payload.capture_fps, 300);
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+        let mut payload = sample_payload();
+        payload.agr_fps = 0;
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 30);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_default_agr_fps() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/agr_rate.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const DEFAULT_AGR_FPS = {};",
+            native::patch::DEFAULT_AGR_FPS
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/agr_rate.js must say `{line}`"
+        );
     }
 
     #[test]
@@ -2826,6 +2876,7 @@ mod tests {
             streak_uids: vec![],
             streak_sources: vec![],
             project_path: None,
+            settings: None,
         }
     }
 
@@ -2847,35 +2898,11 @@ mod tests {
                 cut_by: None,
                 short_take: None,
                 started_late_ms: None,
+                clip_verdict: None,
                 ramped_gaps: 0,
+                not_reached: false,
             })
             .collect()
-    }
-
-    /// #1109: a take OBS started after its clip did is missing the opening.
-    #[test]
-    fn a_take_obs_started_late_is_not_captured_and_says_by_how_much() {
-        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0)]);
-        let mut blocks = on_disk(&manifest);
-        let late = native::obs::LateStart {
-            take_folder: std::path::PathBuf::from("a_b1"),
-            late: std::time::Duration::from_millis(240),
-        };
-        mark_started_late(&mut blocks, &[late]);
-        let got: Vec<_> = blocks
-            .iter()
-            .map(|b| (b.captured, b.renderable, b.started_late_ms))
-            .collect();
-        assert_eq!(
-            got,
-            [
-                (true, true, None),
-                (false, false, Some(240)),
-                (true, true, None)
-            ]
-        );
-        // Not a clip the batch's end cut short.
-        assert!(blocks.iter().all(|b| !b.cut_short));
     }
 
     /// Marker counts with no ticks (a marker that names none).
@@ -2973,6 +3000,20 @@ mod tests {
         assert_eq!(stalled.cut_by, CutBy::Stopped);
         let cancelled = BatchEnd::cancelled(records);
         assert_eq!((cancelled.error, cancelled.cut_by), (false, CutBy::Cancel));
+    }
+
+    /// #1434: only a batch that stopped early says what ended it.
+    #[test]
+    fn a_complete_batch_names_nothing_as_what_ended_it() {
+        assert_eq!(BatchEnd::complete().ended_by(), None);
+        assert_eq!(
+            BatchEnd::cancelled(Records::default()).ended_by(),
+            Some(CutBy::Cancel)
+        );
+        assert_eq!(
+            BatchEnd::failed("x", Records::default(), true).ended_by(),
+            Some(CutBy::GameClosed)
+        );
     }
 
     /// A demo the hook's batch skipped sends no markers (#861), so the count

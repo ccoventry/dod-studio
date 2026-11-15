@@ -1,9 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  PROJECT_EXTENSION, projectSaveDialogOptions, PROJECT_OPEN_FILTERS, isProjectFile, isDemoFile,
+  PROJECT_EXTENSION, projectSaveDialogOptions, projectCopyDialogOptions, PROJECT_OPEN_FILTERS, isProjectFile, isDemoFile,
 } from './project_file_type.js';
 
 // Project files are `.dodstudio`, and `.json` projects keep loading (#528).
+
+describe('Save a copy', () => {
+  it('defaults to a .dodstudio copy beside the project, from either kind of file', () => {
+    expect(projectCopyDialogOptions('D:\\p\\monday.json').defaultPath).toBe('D:\\p\\monday copy.dodstudio');
+    expect(projectCopyDialogOptions('D:\\p\\monday.dodstudio').defaultPath).toBe('D:\\p\\monday copy.dodstudio');
+  });
+});
 
 describe('the first save', () => {
   it('defaults to a .dodstudio file in the projects folder', () => {

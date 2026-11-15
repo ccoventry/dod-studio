@@ -295,6 +295,11 @@ fn describe_spectator_crosshair(on: bool) -> &'static str {
 /// `deathmsg::poll`, `spectator_target::poll` and `msglog::poll` below do
 /// not depend on cvars existing at all and must run either way (issue #324).
 pub fn poll() {
+    // The hang reporter's heartbeat: only frames the engine thread draws,
+    // not the fallback timer thread's ticks.
+    if engine::hud_frame_driving() {
+        crate::hang::beat();
+    }
     // Cvar-backed polling: each reads a `CVAR_*` pointer that stays null
     // when its cvar did not register, and then does nothing.
     // One cvar, several readers: the viewmodel's animations here, and
@@ -354,6 +359,8 @@ pub fn poll() {
     );
     poll_hand_signals();
     poll_ex_interp();
+    crate::crosshair_scale::poll(CVAR_CROSSHAIR_SCALE.value());
+    crate::crosshair_outline::poll();
     poll_flag(
         TEXTURE_HIRES_LOG_NAME,
         &CVAR_TEXTURE_HIRES_LOG,
@@ -371,6 +378,9 @@ pub fn poll() {
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
+    // Draws the map's own models in a POV demo played as HLTV, where the
+    // game never calls the code that does.
+    crate::env_models::poll();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -432,11 +442,15 @@ pub fn poll() {
     // Patches Core.dll's packet loop once viewdemo loads it, and logs each
     // load's time (#798).
     crate::fast_load::poll();
+    // Patches DemoPlayer.dll's dictionary grow once viewdemo loads it (#1392).
+    crate::demoplayer_dict_cache::keep_installed();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
     crate::connect_guard::poll();
     crate::events::poll();
+    // Only until +map is wrapped (#1441).
+    crate::pov_map_keys::poll();
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
@@ -479,6 +493,8 @@ pub fn poll() {
     crate::own_blood::poll();
     // A float compare unless ds_map_weather changed (#1129).
     crate::map_weather::poll();
+    // Two float loads and a level-name hash unless ds_map_wind changed.
+    crate::map_wind::poll();
     crate::map_sounds::poll();
     // A level-name hash and a few byte compares once applied (#1312).
     crate::map_light::poll();

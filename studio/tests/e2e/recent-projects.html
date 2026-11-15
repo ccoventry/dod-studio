@@ -60,7 +60,8 @@
     import { createProjectConvert } from '/src/project_convert.js';
 
     window.__missing = [];
-    window.__mockInvokeHandlers.files_exist = ({ paths }) => paths.map((p) => !window.__missing.includes(p));
+    window.__mockInvokeHandlers.files_exist = ({ paths }) =>
+      paths.map((p) => !window.__missing.includes(p) && !p.includes('.before-'));
     window.__release = {};
     const held = (name, value) => (window.__hold
       ? new Promise((resolve) => { window.__release[name] = () => resolve(value); })

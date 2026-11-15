@@ -106,6 +106,9 @@ pub enum Sheet {
     Custom = 1,
     /// `sprites/crosshairs.spr`, the stock spectator crosshair.
     Stock = 2,
+    /// `sprites/dodcross.spr`, POV's red crosshair. Never swapped: it has no
+    /// tile for the table's crosshair to replace.
+    Red = 3,
 }
 
 impl Sheet {
@@ -115,6 +118,8 @@ impl Sheet {
             Sheet::Custom
         } else if file.eq_ignore_ascii_case("crosshairs.spr") {
             Sheet::Stock
+        } else if file.eq_ignore_ascii_case("dodcross.spr") {
+            Sheet::Red
         } else {
             Sheet::Other
         }
@@ -124,6 +129,7 @@ impl Sheet {
         match v {
             1 => Sheet::Custom,
             2 => Sheet::Stock,
+            3 => Sheet::Red,
             _ => Sheet::Other,
         }
     }
@@ -146,7 +152,7 @@ pub fn is_crosshair_draw(sheet: Sheet, rect: &Wrect, in_eye: bool) -> bool {
     match sheet {
         Sheet::Custom => true,
         Sheet::Stock => in_eye && *rect == SPECTATOR_RECT,
-        Sheet::Other => false,
+        Sheet::Red | Sheet::Other => false,
     }
 }
 
@@ -429,8 +435,9 @@ mod tests {
         assert_eq!(Sheet::of("sprites/customXHair.spr"), Sheet::Custom);
         assert_eq!(Sheet::of("sprites/CUSTOMXHAIR.SPR"), Sheet::Custom);
         assert_eq!(Sheet::of("sprites/crosshairs.spr"), Sheet::Stock);
+        assert_eq!(Sheet::of("sprites/dodcross.spr"), Sheet::Red);
         assert_eq!(Sheet::of("sprites/hud_icons.spr"), Sheet::Other);
-        for s in [Sheet::Other, Sheet::Custom, Sheet::Stock] {
+        for s in [Sheet::Other, Sheet::Custom, Sheet::Stock, Sheet::Red] {
             assert_eq!(Sheet::from_u8(s as u8), s);
         }
         let any = rect(64, 0, 128, 64);
@@ -441,6 +448,8 @@ mod tests {
         assert!(!is_crosshair_draw(Sheet::Stock, &SPECTATOR_RECT, false));
         assert!(!is_crosshair_draw(Sheet::Stock, &any, true));
         assert!(!is_crosshair_draw(Sheet::Other, &any, true));
+        // The red crosshair is never swapped.
+        assert!(!is_crosshair_draw(Sheet::Red, &any, true));
     }
 
     #[test]

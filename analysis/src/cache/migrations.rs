@@ -418,11 +418,13 @@ mod tests {
     /// entry would be estimated at milliseconds by the rescan prompt while
     /// it re-parses in full, and would keep its old folder from the sweep.
     /// Nor v15 (#1132): a v14 entry has no `ClientAreas` to tell who was
-    /// capping at a kill.
+    /// capping at a kill. Nor v16: a v15 entry counts a KTP HLTV demo's
+    /// post-pause replay twice, and only the demo's frames tell which of its
+    /// kills, chat and captures were the replay's.
     #[test]
-    fn no_entry_older_than_15_upgrades() {
-        assert_eq!(super::super::SCHEMA_VERSION, 15);
-        for version in 0..15 {
+    fn no_entry_older_than_16_upgrades() {
+        assert_eq!(super::super::SCHEMA_VERSION, 16);
+        for version in 0..16 {
             assert!(!upgrades_from(version), "v{version}");
         }
     }
