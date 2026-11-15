@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,10 +161,67 @@ class QueueTrainTests(unittest.TestCase):
         self.assertIn("Ignored", text)
         self.assertIn("Queued: #4", text)
 
+    def test_a_reused_pid_with_another_start_time_is_a_dead_train(self):
+        dead = merge_queue.QueueStore(self.folder, pid=lambda: 300, alive=lambda p: True, start=lambda p: 111)
+        dead.acquire([7])
+        reused = merge_queue.QueueStore(self.folder, pid=lambda: 100, alive=lambda p: True, start=lambda p: 222)
+        self.assertIsNone(reused.holder(), "PID 300 is alive but started at another time")
+        same = merge_queue.QueueStore(self.folder, pid=lambda: 100, alive=lambda p: True, start=lambda p: 111)
+        self.assertEqual(same.holder(), 300)
+        owned, _added, _ignored = reused.acquire([8])
+        self.assertTrue(owned)
+
+    def test_status_shows_an_interrupted_pr(self):
+        self.store.acquire([1, 2])
+        self.store.take()  # killed here: current stays set, the lock stays on disk
+        dead_view = merge_queue.QueueStore(self.folder, pid=lambda: 5, alive=lambda p: False)
+        lines = merge_queue.status_lines(*dead_view.snapshot())
+        self.assertEqual(lines[0], "Train: not running")
+        self.assertIn("Interrupted at #1", lines[1])
+        self.assertIn("Queued: #2", lines)
+
+    def test_a_permission_error_on_the_mutex_counts_as_held_and_is_retried(self):
+        real_open, calls = merge_queue.os.open, []
+
+        def flaky(path, flags, *a):
+            calls.append(path)
+            if len(calls) == 1:
+                raise PermissionError("delete pending")
+            return real_open(path, flags, *a)
+
+        merge_queue.os.open = flaky
+        self.addCleanup(setattr, merge_queue.os, "open", real_open)
+        self.assertEqual(self.store.add([1])[0], [1])
+        self.assertGreaterEqual(len(calls), 2)
+
+    def test_a_stale_mutex_is_cleared_once_and_a_fresh_one_is_left_alone(self):
+        Path(self.folder).mkdir(exist_ok=True)
+        mutex = Path(self.folder) / "mutex"
+        mutex.write_text("")
+        clock = [mutex.stat().st_mtime + merge_queue.MUTEX_STALE_SECS + 5]
+        stale = merge_queue.QueueStore(self.folder, pid=lambda: 100, alive=lambda p: True,
+                                       clock=lambda: clock[0], sleep=lambda s: None)
+        self.assertEqual(stale.add([1])[0], [1], "the stale mutex did not block it")
+        mutex.write_text("")
+        fresh = merge_queue.QueueStore(self.folder, pid=lambda: 100, clock=lambda: mutex.stat().st_mtime + 1,
+                                       sleep=lambda s: None)
+        fresh._clear_stale_mutex()
+        self.assertTrue(mutex.exists(), "a mutex younger than the limit stays")
+
+    def test_dry_run_with_no_numbers_creates_nothing(self):
+        folder = Path(self.folder) / "not-yet"
+        store = merge_queue.QueueStore(folder, pid=lambda: 100, alive=lambda p: p == 100)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mt.main(["--dry-run"], store=store, gh=FakeGh({}))
+        self.assertFalse(folder.exists())
+
     def test_the_real_pid_check_knows_this_process_and_a_dead_one(self):
-        import os
         self.assertTrue(merge_queue.pid_alive(os.getpid()))
         self.assertFalse(merge_queue.pid_alive(2 ** 22 - 3))
+        if os.name == "nt":
+            self.assertIsNotNone(merge_queue.process_start(os.getpid()))
+            self.assertEqual(merge_queue.process_start(os.getpid()), merge_queue.process_start(os.getpid()))
 
 
 if __name__ == "__main__":

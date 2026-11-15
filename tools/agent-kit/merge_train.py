@@ -369,7 +369,7 @@ def main(argv=None, store=None, gh=None):
     try:
         if args.dry_run:
             # Nothing is written: the PRs given, or else the saved queue, run through a copy.
-            queue = merge_queue.MemoryQueue(args.prs or store.snapshot()[0]["pending"])
+            queue = merge_queue.MemoryQueue(args.prs or store.peek()["pending"])
         else:
             owned, added, ignored = store.acquire(args.prs)
             if ignored:

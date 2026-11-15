@@ -41,19 +41,37 @@ def default_dir():
     return Path(common or kit_paths.REPO / ".git") / "merge-train"
 
 
+def _kernel32():
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype, k.OpenProcess.argtypes = wintypes.HANDLE, [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.GetExitCodeProcess.restype = wintypes.BOOL
+    k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    k.GetProcessTimes.restype = wintypes.BOOL
+    k.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    k.CloseHandle.restype, k.CloseHandle.argtypes = wintypes.BOOL, [wintypes.HANDLE]
+    return k, ctypes, wintypes
+
+
+def _open_process(pid):
+    k, ctypes, wintypes = _kernel32()
+    handle = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    return (k, ctypes, wintypes, handle) if handle else None
+
+
 def pid_alive(pid):
     """Whether a process with this PID exists. (`os.kill(pid, 0)` would terminate it on Windows.)"""
     if os.name == "nt":
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
+        opened = _open_process(pid)
+        if not opened:
             return False
+        k, ctypes, wintypes, handle = opened
         try:
-            code = ctypes.c_ulong()
-            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
+            code = wintypes.DWORD()
+            return bool(k.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
         finally:
-            kernel32.CloseHandle(handle)
+            k.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -61,6 +79,24 @@ def pid_alive(pid):
     except PermissionError:
         return True
     return True
+
+
+def process_start(pid):
+    """When the process was created (Windows FILETIME ticks), or None when unknown. A PID
+    is reused after a process dies; the same PID with another start time is another process."""
+    if os.name != "nt":
+        return None
+    opened = _open_process(pid)
+    if not opened:
+        return None
+    k, ctypes, wintypes, handle = opened
+    try:
+        created, ex, kern, user = (wintypes.FILETIME() for _ in range(4))
+        if not k.GetProcessTimes(handle, *(ctypes.byref(t) for t in (created, ex, kern, user))):
+            return None
+        return (created.dwHighDateTime << 32) | created.dwLowDateTime
+    finally:
+        k.CloseHandle(handle)
 
 
 def empty_state():
@@ -104,8 +140,10 @@ class QueueStore(MemoryQueue):
     """The queue and lock on disk. Same take/merged/skipped/stopped calls as MemoryQueue,
     each one a locked read-modify-write of the file."""
 
-    def __init__(self, folder, pid=os.getpid, alive=pid_alive, clock=time.time, sleep=time.sleep):
+    def __init__(self, folder, pid=os.getpid, alive=pid_alive, clock=time.time, sleep=time.sleep,
+                 start=process_start):
         self.dir, self.pid, self.alive, self.clock, self.sleep = Path(folder), pid, alive, clock, sleep
+        self.start = start
         self.queue_file, self.lock_file, self.mutex_file = (self.dir / n for n in ("queue.json", "lock.json", "mutex"))
 
     # -- files ---------------------------------------------------------------
@@ -118,11 +156,10 @@ class QueueStore(MemoryQueue):
             try:
                 os.close(os.open(self.mutex_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                 break
-            except FileExistsError:
-                with contextlib.suppress(OSError):
-                    if self.clock() - self.mutex_file.stat().st_mtime > MUTEX_STALE_SECS:
-                        self.mutex_file.unlink()
-                        continue
+            # PermissionError: Windows says so for a file another process just deleted
+            # (delete pending), which is "held" too.
+            except (FileExistsError, PermissionError):
+                self._clear_stale_mutex()
                 if self.clock() >= deadline:
                     raise ToolError(f"the queue mutex {self.mutex_file} stayed held for {MUTEX_WAIT_SECS} s")
                 self.sleep(0.05)
@@ -131,6 +168,24 @@ class QueueStore(MemoryQueue):
         finally:
             with contextlib.suppress(OSError):
                 self.mutex_file.unlink()
+
+    def _clear_stale_mutex(self):
+        """Remove a mutex left by a process that died inside it. The file is renamed away first:
+        of two waiters that both see it stale only one rename succeeds, so they can't both
+        delete it and then both enter. A file found fresh after the rename (a new holder got
+        in between) is put back."""
+        mine = self.mutex_file.with_name(f"mutex.stale.{self.pid()}")
+        try:
+            if self.clock() - self.mutex_file.stat().st_mtime <= MUTEX_STALE_SECS:
+                return
+            os.replace(self.mutex_file, mine)
+            if self.clock() - mine.stat().st_mtime <= MUTEX_STALE_SECS:
+                with contextlib.suppress(OSError):
+                    os.link(mine, self.mutex_file)
+            mine.unlink()
+        except OSError:
+            with contextlib.suppress(OSError):
+                mine.unlink()
 
     def _read_json(self, path, default):
         try:
@@ -163,9 +218,12 @@ class QueueStore(MemoryQueue):
     def _holder(self):
         """The live train's PID, or None (no lock, or a stale one from a dead process)."""
         lock = self._read_json(self.lock_file, None)
-        if lock and lock.get("pid") and self.alive(lock["pid"]):
-            return lock["pid"]
-        return None
+        if not (lock and lock.get("pid") and self.alive(lock["pid"])):
+            return None
+        started = lock.get("start")
+        if started is not None and self.start(lock["pid"]) not in (None, started):
+            return None  # the PID was reused by another process: the train died
+        return lock["pid"]
 
     def holder(self):
         with self.mutex():
@@ -195,7 +253,7 @@ class QueueStore(MemoryQueue):
                     self.state = {**empty_state()}
                 self.state["current"] = None
                 self.state["stopped"] = None
-                self._write_json(self.lock_file, {"pid": self.pid(), "started": self.clock()})
+                self._write_json(self.lock_file, {"pid": self.pid(), "start": self.start(self.pid()), "started": self.clock()})
             added, ignored = self._append(prs)
             self._save()
         return owned, added, ignored
@@ -233,6 +291,10 @@ class QueueStore(MemoryQueue):
                 self.state["stopped"] = None
             self._save()
             return f"#{pr} removed from the queue"
+
+    def peek(self):
+        """The saved state, read without the mutex and without creating anything (`--dry-run`)."""
+        return {**empty_state(), **self._read_json(self.queue_file, {})}
 
     def snapshot(self):
         """(state, the running train's PID or None), for `status`."""
@@ -279,10 +341,15 @@ def status_lines(state, holder):
     def nums(items):
         return ", ".join(f"#{n}" for n in items) or "none"
 
+    stopped = (state["stopped"] or {}).get("pr")
+    # With no live train, `current` is a PR whose train died mid-way; it is retried first.
+    interrupted = state["current"] if not holder else None
+    held = {state["current"], stopped}
     lines = [f"Train: running (pid {holder})" if holder else "Train: not running"]
     if holder and state["current"]:
         lines.append(f"Merging now: #{state['current']}")
-    held = {state["current"], (state["stopped"] or {}).get("pr")}
+    if interrupted:
+        lines.append(f"Interrupted at #{interrupted} (the train died mid-PR); it goes first on the next run.")
     lines.append(f"Queued: {nums([n for n in state['pending'] if n not in held])}")
     lines.append(f"Merged: {nums(state['done'])}")
     if state["skipped"]:
