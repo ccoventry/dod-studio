@@ -1,5 +1,5 @@
 // players_ui.js — Configuration > Players (#428).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const M00CAT = '76561197972576011';
 

@@ -1,7 +1,7 @@
 // Start Capture's blockers mark the Configuration field that causes them (#25):
 // a blank hl.exe or hlae.exe path, no Capture Output folder. Harness: the
 // capture precheck page, which carries those three fields.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.addInitScript(() => {

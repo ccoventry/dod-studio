@@ -1,5 +1,5 @@
 // demo_drop.js (#530), driven against tests/e2e/demo-drop.html.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/demo-drop.html');

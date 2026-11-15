@@ -1,7 +1,7 @@
 // queue_repair.js — a Master Queue demo damaged partway (#15) gets a
 // "Damaged · Repair" button; clicking it repairs the demo without selecting
 // the row, with a progress bar in its place until it ends.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const row = (page, name) => page.locator('#master-demo-table-body tr', { hasText: name });
 

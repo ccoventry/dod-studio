@@ -24,7 +24,7 @@ const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 const KINDS = {
   mode: (v) => (CAPTURE_MODES.includes(v) ? v : undefined),
   size: (v) => (Number.isInteger(v) && v > 0 ? v : undefined),
-  // AGR's 0 is "the same as Capture FPS".
+  // AGR's 0 is a blank AGR FPS, which Start refuses in AGR mode.
   rateOrZero: (v) => (Number.isInteger(v) && v >= 0 ? v : undefined),
   seconds: (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined),
   flag: (v) => (typeof v === 'boolean' ? v : undefined),

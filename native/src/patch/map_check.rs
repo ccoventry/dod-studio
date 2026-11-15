@@ -170,7 +170,9 @@ pub fn status_of(reference: &MapReference, maps_dir: &Path) -> MapStatus {
     match bsp::map_checksum_of_file(&path) {
         Ok(found) if found == expected => MapStatus::Ok { checksum: found },
         Ok(found) => MapStatus::WrongBuild { expected, found },
-        Err(reason) => MapStatus::Unreadable { reason },
+        Err(reason) => MapStatus::Unreadable {
+            reason: reason.to_string(),
+        },
     }
 }
 

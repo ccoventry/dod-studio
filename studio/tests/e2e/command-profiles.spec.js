@@ -1,5 +1,5 @@
 // command_profiles_ui.js — named sets of Initial and Scheduled Commands (#442).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const FOTW = {
   init_commands: ['mirv_fov 90', 'r_decals 256'],

@@ -3,6 +3,7 @@
 // game that is already running, the running-process guard, and watching a
 // launch for the game's error boxes.
 
+use native::shared::lock::lock_or_recover;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -166,10 +167,7 @@ pub async fn launch_standalone_game(
 
 pub(crate) fn saved_settings(app: &tauri::AppHandle) -> crate::settings_manager::AppSettings {
     let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let guard = settings_state
-        .inner
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let guard = lock_or_recover(&settings_state.inner);
     guard.clone()
 }
 
