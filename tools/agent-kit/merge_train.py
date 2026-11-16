@@ -44,6 +44,11 @@ CHECKS_TIMEOUT_SECS = 45 * 60
 HEAD_MOVE_TIMEOUT_SECS = 120
 MERGED_TIMEOUT_SECS = 60
 SHORT_POLL_SECS = 5
+# A stacked PR's base branch is deleted when its parent merges and GitHub then retargets
+# the PR to dev; that takes a few seconds, so the train waits this long before it stops.
+RETARGET_TIMEOUT_SECS = 60
+# What gh/GitHub say when update-branch cannot merge dev into the PR (a 502 or a typo must not match).
+CONFLICT_PHRASES = ("due to conflicts", "merge conflict between base and head")
 # A PR whose base moves while its checks run is updated again, at most this often.
 MAX_UPDATES_PER_PR = 3
 # What `gh pr checks` prints before the new head commit has any check runs; it means
@@ -136,7 +141,7 @@ class Gh:
 
     def view(self, pr):
         return json.loads(self._ok(["pr", "view", str(pr), "--json",
-                                    "number,title,state,isDraft,baseRefName,mergeable,headRefOid,autoMergeRequest"]))
+                                    "number,title,state,isDraft,baseRefName,headRefName,mergeable,headRefOid,autoMergeRequest"]))
 
     def behind_by(self, head_sha):
         out = self._ok(["api", f"repos/{{owner}}/{{repo}}/compare/{BASE}...{head_sha}", "--jq", ".behind_by"])
@@ -187,6 +192,7 @@ class Stop(Exception):
 class Train:
     def __init__(self, gh, options, clock=time.monotonic, sleep=time.sleep, out=print):
         self.gh, self.opt, self.clock, self.sleep, self.out = gh, options, clock, sleep, out
+        self.merged_heads = set()  # head branches of the PRs this run merged
 
     def log(self, pr, text):
         self.out(f"[{datetime.now():%H:%M:%S}] #{pr} {text}")
@@ -217,14 +223,29 @@ class Train:
 
     def ride(self, pr, required):
         view = self.gh.view(pr)
+        stacked = self.is_stacked_on_merged(view)
+        if stacked and self.opt.dry_run:
+            # Its base is the only thing a retarget fixes; draft and conflicts are not.
+            problem = pr_problem({**view, "baseRefName": BASE})
+            if problem:
+                raise Stop(problem)
+            self.log(pr, f"{view['title']}: targets {view['baseRefName']}; would wait for GitHub to retarget, then merge")
+            self.merged_heads.add(view["headRefName"])
+            return
+        if stacked:
+            view = self.wait_for_retarget(pr, view)
         self.log(pr, f"{view['title']} (head {view['headRefOid'][:8]})")
         if view["state"] in ("MERGED", "CLOSED"):
+            if view["state"] == "MERGED":
+                # A child of a parent merged in an earlier run still gets retargeted.
+                self.merged_heads.add(view["headRefName"])
             raise Skip(f"already {view['state'].lower()}")
         problem = pr_problem(view)
         if problem:
             raise Stop(problem)
         if self.opt.dry_run:
             self.dry_run(pr, view, required)
+            self.merged_heads.add(view["headRefName"])
             return
         head = view["headRefOid"]
         for _update in range(MAX_UPDATES_PER_PR + 1):
@@ -238,6 +259,24 @@ class Train:
         self.log(pr, f"merging (--merge, head {head[:8]})")
         self.gh.merge(pr, head)
         self.confirm_merged(pr)
+        self.merged_heads.add(view["headRefName"])
+
+    def is_stacked_on_merged(self, view):
+        """True for an open PR whose base is the head branch of a PR this run merged: GitHub
+        retargets it to dev a few seconds later. Any other base (a branch nobody here merged,
+        main) is a real mistake that pr_problem reports at once."""
+        return view["state"] == "OPEN" and view["baseRefName"] in self.merged_heads
+
+    def wait_for_retarget(self, pr, view):
+        """The PR's view once its base is dev, polling while GitHub retargets it."""
+        self.log(pr, f"targets {view['baseRefName']}, not {BASE}; waiting for GitHub to retarget it")
+        deadline = self.clock() + RETARGET_TIMEOUT_SECS
+        while self.clock() < deadline:
+            self.sleep(SHORT_POLL_SECS)
+            view = self.gh.view(pr)
+            if view["state"] != "OPEN" or view["baseRefName"] == BASE:
+                break
+        return view
 
     def dry_run(self, pr, view, required):
         behind = self.gh.behind_by(view["headRefOid"])
@@ -257,7 +296,12 @@ class Train:
             self.log(pr, f"up to date with {BASE}")
             return head
         self.log(pr, f"{behind} commits behind {BASE}; gh pr update-branch")
-        self.gh.update_branch(pr)
+        try:
+            self.gh.update_branch(pr)
+        except ToolError as e:
+            if any(phrase in str(e).lower() for phrase in CONFLICT_PHRASES):
+                raise Stop(f"has conflicts with {BASE}: resolve and rerun ({e})") from e
+            raise
         deadline = self.clock() + HEAD_MOVE_TIMEOUT_SECS
         while self.clock() < deadline:
             view = self.gh.view(pr)
