@@ -660,16 +660,34 @@ pub fn launch_through_wmi(pid: u32) -> String {
     format!("[launch] Started through WMI (PID {pid}), so the game outlives this dev Studio (#545)")
 }
 
+/// How `sys::bring_forward`'s watch ended, `took` after the launch. A
+/// refusal is a failure and carries Windows' error.
 pub fn bring_forward_outcome(
     outcome: crate::sys::bring_forward::Outcome,
     took: std::time::Duration,
 ) -> String {
     use crate::sys::bring_forward::Outcome;
     let what = match outcome {
-        Outcome::Brought => "brought the game's window to the front",
-        Outcome::AlreadyInFront => "the game's window opened in front",
-        Outcome::LeftBehind => "left the game's window behind: another window was in front",
-        Outcome::NoWindow => "no new game window showed",
+        Outcome::Brought => "brought the game's window to the front".to_string(),
+        Outcome::AlreadyInFront => "the game's window opened in front".to_string(),
+        Outcome::OtherWindowInFront => {
+            "left the game's window behind: another program's window was in front".to_string()
+        }
+        Outcome::NoForeground => {
+            "left the game's window behind: no window was in front".to_string()
+        }
+        Outcome::Refused(0) => "Failed to bring the game's window to the front: Windows refused \
+             SetForegroundWindow and gave no error code"
+            .to_string(),
+        Outcome::Refused(code) => format!(
+            "Failed to bring the game's window to the front: Windows refused \
+             SetForegroundWindow: {}",
+            std::io::Error::from_raw_os_error(code as i32)
+        ),
+        Outcome::NoWindow => "no new game window showed".to_string(),
+        Outcome::Superseded => {
+            "stopped watching for the game's window: a newer launch took over".to_string()
+        }
     };
     format!(
         "[launch] {what} ({:.1} s after the launch)",

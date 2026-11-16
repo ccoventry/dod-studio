@@ -3,7 +3,6 @@
 pub mod analysis_server;
 /// Brings a game started through WMI to the front, as a child of Studio's
 /// would come.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bring_forward;
 /// A job object that ends the processes put in it when Studio exits (#1439).
 pub mod child_job;
@@ -52,6 +51,9 @@ pub mod steam;
 /// game (#1235).
 #[cfg(windows)]
 pub mod studio_pipe;
+/// Another process's top-level windows: which it owns, which are visible.
+#[cfg(windows)]
+pub mod window_list;
 /// "Keep free on the Windows drive" (#1430): what captures and renders leave
 /// free on the drive Windows is installed on.
 pub mod windows_drive;

@@ -65,14 +65,18 @@ enum Kind {
 impl Launcher {
     /// Starts `cmd`, outside Studio's job when that job would end it when
     /// Studio closes. May set `cmd`'s creation flags, so callers set none.
-    /// For a game the user opened (Launch Game, Review, Launch Preview): one
-    /// started through WMI is brought to the front once its window shows, as
-    /// Studio's own child would come (`sys::bring_forward`).
+    ///
+    /// This is the launch that brings the game forward, for a game the user
+    /// opened (Launch Game, Review, Launch Preview): when the launcher was
+    /// started through WMI, the game it starts is brought to the front once
+    /// its window shows, as Studio's own child would come
+    /// (`sys::bring_forward`). [`Launcher::spawn_unless_cancelled`] never
+    /// does.
     pub fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
-        let games_before = crate::sys::process::game_pids();
+        let launch = crate::sys::bring_forward::ThisLaunch::starting_now();
         let launcher = Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))?;
-        if let Kind::Detached { pid, .. } = launcher.kind {
-            crate::sys::bring_forward::when_shown(pid, games_before);
+        if let Kind::Detached { pid, exe_name } = &launcher.kind {
+            crate::sys::bring_forward::when_shown(launch, *pid, exe_name.clone());
         }
         Ok(launcher)
     }
@@ -80,8 +84,11 @@ impl Launcher {
     /// [`Launcher::spawn`] for a launch the user can cancel (a capture
     /// batch). A cancel while WMI is starting the launcher ends whatever it
     /// started and fails with [`std::io::ErrorKind::Interrupted`]; it never
-    /// falls back to starting another (follows #1198). The game is left
-    /// where it opens: a batch keeps it behind (#434).
+    /// falls back to starting another (follows #1198).
+    ///
+    /// Never brings the game forward: it opens wherever Windows puts it, and
+    /// a batch keeps it behind (#434). [`Launcher::spawn`] is the one that
+    /// brings it forward.
     pub fn spawn_unless_cancelled(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Self> {
         if !crate::sys::job::kills_children_on_close() {
             return cmd.spawn().map(Self::child);
@@ -182,7 +189,7 @@ fn spawn_breaking_away(_cmd: &mut Command) -> std::io::Result<Option<Child>> {
 
 /// Whether `pid` is still the process named `exe_name`. A pid now held by
 /// another process means the launcher has gone.
-fn is_running_in(sys: &System, pid: u32, exe_name: &str) -> bool {
+pub(crate) fn is_running_in(sys: &System, pid: u32, exe_name: &str) -> bool {
     sys.process(Pid::from_u32(pid))
         .is_some_and(|process| crate::sys::process::is_named(process, &[exe_name]))
 }
