@@ -225,6 +225,10 @@ class Train:
         view = self.gh.view(pr)
         stacked = self.is_stacked_on_merged(view)
         if stacked and self.opt.dry_run:
+            # Its base is the only thing a retarget fixes; draft and conflicts are not.
+            problem = pr_problem({**view, "baseRefName": BASE})
+            if problem:
+                raise Stop(problem)
             self.log(pr, f"{view['title']}: targets {view['baseRefName']}; would wait for GitHub to retarget, then merge")
             self.merged_heads.add(view["headRefName"])
             return
@@ -232,6 +236,9 @@ class Train:
             view = self.wait_for_retarget(pr, view)
         self.log(pr, f"{view['title']} (head {view['headRefOid'][:8]})")
         if view["state"] in ("MERGED", "CLOSED"):
+            if view["state"] == "MERGED":
+                # A child of a parent merged in an earlier run still gets retargeted.
+                self.merged_heads.add(view["headRefName"])
             raise Skip(f"already {view['state'].lower()}")
         problem = pr_problem(view)
         if problem:

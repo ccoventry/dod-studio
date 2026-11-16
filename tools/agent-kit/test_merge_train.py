@@ -244,7 +244,7 @@ class TrainTests(unittest.TestCase):
         self.assertEqual(result.reason, err)
 
     def test_gh_conflict_phrase_is_recognised(self):
-        err = "Pull request branch cannot be updated due to conflicts"
+        err = "Cannot update PR branch due to conflicts"
         _gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error=err)}, [1])
         self.assertTrue(result.reason.startswith("has conflicts with dev"))
         self.assertIn(err, result.reason)
@@ -255,6 +255,21 @@ class TrainTests(unittest.TestCase):
         result = mt.Train(gh, mt.Options(), clock=clock, sleep=clock.sleep, out=lambda _l: None).run([1, 2])
         self.assertEqual(result.stopped_at, 2)
         self.assertEqual(clock.now, 0)
+
+    def test_a_child_of_a_parent_merged_in_an_earlier_run_still_waits_for_the_retarget(self):
+        gh = FakeGh({1: pr([(GREEN, "")], state="MERGED"), 2: pr([(GREEN, "")], base="feat/1")})
+        gh.retarget_after_views(2, 3)
+        clock = FakeClock()
+        result = mt.Train(gh, mt.Options(interval_secs=30, timeout_secs=600), clock=clock,
+                          sleep=clock.sleep, out=lambda _l: None).run([1, 2])
+        self.assertEqual((result.skipped, result.merged), ([1], [2]))
+
+    def test_dry_run_still_refuses_a_stacked_draft_or_conflict(self):
+        for extra, word in (({"draft": True}, "draft"), ({"mergeable": "CONFLICTING"}, "conflicts")):
+            gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/1", **extra)})
+            result = mt.Train(gh, mt.Options(dry_run=True), out=lambda _l: None).run([1, 2])
+            self.assertEqual(result.stopped_at, 2)
+            self.assertIn(word, result.reason)
 
     def test_dry_run_does_not_wait_for_a_retarget(self):
         gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/1")})
