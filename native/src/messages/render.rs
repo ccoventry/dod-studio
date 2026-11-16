@@ -144,9 +144,48 @@ pub fn segments_removed(job_id: impl Display, removed: usize, why: &str) -> Stri
     format!("[render] job {job_id}: removed {removed} finished segment(s): {why}")
 }
 
-/// Segments of the same take rendered with other settings, thrown away.
-pub fn stale_segments_removed(dir: impl Display) -> String {
-    format!("[render] removed segments of a render of this take with other settings: {dir}")
+/// Whose segments a sweep removed, for [`leftover_segments_removed`].
+pub const LEFTOVER_OTHER_SETTINGS: &str = "a render of this take with other settings";
+pub const LEFTOVER_OTHER_FOLDER: &str = "a stopped render of this take in another export folder (this render's room is in a different one)";
+pub const LEFTOVER_TAKE_GONE: &str = "a take that is no longer there";
+pub const LEFTOVER_ONE_PIECE: &str =
+    "a stopped render of this take, which is now rendering in one piece";
+
+/// Segments no render will join, thrown away: `why` is whose they were.
+pub fn leftover_segments_removed(dir: impl Display, why: &str) -> String {
+    format!("[render] removed the segments of {why}: {dir}")
+}
+
+/// No export folder has room for a segmented render's segments and clip
+/// together, so it renders in one piece, which needs room for the clip only.
+pub fn segments_no_room(job_id: impl Display, segmented: u64) -> String {
+    format!(
+        "[render] job {job_id}: no export folder has {:.2} GB free for the segments and the clip together; rendering it in one piece",
+        segmented as f64 / GB
+    )
+}
+
+/// The Render tab row's speed cell while the segments are joined.
+pub fn joining_segments(count: usize) -> String {
+    format!("Joining {count} segments")
+}
+
+/// Why a join that FFmpeg finished without an error is no clip: it holds
+/// fewer frames than the take (a segment it read only part of).
+pub fn join_short(joined: Option<usize>, total: usize) -> String {
+    match joined {
+        Some(frames) => format!(
+            "Joining the segments gave {frames} of the take's {total} frames: a segment is damaged. Render the take again."
+        ),
+        None => format!(
+            "Joining the segments gave a clip FFmpeg counted no frames in (the take has {total}): a segment is damaged. Render the take again."
+        ),
+    }
+}
+
+/// A segmented render's join failed: the activity log's line.
+pub fn join_failed(job_id: impl Display, message: &str) -> String {
+    format!("[render] job {job_id}: joining the segments failed: {message}")
 }
 
 /// Segments that could not be removed.
@@ -200,5 +239,14 @@ mod tests {
             fps_from_render_settings("D:/t"),
             "Render Settings' Source FPS (the take doesn't say what it was captured at; D:/t)"
         );
+    }
+
+    #[test]
+    fn a_short_join_says_how_many_frames_it_got() {
+        assert_eq!(
+            join_short(Some(300), 1000),
+            "Joining the segments gave 300 of the take's 1000 frames: a segment is damaged. Render the take again."
+        );
+        assert!(join_short(None, 1000).contains("no frames in (the take has 1000)"));
     }
 }

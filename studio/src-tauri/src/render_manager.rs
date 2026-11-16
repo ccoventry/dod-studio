@@ -14,7 +14,8 @@ use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSession
 use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{
-    RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
+    RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_peak_reservation_estimate,
+    job_reservation_estimate, run_render_job,
 };
 use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_background};
 use native::hlcr::take_cleanup::attempt_stream;
@@ -576,23 +577,16 @@ impl RenderManager {
             .map(|j| j.clip.take_folder.clone())
     }
 
-    /// What the first jobs to start need on the export drives, one figure per
-    /// job, since each job writes to one drive: the largest `max_concurrent`
-    /// estimates among the queued jobs, which is what `run_render_job`'s drive
-    /// routing checks as they start together. Later jobs reserve from what
-    /// finished renders actually wrote (#120).
-    pub(crate) fn first_wave_pieces(&self, max_concurrent: usize) -> Vec<u64> {
-        let mut estimates: Vec<u64> = self
-            .jobs
+    /// The queued jobs' takes and settings, for [`first_wave_pieces`]: copied
+    /// out so the estimates, which read take headers, run without the lock.
+    pub(crate) fn queued_takes(&self) -> Vec<(ClipData, RenderCodec, String)> {
+        self.jobs
             .lock()
             .unwrap()
             .iter()
             .filter(|j| j.status == "Queued")
-            .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
-            .collect();
-        estimates.sort_unstable_by(|a, b| b.cmp(a));
-        estimates.truncate(max_concurrent.max(1));
-        estimates
+            .map(|j| (j.clip.clone(), j.codec, j.custom_codec_args.clone()))
+            .collect()
     }
 
     /// Takes these takes' rows out of the list before their folders go to the
@@ -1419,6 +1413,29 @@ async fn scan_and_merge(
 /// Queued), and batch-wide infrastructure (ffmpeg path, export pool,
 /// concurrency) came from `queue_render_batch`'s payload via `last_config`.
 ///
+/// What the first jobs to start need on the export drives, one figure per
+/// job, since each job writes to one drive: the largest `max_concurrent`
+/// estimates among the `queued` takes ([`RenderManager::queued_takes`]),
+/// which is what `run_render_job`'s drive routing checks as they start
+/// together, with room for a long take's segments and clip together (#1451).
+/// Later jobs reserve from what finished renders actually wrote (#120).
+/// Reads take headers: run it off the async worker.
+fn first_wave_pieces(
+    queued: &[(ClipData, RenderCodec, String)],
+    max_concurrent: usize,
+    setting_fps: u32,
+) -> Vec<u64> {
+    let mut estimates: Vec<u64> = queued
+        .iter()
+        .map(|(clip, codec, custom_args)| {
+            job_peak_reservation_estimate(clip, *codec, custom_args, setting_fps)
+        })
+        .collect();
+    estimates.sort_unstable_by(|a, b| b.cmp(a));
+    estimates.truncate(max_concurrent.max(1));
+    estimates
+}
+
 /// Every Queued row renders (#70): the tick boxes scope Cancel, Retry,
 /// Remove and Delete, not Start. A row to leave out is cancelled or removed.
 #[tauri::command]
@@ -1441,13 +1458,16 @@ pub async fn start_queued_render(
     // #644: with "Only when space is needed", finished takes make room on the
     // export drives before the first jobs reserve theirs there.
     if crate::take_cleanup_manager::makes_room(&app) && !config.export_directories.is_empty() {
-        let need = native::hlcr::take_cleanup::SpaceNeed {
-            targets: config.export_directories.clone(),
-            pieces: state.first_wave_pieces(config.max_concurrent_renders),
-            headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
-        };
+        let queued = state.queued_takes();
+        let targets = config.export_directories.clone();
+        let (max_concurrent, setting_fps) = (config.max_concurrent_renders, config.fps);
         let cleanup_app = app.clone();
         let _ = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+            let need = native::hlcr::take_cleanup::SpaceNeed {
+                targets,
+                pieces: first_wave_pieces(&queued, max_concurrent, setting_fps),
+                headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
+            };
             crate::take_cleanup_manager::make_room(
                 &cleanup_app,
                 crate::take_cleanup_manager::RoomFor::Finish,

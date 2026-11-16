@@ -342,13 +342,16 @@ pub(super) fn concat_list(segment_names: &[String]) -> String {
 
 /// The join's command line: the segments listed in `list_file` copied into
 /// `out_file` as they are, with the render's DoD Studio tag (#1442).
+/// `-xerror` ends it with an error at a segment it can't read: without it the
+/// concat demuxer stops at a missing or damaged segment and FFmpeg still
+/// exits 0 with a short clip. The caller checks the joined frame count too.
 pub(super) fn join_args(
     list_file: &Path,
     out_file: &Path,
     file_ext: &str,
     clip_tag: Option<&str>,
 ) -> Vec<String> {
-    let mut args: Vec<String> = ["-y", "-hide_banner", "-f", "concat", "-i"]
+    let mut args: Vec<String> = ["-y", "-hide_banner", "-xerror", "-f", "concat", "-i"]
         .map(str::to_string)
         .to_vec();
     args.push(list_file.to_string_lossy().into_owned());
@@ -402,9 +405,9 @@ pub(super) struct KeySettings<'a> {
     pub(super) encode: &'a Encode<'a>,
     pub(super) plan: &'a SegmentPlan,
     pub(super) ffmpeg_path: &'a str,
-    /// The take's wav and video sizes together: a take written over in
-    /// place changes them.
-    pub(super) source_bytes: u64,
+    /// The take's wav and video sizes and modified times: a take written
+    /// over in place changes them, even at the same length.
+    pub(super) source_stamp: &'a str,
 }
 
 /// Bumped when a segment's command line changes in a way the key's parts
@@ -416,29 +419,11 @@ const KEY_FORMAT: &str = "1";
 /// follows Max Concurrent Renders, which may change between the stop and
 /// the resume.
 pub(super) fn segment_key(clip: &ClipData, settings: &KeySettings) -> SegmentKey {
-    let hex = |parts: &[&str]| {
-        let mut hash = Fnv1a::new();
-        for part in parts {
-            hash.update(part.as_bytes());
-            // A separator no part holds, so ("ab", "c") and ("a", "bc")
-            // differ.
-            hash.update(&[0]);
-        }
-        format!("{:016x}", hash.finish())
-    };
-    let take = hex(&[
-        &clip.take_folder,
-        &clip.clip_type,
-        &clip.img_folder,
-        clip.alpha_folder.as_deref().unwrap_or(""),
-        clip.wav_file.as_deref().unwrap_or(""),
-        clip.video_file.as_deref().unwrap_or(""),
-    ]);
     let plan = settings.plan;
     let settings = hex(&[
         KEY_FORMAT,
         &clip.frame_count.to_string(),
-        &settings.source_bytes.to_string(),
+        settings.source_stamp,
         &settings.encode.video_args.join(" "),
         settings.encode.file_ext,
         &format!("{:?}", plan.pictures),
@@ -446,7 +431,45 @@ pub(super) fn segment_key(clip: &ClipData, settings: &KeySettings) -> SegmentKey
         &plan.segment_frames.to_string(),
         settings.ffmpeg_path,
     ]);
-    SegmentKey { take, settings }
+    SegmentKey {
+        take: take_key(clip),
+        settings,
+    }
+}
+
+/// The take-and-stream part of `clip`'s segment keys, whatever the
+/// settings: every segment folder of this take and stream starts with it.
+pub(super) fn take_key(clip: &ClipData) -> String {
+    hex(&[
+        &clip.take_folder,
+        &clip.clip_type,
+        &clip.img_folder,
+        clip.alpha_folder.as_deref().unwrap_or(""),
+        clip.wav_file.as_deref().unwrap_or(""),
+        clip.video_file.as_deref().unwrap_or(""),
+    ])
+}
+
+/// `parts` hashed together, as 16 hex digits.
+fn hex(parts: &[&str]) -> String {
+    let mut hash = Fnv1a::new();
+    for part in parts {
+        hash.update(part.as_bytes());
+        // A separator no part holds, so ("ab", "c") and ("a", "bc") differ.
+        hash.update(&[0]);
+    }
+    format!("{:016x}", hash.finish())
+}
+
+/// The most a segmented render has on its export drive at once, for a clip
+/// of `clip_bytes`: the joined clip, plus the segments still to render (the
+/// finished ones are on the disk already, so its free space counts them).
+/// Twice the clip for a render starting from nothing.
+pub(super) fn peak_bytes(clip_bytes: u64, plan: &SegmentPlan, frames_on_disk: usize) -> u64 {
+    let total = plan.total_frames.max(1) as u128;
+    let to_render = plan.total_frames.saturating_sub(frames_on_disk) as u128;
+    let segments = (u128::from(clip_bytes) * to_render).div_ceil(total);
+    clip_bytes.saturating_add(u64::try_from(segments).unwrap_or(u64::MAX))
 }
 
 #[cfg(test)]
@@ -723,7 +746,7 @@ mod tests {
         assert_eq!(
             args.join(" "),
             format!(
-                "-y -hide_banner -f concat -i {} -map 0 -c copy -progress pipe:1 -loglevel error -metadata dodstudio_clip=v1/s/t/1/all -movflags use_metadata_tags {}",
+                "-y -hide_banner -xerror -f concat -i {} -map 0 -c copy -progress pipe:1 -loglevel error -metadata dodstudio_clip=v1/s/t/1/all -movflags use_metadata_tags {}",
                 list.display(),
                 out.display()
             )
@@ -734,7 +757,7 @@ mod tests {
         );
     }
 
-    fn key_for(clip: &ClipData, codec: RenderCodec, source_bytes: u64) -> SegmentKey {
+    fn key_for(clip: &ClipData, codec: RenderCodec, source_stamp: &str) -> SegmentKey {
         let config = config(codec);
         let encode = encode_settings(false, &config).unwrap();
         let plan = plan_of(Pictures::Sequence);
@@ -744,7 +767,7 @@ mod tests {
                 encode: &encode,
                 plan: &plan,
                 ffmpeg_path: "ffmpeg",
-                source_bytes,
+                source_stamp,
             },
         )
     }
@@ -752,28 +775,46 @@ mod tests {
     #[test]
     fn the_key_changes_with_the_settings_but_not_the_take_part() {
         let clip = clip(None, false);
-        let base = key_for(&clip, RenderCodec::ProRes422, 10);
-        assert_eq!(base, key_for(&clip, RenderCodec::ProRes422, 10));
-        let other_codec = key_for(&clip, RenderCodec::ProResLt, 10);
+        let base = key_for(&clip, RenderCodec::ProRes422, "10");
+        assert_eq!(base, key_for(&clip, RenderCodec::ProRes422, "10"));
+        let other_codec = key_for(&clip, RenderCodec::ProResLt, "10");
         assert_eq!(other_codec.take, base.take);
         assert_ne!(other_codec.settings, base.settings);
         assert!(base.is_other_settings(&other_codec.folder_name()));
         assert!(!base.is_other_settings(&base.folder_name()));
-        let rewritten = key_for(&clip, RenderCodec::ProRes422, 11);
+        let rewritten = key_for(&clip, RenderCodec::ProRes422, "11");
         assert_ne!(rewritten.settings, base.settings);
     }
 
     #[test]
+    fn every_key_of_a_take_starts_with_its_take_key() {
+        let clip = clip(None, false);
+        let key = key_for(&clip, RenderCodec::ProRes422, "10");
+        assert_eq!(key.take, take_key(&clip));
+        assert!(key.folder_name().starts_with(&take_key(&clip)));
+    }
+
+    #[test]
+    fn a_fresh_segmented_render_needs_twice_the_clip_and_a_resume_less() {
+        let plan = plan_of(Pictures::Sequence);
+        assert_eq!(peak_bytes(1000, &plan, 0), 2000);
+        // Two of three segments on the disk: the clip and one more segment.
+        assert_eq!(peak_bytes(1000, &plan, 600), 1334);
+        assert_eq!(peak_bytes(1000, &plan, 900), 1000);
+        assert_eq!(peak_bytes(u64::MAX, &plan, 0), u64::MAX);
+    }
+
+    #[test]
     fn another_take_or_stream_is_never_other_settings_of_this_one() {
-        let main = key_for(&clip(None, false), RenderCodec::ProRes422, 10);
+        let main = key_for(&clip(None, false), RenderCodec::ProRes422, "10");
         let mut other = clip(None, false);
         other.take_folder = "D:/takes/s/take0001".to_string();
-        let other = key_for(&other, RenderCodec::ProRes422, 10);
+        let other = key_for(&other, RenderCodec::ProRes422, "10");
         assert_ne!(other.take, main.take);
         assert!(!main.is_other_settings(&other.folder_name()));
         let mut alt_wav = clip(None, false);
         alt_wav.wav_file = Some("alt.wav".to_string());
-        let alt_wav = key_for(&alt_wav, RenderCodec::ProRes422, 10);
+        let alt_wav = key_for(&alt_wav, RenderCodec::ProRes422, "10");
         assert!(!main.is_other_settings(&alt_wav.folder_name()));
     }
 }

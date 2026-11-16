@@ -87,29 +87,44 @@ fn write_wav_header(path: &Path, seconds: f64) {
     std::fs::write(path, wav).unwrap();
 }
 
-/// The plan, encoder and claimed folder a render of `job` would use.
-fn claim(job: &RenderJob, output_folder: &Path) -> (SegmentPlan, Option<SegmentFolder>) {
-    let plan = super::super::segment_plan::plan(&take_facts(job, FPS)).expect("a segmented take");
-    let encode = encode_settings(job.is_hud, &job.config).unwrap();
-    let folder = claim_folder(job, &plan, &encode, output_folder);
-    (plan, folder)
+/// What a render of `job` would decide before reserving room.
+fn prepared(job: &RenderJob) -> Prepared {
+    prepare(job, FPS).expect("a segmented take")
 }
 
-#[test]
-fn a_take_of_three_segments_is_planned_in_three() {
+/// The plan and claimed folder a render of `job` into `output_folder` would
+/// use.
+async fn claim(job: &RenderJob, output_folder: &Path) -> (SegmentPlan, Option<SegmentFolder>) {
+    let prepared = prepared(job);
+    let folder = claim_folder(job, &prepared.key, output_folder).await;
+    (prepared.plan, folder)
+}
+
+/// A segment folder's name.
+fn name_of(folder: &SegmentFolder) -> String {
+    folder
+        .dir
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tokio::test]
+async fn a_take_of_three_segments_is_planned_in_three() {
     let root = Scratch::new("segmented_plan");
     let take = bare_take(&root);
     let job = job_for(
         clip_for(&take, None, false),
         config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
     );
-    let (plan, _) = claim(&job, &root);
+    let (plan, _) = claim(&job, &root).await;
     let spans: Vec<usize> = plan.segments().iter().map(|s| s.frames).collect();
     assert_eq!(spans, [30, 30, 10]);
 }
 
-#[test]
-fn claiming_throws_away_this_takes_other_settings_and_keeps_other_takes() {
+#[tokio::test]
+async fn claiming_throws_away_this_takes_other_settings_and_keeps_other_takes() {
     let root = Scratch::new("segmented_stale");
     let take = bare_take(&root);
     let export = root.join("export");
@@ -117,14 +132,9 @@ fn claiming_throws_away_this_takes_other_settings_and_keeps_other_takes() {
         clip_for(&take, None, false),
         config_for(&[&export], RenderCodec::ProRes422, "ffmpeg"),
     );
-    let (_, folder) = claim(&job, &export);
+    let (_, folder) = claim(&job, &export).await;
     let folder = folder.unwrap();
-    let name = folder
-        .dir
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
+    let name = name_of(&folder);
     let take_part = name.split('_').next().unwrap().to_string();
     drop(folder);
 
@@ -135,7 +145,7 @@ fn claiming_throws_away_this_takes_other_settings_and_keeps_other_takes() {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("0000.seg"), b"old").unwrap();
     }
-    let (_, folder) = claim(&job, &export);
+    let (_, folder) = claim(&job, &export).await;
     assert_eq!(folder.unwrap().dir, segments_root.join(&name));
     assert!(
         !stale.exists(),
@@ -144,27 +154,80 @@ fn claiming_throws_away_this_takes_other_settings_and_keeps_other_takes() {
     assert!(other_take.join("0000.seg").exists(), "another take's stay");
 }
 
-#[test]
-fn a_second_render_of_the_same_segments_renders_in_one_piece() {
+#[tokio::test]
+async fn a_second_render_of_the_same_segments_renders_in_one_piece() {
     let root = Scratch::new("segmented_busy");
     let take = bare_take(&root);
     let job = job_for(
         clip_for(&take, None, false),
         config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
     );
-    let (_, first) = claim(&job, &root);
+    let (_, first) = claim(&job, &root).await;
     assert!(first.is_some());
-    let (_, second) = claim(&job, &root);
+    let (_, second) = claim(&job, &root).await;
     assert!(second.is_none());
     drop(first);
-    let (_, third) = claim(&job, &root);
+    let (_, third) = claim(&job, &root).await;
     assert!(third.is_some(), "free again once the first render ends");
 }
 
+#[tokio::test]
+async fn a_claimed_folder_names_its_take() {
+    let root = Scratch::new("segmented_take_file");
+    let take = bare_take(&root);
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let (_, folder) = claim(&job, &root).await;
+    let written = std::fs::read_to_string(folder.unwrap().dir.join(TAKE_FILE)).unwrap();
+    assert_eq!(Path::new(&written), take);
+}
+
 /// A stopped render's segments are found in whichever export folder holds
-/// them, even when this render's clip goes to another.
-#[test]
-fn segments_in_another_export_folder_are_found() {
+/// them, with the frames they cover, and the render asks for room there
+/// first: the clip and the one segment still to render.
+#[tokio::test]
+async fn a_stopped_render_is_found_and_asks_for_room_on_its_own_drive_first() {
+    let root = Scratch::new("segmented_stopped");
+    let take = bare_take(&root);
+    let (first, second) = (root.join("e1"), root.join("e2"));
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&first, &second], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    assert!(prepared(&job).stopped.is_none());
+    let (_, folder) = claim(&job, &second).await;
+    let folder = folder.unwrap();
+    std::fs::write(folder.segment_file(0), b"a").unwrap();
+    std::fs::write(folder.segment_file(1), b"b").unwrap();
+    std::fs::write(folder.dir.join("0002.partial.seg"), b"c").unwrap();
+    drop(folder);
+
+    let resume = prepared(&job);
+    assert_eq!(
+        resume.stopped,
+        Some(Stopped {
+            export_dir: second.clone(),
+            frames_on_disk: 60,
+        })
+    );
+    let asks = resume.room_asks(&job.config.export_directories, 700);
+    let shown: Vec<(Vec<PathBuf>, u64)> = asks.into_iter().map(|a| (a.dirs, a.amount)).collect();
+    assert_eq!(
+        shown,
+        [
+            (vec![second.clone()], 800),
+            (vec![first.clone(), second.clone()], 1400),
+        ]
+    );
+}
+
+/// The room for the remaining segments was reserved on the drive the clip
+/// goes to, so a stopped render's segments in another export folder are
+/// thrown away and the render starts afresh in its own (#1451 review).
+#[tokio::test]
+async fn claiming_in_another_export_folder_throws_the_old_segments_away() {
     let root = Scratch::new("segmented_other_folder");
     let take = bare_take(&root);
     let (first, second) = (root.join("e1"), root.join("e2"));
@@ -172,27 +235,29 @@ fn segments_in_another_export_folder_are_found() {
         clip_for(&take, None, false),
         config_for(&[&first, &second], RenderCodec::ProRes422, "ffmpeg"),
     );
-    let (_, folder) = claim(&job, &second);
-    let in_second = folder.unwrap().dir.clone();
-    assert!(in_second.starts_with(&second));
-    let (_, folder) = claim(&job, &first);
-    assert_eq!(folder.unwrap().dir, in_second);
+    let (_, folder) = claim(&job, &second).await;
+    let in_second = folder.as_ref().unwrap().dir.clone();
+    std::fs::write(folder.unwrap().segment_file(0), b"a").unwrap();
+    let (_, folder) = claim(&job, &first).await;
+    let folder = folder.unwrap();
+    assert!(folder.dir.starts_with(&first));
+    assert!(!in_second.exists());
+    assert!(
+        !second.join(SEGMENTS_DIR).exists(),
+        "its empty root goes too"
+    );
 }
 
 #[test]
 fn removing_a_folder_counts_its_finished_segments_and_drops_an_empty_root() {
     let root = Scratch::new("segmented_remove");
-    let take = bare_take(&root);
-    let job = job_for(
-        clip_for(&take, None, false),
-        config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
-    );
-    let (_, folder) = claim(&job, &root);
-    let folder = folder.unwrap();
-    std::fs::write(folder.segment_file(0), b"a").unwrap();
-    std::fs::write(folder.segment_file(1), b"b").unwrap();
-    std::fs::write(folder.dir.join("0002.partial.seg"), b"c").unwrap();
-    assert_eq!(folder.remove(), 2);
+    let dir = root.join(SEGMENTS_DIR).join("take_settings");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(segment_name(0)), b"a").unwrap();
+    std::fs::write(dir.join(segment_name(1)), b"b").unwrap();
+    std::fs::write(dir.join("0002.partial.seg"), b"c").unwrap();
+    std::fs::write(dir.join(TAKE_FILE), b"D:/t").unwrap();
+    assert_eq!(remove_segment_dir(&dir), 2);
     assert!(!root.join(SEGMENTS_DIR).exists());
 }
 
@@ -210,18 +275,114 @@ fn segments_are_numbered_with_four_digits_and_no_video_extension() {
     assert_eq!(segment_name(12345), "12345.seg");
 }
 
-#[test]
-fn only_the_picked_folders_are_removed() {
-    let dir = crate::test_support::Scratch::new("segments_stale");
-    let root = dir.join(SEGMENTS_DIR);
-    for name in ["take_old", "take_new", "other_x"] {
+/// Folders under `root`, each with one segment.
+fn segment_folders(root: &Path, names: &[&str]) {
+    for name in names {
         std::fs::create_dir_all(root.join(name)).unwrap();
         std::fs::write(root.join(name).join("0000.seg"), b"x").unwrap();
     }
-    remove_other_settings(std::slice::from_ref(&root), |f| f == "take_old");
+}
+
+#[test]
+fn only_the_picked_folders_are_removed() {
+    let dir = Scratch::new("segments_stale");
+    let root = dir.join(SEGMENTS_DIR);
+    segment_folders(&root, &["take_old", "take_new", "other_x"]);
+    remove_unclaimed(std::slice::from_ref(&root), |name, _| {
+        (name == "take_old").then_some("test")
+    });
     assert!(!root.join("take_old").exists());
     assert!(root.join("take_new").join("0000.seg").exists());
     assert!(root.join("other_x").exists());
+}
+
+#[test]
+fn a_folder_a_render_is_using_is_never_swept() {
+    let dir = Scratch::new("segments_in_use");
+    let root = dir.join(SEGMENTS_DIR);
+    let name = "segments_in_use_test_folder";
+    segment_folders(&root, &[name]);
+    lock_in_use().insert(name.to_string());
+    remove_unclaimed(std::slice::from_ref(&root), |_, _| Some("test"));
+    lock_in_use().remove(name);
+    assert!(root.join(name).join("0000.seg").exists());
+}
+
+/// A take deleted with its segments still in an export folder (#1451
+/// review): the next render removes them; another take's stay, and so do
+/// segments whose folder names no take.
+#[tokio::test]
+async fn segments_of_a_take_that_is_gone_are_removed_by_the_next_render() {
+    let root = Scratch::new("segmented_orphans");
+    let take = bare_take(&root);
+    let export = root.join("export");
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&export], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let segments_root = export.join(SEGMENTS_DIR);
+    segment_folders(&segments_root, &["gone_a", "here_b", "unnamed_c"]);
+    let gone = root.join("demo").join("take0099");
+    std::fs::write(
+        segments_root.join("gone_a").join(TAKE_FILE),
+        gone.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    std::fs::write(
+        segments_root.join("here_b").join(TAKE_FILE),
+        take.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    remove_orphans(&job).await;
+    assert!(!segments_root.join("gone_a").exists());
+    assert!(segments_root.join("here_b").exists());
+    assert!(segments_root.join("unnamed_c").exists());
+}
+
+/// A take rendered in one piece (now short of room, or under a codec that
+/// isn't segmented) leaves no segments of a stopped render behind (#1451
+/// review); another take's stay.
+#[tokio::test]
+async fn rendering_in_one_piece_removes_this_takes_segments() {
+    let root = Scratch::new("segmented_one_piece");
+    let take = bare_take(&root);
+    let export = root.join("export");
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&export], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let take_part = super::super::segment_plan::take_key(&job.clip);
+    let segments_root = export.join(SEGMENTS_DIR);
+    let this_take = format!("{take_part}_0000000000000000");
+    let other_take = "ffffffffffffffff_0000000000000000";
+    segment_folders(&segments_root, &[&this_take, other_take]);
+    remove_take_segments(&job).await;
+    assert!(!segments_root.join(&this_take).exists());
+    assert!(segments_root.join(other_take).exists());
+}
+
+/// A take captured again in place at the same length has the same frame
+/// count and wav size; its wav's modified time still tells its segments
+/// from the old take's.
+#[test]
+fn a_take_written_again_at_the_same_length_gets_a_new_key() {
+    let root = Scratch::new("segmented_rewritten");
+    let take = bare_take(&root);
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let before = prepared(&job).key;
+    let wav = std::fs::File::options()
+        .write(true)
+        .open(take.join("sound.wav"))
+        .unwrap();
+    wav.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000))
+        .unwrap();
+    drop(wav);
+    let after = prepared(&job).key;
+    assert_eq!(after.take, before.take);
+    assert_ne!(after.settings, before.settings);
 }
 
 // ── With a real FFmpeg ───────────────────────────────────────────────────────
@@ -446,7 +607,7 @@ async fn a_stopped_render_resumes_from_its_finished_segments() {
     // What the stopped render left: segment 0 finished, segment 1 half
     // written under its partial name.
     let job = job_for(clip.clone(), config.clone());
-    let (plan, folder) = claim(&job, &export);
+    let (plan, folder) = claim(&job, &export).await;
     let folder = folder.unwrap();
     let encode = encode_settings(false, &config).unwrap();
     let other = make_take(&ffmpeg, &root.join("other"), false, false);
@@ -521,4 +682,67 @@ fn segment_zero_copy(
     .collect();
     ffmpeg_ok(ffmpeg, take, &args);
     out
+}
+
+/// A segment on disk under its finished name but damaged (#1451 review: a
+/// zero-filled `0001.seg` joined into 300 of 1,000 frames and the job ended
+/// Finished): the join fails, no clip is left and the segments are removed,
+/// so the next render starts afresh.
+#[tokio::test]
+#[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+async fn a_damaged_segment_fails_the_join_instead_of_a_short_clip() {
+    let ffmpeg = real_ffmpeg();
+    let root = Scratch::new("segmented_damaged");
+    let take = make_take(&ffmpeg, &root, false, false);
+    let export = root.join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    let clip = clip_for(&take, None, false);
+    let config = config_for(&[&export], RenderCodec::ProRes422, &ffmpeg);
+
+    let job = job_for(clip.clone(), config.clone());
+    let (plan, folder) = claim(&job, &export).await;
+    let folder = folder.unwrap();
+    let encode = encode_settings(false, &config).unwrap();
+    for segment in plan.segments() {
+        let out = folder.segment_file(segment.index);
+        if segment.index == 1 {
+            std::fs::write(&out, vec![0u8; 64 * 1024]).unwrap();
+            continue;
+        }
+        let args: Vec<String> = SegmentArgs {
+            clip: &clip,
+            plan: &plan,
+            segment,
+            encode: &encode,
+            threads: 2,
+            out_file: &out,
+        }
+        .to_args()
+        .into_iter()
+        .filter(|a| a != "-progress" && a != "pipe:1")
+        .collect();
+        ffmpeg_ok(&ffmpeg, &take, &args);
+    }
+    drop(folder);
+
+    let updates = render(clip, config).await;
+    let failed = updates.iter().any(|u| {
+        matches!(u, RenderUpdate::Finished(_, false, Some(e)) if e.contains("segment") || e.contains("FFmpeg failed"))
+    });
+    assert!(failed, "{updates:?}");
+    assert!(
+        !updates
+            .iter()
+            .any(|u| matches!(u, RenderUpdate::OutputPath(..))),
+        "{updates:?}"
+    );
+    let left: Vec<PathBuf> = std::fs::read_dir(&export)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert!(
+        left.is_empty(),
+        "no clip and no segments are left: {left:?}"
+    );
 }

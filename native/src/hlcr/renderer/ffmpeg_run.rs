@@ -27,9 +27,10 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Rese
     let whole_take = ProgressScale {
         frames_before: 0,
         total_frames: job.clip.frame_count,
+        max_percent: 100,
     };
     match run_to_end(job, args, Some(whole_take)).await {
-        RunEnd::Succeeded => finish_render(job, output),
+        RunEnd::Succeeded { .. } => finish_render(job, output),
         RunEnd::Exiting => {}
         RunEnd::NotStarted(reason) => job.refuse(reason),
         RunEnd::Cancelled => {
@@ -71,18 +72,21 @@ pub(super) fn finish_render(job: &RenderJob, output: &Reserved<'_>) {
 
 /// How one FFmpeg run's `frame=` lines become the job's percentage: the
 /// frames rendered before it (by earlier segments, #1451) plus its own, over
-/// the take's.
+/// the take's, up to `max_percent` (99 for segments: the join is still to
+/// come, and the job's `Finished` sends 100).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ProgressScale {
     pub(super) frames_before: usize,
     pub(super) total_frames: usize,
+    pub(super) max_percent: u32,
 }
 
 /// How one FFmpeg run ended.
 #[derive(Debug)]
 pub(super) enum RunEnd {
-    /// It exited with success.
-    Succeeded,
+    /// It exited with success, having written `last_frame` frames by its
+    /// last `frame=` line (`None` if it printed none).
+    Succeeded { last_frame: Option<usize> },
     /// Cancel was seen; FFmpeg was ended.
     Cancelled,
     /// Studio is closing (#1439): send nothing, rename nothing.
@@ -96,8 +100,9 @@ pub(super) enum RunEnd {
 }
 
 /// Runs FFmpeg with `args` for `job` until it exits or Cancel ends it,
-/// sending progress (scaled by `progress`, none when `None`) and speed
-/// updates on the way, and says how it ended. Sends no status of its own.
+/// sending progress (scaled by `progress`) and speed updates on the way, or
+/// none at all when `progress` is `None` (the join, whose row says it is
+/// joining), and says how it ended. Sends no status of its own.
 pub(super) async fn run_to_end(
     job: &RenderJob,
     args: Vec<String>,
@@ -133,11 +138,15 @@ pub(super) async fn run_to_end(
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
 
+    let mut last_frame = None;
     let exit_status = match read_progress(job, &mut reader, &mut interval, progress).await {
         Polled::Cancelled => None,
-        Polled::Done(()) => match wait_for_exit(job, &mut child, &mut interval).await {
+        Polled::Done(frame) => match wait_for_exit(job, &mut child, &mut interval).await {
             Polled::Cancelled => None,
-            Polled::Done(status) => Some(status),
+            Polled::Done(status) => {
+                last_frame = frame;
+                Some(status)
+            }
         },
     };
     if is_exiting() {
@@ -153,7 +162,7 @@ pub(super) async fn run_to_end(
     let err_log = finished_stderr(stderr_log).await;
 
     match exit_status {
-        Ok(status) if status.success() => RunEnd::Succeeded,
+        Ok(status) if status.success() => RunEnd::Succeeded { last_frame },
         Ok(status) => {
             let exit_code = status
                 .code()
@@ -260,13 +269,13 @@ enum Polled<T> {
 
 /// Sends progress (scaled by `scale`) and speed updates from FFmpeg's
 /// `-progress` output until it closes, checking the cancel flag on every
-/// tick of `interval`.
+/// tick of `interval`. Done with the last `frame=` value it read.
 async fn read_progress(
     job: &RenderJob,
     reader: &mut BufReader<ChildStdout>,
     interval: &mut Interval,
     scale: Option<ProgressScale>,
-) -> Polled<()> {
+) -> Polled<Option<usize>> {
     let mut line = String::new();
     let mut progress = ProgressLines::default();
     loop {
@@ -290,7 +299,7 @@ async fn read_progress(
             }
         }
     }
-    Polled::Done(())
+    Polled::Done(progress.last_frame)
 }
 
 /// Waits for FFmpeg to exit, checking the cancel flag on every tick of
@@ -317,10 +326,11 @@ async fn wait_for_exit(
 /// Reads FFmpeg's `-progress` lines (`key=value`): `frame` becomes a
 /// percentage of the take's frames (with the frames earlier segments
 /// rendered), `fps` and `speed` one speed line that shows the latest of
-/// both.
+/// both. Remembers the last `frame` value, which the join is checked by.
 struct ProgressLines {
     fps: String,
     speed: String,
+    last_frame: Option<usize>,
 }
 
 impl Default for ProgressLines {
@@ -328,13 +338,15 @@ impl Default for ProgressLines {
         Self {
             fps: "0".to_string(),
             speed: "0x".to_string(),
+            last_frame: None,
         }
     }
 }
 
 impl ProgressLines {
-    /// The update one line makes, if any. A take with no frame count, or a
-    /// run with no `scale` (the join of segments), gets no percentage.
+    /// The update one line makes, if any. A take with no frame count gets no
+    /// percentage; a run with no `scale` (the join of segments) gets no
+    /// updates at all.
     fn update_for(
         &mut self,
         job_id: &str,
@@ -348,12 +360,15 @@ impl ProgressLines {
         let pos = trimmed.find('=')?;
         let key = trimmed[..pos].trim();
         let val = trimmed[pos + 1..].trim();
+        if key == "frame" {
+            self.last_frame = val.parse::<usize>().ok();
+        }
+        let scale = scale?;
         match key {
             "frame" => {
-                let scale = scale?;
-                let current_frame = val.parse::<usize>().ok()? + scale.frames_before;
+                let current_frame = self.last_frame? + scale.frames_before;
                 let ratio = (current_frame * 100).checked_div(scale.total_frames)?;
-                let percent = std::cmp::min(100, ratio) as u32;
+                let percent = std::cmp::min(scale.max_percent as usize, ratio) as u32;
                 Some(RenderUpdate::Progress(job_id.to_string(), percent))
             }
             "fps" => {
@@ -386,6 +401,7 @@ mod tests {
             Some(ProgressScale {
                 frames_before: 0,
                 total_frames: frame_count,
+                max_percent: 100,
             }),
         )
     }
@@ -428,13 +444,34 @@ mod tests {
         let second_of_four = Some(ProgressScale {
             frames_before: 250,
             total_frames: 1000,
+            max_percent: 99,
         });
         assert_eq!(
             read_scaled(&["frame=0", "frame=125", "frame=250"], second_of_four),
             ["3 progress 25", "3 progress 37", "3 progress 50"]
         );
-        // The join has no frames of its own to show.
-        assert!(read_scaled(&["frame=500"], None).is_empty());
+    }
+
+    /// The last segment stops at 99%: the join is still to come.
+    #[test]
+    fn a_segments_percentage_stops_at_its_cap() {
+        let last = Some(ProgressScale {
+            frames_before: 900,
+            total_frames: 1000,
+            max_percent: 99,
+        });
+        assert_eq!(read_scaled(&["frame=100"], last), ["3 progress 99"]);
+    }
+
+    /// The join sends nothing (its row says it is joining) but keeps the
+    /// frame count it reached, which it is checked by.
+    #[test]
+    fn a_run_with_no_scale_sends_nothing_and_keeps_its_last_frame() {
+        let mut progress = ProgressLines::default();
+        for line in ["frame=300", "fps=900", "speed=30x", "frame=1000"] {
+            assert!(progress.update_for("3", line, None).is_none());
+        }
+        assert_eq!(progress.last_frame, Some(1000));
     }
 
     #[test]
