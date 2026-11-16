@@ -88,6 +88,9 @@ export async function bootWithDemos(page, count, extra = {}) {
     window.__mockInvokeHandlers = {
       get_settings: () => ({ pinned_folders: [], setup_dismissed: true, ...LONG, ...more }),
       diagnose_executable_paths: ({ paths }) => paths.map(() => 'ok'),
+      // Config tab asks on load; an undefined answer is now a page error (fixtures.js).
+      check_hlae_ffmpeg: () => ({ state: {}, can_link: false }),
+      blender_status: () => ({ blender: { exe: null, scripts: false }, maps: [], styles: [] }),
       browse_directory: () => ({
         path: dir, parent: null,
         subdirs: [{ name: 'Season 14 - Regular Season Playoff Round with a long name', path: `${dir}/sub`, demo_count: 12 }],

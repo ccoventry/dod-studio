@@ -1,8 +1,8 @@
 // Every main tab fits the window width: no horizontal page scrollbar at the
 // two common sizes (#46). Drives the real app shell against mocked IPC.
 import { readFileSync } from 'node:fs';
-import { bootWithDemos, makeRenderJobs } from './sizing-data.js';
 import { test, expect } from './fixtures.js';
+import { bootWithDemos, makeRenderJobs } from './sizing-data.js';
 
 const SIZES = [
   { width: 1280, height: 720 },
@@ -116,6 +116,6 @@ test.describe('Highlight Details at the narrowest common window (#46)', () => {
     await bootWithDemos(page, 5);
     await expect(page.locator('#detail-streaks-table th.col-stack')).toBeVisible();
     await expect(page.locator('#detail-streaks-table th.col-wide').first()).toBeHidden();
-    await expect(page.locator('#detail-streaks-table .streak-stack-when').first()).toContainText('Â·');
+    await expect(page.locator('#detail-streaks-table .streak-stack-when').first()).toContainText('·');
   });
 });
