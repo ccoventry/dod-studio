@@ -40,7 +40,7 @@ pub(super) fn request_highlights() {
     if *requested == name {
         return;
     }
-    crate::streaks::request(&crate::streaks::demo_path(&dod_dir(), &name));
+    crate::streaks::request(&crate::demo_locate::playing(&name));
     *requested = name;
 }
 

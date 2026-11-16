@@ -102,7 +102,7 @@ fn loaded_span_of_current_demo() -> Option<f32> {
     }
     *known = Some((name.clone(), None));
     drop(known);
-    let path = crate::streaks::demo_path(&dod_dir(), &name);
+    let path = crate::demo_locate::playing(&name);
     std::thread::spawn(move || {
         let span = crate::demo_file::loaded_span(&path);
         let mut known = SPAN.lock().unwrap_or_else(|e| e.into_inner());
@@ -124,8 +124,7 @@ fn length_of_current_demo() -> Option<crate::demo_file::DemoLength> {
     {
         return *length;
     }
-    let game_dir = dod_dir();
-    let length = crate::demo_file::length(&crate::streaks::demo_path(&game_dir, &name));
+    let length = crate::demo_file::length(&crate::demo_locate::playing(&name));
     *known = Some((name, length));
     length
 }

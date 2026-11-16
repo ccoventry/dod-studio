@@ -681,7 +681,7 @@ fn send_ask(start: crate::review_ask::Start) {
         say("no demo is playing: play one with viewdemo first");
         return;
     };
-    let demo = crate::review_ask::demo_path(&crate::texture_hires::game_dir(), &name);
+    let demo = crate::review_ask::demo_path(&crate::demo_locate::playing(&name));
     match crate::review_ask::send(demo.clone(), start) {
         Ok(()) => say(&format!("asked DoD Studio to review {}", demo.display())),
         Err(why) => say(&why),

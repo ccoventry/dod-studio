@@ -164,14 +164,15 @@ static DEMO_INFO: std::sync::Mutex<Vec<(String, u64, Option<DemoInfo>)>> =
 /// How much of a demo `demo_info` reads.
 const DEMO_START: usize = 4096;
 
-/// The demo file a row names (a path from `dod/`), or `None` for a
+/// The demo file a row names (a path from `dod/`, which the game also
+/// looks for in `dod_addon` and `dod_downloads`, #1474), or `None` for a
 /// folder row.
 pub(super) fn row_path(row: &str) -> Option<std::path::PathBuf> {
     let name = row.trim().trim_matches('"');
     if name.ends_with('/') || name.is_empty() {
         return None;
     }
-    Some(crate::demo_list_folders::full_path(&dod_dir(), name))
+    Some(crate::demo_locate::file_for(name))
 }
 
 /// The header facts of the demo a row names (a path from `dod/`).

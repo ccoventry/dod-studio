@@ -276,7 +276,7 @@ pub fn poll() {
 /// asked for meanwhile. A lambda that arrives first is treated as nobody's.
 fn start_read(name: String) {
     let ticket = LATEST_READ.fetch_add(1, Ordering::AcqRel) + 1;
-    let path = crate::streaks::demo_path(&crate::texture_hires::game_dir(), &name);
+    let path = crate::demo_locate::playing(&name);
     let spawned = std::thread::Builder::new()
         .name("ds_spray_lambda".into())
         .spawn(move || {

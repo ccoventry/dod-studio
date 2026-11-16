@@ -20,8 +20,20 @@
 //! can't open one, `demo_other_drives` makes it, and it opens that file. A
 //! relative name with `..` (`../other/demo`) is joined to each search path
 //! like any other, as the engine does.
+//!
+//! Readers on the engine thread that ask every frame (the DoD Studio
+//! window's tabs, map cfgs, spray lambdas, Review) go through [`playing`],
+//! which locates each play once (#1474).
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+
+thread_local! {
+    /// The name [`playing`] last located and the file it found. Engine
+    /// thread only, where every caller runs; another thread just locates
+    /// again.
+    static PLAYING: RefCell<Option<(String, PathBuf)>> = const { RefCell::new(None) };
+}
 
 /// The engine's `-game` fallback, searched after the game's own folders.
 const FALLBACK_GAME: &str = "valve";
@@ -74,6 +86,78 @@ pub(crate) fn locate(name: &str) -> Result<PathBuf, Vec<PathBuf>> {
         ),
         Path::is_file,
     )
+}
+
+/// The file the demo `name` (as `playdemo`/`viewdemo` was given it) opened,
+/// remembered until the next play, so callers that ask every frame cost no
+/// file-system lookups; the hook log names it once per play. When no
+/// candidate exists, the path in the game folder, so the caller's own error
+/// names a file.
+pub(crate) fn playing(name: &str) -> PathBuf {
+    PLAYING.with(|cache| {
+        remembered(
+            &mut cache.borrow_mut(),
+            name,
+            locate,
+            || in_game_folder(name),
+            report,
+        )
+    })
+}
+
+/// The file `name` would open, found now and not logged: for lists of
+/// demos (the Demos tab's rows) rather than the one playing.
+// The Demos tab is x86-only.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn file_for(name: &str) -> PathBuf {
+    locate(name).unwrap_or_else(|_| in_game_folder(name))
+}
+
+/// Where a demo found nowhere is reported missing: the game folder, where
+/// every reader looked before #1474.
+fn in_game_folder(name: &str) -> PathBuf {
+    crate::streaks::demo_path(&crate::texture_hires::game_dir(), name)
+}
+
+/// Drops what [`playing`] remembers: a new play may open another file under
+/// the same name (a copy put in `dod_addon` meanwhile). Called by
+/// `demo_reload` on every `playdemo`/`viewdemo`.
+pub(crate) fn forget() {
+    PLAYING.with(|cache| *cache.borrow_mut() = None);
+}
+
+/// [`playing`]'s lookup: `cache` when it holds `name`, else `find`'s answer
+/// (or `fallback` when it found nothing), stored and passed to `log`.
+fn remembered(
+    cache: &mut Option<(String, PathBuf)>,
+    name: &str,
+    find: impl FnOnce(&str) -> Result<PathBuf, Vec<PathBuf>>,
+    fallback: impl FnOnce() -> PathBuf,
+    log: impl FnOnce(&str),
+) -> PathBuf {
+    if let Some((cached, path)) = cache.as_ref()
+        && cached == name
+    {
+        return path.clone();
+    }
+    let path = match find(name) {
+        Ok(path) => {
+            log(&format!("{name} opens {}", path.display()));
+            path
+        }
+        Err(tried) => {
+            let tried: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
+            log(&format!("can't find {name}; tried {}", tried.join(", ")));
+            fallback()
+        }
+    };
+    *cache = Some((name.to_string(), path.clone()));
+    path
+}
+
+fn report(message: &str) {
+    // Safety: `report` only appends to the hook log; any thread may call it.
+    unsafe { crate::debug::report(&format!("demo_locate: {message}")) };
 }
 
 #[cfg(test)]
@@ -168,5 +252,71 @@ mod tests {
     fn a_demo_nowhere_lists_every_path_tried() {
         let tried = first_existing(candidates(&root(), "dod", true, "gone"), |_| false);
         assert_eq!(tried.map_err(|t| t.len()), Err(6));
+    }
+
+    fn addon_copy(name: &str) -> Result<PathBuf, Vec<PathBuf>> {
+        first_existing(candidates(&root(), "dod", true, name), |p| {
+            p.starts_with(root().join("dod_addon"))
+        })
+    }
+
+    fn game_folder_copy() -> PathBuf {
+        root().join("dod").join("match1.dem")
+    }
+
+    #[test]
+    fn the_playing_demo_is_located_once_and_logged_once() {
+        let mut cache = None;
+        let mut lines = Vec::new();
+        let first = remembered(&mut cache, "match1", addon_copy, game_folder_copy, |l| {
+            lines.push(l.to_string())
+        });
+        assert_eq!(first, root().join("dod_addon").join("match1.dem"));
+        let again = remembered(
+            &mut cache,
+            "match1",
+            |_| panic!("looked up again"),
+            game_folder_copy,
+            |l| lines.push(l.to_string()),
+        );
+        assert_eq!(again, first);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("dod_addon"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn another_demo_is_located_afresh() {
+        let mut cache = None;
+        remembered(&mut cache, "match1", addon_copy, game_folder_copy, |_| {});
+        let other = remembered(&mut cache, "match2", addon_copy, game_folder_copy, |_| {});
+        assert_eq!(other, root().join("dod_addon").join("match2.dem"));
+    }
+
+    #[test]
+    fn a_full_path_is_played_from_where_it_is() {
+        let mut cache = None;
+        let found = remembered(
+            &mut cache,
+            "D:/demos/match1",
+            |n| first_existing(candidates(&root(), "dod", true, n), |_| true),
+            game_folder_copy,
+            |_| {},
+        );
+        assert_eq!(found, PathBuf::from("D:/demos/match1.dem"));
+    }
+
+    #[test]
+    fn a_demo_nowhere_falls_back_to_the_game_folder_and_says_so() {
+        let mut cache = None;
+        let mut lines = Vec::new();
+        let found = remembered(
+            &mut cache,
+            "match1",
+            |n| first_existing(candidates(&root(), "dod", true, n), |_| false),
+            game_folder_copy,
+            |l| lines.push(l.to_string()),
+        );
+        assert_eq!(found, game_folder_copy());
+        assert!(lines[0].starts_with("can't find match1"), "{}", lines[0]);
     }
 }

@@ -46,13 +46,12 @@ pub(crate) fn request_line(demo: &Path, start: Start) -> String {
     }
 }
 
-/// The loaded demo's full path: the name `viewdemo` was given, from the
-/// game's `dod` folder, with `.dem` added when missing and `..` worked out
-/// (`viewdemo "../../demos/a"` names `<Steam>\demos\a.dem`).
-pub(crate) fn demo_path(dod_dir: &Path, name: &str) -> PathBuf {
-    let joined = crate::streaks::demo_path(dod_dir, name);
+/// The loaded demo's full path for Studio: the file the game opened
+/// (`demo_locate::playing`, which may be in `dod_addon`, #1474) with `..`
+/// worked out (`viewdemo "../../demos/a"` names `<Steam>\demos\a.dem`).
+pub(crate) fn demo_path(opened: &Path) -> PathBuf {
     let mut out = PathBuf::new();
-    for part in joined.components() {
+    for part in opened.components() {
         match part {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -357,14 +356,31 @@ mod tests {
 
     #[test]
     fn a_demo_named_from_the_game_folder_becomes_a_plain_full_path() {
-        let dod = Path::new(r"C:\Steam\common\Half-Life\dod");
+        // The file the game opens for `name` when it is in `folder` (a full
+        // path has one candidate, itself).
+        let opened = |folder: &str, name: &str| {
+            let root = Path::new(r"C:\Steam\common\Half-Life");
+            let found = crate::demo_locate::candidates(root, "dod", true, name);
+            let only = found.len() == 1;
+            crate::demo_locate::first_existing(found, |p| only || p.starts_with(root.join(folder)))
+                .unwrap()
+        };
         assert_eq!(
-            demo_path(dod, "../../../demos/./m"),
+            demo_path(&opened("dod", "../../../demos/./m")),
             PathBuf::from(r"C:\Steam\demos\m.dem")
         );
         assert_eq!(
-            demo_path(dod, "ktps8w11sf.dem"),
+            demo_path(&opened("dod", "ktps8w11sf.dem")),
             PathBuf::from(r"C:\Steam\common\Half-Life\dod\ktps8w11sf.dem")
+        );
+        // #1474: a demo the game found in dod_addon is reviewed from there.
+        assert_eq!(
+            demo_path(&opened("dod_addon", "ktps8w11sf")),
+            PathBuf::from(r"C:\Steam\common\Half-Life\dod_addon\ktps8w11sf.dem")
+        );
+        assert_eq!(
+            demo_path(&opened("dod", "D:/demos/ktp.dem")),
+            PathBuf::from(r"D:\demos\ktp.dem")
         );
     }
 
