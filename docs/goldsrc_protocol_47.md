@@ -2,7 +2,7 @@
 
 A GoldSrc demo names the network protocol it was recorded with twice: in its file header and in every `svc_serverinfo` message (one per map). Today's game, pre-Anniversary and 25th Anniversary alike, is protocol 48, and so is every demo in the PRE and POST libraries. Protocol 47 is the one before it: DoD 1.3 demos from the early Steam years, 2004 and a little after. This page says what differs between the two, how DoD Studio reads and converts a protocol-47 demo, and how that was established (#239).
 
-Measured on a community archive of 2004-2008 DoD 1.3 match demos (not in the repo: the files are other people's recordings): 103 files, 78 of protocol 47, 23 of protocol 48, and two damaged copies with no demo header. The protocol-47 set covers seven maps (dod_donner, dod_chemille, dod_anzio, dod_harrington, dod_railroad, dod_railroad2_b2, dod_lennon_b2), 70 HLTV recordings and 8 POV ones, several matches per map and many recorders.
+Measured on a community archive of 2004-2008 DoD 1.3 match demos (not in the repo: the files are other people's recordings): 103 files, 78 of protocol 47, 23 of protocol 48, and two damaged copies with no demo header. The protocol-47 set covers seven maps (dod_donner, dod_chemille, dod_anzio, dod_harrington, dod_railroad, dod_railroad2_b2, dod_lennon_b2), 71 HLTV recordings and 7 POV ones, several matches per map and many recorders.
 
 ## What the game does with one
 
@@ -21,7 +21,7 @@ Only those two numbers. Measured with `analysis/examples/protocol47_probe.rs` ov
 | --- | --- | --- |
 | Header network protocol | 47 | 48 |
 | Header demo protocol | 5 | 5 |
-| `svc_serverinfo` protocol | 47 in every one (82 in all: four demos recorded two maps) | 48 |
+| `svc_serverinfo` protocol | 47 in every one (82 in all: four demos load their map a second time, a restart, and carry a second server info for the same map) | 48 |
 | `svc_version` | none in any demo | none |
 | Engine messages that occur | the same ids; `svc_resourcelocation` (56) in some of each | the same |
 | `svc_serverinfo` VAC byte, and the 21-byte old-build block (#1456) | 0, none | 0, none |
@@ -41,16 +41,16 @@ Two of the protocol-47 demos (three files: one is a copy under two names) end th
 
 ## Converting one
 
-`native::patch::protocol47` rewrites the two numbers in place: the header's protocol, and the protocol of each `svc_serverinfo` saying 47 in the network frames. It walks the frames by their own lengths from the header to the directory (or to the end of a file whose directory is missing), and finds each server info by its id and protocol, confirmed by a game folder, a host name and a `maps/*.bsp` where they belong. Every other byte stays the recorder's; the length doesn't change, so the directory needs nothing. A demo with no server info to rewrite is refused, since the game would still refuse the copy.
+`native::patch::protocol47` rewrites the two numbers in place: the header's protocol, and the protocol of each `svc_serverinfo` saying 47. It searches every byte from the header to the directory (or to the end of a file whose directory is missing) for a server info: its id and protocol, confirmed by a game folder, a host name and a `maps/*.bsp` where they belong. Searching the bytes rather than only the frames a walk reaches matters for a damaged demo: a broken frame length stops a walk, or carries it past a restart's server info, and a server info left at 47 makes the game refuse the copy at that restart. Over the 78 demos the search finds exactly the server infos a frame walk does. A walk of the frames by their own lengths still runs, to say where a damaged copy's frames stop fitting: the CLI and the activity log report it, since the game may not play past that point. Every other byte stays the recorder's; the length doesn't change, so the directory needs nothing. A demo with no server info to rewrite is refused, since the game would still refuse the copy.
 
 Where a protocol-47 demo is converted:
 
 - The Demo Analyzer shows a notice above every tab for a protocol-47 demo, with Convert: it writes `<name>_p48.dem` beside the demo, lists it in the Analyzer's file browser and opens it (`studio/src/analyzer_protocol47.js`, `studio/src-tauri/src/demo_convert.rs`). The activity log gets a line when it starts and one when it ends, with how long it took. A conversion reads and writes the file once: 0.3 s at most over the 78 demos above (9 to 91 MB, local disk), so the notice says "Converting…" rather than showing a progress bar.
-- `dod-studio-cli convert-47 <demo>...` writes `<name>_p48.dem` beside each demo, or `--output <file>` for one. The demo itself is only read, and the copy never goes over it.
-- A patched copy says 48 by itself: `StreamPatcher` (Studio's patched batches, `preview_cli`) and `dod-studio-cli patch-streak` convert as they copy.
+- `dod-studio-cli convert-47 <demo>...` writes `<name>_p48.dem` beside each demo, or `--output <file>` for one. The demo itself is only read, and the copy never goes over it: it is written to a new temporary file beside its final name (one that did not exist before, so neither the demo nor anyone else's `.part` file is ever opened for writing) and renamed into place.
+- A patched copy says 48 by itself: `StreamPatcher` (Studio's patched batches, `preview_cli`) and `dod-studio-cli patch-streak` convert as they copy. The patcher logs a line when it converts one, and refuses a protocol-47 demo it finds no server info in, as the conversion does.
 - Anything that plays the original file in the game (Studio's previews and Seek Between Clips batches, the in-game Load Demo window) still meets the game's refusal: convert the demo first.
 
-The idea and the two places to change come from HLAE's DemoTools wizard, "Try to convert demo version (47 -> 48)": `AfxCppCli/old/tools/demotools/demotools.cpp` (`bSet_NetworkVersion` for the header, `bSet_ProtocolVersion` in `copy_gamedata` for the server info) and `demotoolswizard.cpp`, advancedfx commit `41b158171b275f9bb8ead737e8c7d0a159daf0af`, MIT (`third_party_notices.md`). Their tool reads each network frame's first messages one by one (`svc_nop`, `svc_time`, `svc_print`, `svc_hltv`) and stops at the first other one before the server info; ours finds the server info wherever it sits. The measurements above are our own.
+The idea and the two places to change come from HLAE's DemoTools wizard, "Try to convert demo version (47 -> 48)": `AfxCppCli/old/tools/demotools/demotools.cpp` (`bSet_NetworkVersion` for the header, `bSet_ProtocolVersion` in `copy_gamedata` for the server info) and `demotoolswizard.cpp`, advancedfx commit `41b158171b275f9bb8ead737e8c7d0a159daf0af`, MIT (`third_party_notices.md`). Their tool reads each network frame's first messages one by one (`svc_nop`, `svc_time`, `svc_print`, `svc_hltv`) and stops at the first other one before the server info; ours finds the server info wherever it sits, past a damaged frame too. The measurements above are our own.
 
 ## Checking it
 

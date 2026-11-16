@@ -103,15 +103,22 @@ fn run_convert_47_subcommand(demo_paths: Vec<PathBuf>, output: Option<PathBuf>) 
     for input in &demo_paths {
         let started = std::time::Instant::now();
         match native::patch::protocol47::convert_file(input, output.as_deref()) {
-            Ok((written, converted)) => println!(
-                "{}",
-                m::cli_converted(
-                    input.display(),
-                    written.display(),
-                    converted.server_infos,
-                    native::utils::duration_text::duration_text(started.elapsed().as_secs_f64()),
-                )
-            ),
+            Ok((written, converted)) => {
+                println!(
+                    "{}",
+                    m::cli_converted(
+                        input.display(),
+                        written.display(),
+                        converted.server_infos,
+                        native::utils::duration_text::duration_text(
+                            started.elapsed().as_secs_f64()
+                        ),
+                    )
+                );
+                if let Some(at) = converted.stopped_at {
+                    eprintln!("{}", m::walk_stopped(input.display(), at));
+                }
+            }
             Err(e) => {
                 failed += 1;
                 eprintln!("{}", m::cli_not_converted(input.display(), e));

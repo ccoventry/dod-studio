@@ -3,10 +3,6 @@
 
 use std::fmt::Display;
 
-/// What a protocol-47 demo needs before the game plays it.
-pub const CONVERT_FIRST: &str = "protocol 47 demo: convert it first \
-     (dod-studio-cli convert-47 <demo>); the game plays only protocol 48 demos";
-
 pub const NOT_A_DEMO: &str = "not a demo: the file has no HLDEMO header";
 
 pub fn not_protocol_47(network_protocol: i32) -> String {
@@ -32,6 +28,40 @@ pub fn cannot_write(path: impl Display, err: impl Display) -> String {
     format!("could not write {path}: {err}")
 }
 
+/// Every part-file name beside the copy was taken.
+pub const NO_FREE_PART_NAME: &str =
+    "every temporary name beside the copy is taken by another file";
+
+/// How many map loads a conversion rewrote: one server info each, and a
+/// restart loads the same map again.
+pub fn map_loads(server_infos: usize) -> String {
+    if server_infos == 1 {
+        "1 map load".to_string()
+    } else {
+        format!("{server_infos} map loads")
+    }
+}
+
+/// The frames stop fitting before the directory (a damaged or cut copy):
+/// the conversion searched the bytes for server infos all the same.
+pub fn walk_stopped(input: impl Display, at: usize) -> String {
+    format!(
+        "{input}: the frames stop fitting at byte {at} (a damaged or cut copy); \
+         every server info was still found and converted, but the game may not \
+         play past that point"
+    )
+}
+
+// ── patch/engine.rs (StreamPatcher) ────────────────────────────────────────
+
+/// A patched copy of a protocol-47 demo was written as protocol 48.
+pub fn patched_copy_converted(input: impl Display, server_infos: usize) -> String {
+    format!(
+        "[convert-47] {input} is a protocol 47 demo: its patched copy says protocol 48 ({})",
+        map_loads(server_infos)
+    )
+}
+
 // ── bin/cli.rs (dod-studio-cli convert-47) ─────────────────────────────────
 
 pub fn cli_converted(
@@ -40,12 +70,10 @@ pub fn cli_converted(
     server_infos: usize,
     took: impl Display,
 ) -> String {
-    let maps = if server_infos == 1 {
-        "1 map".to_string()
-    } else {
-        format!("{server_infos} maps")
-    };
-    format!("{input}: converted to protocol 48 ({maps}) in {took}: {output}")
+    format!(
+        "{input}: converted to protocol 48 ({}) in {took}: {output}",
+        map_loads(server_infos)
+    )
 }
 
 pub fn cli_not_converted(input: impl Display, err: impl Display) -> String {
@@ -64,12 +92,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cli_line_names_both_files_and_counts_maps() {
+    fn the_cli_line_names_both_files_and_counts_map_loads() {
         assert_eq!(
             cli_converted("a.dem", "a_p48.dem", 1, "0.2s"),
-            "a.dem: converted to protocol 48 (1 map) in 0.2s: a_p48.dem"
+            "a.dem: converted to protocol 48 (1 map load) in 0.2s: a_p48.dem"
         );
-        assert!(cli_converted("a.dem", "b.dem", 2, "1s").contains("(2 maps)"));
+        assert!(cli_converted("a.dem", "b.dem", 2, "1s").contains("(2 map loads)"));
+    }
+
+    #[test]
+    fn a_stopped_walk_says_where() {
+        assert!(walk_stopped("a.dem", 1234).contains("byte 1234"));
     }
 
     #[test]

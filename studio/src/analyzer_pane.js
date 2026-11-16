@@ -130,7 +130,7 @@ async function loadAnalyzerDemo(path) {
     renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
     renderProtocol47Banner(document.querySelector('#analyzer-protocol47-banner'), result,
-      () => convertAnalyzedDemo(path, { relistFolderOf, open: loadAnalyzerDemo }));
+      () => convertAnalyzedDemo(path, { relistFolderOf, open: loadAnalyzerDemo, isShown: () => seq === analyzerLoadSeq }));
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

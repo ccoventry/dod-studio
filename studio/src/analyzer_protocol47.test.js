@@ -28,7 +28,7 @@ describe('convertAnalyzedDemo', () => {
     convertProtocol47.mockResolvedValue('D:\\demos\\old_p48.dem');
     const relistFolderOf = vi.fn().mockResolvedValue();
     const open = vi.fn().mockResolvedValue();
-    const text = await convertAnalyzedDemo('D:\\demos\\old.dem', { relistFolderOf, open });
+    const text = await convertAnalyzedDemo('D:\\demos\\old.dem', { relistFolderOf, open, isShown: () => true });
     expect(convertProtocol47).toHaveBeenCalledWith('D:\\demos\\old.dem');
     expect(relistFolderOf).toHaveBeenCalledWith('D:\\demos\\old.dem');
     expect(open).toHaveBeenCalledWith('D:\\demos\\old_p48.dem');
@@ -38,7 +38,17 @@ describe('convertAnalyzedDemo', () => {
   it('opens nothing when the conversion fails', async () => {
     convertProtocol47.mockRejectedValue(new Error('already a protocol 48 demo: nothing to convert'));
     const open = vi.fn();
-    await expect(convertAnalyzedDemo('a.dem', { relistFolderOf: vi.fn(), open })).rejects.toThrow('already');
+    await expect(convertAnalyzedDemo('a.dem', { relistFolderOf: vi.fn(), open, isShown: () => true })).rejects.toThrow('already');
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('lists the copy but leaves another demo open when one was opened meanwhile', async () => {
+    convertProtocol47.mockResolvedValue('D:\\demos\\old_p48.dem');
+    const relistFolderOf = vi.fn().mockResolvedValue();
+    const open = vi.fn().mockResolvedValue();
+    const text = await convertAnalyzedDemo('D:\\demos\\old.dem', { relistFolderOf, open, isShown: () => false });
+    expect(relistFolderOf).toHaveBeenCalledWith('D:\\demos\\old.dem');
+    expect(open).not.toHaveBeenCalled();
+    expect(text).toBe(STRINGS.PROTOCOL_47.done('old_p48.dem'));
   });
 });

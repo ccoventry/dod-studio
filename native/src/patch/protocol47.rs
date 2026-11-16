@@ -43,10 +43,12 @@
 //!
 //! HLAE's tool reads each network frame's first messages one by one
 //! (`svc_nop`, `svc_time`, `svc_print`, `svc_hltv`) and gives up at the first
-//! other one before the server info. This pass finds `svc_serverinfo` the way
-//! `demo_split::quick_maps` does, wherever it sits in the frame: its id and
-//! the protocol, confirmed by a game folder, a host name and a `maps/*.bsp`
-//! where they belong.
+//! other one before the server info. This pass searches every byte between
+//! the header and the directory for `svc_serverinfo`, much as
+//! `demo_split::quick_maps` does: its id and the protocol, confirmed by a
+//! game folder, a host name and a `maps/*.bsp` where they belong. So a
+//! server info is found wherever it sits in its frame, and past a damaged
+//! frame too.
 
 use dem::protocol::{NETWORK_PROTOCOL_47, NETWORK_PROTOCOL_48};
 use std::fmt;
@@ -112,10 +114,15 @@ impl std::error::Error for ConvertError {}
 /// What a conversion changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Converted {
-    /// `svc_serverinfo` messages rewritten: one per map the demo recorded.
+    /// `svc_serverinfo` messages rewritten: one per map load. A restart
+    /// loads the same map again, so two can name one map.
     pub server_infos: usize,
     /// Frames walked to find them.
     pub frames: usize,
+    /// Where the frame walk stopped short of the frames' end, in a damaged
+    /// or cut copy. Server infos past it were found by searching the bytes
+    /// that are left, so a later map load is converted too.
+    pub stopped_at: Option<usize>,
 }
 
 /// Whether `bytes` are a demo whose header says protocol 47: one the game
@@ -147,18 +154,19 @@ pub fn convert_in_place(bytes: &mut [u8]) -> Result<Converted, ConvertError> {
         Some(NETWORK_PROTOCOL_47) => {}
         Some(network_protocol) => return Err(ConvertError::NotProtocol47 { network_protocol }),
     }
-    let (spots, frames) = server_info_protocols(bytes);
-    if spots.is_empty() {
+    let found = server_info_protocols(bytes);
+    if found.spots.is_empty() {
         return Err(ConvertError::NoServerInfo);
     }
     let to = NETWORK_PROTOCOL_48.to_le_bytes();
-    for at in &spots {
+    for at in &found.spots {
         bytes[*at..*at + 4].copy_from_slice(&to);
     }
     bytes[HEADER_NETWORK_PROTOCOL].copy_from_slice(&to);
     Ok(Converted {
-        server_infos: spots.len(),
-        frames,
+        server_infos: found.spots.len(),
+        frames: found.frames,
+        stopped_at: found.stopped_at,
     })
 }
 
@@ -184,28 +192,44 @@ pub fn convert_messages_in_place(messages: &mut [u8]) -> usize {
     found.len()
 }
 
-/// Where each `svc_serverinfo` saying protocol 47 keeps that number (the
-/// byte after its id), in the network frames of `bytes`, and how many frames
-/// were walked. The walk follows each frame's own length, from the header to
-/// the directory (or the end of the file when the directory is missing or
-/// out of range), and stops at the first frame that doesn't fit.
-fn server_info_protocols(bytes: &[u8]) -> (Vec<usize>, usize) {
+/// What [`server_info_protocols`] found.
+struct Found {
+    /// Where each server info keeps its protocol (the byte after its id).
+    spots: Vec<usize>,
+    frames: usize,
+    stopped_at: Option<usize>,
+}
+
+/// Where each `svc_serverinfo` saying protocol 47 keeps that number, between
+/// the header and the directory (or the end of the file when the directory
+/// is missing or out of range), and how far a walk of the frames got.
+///
+/// Every byte of that span is searched, taking only a match with a game
+/// folder, a host name and a `maps/*.bsp` where they belong
+/// ([`server_infos_in`]), rather than only the network frames a walk reaches:
+/// a damaged frame stops the walk (or, when its length still fits, carries
+/// it past a restart's server info), and a server info left at 47 makes the
+/// game refuse the copy there. Across the 78 demos of the survey this finds
+/// exactly the server infos the walk does. The walk follows each frame's own
+/// length and says where it stopped short, for the caller to report.
+fn server_info_protocols(bytes: &[u8]) -> Found {
     let end = frames_end(bytes);
-    let mut spots = Vec::new();
     let mut frames = 0;
     let mut at = DEMO_HEADER_SIZE;
-    while let Some(frame) = next_frame(bytes, at, end) {
+    while let Some(next) = next_frame(bytes, at, end) {
         frames += 1;
-        if let Some(messages) = &frame.messages {
-            spots.extend(
-                server_infos_in(&bytes[messages.clone()])
-                    .into_iter()
-                    .map(|i| messages.start + i + 1),
-            );
-        }
-        at = frame.end;
+        at = next;
     }
-    (spots, frames)
+    let from = DEMO_HEADER_SIZE.min(end);
+    let spots = server_infos_in(&bytes[from..end])
+        .into_iter()
+        .map(|i| from + i + 1)
+        .collect();
+    Found {
+        spots,
+        frames,
+        stopped_at: (at < end).then_some(at),
+    }
 }
 
 /// Where the frames end: the directory's offset when it lies inside the file
@@ -221,16 +245,10 @@ fn frames_end(bytes: &[u8]) -> usize {
     }
 }
 
-/// One frame of the walk: where it ends, and its message bytes when it is a
-/// network frame.
-struct FrameSpan {
-    end: usize,
-    messages: Option<std::ops::Range<usize>>,
-}
-
-/// The frame starting at `at`, or `None` when no whole frame starts there
-/// before `end` (the frames are over, or the next one is cut or unknown).
-fn next_frame(bytes: &[u8], at: usize, end: usize) -> Option<FrameSpan> {
+/// Where the frame starting at `at` ends, or `None` when no whole frame
+/// starts there before `end` (the frames are over, or the next one is cut or
+/// unknown).
+fn next_frame(bytes: &[u8], at: usize, end: usize) -> Option<usize> {
     let body = at.checked_add(FRAME_HEADER_SIZE)?;
     if body > end {
         return None;
@@ -239,34 +257,30 @@ fn next_frame(bytes: &[u8], at: usize, end: usize) -> Option<FrameSpan> {
         let b = bytes.get(p..p.checked_add(4)?)?;
         usize::try_from(u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok()
     };
-    let (frame_end, messages) = match bytes[at] {
+    let frame_end = match bytes[at] {
         // Network messages: demo info and sequence info, the length, then
         // the messages.
         0 | 1 => {
             let len_at = body + NETMSG_INFO_SIZE;
             let start = body + NETWORK_HEADER_ALIGNMENT;
-            let stop = start.checked_add(read_len(len_at)?)?;
-            (stop, Some(start..stop))
+            start.checked_add(read_len(len_at)?)?
         }
         // Demo start, next section: no body.
-        2 | 5 => (body, None),
-        3 => (body + 64, None),
-        4 => (body + 32, None),
-        6 => (body + 84, None),
-        7 => (body + 8, None),
+        2 | 5 => body,
+        3 => body + 64,
+        4 => body + 32,
+        6 => body + 84,
+        7 => body + 8,
         // Sound: channel, sample name (length-prefixed), then 16 bytes.
         8 => {
             let name = body + 4;
-            (name.checked_add(4 + read_len(name)? + 16)?, None)
+            name.checked_add(4 + read_len(name)? + 16)?
         }
         // Demo buffer: length-prefixed.
-        9 => ((body + 4).checked_add(read_len(body)?)?, None),
+        9 => (body + 4).checked_add(read_len(body)?)?,
         _ => return None,
     };
-    (frame_end <= end).then_some(FrameSpan {
-        end: frame_end,
-        messages,
-    })
+    (frame_end <= end).then_some(frame_end)
 }
 
 /// Where each `svc_serverinfo` saying protocol 47 starts in one frame's
@@ -362,18 +376,47 @@ fn is_same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Writes `bytes` to `<path>.part`, then renames it over `path`. The part
-/// file is removed again when either step fails.
+/// Writes `bytes` to a new part file beside `path` ([`new_part_file`]), then
+/// renames it over `path`. The part file is removed again when either step
+/// fails.
 fn write_replacing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut part = path.as_os_str().to_owned();
-    part.push(".part");
-    let part = PathBuf::from(part);
-    let result = std::fs::write(&part, bytes).and_then(|()| std::fs::rename(&part, path));
+    use std::io::Write;
+    let (part, mut file) = new_part_file(path)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| std::fs::rename(&part, path));
     if result.is_err() {
         // Our own scratch file: failing to remove it changes nothing.
         let _ = std::fs::remove_file(&part);
     }
     result
+}
+
+/// How many part-file names [`new_part_file`] tries before giving up.
+const PART_FILE_TRIES: u32 = 100;
+
+/// A part file beside `path` that did not exist before: `<path>.<pid>-<n>.part`,
+/// created new, so no file already there (the demo being converted, or
+/// someone else's `.part`) is ever opened for writing.
+fn new_part_file(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    for n in 0..PART_FILE_TRIES {
+        let mut name = path.as_os_str().to_owned();
+        name.push(format!(".{}-{n}.part", std::process::id()));
+        let part = PathBuf::from(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&part)
+        {
+            Ok(file) => return Ok((part, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        crate::messages::protocol47::NO_FREE_PART_NAME,
+    ))
 }
 
 #[cfg(test)]
@@ -590,21 +633,75 @@ mod tests {
         assert_eq!(convert_in_place(&mut bytes).unwrap().server_infos, 2);
     }
 
+    /// A frame length past the end stops the walk at that frame, which is
+    /// reported, but not the search: the server info inside it converts.
     #[test]
     fn a_frame_length_past_the_end_stops_the_walk_there() {
         let mut bytes = demo(47, &[sign_on(47)]);
         let len_at = DEMO_HEADER_SIZE + FRAME_HEADER_SIZE + NETMSG_INFO_SIZE;
         bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(matches!(
-            convert_in_place(&mut bytes),
-            Err(ConvertError::NoServerInfo)
-        ));
+        let converted = convert_in_place(&mut bytes).unwrap();
+        assert_eq!(converted.server_infos, 1);
+        assert_eq!(converted.frames, 0);
+        assert_eq!(converted.stopped_at, Some(DEMO_HEADER_SIZE));
+    }
+
+    #[test]
+    fn a_demo_cut_inside_its_header_has_no_server_info() {
         let mut header_only = demo(47, &[sign_on(47)]);
         header_only.truncate(DEMO_HEADER_SIZE + 3);
         assert!(matches!(
             convert_in_place(&mut header_only),
             Err(ConvertError::NoServerInfo)
         ));
+    }
+
+    /// Where the `n`th demo-buffer frame of [`demo`] keeps its length.
+    fn buffer_length_at(bytes: &[u8], n: usize) -> usize {
+        bytes
+            .windows(7)
+            .enumerate()
+            .filter(|(_, w)| *w == [3, 0, 0, 0, 1, 2, 3])
+            .nth(n)
+            .expect("a demo buffer frame")
+            .0
+    }
+
+    /// A demo damaged between its two server infos (a mid-demo restart): the
+    /// walk stops at the damage, and the second server info is still found
+    /// and converted, or the game would refuse the copy at the restart.
+    #[test]
+    fn damage_before_a_restart_s_server_info_still_converts_it() {
+        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let len_at = buffer_length_at(&bytes, 0);
+        bytes[len_at..len_at + 4].copy_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+
+        let converted = convert_in_place(&mut bytes).unwrap();
+        assert_eq!(converted.server_infos, 2);
+        assert_eq!(converted.stopped_at, Some(len_at - FRAME_HEADER_SIZE));
+        assert!(server_infos_in(&bytes).is_empty(), "a server info still says 47");
+    }
+
+    /// A damaged length that lands on a later frame carries the walk past the
+    /// second server info without stopping it; the search still finds it.
+    #[test]
+    fn a_damaged_length_that_jumps_past_a_server_info_still_converts_it() {
+        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let len_at = buffer_length_at(&bytes, 0);
+        let second_frame = buffer_length_at(&bytes, 1) - FRAME_HEADER_SIZE;
+        let jump = u32::try_from(second_frame - (len_at + 4)).unwrap();
+        bytes[len_at..len_at + 4].copy_from_slice(&jump.to_le_bytes());
+
+        let converted = convert_in_place(&mut bytes).unwrap();
+        assert_eq!(converted.stopped_at, None);
+        assert_eq!(converted.server_infos, 2);
+        assert!(server_infos_in(&bytes).is_empty(), "a server info still says 47");
+    }
+
+    #[test]
+    fn a_whole_demo_s_walk_does_not_stop_early() {
+        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        assert_eq!(convert_in_place(&mut bytes).unwrap().stopped_at, None);
     }
 
     #[test]
@@ -649,6 +746,29 @@ mod tests {
             Err(ConvertError::OutputIsInput { .. })
         ));
         assert_eq!(std::fs::read(&input).unwrap(), source);
+    }
+
+    /// A demo named like the part file the copy goes through (`x.dem.part`
+    /// converted to `x.dem`, here the exact name the first try would take)
+    /// is never written over.
+    #[test]
+    fn convert_file_never_writes_through_an_existing_part_file() {
+        let dir = crate::test_support::Scratch::new("protocol47_part");
+        let output = dir.path().join("x.dem");
+        let input = dir
+            .path()
+            .join(format!("x.dem.{}-0.part", std::process::id()));
+        let source = demo(47, &[sign_on(47)]);
+        std::fs::write(&input, &source).unwrap();
+
+        convert_file(&input, Some(&output)).unwrap();
+        assert_eq!(std::fs::read(&input).unwrap(), source);
+        assert_eq!(header_protocol(&std::fs::read(&output).unwrap()), Some(48));
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 
     #[test]

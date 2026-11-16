@@ -150,6 +150,12 @@ is `analysis::repair`, run by `hl-demo-auditor --repair` and Studio (#15);
 | `tempentity_scan` | Every `SvcTempEntity` in a time window, by variant. |
 | `patch_resource_url` | Replaces a demo's recorded `SvcResourceLocation` (download URL). |
 
+### Demo protocols
+
+| Probe | What it does |
+| --- | --- |
+| `protocol47_probe` | One line per demo in a folder: header, `svc_serverinfo` and `svc_version` protocols, the server build, the VAC byte, engine message ids, a delta-table signature, whether every frame re-encodes byte for byte, and what the analyzer reads. What showed protocol 47 differs from 48 only in those two numbers (#239; `docs/goldsrc_protocol_47.md`). |
+
 ## What they established
 
 Measured across 624 demos — a mixed POV library plus 126 LAN HLTV recordings.

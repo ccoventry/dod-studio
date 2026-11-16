@@ -80,6 +80,21 @@ test('a failed conversion says why and leaves Convert usable', async ({ page }) 
   await expect(page.locator('#analyzer-current-file')).toHaveText('donner-vtec-dice1.dem');
 });
 
+test('a demo opened while Convert runs stays open when the conversion ends', async ({ page }) => {
+  await open(page);
+  await page.locator('#analyzer-protocol47-banner .analyzer-protocol47-convert').click();
+  await page.waitForFunction(() => typeof window.__finishConvert === 'function');
+  await page.evaluate((other) => {
+    const old = window.__mockInvokeHandlers.analyze_demo_full;
+    window.__mockInvokeHandlers.analyze_demo_full = (args) => (args.demoPath.endsWith('anzio-new.dem') ? other : old(args));
+  }, report('anzio-new.dem', 48));
+  await page.evaluate(() => window.__openDemo('C:/demos/anzio-new.dem'));
+  await expect(page.locator('#analyzer-current-file')).toHaveText('anzio-new.dem');
+  await page.evaluate(() => window.__finishConvert());
+  await expect(page.locator('#toast-container')).toContainText('Converted: donner-vtec-dice1_p48.dem');
+  await expect(page.locator('#analyzer-current-file')).toHaveText('anzio-new.dem');
+});
+
 test('a protocol-48 demo shows no notice', async ({ page }) => {
   await page.evaluate((plain) => {
     window.__mockInvokeHandlers.analyze_demo_full = () => plain;

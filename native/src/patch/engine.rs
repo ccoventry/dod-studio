@@ -252,6 +252,7 @@ impl StreamPatcher {
         // svc_serverinfo below, or the game refuses to play it (#239; see
         // protocol47.rs). The game-folder rewrite then looks for 48.
         let converting_47 = crate::patch::protocol47::convert_header_in_place(&mut header);
+        let mut server_infos_converted = 0usize;
         let network_protocol = crate::patch::game_dir::header_network_protocol(&header);
         crate::patch::game_dir::set_header_game_dir(&mut header, &game_folder);
         writer.write_all(&header)?;
@@ -520,7 +521,8 @@ impl StreamPatcher {
                     read_exact(&mut reader, &mut net_buf, "NetworkMessage Body")?;
 
                     if converting_47 {
-                        crate::patch::protocol47::convert_messages_in_place(&mut net_buf);
+                        server_infos_converted +=
+                            crate::patch::protocol47::convert_messages_in_place(&mut net_buf);
                     }
                     if let Some(renamed) = network_protocol.and_then(|p| {
                         crate::patch::game_dir::rewrite_server_info_game_dir(
@@ -540,6 +542,22 @@ impl StreamPatcher {
                     writer.write_all(&net_buf)?;
                 }
             }
+        }
+
+        // A protocol-47 copy with no server info converted still says 47
+        // where the game signs on, and is refused there: fail as the
+        // standalone conversion does rather than hand the game that copy.
+        if converting_47 {
+            if server_infos_converted == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    crate::patch::protocol47::ConvertError::NoServerInfo.to_string(),
+                ));
+            }
+            crate::log_markdown(&crate::messages::protocol47::patched_copy_converted(
+                &job.source_demo,
+                server_infos_converted,
+            ));
         }
 
         // Commands are written as their frame comes up, so one scheduled past
@@ -1115,24 +1133,16 @@ mod directory_tests {
         assert_eq!(directory + 4 + 2 * DIR_ENTRY_SIZE, patched.len());
     }
 
-    /// A protocol-47 demo's patched copy says 48 in its header and its
-    /// `svc_serverinfo`, or the game refuses to play it (#239).
-    #[test]
-    fn a_protocol_47_demo_s_patched_copy_says_48() {
-        let scratch = Scratch::new("patch_protocol47");
-        let input = scratch.path().join("in.dem");
-        let output = scratch.path().join("out.dem");
+    /// A protocol-47 demo whose sign-on frame holds `sign_on`, then a few
+    /// network frames; no directory.
+    fn protocol_47_demo(sign_on: &[u8]) -> Vec<u8> {
         let mut d = vec![0u8; DEMO_HEADER_SIZE];
         d[0..8].copy_from_slice(b"HLDEMO\0\0");
         d[12..16].copy_from_slice(&47i32.to_le_bytes());
-        let mut sign_on = vec![11u8];
-        sign_on.extend_from_slice(&47i32.to_le_bytes());
-        sign_on.extend_from_slice(&[0u8; 4 + 4 + 16 + 3]);
-        sign_on.extend_from_slice(b"dod\0an HLTV\0maps/dod_donner.bsp\0\0\0");
         frame(&mut d, 0, 0);
         d.extend_from_slice(&[0u8; NETMSG_INFO_SIZE]);
         d.extend_from_slice(&(sign_on.len() as u32).to_le_bytes());
-        d.extend_from_slice(&sign_on);
+        d.extend_from_slice(sign_on);
         frame(&mut d, 5, 0);
         frame(&mut d, 2, 0);
         for tick in 1..=3 {
@@ -1140,12 +1150,14 @@ mod directory_tests {
         }
         frame(&mut d, 5, 3);
         d[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].copy_from_slice(&0i32.to_le_bytes());
-        std::fs::write(&input, &d).unwrap();
-        assert_eq!(crate::demo_split::quick_maps(&d, 47), ["dod_donner"]);
+        d
+    }
 
+    /// Patches `input` into `output` with an empty job.
+    fn patch_plain(input: &std::path::Path, output: &std::path::Path) -> std::io::Result<()> {
         let job = PatchJob {
             source_demo: input.to_string_lossy().to_string(),
-            output_demo: output.clone(),
+            output_demo: output.to_path_buf(),
             streaks: Vec::new(),
             target_player: None,
             init_commands: Vec::new(),
@@ -1158,13 +1170,44 @@ mod directory_tests {
             decal_flush: false,
             ..PatcherConfig::default()
         };
-        StreamPatcher::new(&input, &output)
-            .patch(&job, &config, &Arc::new(AtomicBool::new(false)))
-            .unwrap();
+        StreamPatcher::new(input, output).patch(&job, &config, &Arc::new(AtomicBool::new(false)))
+    }
+
+    /// A protocol-47 demo's patched copy says 48 in its header and its
+    /// `svc_serverinfo`, or the game refuses to play it (#239).
+    #[test]
+    fn a_protocol_47_demo_s_patched_copy_says_48() {
+        let scratch = Scratch::new("patch_protocol47");
+        let input = scratch.path().join("in.dem");
+        let output = scratch.path().join("out.dem");
+        let mut sign_on = vec![11u8];
+        sign_on.extend_from_slice(&47i32.to_le_bytes());
+        sign_on.extend_from_slice(&[0u8; 4 + 4 + 16 + 3]);
+        sign_on.extend_from_slice(b"dod\0an HLTV\0maps/dod_donner.bsp\0\0\0");
+        let d = protocol_47_demo(&sign_on);
+        std::fs::write(&input, &d).unwrap();
+        assert_eq!(crate::demo_split::quick_maps(&d, 47), ["dod_donner"]);
+
+        patch_plain(&input, &output).unwrap();
 
         let patched = std::fs::read(&output).unwrap();
         assert_eq!(crate::demo_split::header_protocol(&patched), Some(48));
         assert_eq!(crate::demo_split::quick_maps(&patched, 48), ["dod_donner"]);
         assert!(crate::demo_split::quick_maps(&patched, 47).is_empty());
+    }
+
+    /// A protocol-47 demo with no server info to convert is refused, as the
+    /// standalone conversion refuses it: its copy would say 48 in the header
+    /// and still be refused where the game signs on.
+    #[test]
+    fn a_protocol_47_demo_with_no_server_info_is_not_patched() {
+        let scratch = Scratch::new("patch_protocol47_none");
+        let input = scratch.path().join("in.dem");
+        let output = scratch.path().join("out.dem");
+        std::fs::write(&input, protocol_47_demo(&[1, 1, 1])).unwrap();
+
+        let err = patch_plain(&input, &output).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("no server info"), "{err}");
     }
 }

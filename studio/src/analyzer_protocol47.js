@@ -56,14 +56,15 @@ export function renderProtocol47Banner(el, report, onConvert) {
 
 /**
  * Converts the demo at `path`, then lists the copy (`relistFolderOf(path)`)
- * and opens it (`open(copy)`). Resolves the line the notice shows after;
- * throws when the conversion fails.
+ * and opens it (`open(copy)`) when `isShown()` says the Analyzer still shows
+ * that demo: one opened while the conversion ran stays open. Resolves the
+ * line the notice shows after; throws when the conversion fails.
  */
-export async function convertAnalyzedDemo(path, { relistFolderOf, open }) {
+export async function convertAnalyzedDemo(path, { relistFolderOf, open, isShown }) {
   const written = await convertProtocol47(path);
   const text = STRINGS.PROTOCOL_47.done(fileNameOf(written));
   showToast(text, 'success', 6000);
   await relistFolderOf(path);
-  await open(written);
+  if (isShown()) await open(written);
   return text;
 }

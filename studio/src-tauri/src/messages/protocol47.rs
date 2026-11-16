@@ -7,7 +7,17 @@ pub fn convert_started(path: &str) -> String {
 
 pub fn convert_done(path: &str, written: &str, server_infos: usize, took: &str) -> String {
     format!(
-        "[convert-47] done in {took}: {path} -> {written}, {server_infos} server info(s) set to protocol 48"
+        "[convert-47] done in {took}: {path} -> {written}, protocol 48 in the header and {}",
+        native::messages::protocol47::map_loads(server_infos)
+    )
+}
+
+/// The frames stop fitting before the directory: the copy is converted, but
+/// a damaged demo may still not play past that point.
+pub fn convert_walk_stopped(path: &str, at: usize) -> String {
+    format!(
+        "[convert-47] {}",
+        native::messages::protocol47::walk_stopped(path, at)
     )
 }
 

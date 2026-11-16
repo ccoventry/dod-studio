@@ -37,6 +37,9 @@ fn convert_with_log(path: &Path) -> Result<String, String> {
                 converted.server_infos,
                 &took,
             ));
+            if let Some(at) = converted.stopped_at {
+                native::log_markdown(&m::convert_walk_stopped(&shown, at));
+            }
             Ok(written)
         }
         Err(e) => {
