@@ -1,6 +1,7 @@
 //! Preview patches: the playdemo-safe name and the director messages a
 //! preview injects.
 
+use super::blocks::{group_highlights, highlight_order_key};
 use super::*;
 
 /// Makes a demo stem safe as a `playdemo`/`viewdemo` target.
@@ -53,39 +54,49 @@ pub fn build_preview_patch_jobs(
     raw_streaks: Vec<CaptureStreak>,
     output_dir: Option<&std::path::Path>,
 ) -> Vec<PatchJob> {
+    // Labels come from the same grouping and order a capture job uses: per
+    // demo and player, by first kill, then last kill (#1417, #1449), so a
+    // preview's Event List numbers match the capture's. Indexed like
+    // `raw_streaks`.
+    let mut labels: Vec<String> = vec![String::new(); raw_streaks.len()];
+    for group in group_highlights(&raw_streaks) {
+        let total = group.highlights.len();
+        for (row, (idx, s)) in group.highlights.iter().enumerate() {
+            labels[*idx] = format!(
+                "#{}/{}: {} kills: {}",
+                row + 1,
+                total,
+                s.kill_count,
+                s.timeline_string
+            );
+        }
+    }
+
     // Group all streaks by source demo path.
-    let mut grouped: std::collections::HashMap<String, Vec<CaptureStreak>> =
+    let mut grouped: std::collections::HashMap<String, Vec<(CaptureStreak, String)>> =
         std::collections::HashMap::new();
-    for streak in raw_streaks {
+    for (streak, label) in raw_streaks.into_iter().zip(labels) {
         grouped
             .entry(streak.source_demo.clone())
             .or_default()
-            .push(streak);
+            .push((streak, label));
     }
 
     let mut jobs = Vec::new();
 
-    for (source_demo, mut streaks) in grouped {
-        // Sort chronologically.
-        streaks.sort_by_key(|s| s.start_tick);
+    for (source_demo, mut labelled) in grouped {
+        // Chronological, ties by the capture job's order key (not sent order).
+        labelled.sort_by_cached_key(|(s, _)| (s.start_tick, highlight_order_key(s)));
 
-        // Build (tick, label) for each streak — same format as the highlight table.
-        let mut director_events: Vec<(i32, String)> = streaks
+        let mut director_events: Vec<(i32, String)> = labelled
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let label = format!(
-                    "#{}/{}: {} kills: {}",
-                    i + 1,
-                    streaks.len(),
-                    s.kill_count,
-                    s.timeline_string
-                );
+            .map(|(s, label)| {
                 let preview_tick =
                     find_tick_backwards(s.start_tick as usize, 3.0, &s.frame_times, s.demo_fps);
-                (preview_tick, label)
+                (preview_tick, label.clone())
             })
             .collect();
+        let streaks: Vec<CaptureStreak> = labelled.into_iter().map(|(s, _)| s).collect();
 
         if let Some(first_streak) = streaks.first() {
             let match_frame_idx = 0; // Float time unavailable for match start
