@@ -54,6 +54,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
+- [housekeeping.md](housekeeping.md) — the routine pass that keeps PRs, issues, branches, docs, CLAUDE.md, the coding-standards trend, CI, dependencies and the agents' notes current: what each part checks, and the report-first rule.
 - [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files), and the MIT code our work derives from (HLAE's DemoTools, for converting protocol-47 demos).
 - [../tools/agent-kit/](../tools/agent-kit/README.md) — dev-only helpers for testing the app: the shared game lock, playing demos to the end on PRE and POST, a throwaway Studio driven over CDP, frame checks and the comparison-video stopwatch, the activity log, the open-PR board, issue audits, open PRs by file, demos and kill moments from the analyzer cache, the hook log by game run, and HLAE's command names.
 
