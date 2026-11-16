@@ -88,8 +88,10 @@ impl Launcher {
     ///
     /// Never brings the game forward: it opens wherever Windows puts it, and
     /// a batch keeps it behind (#434). [`Launcher::spawn`] is the one that
-    /// brings it forward.
+    /// brings it forward. Ends an older launch's bring-forward watch first,
+    /// so that watch never brings this launch's game forward.
     pub fn spawn_unless_cancelled(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Self> {
+        crate::sys::bring_forward::end_older_watches();
         if !crate::sys::job::kills_children_on_close() {
             return cmd.spawn().map(Self::child);
         }
@@ -244,5 +246,17 @@ mod tests {
         assert!(renamed.exit_status(&sys).unwrap().is_some());
         // Not this process's name, so it is never ended.
         renamed.kill();
+    }
+
+    /// A batch's launch ends an older launch's bring-forward watch, even when
+    /// the launcher fails to start: a missing program stands in for it.
+    #[test]
+    fn a_batch_launch_ends_an_older_bring_forward_watch() {
+        let before = crate::sys::bring_forward::current_turn();
+        let missing = std::env::temp_dir().join("no-such-launcher-dodstudio.exe");
+        let started =
+            Launcher::spawn_unless_cancelled(&mut Command::new(missing), &AtomicBool::new(false));
+        assert!(started.is_err());
+        assert!(crate::sys::bring_forward::current_turn() > before);
     }
 }

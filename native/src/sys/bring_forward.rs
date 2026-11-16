@@ -89,7 +89,8 @@ pub fn when_shown(launch: ThisLaunch, launcher_pid: u32, launcher_exe: String) {
         launch,
         launcher_pid,
         launcher_exe,
-        turn: CURRENT_WATCH.fetch_add(1, Ordering::SeqCst) + 1,
+        launcher_gone_grace: LAUNCHER_GONE_GRACE,
+        turn: end_older_watches_in(&CURRENT_WATCH),
     };
     std::thread::spawn(move || {
         let started = Instant::now();
@@ -99,6 +100,25 @@ pub fn when_shown(launch: ThisLaunch, launcher_pid: u32, launcher_exe: String) {
             started.elapsed(),
         ));
     });
+}
+
+/// Ends any running watch on its next look, without starting one. A launch
+/// that keeps the game behind (a capture batch, #434) calls it, so an older
+/// interactive launch's watch, still waiting, never brings the batch's game
+/// forward.
+pub fn end_older_watches() {
+    end_older_watches_in(&CURRENT_WATCH);
+}
+
+/// Takes the next turn of `current`, ending every older watch; returns it.
+fn end_older_watches_in(current: &AtomicU64) -> u64 {
+    current.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// The newest watch's turn, for tests that check a launch ended the others.
+#[cfg(test)]
+pub(crate) fn current_turn() -> u64 {
+    CURRENT_WATCH.load(Ordering::SeqCst)
 }
 
 /// How the watch ended, for the activity log.
@@ -128,6 +148,9 @@ struct Watch {
     launch: ThisLaunch,
     launcher_pid: u32,
     launcher_exe: String,
+    /// How long the watch goes on once the launcher has exited with no game
+    /// ([`LAUNCHER_GONE_GRACE`]; a test passes a short one).
+    launcher_gone_grace: Duration,
     /// This watch's number: it runs while [`CURRENT_WATCH`] still holds it.
     turn: u64,
 }
@@ -167,7 +190,7 @@ impl Watch {
                     } else if launcher_gone_since
                         .get_or_insert_with(Instant::now)
                         .elapsed()
-                        >= LAUNCHER_GONE_GRACE
+                        >= self.launcher_gone_grace
                     {
                         return Outcome::NoWindow;
                     }
@@ -178,24 +201,30 @@ impl Watch {
     }
 }
 
-/// What to do with the game's `window`, given the window in `front` (0 for
-/// none), the pid owning it and Studio's own pid. `set_foreground` asks
-/// Windows to bring `window` forward, failing with `GetLastError`'s code; it
-/// is only called when Studio is the one in front.
-fn decide(
-    window: isize,
+/// What [`decide`] looks at once the game's window has shown.
+#[derive(Debug, Clone, Copy)]
+struct Foreground {
+    /// The game's window.
+    game_window: isize,
+    /// The window in front; 0 for none.
     front: isize,
+    /// The pid owning `front`.
     front_owner: u32,
+    /// Studio's own pid.
     own_pid: u32,
-    set_foreground: impl FnOnce() -> Result<(), u32>,
-) -> Outcome {
-    if front == window {
+}
+
+/// What to do with the game's window, given what is in front.
+/// `set_foreground` asks Windows to bring it forward, failing with
+/// `GetLastError`'s code; it is only called when Studio is the one in front.
+fn decide(seen: Foreground, set_foreground: impl FnOnce() -> Result<(), u32>) -> Outcome {
+    if seen.front == seen.game_window {
         return Outcome::AlreadyInFront;
     }
-    if front == 0 {
+    if seen.front == 0 {
         return Outcome::NoForeground;
     }
-    if front_owner != own_pid {
+    if seen.front_owner != seen.own_pid {
         return Outcome::OtherWindowInFront;
     }
     match set_foreground() {
@@ -219,7 +248,7 @@ fn settled_front(mut read_front: impl FnMut() -> isize, wait: Duration, every: D
 
 #[cfg(windows)]
 mod win {
-    use super::{NO_FRONT_EVERY, NO_FRONT_RECHECK, Outcome, decide, settled_front};
+    use super::{Foreground, NO_FRONT_EVERY, NO_FRONT_RECHECK, Outcome, decide, settled_front};
     use crate::sys::window_list::Hwnd;
 
     #[link(name = "user32")]
@@ -228,16 +257,27 @@ mod win {
         fn SetForegroundWindow(window: Hwnd) -> i32;
     }
 
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetLastError(code: u32);
+    }
+
     pub fn visible_window(pid: u32) -> Option<Hwnd> {
         crate::sys::window_list::visible_window(pid)
     }
 
     fn set_foreground(window: Hwnd) -> Result<(), u32> {
+        // SetForegroundWindow often fails without setting an error, so the
+        // code is cleared first: otherwise the log would show whatever an
+        // earlier call on this thread left (the process-list refresh leaves
+        // "Access is denied" for processes it can't open).
+        // SAFETY: sets this thread's last-error value; no pointers.
+        unsafe { SetLastError(0) };
         // SAFETY: a window that has closed since only makes this fail.
         if unsafe { SetForegroundWindow(window) } != 0 {
             return Ok(());
         }
-        // Read straight after the call, before anything else can set it.
+        // 0 when the refusal set no error.
         Err(std::io::Error::last_os_error()
             .raw_os_error()
             .map_or(0, |code| code as u32))
@@ -250,13 +290,13 @@ mod win {
             NO_FRONT_RECHECK,
             NO_FRONT_EVERY,
         );
-        decide(
-            window,
+        let seen = Foreground {
+            game_window: window,
             front,
-            crate::sys::window_list::owner(front),
-            std::process::id(),
-            || set_foreground(window),
-        )
+            front_owner: crate::sys::window_list::owner(front),
+            own_pid: std::process::id(),
+        };
+        decide(seen, || set_foreground(window))
     }
 }
 
@@ -286,24 +326,32 @@ mod tests {
         panic!("SetForegroundWindow was called when Studio wasn't in front")
     }
 
+    /// The game's window shown, with `front` (owned by `front_owner`) in
+    /// front of Studio's pid.
+    fn seen(front: isize, front_owner: u32) -> Foreground {
+        Foreground {
+            game_window: GAME_WINDOW,
+            front,
+            front_owner,
+            own_pid: STUDIO,
+        }
+    }
+
     #[test]
     fn a_game_already_in_front_is_left_alone() {
-        let outcome = decide(GAME_WINDOW, GAME_WINDOW, 300, STUDIO, never_called);
+        let outcome = decide(seen(GAME_WINDOW, 300), never_called);
         assert_eq!(outcome, Outcome::AlreadyInFront);
     }
 
     #[test]
     fn no_window_in_front_leaves_the_game_behind() {
-        assert_eq!(
-            decide(GAME_WINDOW, 0, 0, STUDIO, never_called),
-            Outcome::NoForeground
-        );
+        assert_eq!(decide(seen(0, 0), never_called), Outcome::NoForeground);
     }
 
     #[test]
     fn another_programs_window_in_front_leaves_the_game_behind() {
         assert_eq!(
-            decide(GAME_WINDOW, 0x30, OTHER_PROGRAM, STUDIO, never_called),
+            decide(seen(0x30, OTHER_PROGRAM), never_called),
             Outcome::OtherWindowInFront
         );
     }
@@ -311,7 +359,7 @@ mod tests {
     #[test]
     fn studio_in_front_brings_the_game_forward() {
         assert_eq!(
-            decide(GAME_WINDOW, STUDIO_WINDOW, STUDIO, STUDIO, || Ok(())),
+            decide(seen(STUDIO_WINDOW, STUDIO), || Ok(())),
             Outcome::Brought
         );
     }
@@ -319,7 +367,7 @@ mod tests {
     #[test]
     fn a_refused_bring_keeps_its_error() {
         assert_eq!(
-            decide(GAME_WINDOW, STUDIO_WINDOW, STUDIO, STUDIO, || Err(5)),
+            decide(seen(STUDIO_WINDOW, STUDIO), || Err(5)),
             Outcome::Refused(5)
         );
     }
@@ -388,21 +436,22 @@ mod tests {
             launch: ThisLaunch::starting_now(),
             launcher_pid: u32::MAX - 1,
             launcher_exe: "no-such-launcher-dodstudio.exe".to_string(),
+            launcher_gone_grace: Duration::ZERO,
             turn,
         }
     }
 
     #[test]
     fn a_launch_that_ended_with_no_new_game_stops_the_watch_soon() {
-        // No launcher has this pid, and no game has started since: the watch
-        // ends once the grace has passed, bringing nothing forward.
+        // No launcher has this pid, and no game has started since: with no
+        // grace the first look ends the watch, bringing nothing forward.
         let current = AtomicU64::new(1);
         let started = Instant::now();
         assert_eq!(
             watch_of_no_launcher(1).run(&current, started),
             Outcome::NoWindow
         );
-        assert!(started.elapsed() < LAUNCHER_GONE_GRACE + Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
@@ -412,6 +461,14 @@ mod tests {
             watch_of_no_launcher(1).run(&current, Instant::now()),
             Outcome::Superseded
         );
+    }
+
+    #[test]
+    fn a_launch_that_keeps_the_game_behind_ends_an_older_watch() {
+        let current = AtomicU64::new(0);
+        let watch = watch_of_no_launcher(end_older_watches_in(&current));
+        end_older_watches_in(&current);
+        assert_eq!(watch.run(&current, Instant::now()), Outcome::Superseded);
     }
 
     #[test]
@@ -429,7 +486,7 @@ mod tests {
             Duration::from_millis(2800),
         );
         assert!(
-            line.starts_with("[launch] Failed to bring the game's window to the front"),
+            line.starts_with("[launch] failed to bring the game's window to the front"),
             "{line}"
         );
         assert!(line.contains("error 5"), "{line}");

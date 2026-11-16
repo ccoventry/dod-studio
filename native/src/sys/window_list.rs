@@ -3,9 +3,9 @@
 //! `sys::minimize`, `sys::dialogs` and `sys::bring_forward`.
 
 pub type Hwnd = isize;
-pub type Lparam = isize;
-pub type Bool = i32;
-pub type EnumProc = unsafe extern "system" fn(Hwnd, Lparam) -> Bool;
+pub(super) type Lparam = isize;
+pub(super) type Bool = i32;
+pub(super) type EnumProc = unsafe extern "system" fn(Hwnd, Lparam) -> Bool;
 
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -20,7 +20,7 @@ unsafe extern "system" {
 /// # Safety
 ///
 /// `param` must be a `*mut Vec<Hwnd>` that outlives the enumeration.
-pub unsafe extern "system" fn collect(window: Hwnd, param: Lparam) -> Bool {
+pub(super) unsafe extern "system" fn collect(window: Hwnd, param: Lparam) -> Bool {
     // SAFETY: the caller passes a `&mut Vec<Hwnd>` alive for the whole
     // enumeration (the contract above).
     let found = unsafe { &mut *(param as *mut Vec<Hwnd>) };

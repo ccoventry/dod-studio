@@ -676,11 +676,11 @@ pub fn bring_forward_outcome(
         Outcome::NoForeground => {
             "left the game's window behind: no window was in front".to_string()
         }
-        Outcome::Refused(0) => "Failed to bring the game's window to the front: Windows refused \
+        Outcome::Refused(0) => "failed to bring the game's window to the front: Windows refused \
              SetForegroundWindow and gave no error code"
             .to_string(),
         Outcome::Refused(code) => format!(
-            "Failed to bring the game's window to the front: Windows refused \
+            "failed to bring the game's window to the front: Windows refused \
              SetForegroundWindow: {}",
             std::io::Error::from_raw_os_error(code as i32)
         ),
