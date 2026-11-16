@@ -67,6 +67,12 @@ Caveats:
 - **`dem_forcehltv 1` drops them.** `Server::ProcessMessage` keeps demo data
   only when not forcing HLTV. Default is 0. (ReHLDS source; not re-derived from
   the binary.)
+- **A POV demo played with `dem_forcehltv 1` never runs `CHud::Think`**
+  (measured, PRE, `tr2.dem`, #1462): the recorder's `ResetHUD`, `YouDied` and
+  `SetFOV` messages still set the HUD's FOV, and nothing resets it, so from the
+  recorder's spawn to his death it sits at 0 and DoD's `StudioDrawModel` skips
+  the in-eye viewmodel (it does under 90, the scoped-in rule).
+  `goldsrc-hooks/src/hltv_fov.rs` puts `Think`'s spectator FOV back each frame.
 
 ## 2. The trailing directory: followed, and ours is right
 
@@ -213,6 +219,25 @@ camera state is visible.
 The engine already has `dem_jump <seconds>` (relative, then pauses),
 `dem_start`, `dem_pause <0|1>`, `dem_speed <rate>` and `dem_save`, all from
 `DemoPlayer.dll`.
+
+**`dem_jump` is relative, and past the end it shows the start (#1465).**
+`dem_jump 293` typed at 4:50 goes to 9:43, not to 4:53 (ReHLDS
+`DemoPlayer::CMD_Jump` is `SetWorldTime(atof(arg), true)`). Measured on
+both builds with `ktps8w3-dyelife_ih_anzio_h2` (POV, the demo runs 0:05 to
+22:27): `dem_jump 20` at 5:36 landed at 5:56, `dem_jump -30` from there
+landed at 5:26 and played on from it, and `dem_jump 590` at 5:35 landed at
+15:25. `dem_jump 9000` put the clock at 165:25; the player then held it at
+the demo's last frame (22:27), but the view froze on the demo's first frames
+(warm-up, "Clan Match Begins in : 142 mins") and the client clock went to
+-8,524 s. That is what looked like "a jump back lands at the start" in
+#1452's probe: it typed absolute times into `dem_jump`, so its third jump
+ran past the end of an 18-minute demo. It is the engine, not the hook:
+nothing in the hook moves the clock on a `dem_jump` (the #893 gap skip
+logged nothing). So to go back by an amount, `dem_jump -<seconds>` (it
+pauses); to go to a time, `ds_demo_seek_to <seconds>` (it doesn't pause, and
+going back in an HLTV demo it replays from the start so names, teams and
+zooms are right).
+A jump past the end is undone with `ds_demo_seek_to`.
 
 `ds_demo_seek_to <seconds>` and `ds_demo_seek_by <seconds>`
 (`goldsrc-hooks/src/demo_seek.rs`) jump without pausing and refuse while the

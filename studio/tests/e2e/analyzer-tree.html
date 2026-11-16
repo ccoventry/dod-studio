@@ -22,11 +22,11 @@
       'D:\\': ['D:\\Program Files (x86)', 'D:\\Users'],
       'D:\\Program Files (x86)': ['D:\\Program Files (x86)\\Steam'],
       'D:\\Program Files (x86)\\Steam': [],
-      'D:\\Users': ['D:\\Users\\chris'],
-      'D:\\Users\\chris': [],
+      'D:\\Users': ['D:\\Users\\name'],
+      'D:\\Users\\name': [],
     };
     // Demos by folder: names only, as browse_directory lists them.
-    const demos = { 'D:\\Users\\chris': ['a.dem', 'x.dem'] };
+    const demos = { 'D:\\Users\\name': ['a.dem', 'x.dem'] };
     const entry = (path) => ({ name: path.split('\\').filter(Boolean).pop() || path, path, demo_count: 0 });
     const demo = (dir, name) => ({ name, path: `${dir}\\${name}`, size_bytes: 1, modified_unix_secs: 0, map_name: null, demo_type: 'POV' });
     window.__unreadable = new Set();

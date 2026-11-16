@@ -11,7 +11,11 @@ thunk's bytes the way it means to; only the binaries can prove:
      `[this + player*4 + TABLE_OFFSET]` (STORE_RVA) and all SLOTS of them
      with `lea edi, [ecx + TABLE_OFFSET]; mov ecx, SLOTS; rep stosd`.
   3. `CHud::Think` reads `[esi + g_iUser2*4 + TABLE_OFFSET]` at READ_RVA.
-  4. No other instruction in `.text` addresses the table: a `[reg+reg*4+0x70]`
+  4. `CHud::Think` stores the in-eye FOV at `[esi + HUD_FOV_OFFSET]`
+     (FOV_STORE_RVA), and `StudioDrawModel` compares that same field
+     (`gHUD + HUD_FOV_OFFSET`) with 90 before drawing the viewmodel
+     (VIEWMODEL_FOV_READ, #1462).
+  5. No other instruction in `.text` addresses the table: a `[reg+reg*4+0x70]`
      operand outside the handler and `Think`, or an absolute operand inside
      the table, would be another writer the module doesn't know of.
 
@@ -44,12 +48,23 @@ RUST = Path(__file__).resolve().parent.parent / "src" / "hltv_fov.rs"
 GHUD = 0x1080B0
 # `CHud::Think`'s HLTV block, which holds the one read.
 THINK_FROM, THINK_TO = 0x36D72, 0x36DA4
+# `CStudioModelRenderer::StudioDrawModel`'s `mov eax, [gHUD.m_iFOV]; cmp eax, 90`.
+VIEWMODEL_FOV_READ = 0x49ED5
 
 
 def constants():
     text = RUST.read_text(encoding="utf-8")
     out = {}
-    for name in ("THUNK_RVA", "HANDLER_RVA", "STORE_RVA", "READ_RVA", "TABLE_OFFSET", "SLOTS"):
+    for name in (
+        "THUNK_RVA",
+        "HANDLER_RVA",
+        "STORE_RVA",
+        "READ_RVA",
+        "TABLE_OFFSET",
+        "SLOTS",
+        "HUD_FOV_OFFSET",
+        "FOV_STORE_RVA",
+    ):
         m = re.search(rf"const {name}: usize = (0x[0-9a-f_]+|\d+);", text)
         if not m:
             sys.exit(f"{name} not found in {RUST}")
@@ -99,6 +114,19 @@ def check(path, c):
         f"mov eax, dword ptr [esi + eax*4 + {c['TABLE_OFFSET']:#x}]"
     ):
         problems.append("Think's read is not at READ_RVA")
+
+    fov_store = disasm(c["FOV_STORE_RVA"], 6)
+    if not fov_store or f"{fov_store[0].mnemonic} {fov_store[0].op_str}" != (
+        f"mov dword ptr [esi + {c['HUD_FOV_OFFSET']:#x}], eax"
+    ):
+        problems.append("Think's FOV store is not at FOV_STORE_RVA")
+
+    fov_read = disasm(VIEWMODEL_FOV_READ, 8)
+    if [f"{i.mnemonic} {i.op_str}" for i in fov_read] != [
+        f"mov eax, dword ptr [{base + GHUD + c['HUD_FOV_OFFSET']:#x}]",
+        "cmp eax, 0x5a",
+    ]:
+        problems.append("StudioDrawModel's FOV test is not at VIEWMODEL_FOV_READ")
 
     # Every other reference to the table, by register or absolute address.
     sect = next(s for s in pe.sections if s.Characteristics & 0x20000000)

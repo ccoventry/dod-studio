@@ -129,7 +129,8 @@ Ranked by how much each hurts a clip:
 | --- | --- | --- | --- |
 | 1 | camera frozen at his last spot whenever the recorder's client did not have him (4:50-5:02 of the run) | not in the demo | no. Studio can say which stretches exist (the probe's track mode) |
 | 2 | no gun with `ds_spec_match_pov 1`; the MG42 is drawn with `0` (PRE and POST, 2 s clips each, every frame) | the hook: something under the switch hides the view model in this view. Not the gun lowering: `ds_debug_log_gun_lowered` had the gun up for most of the run and `ds_debug_status` said "the gun is up (lowered 0 of 55)" while it was not drawn. Which part it is was not found | yes, likely small once found: switch the match_pov parts off one at a time in a forcehltv session |
-| 3 | odd shapes at the edges of the view at times (a roof, a camo-textured wedge) | the in-eye camera sits at origin + fixed eye height (DoD's `V_GetInEyePos`, 22 or 18 units); on a roof edge or prone it ends up in or against geometry, and possibly inside his own model. Same as HLTV in-eye, not forcehltv-specific | partly: `ds_spec_match_pov`'s prone/crouch heights apply; the rest is the HLTV in-eye camera |
+| 3 | odd shapes at the edges of the view at times (a roof, a camo-textured wedge) | map geometry next to him: at Allied Street (5:02-5:12) the rubble-textured wedge and the brick block are `func_wall`s `*134`-`*136` around the first flag, drawn the same in a normal POV demo standing there (`dodstudio-avalanche-povtest1.dem`, PRE). Elsewhere the in-eye camera (origin + DoD's `V_GetInEyePos` 22 or 18 units) can end up against a roof edge, as in HLTV in-eye | not a fault at Allied Street; elsewhere partly: `ds_spec_match_pov`'s prone/crouch heights apply |
+| 3a | every map model missing: the sandbags on their platforms, banisters, the tank | DoD draws a map's `env_model`s through one temp entity that `CClientEnvModel::Think` makes; `Think` runs from `CHud::Think`, which this session never calls (as for #1462's FOV), so it was never made | fixed: the hook calls `Think` (`goldsrc-hooks/src/env_models.rs`) |
 | 4 | his own footsteps and landing sounds missing | never sent: footsteps are played by each client for itself; a POV demo holds only the recorder's | no (an HLTV demo lacks them too) |
 | 5 | movement a little less smooth than a POV | entity updates at the server's rate, interpolated, vs the recorder's per-frame view | no, same as HLTV |
 | 6 | HUD: no health, ammo or stamina of his | a spectator HUD; the HUD messages in the demo are the recorder's (`Health`, `CurWeapon` go to Jedi only) | no, not his. Same as HLTV |
@@ -168,13 +169,17 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
 
 - **`dem_jump <t>`** (the demo player's own jump-and-pause) backwards in a
   POV demo landed at the demo's start, not at `t` (PRE). Seek forward with
-  `ds_demo_seek_to`.
+  `ds_demo_seek_to`. Cause (#1465): `dem_jump` is relative, so these
+  absolute times ran past the demo's end, where the view shows its first
+  frames; see `docs/goldsrc_viewdemo.md` (Jumping).
 - A `viewdemo` of a demo in `dod_addon` leaves `lookahead` looking for it in
   `dod\` ("can't open ...\dod\ds1452_tr2.dem"), so the look-ahead part of the
-  animation fix is off for such demos.
+  animation fix is off for such demos. Fixed in #1463: it looks in the
+  engine's search paths, `dod_addon` first with `-addons`.
 - After a backward jump `spectator_input_gate` logs "the demo clock went
-  back" on every frame (217 lines in one session): its log line needs a
-  budget.
+  back" on every frame (217 lines in one session). Fixed in #1471 (#1464): the
+  clock had gone below 0, so the gate's 0 was still ahead of it and was
+  cleared again every frame; it is now cleared to the clock.
 - PR #1458 drops `+map`/`+mapzoom` "while a POV demo plays", judged by
   `IsSpectateOnly()`. Under forcehltv that is true, so the hook counts it as
   HLTV and lets `+map` through; it does not matter, because forcehltv drops
@@ -184,8 +189,8 @@ Both were recorded with `ds_spec_match_pov 1`, so without the gun.
 
 1. The gun under `ds_spec_match_pov` in a forcehltv view (gap 2).
 2. `lookahead` should open the demo the engine actually opened (`dod_addon`,
-   subfolders, `../` paths).
-3. `spectator_input_gate`'s per-frame log line.
+   subfolders, `../` paths): done in #1463.
+3. `spectator_input_gate`'s per-frame log line: done in #1471.
 4. If Studio offers "watch another player" for POV demos: show the stretches
    where the demo holds that player (`forcehltv_pov_probe` track mode), and
    start forcehltv playback from there.
