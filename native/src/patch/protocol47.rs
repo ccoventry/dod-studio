@@ -176,7 +176,9 @@ pub fn convert_header_in_place(header: &mut [u8]) -> bool {
 pub fn restore_header_protocol_47(
     file: &mut (impl std::io::Write + std::io::Seek),
 ) -> std::io::Result<()> {
-    file.seek(std::io::SeekFrom::Start(HEADER_NETWORK_PROTOCOL.start as u64))?;
+    file.seek(std::io::SeekFrom::Start(
+        HEADER_NETWORK_PROTOCOL.start as u64,
+    ))?;
     file.write_all(&NETWORK_PROTOCOL_47.to_le_bytes())
 }
 
@@ -728,7 +730,10 @@ mod tests {
         assert_eq!(written, dir.path().join("old match_p48.dem"));
         assert_eq!(converted.server_infos, 1);
         assert_eq!(std::fs::read(&input).unwrap(), source);
-        assert_eq!(header_protocol(&std::fs::read(&written).unwrap()), Some(P48));
+        assert_eq!(
+            header_protocol(&std::fs::read(&written).unwrap()),
+            Some(P48)
+        );
 
         // Again: the earlier copy is replaced, and no part file stays.
         convert_file(&input, None).unwrap();
@@ -830,7 +835,9 @@ mod tests {
             .collect();
         if changed.len() != 1 + converted.server_infos
             || changed[0] != 12
-            || changed.iter().any(|&i| (source[i], bytes[i]) != (P47_BYTE, P48_BYTE))
+            || changed
+                .iter()
+                .any(|&i| (source[i], bytes[i]) != (P47_BYTE, P48_BYTE))
         {
             return Err(format!("unexpected bytes changed: {changed:?}"));
         }
