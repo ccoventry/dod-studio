@@ -101,7 +101,7 @@ for (const [panel, handle, field, dx] of [
   });
 }
 
-test('a table never drags below its minimum height',async ({ page }) => {
+test('a table never drags below its minimum height', async ({ page }) => {
   await boot(page);
   await open(page, SPLITS[3]);
   await drag(page, '#audit-results-resize-handle', 0, -2000);
