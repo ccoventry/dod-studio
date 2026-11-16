@@ -63,11 +63,7 @@ pub(super) unsafe fn update(vgui: &Vgui, frame_vp: Vpanel) {
             }
             None => Some(HIGHLIGHTS.load(Ordering::Acquire)).filter(|&p| p != NONE),
         };
-        let text = load_strip_text(
-            demo,
-            highlights,
-            crate::demo_damage::tell::strip_line(),
-        );
+        let text = load_strip_text(demo, highlights, crate::demo_damage::tell::strip_line());
         let page = PAGE_OBJECTS
             .iter()
             .map(|p| vpanel_of(p.load(Ordering::Acquire) as *mut c_void))

@@ -13,6 +13,9 @@
 //!   a capture batch runs or `host_framerate` is set (HLAE sets it every
 //!   frame while it records; a fast-forward sets it too).
 
+// Only the 32-bit build has the window that reads the strip line.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+
 use std::sync::Mutex;
 
 /// The window's line, the demo it is about (as played), and the line.
@@ -27,7 +30,8 @@ const CENTRE_DAMAGED: &str = "This demo is damaged at {at}.\nDoD Studio can repa
 
 /// One engine build's `pfnCenterPrint` wrapper, by offset in `hw.dll`
 /// (`tools/verify_center_print_offsets.py`).
-const CENTRE_PRINT_AT: [(&str, usize); 2] = [("pre-Anniversary", 0xb0e0), ("25th Anniversary", 0x195480)];
+const CENTRE_PRINT_AT: [(&str, usize); 2] =
+    [("pre-Anniversary", 0xb0e0), ("25th Anniversary", 0x195480)];
 
 /// Remembers the window's line for `demo` (as played).
 pub(super) fn remember_for_window(demo: &str, at_text: &str) {
@@ -84,7 +88,9 @@ fn center_print(text: &str) -> Result<&'static str, String> {
         .iter()
         .find(|(_, offset)| *offset == at)
         .map(|(name, _)| *name)
-        .ok_or_else(|| format!("pfnCenterPrint is at +{at:#x}, not a wrapper this was checked against"))?;
+        .ok_or_else(|| {
+            format!("pfnCenterPrint is at +{at:#x}, not a wrapper this was checked against")
+        })?;
     let text = std::ffi::CString::new(text.replace('%', "")).map_err(|e| e.to_string())?;
     // Safety: the engine's own wrapper (checked above), on its thread, with a
     // format that has no conversions.

@@ -137,8 +137,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
-//! - `demo_damage`: when a demo stops because its file is damaged, says so in
-//!   the console and tells Studio over the events pipe (#1373).
+//! - `demo_damage`: when a demo stops because its file is damaged (or
+//!   `viewdemo` loads it only up to the damage), says so in the console, the
+//!   DoD Studio window and on screen, and tells Studio over the events pipe
+//!   and its game pipe (#1373).
 //!   `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 //! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
 //!   through its event dictionary's lookup cache, the 25th Anniversary crash

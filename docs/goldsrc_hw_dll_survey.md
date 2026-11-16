@@ -1092,7 +1092,9 @@ all ended through `Host_EndGame("End of demo.")`, while damaged ones end through
 `Host_Error("CL_ParseServerMessage: Illegible server message - svc_bad")`.
 `viewdemo` reaches neither function: `DemoPlayer`'s loader (`Core.dll`) prints
 `WARNING! DemoFile::ReadDemoPacket: ...` or `WARNING! Server::ParseBad: ...` at
-load and plays the part before the damage. `goldsrc-hooks/src/demo_damage.rs`
+load and plays the part before the damage; `goldsrc-hooks/src/demo_damage/viewdemo.rs`
+catches that once the load ends (the player's buffered span against a walk of
+the file's frames, which stops on the same frame). `goldsrc-hooks/src/demo_damage.rs`
 hooks both functions (`Host_EndGame` PRE `+0x55ea0` / Anniversary `+0x1d26e0`,
 `Host_Error` `+0x55f60` / `+0x1d27c0`).
 

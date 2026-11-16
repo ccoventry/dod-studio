@@ -581,7 +581,14 @@ mod tests {
     #[test]
     fn a_frame_no_reader_takes_stops_the_walk_as_damage() {
         // monday-wsod25_r07_m1_h1's kind: a message past MAX_POSSIBLE_MSG.
-        let frames = [net(10.0), net(507.7), oversized(70_000), net(900.0), frame(5, 0.0, 0)].concat();
+        let frames = [
+            net(10.0),
+            net(507.7),
+            oversized(70_000),
+            net(900.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
         let path = one_segment_demo("oversized", &frames);
         let walked = walk(&path).unwrap();
         assert!(walked.bad_frame);

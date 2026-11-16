@@ -489,7 +489,14 @@ damaged frame, or at the engine's entity limit (256 on the pre-Anniversary
 build), and says so in the console, the hook log and a `DEMO_DAMAGED` /
 `DEMO_ENTITY_LIMIT` event to Studio (#1373): one entry detour on each of
 `Host_EndGame` and `Host_Error`, both builds
-(`tools/verify_demo_damage_offsets.py`). It only reads. On by default;
+(`tools/verify_demo_damage_offsets.py`). Under `viewdemo`, which reaches
+neither, `src/demo_damage/viewdemo.rs` holds what the demo player loaded
+against a walk of the file's frames once the load ends. A damaged demo also
+gets a line on the DoD Studio window's loading strip, a centre print while
+nothing is being captured (`pfnCenterPrint`, checked per build by
+`tools/verify_center_print_offsets.py`), and a `damaged` request over
+Studio's game pipe, which shows a toast with Repair
+(`src/demo_damage/tell.rs`). It only reads. On by default;
 `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 
 `src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo

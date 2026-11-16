@@ -108,9 +108,8 @@ pub fn serve(line: &str, writer: &mut impl std::io::Write) {
                 &notice.reason,
             ));
             match HANDLER.get() {
-                Some(handler) => handler(notice).map_err(|e| {
-                    crate::log_markdown(&crate::messages::game_damage_not_handed_on(&e));
-                    e
+                Some(handler) => handler(notice).inspect_err(|e| {
+                    crate::log_markdown(&crate::messages::game_damage_not_handed_on(e));
                 }),
                 None => Err(crate::messages::GAME_DAMAGE_STUDIO_STARTING.to_string()),
             }
@@ -169,7 +168,10 @@ mod tests {
         let mut out = Vec::new();
         serve("damaged 5 bad_frame a.dem\n", &mut out);
         let text = String::from_utf8(out).unwrap();
-        assert!(text.starts_with("failed ") && text.ends_with('\n'), "{text}");
+        assert!(
+            text.starts_with("failed ") && text.ends_with('\n'),
+            "{text}"
+        );
         assert_eq!(text.lines().count(), 1);
     }
 }
