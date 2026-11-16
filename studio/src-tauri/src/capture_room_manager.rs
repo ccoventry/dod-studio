@@ -617,6 +617,7 @@ impl CaptureRoom {
                         // One target drive, so one piece: the block being
                         // written and the next one both land on it.
                         pieces: vec![check.writing.saturating_add(check.next_bytes)],
+                        fallback_pieces: None,
                         headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
                     },
                     Some(&self.cancel),

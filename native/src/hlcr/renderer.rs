@@ -7,9 +7,12 @@ use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
 use crate::shared::lock::lock_or_recover;
 
+mod clip_frames;
 mod ffmpeg_args;
 mod ffmpeg_run;
 mod partial_output;
+mod segment_plan;
+mod segmented;
 /// What marks a render's unfinished file name (#1439): a folder walk for
 /// finished clips skips names with it.
 pub use partial_output::PARTIAL_MARK;
@@ -236,6 +239,35 @@ fn try_reserve(
     }
 }
 
+/// One way a render can fit on the export drives: `amount` bytes on one of
+/// `dirs`, the first with room.
+pub(super) struct RoomAsk {
+    pub(super) dirs: Vec<PathBuf>,
+    pub(super) amount: u64,
+}
+
+/// Reserves the first of `asks` that fits (see [`try_reserve`]): its index,
+/// and what that ask found; the last ask's when none fits (`None`).
+/// `asks` is never empty: the one-piece ask is always last.
+fn reserve_first_fit(
+    ledger: &mut HashMap<PathBuf, u64>,
+    asks: &[RoomAsk],
+    mut margin_of: impl FnMut(&Path) -> u64,
+    mut free_of: impl FnMut(&Path) -> Option<u64>,
+) -> (Option<usize>, Reserved) {
+    let mut last = Reserved {
+        picked: None,
+        passed_over: Vec::new(),
+    };
+    for (index, ask) in asks.iter().enumerate() {
+        last = try_reserve(ledger, &ask.dirs, ask.amount, &mut margin_of, &mut free_of);
+        if last.picked.is_some() {
+            return (Some(index), last);
+        }
+    }
+    (None, last)
+}
+
 /// The first directory in `passed_over` that had room for `amount` past the
 /// usual [`EXPORT_SAFETY_MARGIN_BYTES`] and was passed over only for
 /// "Keep free on the Windows drive" (#1430), with its room. `margin_of` is the
@@ -314,15 +346,16 @@ pub async fn run_render_job(
         return;
     }
     log_render_fps(&job, fps_used, fps_from_take);
+    // A deleted take's segments go whatever this render is (#1451), the
+    // setting off included: turning it off to save space gets the space back.
+    segmented::remove_orphans(&job).await;
 
-    // Releases this job's reservation on every exit path below — see
-    // `ReservationGuard`'s own doc comment.
-    let (output_folder, _reservation_guard) = match reserve_export_dir(&job, &reservations) {
-        Ok(reserved) => reserved,
-        Err(reason) => {
-            job.refuse(reason);
-            return;
-        }
+    // The guard releases this job's reservation on every exit path below —
+    // see `ReservationGuard`'s own doc comment.
+    let Some((output_folder, _reservation_guard, segments)) =
+        reserve_room(&job, &reservations, fps_used).await
+    else {
+        return;
     };
     if let Err(e) = std::fs::create_dir_all(&output_folder) {
         job.refuse(format!("Failed to create output folder: {}", e));
@@ -347,6 +380,21 @@ pub async fn run_render_job(
         std::thread::available_parallelism().ok().map(|n| n.get()),
         job.config.max_concurrent_renders,
     );
+    if let Some(prepared) = &segments
+        && let Some(folder) = segmented::claim_folder(&job, prepared, &output_folder).await
+    {
+        let render = segmented::SegmentedRender {
+            plan: &prepared.plan,
+            folder,
+            encode: &encode,
+            threads,
+            output: &output,
+        };
+        // A segment that came out short sends the take to one piece, below.
+        if segmented::run_segmented(&job, render).await == segmented::SegmentedEnd::Ended {
+            return;
+        }
+    }
     let args = ffmpeg_args::FfmpegArgs {
         clip: &job.clip,
         fps: fps_used,
@@ -357,6 +405,114 @@ pub async fn run_render_job(
     }
     .to_args();
     ffmpeg_run::run_ffmpeg(&job, args, &output).await;
+}
+
+/// Reserves room for `job` on an export drive: the export folder, the guard
+/// that releases it, and the segmented render it has room for, or `None`
+/// for one piece. A long take renders in segments that a stopped render
+/// resumes from (#1451); its segments and the clip they join into are both
+/// on the drive for a moment, so it asks for room for both, on the drive its
+/// stopped segments are on first. With room for the clip only, it renders
+/// in one piece as before, and this take's segments are removed. `None`,
+/// with the job refused, when no drive has room even for that.
+async fn reserve_room(
+    job: &RenderJob,
+    reservations: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    fps_used: u32,
+) -> Option<(PathBuf, ReservationGuard, Option<segmented::Prepared>)> {
+    let mut prepared = segmented::prepare(job, fps_used);
+    let one_piece_bytes = job_reservation_estimate(
+        &job.clip,
+        job.config.target_codec,
+        &job.config.custom_codec_args,
+    );
+    let mut asks = prepared
+        .as_ref()
+        .map(|s| s.room_asks(&job.config.export_directories, one_piece_bytes))
+        .unwrap_or_default();
+    // FFmpeg joins in the segment folder, and Windows refuses a working
+    // folder past its path limit (#1451 review): with no export folder short
+    // enough, the take renders in one piece from the start, reserving and
+    // making room for the clip alone.
+    if prepared.is_some() && asks.is_empty() {
+        crate::log_markdown(&crate::messages::render::segments_path_too_long(
+            &job.job_id,
+            segmented::MAX_SEGMENT_DIR_UNITS,
+        ));
+        prepared = None;
+    }
+    asks.push(RoomAsk {
+        dirs: job.config.export_directories.clone(),
+        amount: one_piece_bytes,
+    });
+    let (output_folder, guard, picked) = match reserve_export_dir(job, reservations, &asks) {
+        Ok(reserved) => reserved,
+        Err(reason) => {
+            job.refuse(reason);
+            return None;
+        }
+    };
+    // Only the last ask is one piece; a segmented render asked more first.
+    if prepared.is_some() && picked + 1 == asks.len() {
+        crate::log_markdown(&crate::messages::render::segments_no_room(
+            &job.job_id,
+            asks[picked - 1].amount,
+        ));
+        prepared = None;
+    }
+    // A take rendering in one piece, the setting off included, frees the
+    // room its stopped segments hold: nothing will join them.
+    if prepared.is_none() {
+        segmented::remove_take_segments(job).await;
+    }
+    Some((output_folder, guard, prepared))
+}
+
+/// A render batch's first activity log line: the FFmpeg `configured`
+/// (Render Settings' path, or a bare `ffmpeg` on PATH) resolves to and its
+/// `-version` banner, or why that can't be read, and whether "Resumable
+/// renders" is on as it starts. Starts FFmpeg once and waits up to 5 s
+/// (`hlae_ffmpeg::verify_is_ffmpeg`): call it once per batch, off the main
+/// thread. Only logged: whether a join is whole never depends on the
+/// version.
+pub fn render_batch_start_line(configured: &str, resumable: bool) -> String {
+    use crate::messages::render as msg;
+    let Some(exe) = crate::shared::hlae_ffmpeg::resolve_absolute(configured) else {
+        return msg::render_batch_start_unread(configured, "not found", resumable);
+    };
+    match crate::shared::hlae_ffmpeg::verify_is_ffmpeg(&exe) {
+        Ok(banner) => msg::render_batch_start(&banner, exe.display(), resumable),
+        Err(why) => msg::render_batch_start_unread(configured, why, resumable),
+    }
+}
+
+/// Whether export folder `export_dir`'s path is short enough to hold a
+/// render's segment folder (#1451): one longer renders long takes in one
+/// piece, and room is made for the clip alone there.
+pub fn segments_fit_under(export_dir: &Path) -> bool {
+    segmented::segments_fit_under(export_dir)
+}
+
+/// What a render of `clip` reserves on its export drive at most when it
+/// starts from nothing: twice the clip for a take that renders in segments
+/// (#1451), the clip otherwise (`job_reservation_estimate`). For the take
+/// cleanup that makes room before a batch starts, so a long take gets the
+/// room to render in segments. Reads the take's wav header and, for an AVI
+/// take, its video header.
+pub fn job_peak_reservation_estimate(
+    clip: &ClipData,
+    codec: RenderCodec,
+    custom_args: &str,
+    setting_fps: u32,
+) -> u64 {
+    let one_piece = job_reservation_estimate(clip, codec, custom_args);
+    if codec == RenderCodec::SourceCopy {
+        return one_piece;
+    }
+    let (fps_used, _) = super::take_meta::render_fps(Path::new(&clip.take_folder), setting_fps);
+    segment_plan::plan(&segmented::take_facts(clip, codec, fps_used)).map_or(one_piece, |plan| {
+        segment_plan::peak_bytes(one_piece, &plan, 0)
+    })
 }
 
 /// One render job as every stage sees it: the job, where its updates go,
@@ -545,13 +701,17 @@ fn log_render_fps(job: &RenderJob, fps_used: u32, fps_from_take: bool) {
 /// pick the same drive before any of them has written a byte — the flat
 /// 20 GiB threshold this replaced was only ever sized to be safe for one
 /// job at a time.
+///
+/// `asks` are the ways the job can fit, in order of preference (a segmented
+/// render's before its one-piece fallback, #1451); the last is the one
+/// piece, whose amount the refusal names. Returns the folder, its guard and
+/// which ask fitted.
 fn reserve_export_dir(
     job: &RenderJob,
     reservations: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-) -> Result<(PathBuf, ReservationGuard), String> {
+    asks: &[RoomAsk],
+) -> Result<(PathBuf, ReservationGuard, usize), String> {
     let config = &job.config;
-    let reservation_estimate =
-        job_reservation_estimate(&job.clip, config.target_codec, &config.custom_codec_args);
 
     // No export folder: refused, never written into the working directory
     // (for an installed app, its install folder), where nobody would look.
@@ -575,13 +735,13 @@ fn reserve_export_dir(
             .unwrap_or(EXPORT_SAFETY_MARGIN_BYTES)
     };
     let mut ledger = lock_or_recover(reservations);
-    let reserved = try_reserve(
+    let (fitted, reserved) = reserve_first_fit(
         &mut ledger,
-        &config.export_directories,
-        reservation_estimate,
+        asks,
         margin_of,
         crate::sys::disk::get_available_bytes,
     );
+    let reservation_estimate = asks[fitted.unwrap_or(asks.len() - 1)].amount;
     let held_back =
         held_back_for_windows_drive(&reserved.passed_over, reservation_estimate, margin_of);
     let keep_free = crate::sys::windows_drive::keep_free_bytes();
@@ -593,7 +753,7 @@ fn reserve_export_dir(
             keep_free,
         ));
     }
-    let Some((dir, already_reserved, live_free)) = reserved.picked else {
+    let (Some(fitted), Some((dir, already_reserved, live_free))) = (fitted, reserved.picked) else {
         let note = held_back
             .map(|_| crate::messages::windows_drive::kept_free_note(keep_free))
             .unwrap_or_default();
@@ -627,7 +787,7 @@ fn reserve_export_dir(
         amount: reservation_estimate,
         job_id: job.job_id.clone(),
     };
-    Ok((dir, guard))
+    Ok((dir, guard, fitted))
 }
 
 /// The pieces of a finished file's name, shared by the FFmpeg render path

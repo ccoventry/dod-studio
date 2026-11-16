@@ -91,6 +91,7 @@ async fn closing_studio_stops_a_render_silently_and_leaves_no_file() {
         custom_codec_args: "-c:v libx264 -preset placebo -crf 0".to_string(),
         max_concurrent_renders: 1,
         clip_tag: None,
+        resumable_renders: true,
     };
     let (tx, rx) = mpsc::channel();
     let reservations = Arc::new(Mutex::new(HashMap::new()));

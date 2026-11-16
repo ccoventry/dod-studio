@@ -389,6 +389,7 @@ fn source_copy_config(export_dir: &Path) -> RenderConfig {
         custom_codec_args: String::new(),
         max_concurrent_renders: 1,
         clip_tag: None,
+        resumable_renders: true,
     }
 }
 
@@ -1388,4 +1389,85 @@ async fn an_ffmpeg_render_cancelled_partway_keeps_its_reservation_till_it_ends()
     );
     assert!(files_in(&export_dir).is_empty());
     assert_eq!(reserved(&ledger), 0);
+}
+
+/// A segmented render's asks (#1451): its own drive for a resume, twice
+/// the clip anywhere, then the clip alone, each on drives with `free` room.
+fn segmented_asks() -> Vec<RoomAsk> {
+    let (a, b) = (PathBuf::from("no-drive-a"), PathBuf::from("no-drive-b"));
+    vec![
+        RoomAsk {
+            dirs: vec![b.clone()],
+            amount: 15,
+        },
+        RoomAsk {
+            dirs: vec![a.clone(), b.clone()],
+            amount: 20,
+        },
+        RoomAsk {
+            dirs: vec![a, b],
+            amount: 10,
+        },
+    ]
+}
+
+fn first_fit(free_a: u64, free_b: u64) -> (Option<usize>, Option<PathBuf>, HashMap<PathBuf, u64>) {
+    let mut ledger = HashMap::new();
+    let free = |p: &Path| {
+        Some(if p.ends_with("no-drive-a") {
+            free_a
+        } else {
+            free_b
+        })
+    };
+    let (fitted, reserved) = reserve_first_fit(&mut ledger, &segmented_asks(), |_| 0, free);
+    (fitted, reserved.picked.map(|p| p.0), ledger)
+}
+
+/// The resume's own drive is asked first, for the clip and the segments
+/// still to render, even when another drive has room for a fresh start.
+#[test]
+fn a_resume_reserves_on_its_own_drive_first() {
+    let (fitted, dir, ledger) = first_fit(100, 16);
+    assert_eq!(fitted, Some(0));
+    assert_eq!(dir, Some(PathBuf::from("no-drive-b")));
+    assert_eq!(ledger.values().sum::<u64>(), 15, "only the ask that fitted");
+}
+
+#[test]
+fn a_fresh_start_takes_twice_the_clip_on_any_drive() {
+    let (fitted, dir, _) = first_fit(21, 5);
+    assert_eq!(fitted, Some(1));
+    assert_eq!(dir, Some(PathBuf::from("no-drive-a")));
+}
+
+/// Room for the clip but not for the segments too (#1451 review): the
+/// render goes ahead in one piece, as it did before segments.
+#[test]
+fn room_for_the_clip_only_falls_back_to_one_piece() {
+    let (fitted, dir, ledger) = first_fit(11, 5);
+    assert_eq!(fitted, Some(2));
+    assert_eq!(dir, Some(PathBuf::from("no-drive-a")));
+    assert_eq!(ledger.values().sum::<u64>(), 10);
+}
+
+#[test]
+fn no_room_even_for_the_clip_fits_nothing() {
+    let (fitted, dir, ledger) = first_fit(9, 9);
+    assert_eq!((fitted, dir), (None, None));
+    assert!(ledger.is_empty());
+}
+
+/// The batch's FFmpeg line (#1451): an FFmpeg that isn't there is logged as
+/// unread, and the batch carries on.
+#[test]
+fn an_ffmpeg_that_is_not_there_is_logged_as_unread() {
+    let dir = scratch("ffmpeg_version_missing");
+    let missing = dir.join("ffmpeg.exe");
+    let line = render_batch_start_line(&missing.to_string_lossy(), false);
+    assert!(
+        line.starts_with("[render] could not read the version of the FFmpeg"),
+        "{line}"
+    );
+    assert!(line.ends_with("; resumable renders off"), "{line}");
 }
