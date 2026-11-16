@@ -1,4 +1,4 @@
-// patch/cfg_scan.rs
+// game_config/cfg_scan.rs
 // What the game's own config files set behind the pipeline's back.
 //
 // STRICTLY READ-ONLY. This module never writes, edits, moves or deletes a

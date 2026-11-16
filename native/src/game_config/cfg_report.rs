@@ -1,6 +1,6 @@
 //! The Capture tab's config warnings: what the game's own config files set,
 //! what Initial and Scheduled Commands change, and what the pipeline refuses
-//! or ignores (#216, #679). Built from [`cfg_scan`](crate::patch::cfg_scan)'s
+//! or ignores (#216, #679). Built from [`cfg_scan`](crate::game_config::cfg_scan)'s
 //! read of the game folder; the Tauri command only converts its arguments.
 
 use std::path::{Path, PathBuf};
@@ -30,9 +30,9 @@ pub struct ValueSourceRow {
     pub offset_seconds: Option<f32>,
 }
 
-impl From<&crate::patch::cfg_scan::StatedValue> for ValueSourceRow {
-    fn from(v: &crate::patch::cfg_scan::StatedValue) -> Self {
-        use crate::patch::cfg_scan::ValueSource;
+impl From<&crate::game_config::cfg_scan::StatedValue> for ValueSourceRow {
+    fn from(v: &crate::game_config::cfg_scan::StatedValue) -> Self {
+        use crate::game_config::cfg_scan::ValueSource;
         let (kind, file, line, offset_seconds) = match &v.source {
             ValueSource::Config { file, line } => (
                 "config",
@@ -97,8 +97,8 @@ pub struct AsymmetricAfterRow {
     pub baseline: ValueSourceRow,
 }
 
-impl From<&crate::patch::cfg_scan::ValueConflict> for ValueConflictRow {
-    fn from(c: &crate::patch::cfg_scan::ValueConflict) -> Self {
+impl From<&crate::game_config::cfg_scan::ValueConflict> for ValueConflictRow {
+    fn from(c: &crate::game_config::cfg_scan::ValueConflict) -> Self {
         ValueConflictRow {
             cvar: c.cvar.clone(),
             values: c.values.iter().map(ValueSourceRow::from).collect(),
@@ -108,8 +108,8 @@ impl From<&crate::patch::cfg_scan::ValueConflict> for ValueConflictRow {
     }
 }
 
-impl From<&crate::patch::cfg_scan::AsymmetricAfter> for AsymmetricAfterRow {
-    fn from(a: &crate::patch::cfg_scan::AsymmetricAfter) -> Self {
+impl From<&crate::game_config::cfg_scan::AsymmetricAfter> for AsymmetricAfterRow {
+    fn from(a: &crate::game_config::cfg_scan::AsymmetricAfter) -> Self {
         AsymmetricAfterRow {
             cvar: a.cvar.clone(),
             after: ValueSourceRow::from(&a.after),
@@ -184,7 +184,7 @@ pub struct RenamedCommandRow {
 }
 
 fn renamed_rows(commands: &[String], source: &str) -> Vec<RenamedCommandRow> {
-    crate::patch::cfg_scan::renamed_commands(commands)
+    crate::game_config::cfg_scan::renamed_commands(commands)
         .into_iter()
         .map(|(old, new, _)| RenamedCommandRow {
             old,
@@ -209,7 +209,7 @@ pub struct FilteredCommandRow {
 }
 
 fn filtered_rows(commands: &[String]) -> Vec<FilteredCommandRow> {
-    crate::patch::cfg_scan::demo_filtered_commands(commands)
+    crate::game_config::cfg_scan::demo_filtered_commands(commands)
         .into_iter()
         .map(|f| FilteredCommandRow {
             command: f.command,
@@ -243,7 +243,7 @@ pub struct CfgReport {
     /// against them once, before the demo plays.
     pub banned_scheduled: Vec<BannedCommandRow>,
     /// Initial / Scheduled Commands too long for one ConsoleCommand frame
-    /// (`crate::patch::too_long_commands`). Blocking, like the banned lists:
+    /// (`crate::game_config::too_long_commands`). Blocking, like the banned lists:
     /// `start_capture_batch` refuses them too (#453).
     pub too_long_init: Vec<String>,
     pub too_long_scheduled: Vec<String>,
@@ -356,10 +356,10 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
     let Some(dir) = game_mod_dir(&request.game_path) else {
         return CfgReport::default();
     };
-    let scan = crate::patch::cfg_scan::scan(&dir);
+    let scan = crate::game_config::cfg_scan::scan(&dir);
     let config_cfg_writable = config_cfg_is_writable(&dir);
     let cfg = pipeline_config(&request);
-    let effective_commands = crate::patch::final_init_commands(&cfg);
+    let effective_commands = crate::game_config::final_init_commands(&cfg);
     let init_commands = &request.init_commands;
     let command_texts: Vec<String> = request
         .scheduled_commands
@@ -386,8 +386,8 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
         custom,
         banned_init: banned_rows(init_commands),
         banned_scheduled,
-        too_long_init: crate::patch::too_long_commands(init_commands),
-        too_long_scheduled: crate::patch::too_long_commands(&command_texts),
+        too_long_init: crate::game_config::too_long_commands(init_commands),
+        too_long_scheduled: crate::game_config::too_long_commands(&command_texts),
         decal_default_ring: decal_default_ring(&cfg),
         decal_flush_is_noop: is_decal_flush_noop(&cfg),
         noop_init: noop_rows(&scan, init_commands),
@@ -428,7 +428,7 @@ impl DemoFilter {
     /// it arrives (`cfg_scan::demo_filter_rule`). Never, when the filter
     /// doesn't apply.
     fn drops(self, command: &str) -> bool {
-        self.applies && crate::patch::cfg_scan::demo_filter_rule(command).is_some()
+        self.applies && crate::game_config::cfg_scan::demo_filter_rule(command).is_some()
     }
 
     /// The rows for `commands` the filter drops; empty when it doesn't apply.
@@ -473,9 +473,9 @@ fn pipeline_config(request: &CfgReportRequest) -> crate::patch::PatcherConfig {
 /// default" — see [`is_decal_flush_noop`].
 fn decal_default_ring(cfg: &crate::patch::PatcherConfig) -> Option<u32> {
     (cfg.decal_flush
-        && crate::patch::ring_limit_from_init(&cfg.init_commands).is_none()
-        && crate::patch::ring_limit_from_game_config(cfg).is_none())
-    .then(|| crate::patch::ring_limit(cfg))
+        && crate::game_config::ring_limit_from_init(&cfg.init_commands).is_none()
+        && crate::game_config::ring_limit_from_game_config(cfg).is_none())
+    .then(|| crate::game_config::ring_limit(cfg))
     .filter(|&ring| ring > 0)
 }
 
@@ -486,7 +486,7 @@ fn decal_default_ring(cfg: &crate::patch::PatcherConfig) -> Option<u32> {
 /// here — see `ring_limit`), or, if it ever becomes settable,
 /// decal_ring_limit's own default being 0.
 fn is_decal_flush_noop(cfg: &crate::patch::PatcherConfig) -> bool {
-    cfg.decal_flush && crate::patch::ring_limit(cfg) == 0
+    cfg.decal_flush && crate::game_config::ring_limit(cfg) == 0
 }
 
 /// Anything the pipeline reads (`cfg_scan::WATCHED_CVARS`, in that order)
@@ -495,7 +495,7 @@ fn is_decal_flush_noop(cfg: &crate::patch::PatcherConfig) -> bool {
 /// not reported as unseen. A command the demo filter drops never reaches the
 /// game, so it names nothing.
 fn unseen_settings(
-    scan: &crate::patch::cfg_scan::CfgScan,
+    scan: &crate::game_config::cfg_scan::CfgScan,
     cfg: &crate::patch::PatcherConfig,
     effective_commands: &[String],
     filter: DemoFilter,
@@ -525,8 +525,8 @@ fn unseen_settings(
         .filter(|c| !filter.drops(c))
         .cloned()
         .collect();
-    let capture_fov_stated = crate::patch::capture_fov_from_init(&delivered).is_some();
-    let r_decals_stated_in_init = crate::patch::ring_limit_from_init(&delivered).is_some();
+    let capture_fov_stated = crate::game_config::capture_fov_from_init(&delivered).is_some();
+    let r_decals_stated_in_init = crate::game_config::ring_limit_from_init(&delivered).is_some();
     scan.effective_settings()
         .into_iter()
         .filter(|s| !named.contains(&s.cvar.to_lowercase()))
@@ -550,7 +550,7 @@ fn unseen_settings(
 /// Commands refused outright (`cfg_scan::BANNED_COMMANDS`, see its doc
 /// comment), in either list.
 fn banned_rows(commands: &[String]) -> Vec<BannedCommandRow> {
-    crate::patch::cfg_scan::banned_commands(commands)
+    crate::game_config::cfg_scan::banned_commands(commands)
         .into_iter()
         .map(|(cvar, command)| BannedCommandRow { cvar, command })
         .collect()
@@ -562,7 +562,7 @@ fn banned_rows(commands: &[String]) -> Vec<BannedCommandRow> {
 fn banned_scheduled_rows(command_texts: &[String]) -> Vec<BannedCommandRow> {
     let mut rows = banned_rows(command_texts);
     rows.extend(
-        crate::patch::cfg_scan::scheduled_banned_commands(command_texts)
+        crate::game_config::cfg_scan::scheduled_banned_commands(command_texts)
             .into_iter()
             .map(|(cvar, command)| BannedCommandRow { cvar, command }),
     );
@@ -573,11 +573,11 @@ fn banned_scheduled_rows(command_texts: &[String]) -> Vec<BannedCommandRow> {
 /// doc comment for why): Initial Commands first, then the value a config
 /// the engine executes leaves in effect.
 fn noop_rows(
-    scan: &crate::patch::cfg_scan::CfgScan,
+    scan: &crate::game_config::cfg_scan::CfgScan,
     init_commands: &[String],
 ) -> Vec<NoopCommandRow> {
     let mut rows: Vec<NoopCommandRow> =
-        crate::patch::cfg_scan::noop_commands_in_init(init_commands)
+        crate::game_config::cfg_scan::noop_commands_in_init(init_commands)
             .into_iter()
             .map(|(cvar, command)| NoopCommandRow {
                 cvar,
@@ -585,7 +585,7 @@ fn noop_rows(
                 source: "Initial Commands".to_string(),
             })
             .collect();
-    for &cvar in crate::patch::cfg_scan::NOOP_IN_INIT_COMMANDS {
+    for &cvar in crate::game_config::cfg_scan::NOOP_IN_INIT_COMMANDS {
         if let Some(setting) = scan.effective(cvar) {
             rows.push(NoopCommandRow {
                 cvar: cvar.to_string(),
@@ -603,7 +603,7 @@ fn noop_rows(
 /// scheduled `r_decals` breaks the flush, however many there are, so the
 /// list is not deduplicated the way the value rules are.
 fn hazard_rows(command_texts: &[String]) -> Vec<CustomCommandWarning> {
-    crate::patch::cfg_scan::mid_demo_hazards(command_texts)
+    crate::game_config::cfg_scan::mid_demo_hazards(command_texts)
         .into_iter()
         .map(|(cvar, command)| CustomCommandWarning {
             command,
@@ -631,7 +631,7 @@ fn flagged_cvars(
 /// What [`value_rules`] reads.
 struct ValueRuleInputs<'a> {
     game_dir: &'a Path,
-    scan: &'a crate::patch::cfg_scan::CfgScan,
+    scan: &'a crate::game_config::cfg_scan::CfgScan,
     /// Initial Commands as the engine receives them, the app's own included.
     effective_commands: &'a [String],
     /// Initial Commands as the user typed them.
@@ -667,16 +667,16 @@ fn value_rules(input: ValueRuleInputs) -> ValueRules {
         .filter(passes)
         .cloned()
         .collect();
-    let execs: Vec<crate::patch::cfg_scan::InitialExec> = applied_init
+    let execs: Vec<crate::game_config::cfg_scan::InitialExec> = applied_init
         .iter()
-        .filter_map(|c| crate::patch::cfg_scan::follow_initial_exec(input.game_dir, c))
+        .filter_map(|c| crate::game_config::cfg_scan::follow_initial_exec(input.game_dir, c))
         .collect();
     let missing_exec: Vec<String> = execs
         .iter()
         .filter(|e| e.file.is_none())
         .map(|e| e.command.clone())
         .collect();
-    let values = crate::patch::cfg_scan::value_warnings_with_execs(
+    let values = crate::game_config::cfg_scan::value_warnings_with_execs(
         input.scan,
         &applied_init,
         input.init_commands.iter().filter(passes).count(),
@@ -705,15 +705,15 @@ fn value_rule_schedule<'a>(
     commands: &'a [CustomCommand],
     flagged: &std::collections::HashSet<String>,
     filter: DemoFilter,
-) -> Vec<crate::patch::cfg_scan::ScheduledCommand<'a>> {
+) -> Vec<crate::game_config::cfg_scan::ScheduledCommand<'a>> {
     application_order(commands)
         .into_iter()
         .filter(|c| !filter.drops(&c.command))
         .filter(|c| {
-            crate::patch::cfg_scan::assigned_cvar(&c.command)
+            crate::game_config::cfg_scan::assigned_cvar(&c.command)
                 .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
         })
-        .map(|c| crate::patch::cfg_scan::ScheduledCommand {
+        .map(|c| crate::game_config::cfg_scan::ScheduledCommand {
             command: &c.command,
             after: c.relation == CommandRelation::After,
             offset_seconds: c.offset,
@@ -724,8 +724,8 @@ fn value_rule_schedule<'a>(
 /// Config-file values DoD's own client will quit the game over -- distinct
 /// from the banned lists, which are about commands typed into the
 /// pipeline's own fields (see [`CfgFatalRow`]'s doc comment).
-fn fatal_rows(scan: &crate::patch::cfg_scan::CfgScan) -> Vec<CfgFatalRow> {
-    crate::patch::cfg_scan::fatal_cvar_hazards(scan)
+fn fatal_rows(scan: &crate::game_config::cfg_scan::CfgScan) -> Vec<CfgFatalRow> {
+    crate::game_config::cfg_scan::fatal_cvar_hazards(scan)
         .into_iter()
         .map(|f| CfgFatalRow {
             file: f.file_name(),
@@ -740,7 +740,7 @@ fn fatal_rows(scan: &crate::patch::cfg_scan::CfgScan) -> Vec<CfgFatalRow> {
 /// Hook console names from before #555 in the configs, Initial Commands and
 /// Scheduled Commands. Configs first, as the engine runs them first.
 fn renamed_everywhere(
-    scan: &crate::patch::cfg_scan::CfgScan,
+    scan: &crate::game_config::cfg_scan::CfgScan,
     init_commands: &[String],
     command_texts: &[String],
 ) -> Vec<RenamedCommandRow> {
