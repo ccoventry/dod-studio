@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Checks `spectator_input_gate.rs` against a real DoD `client.dll` (#1296).
 
-The module writes 0 into `CHudSpectator::m_flNextObserverInput` when it is
-stale. A wrong address would write a float into some other variable:
+The module writes 0 (or the clock, while the clock is below 0) into
+`CHudSpectator::m_flNextObserverInput` when it is stale. A wrong address would write a float into some other variable:
 compiled fine, wrong in game. Every constant is read out of the Rust.
 
   1. `OBJECT_PATTERN` matches once in `.text`, and its `call` reaches
