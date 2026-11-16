@@ -364,8 +364,65 @@ fn need(capture: &Scratch, needed: u64) -> SpaceNeed {
     SpaceNeed {
         targets: vec![capture.path().to_path_buf()],
         pieces: vec![needed],
+        fallback_pieces: None,
         headroom_bytes: 0,
     }
+}
+
+/// A long render asks room for its segments and clip together, else for the
+/// clip alone (#1451): with no deletion making room for both, the cleanup
+/// makes room for the clip, as it did before segments.
+#[test]
+fn room_too_short_for_the_segments_is_made_for_the_clip_alone() {
+    let capture = Scratch::new("take_cleanup_plan_fallback");
+    let a = rendered(&capture, "a.mov");
+    let oldest = take_with_history(
+        &capture,
+        "chain_01_b0",
+        vec![attempt("all", 100, RenderOutcome::Finished, &a)],
+    );
+    let dirs = vec![capture.path().to_path_buf()];
+    let with_fallback = |peak: u64, one_piece: u64| SpaceNeed {
+        pieces: vec![peak],
+        fallback_pieces: Some(vec![one_piece]),
+        ..need(&capture, peak)
+    };
+    // 500 free plus the one take's 1000 is 1500: short of 2400, enough for 1200.
+    let plan = plan_room(
+        &with_fallback(2400, 1200),
+        &dirs,
+        &HashSet::new(),
+        |_| Some(500),
+        |_| {},
+    );
+    let RoomPlan::Delete(chosen) = plan else {
+        panic!("expected deletions for the clip alone, got {plan:?}");
+    };
+    assert_eq!(chosen.len(), 1);
+    assert_eq!(chosen[0].take_folder, oldest);
+    // Room for the clip already: nothing is deleted just for segments that
+    // can't fit anyway.
+    assert!(matches!(
+        plan_room(
+            &with_fallback(2400, 400),
+            &dirs,
+            &HashSet::new(),
+            |_| Some(500),
+            |_| {}
+        ),
+        RoomPlan::Enough
+    ));
+    // Short even for the clip: Short, as before.
+    assert!(matches!(
+        plan_room(
+            &with_fallback(4000, 2000),
+            &dirs,
+            &HashSet::new(),
+            |_| Some(500),
+            |_| {}
+        ),
+        RoomPlan::Short { .. }
+    ));
 }
 
 /// Each test take is 1000 bytes on disk (a 100-byte wav, a 900-byte frame).
@@ -443,6 +500,7 @@ fn nothing_is_planned_when_there_is_room_or_free_space_is_unknown() {
     let no_targets = SpaceNeed {
         targets: Vec::new(),
         pieces: vec![100],
+        fallback_pieces: None,
         headroom_bytes: 0,
     };
     assert!(matches!(

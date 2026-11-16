@@ -430,6 +430,11 @@ fn scan_takes(
 pub struct SpaceNeed {
     pub targets: Vec<PathBuf>,
     pub pieces: Vec<u64>,
+    /// Smaller pieces the job can still run with when no deletion makes
+    /// room for `pieces`: a render's clip alone, where `pieces` holds room
+    /// for its segments too (#1451), which `run_render_job` falls back to
+    /// the same way. `None` when there is no smaller way.
+    pub fallback_pieces: Option<Vec<u64>>,
     pub headroom_bytes: u64,
 }
 
@@ -465,7 +470,8 @@ pub enum RoomPlan {
 }
 
 /// Works out which finished takes to delete, oldest first, so the job in
-/// `need` fits. Nothing is deleted here.
+/// `need` fits: with its `pieces`, else with its `fallback_pieces`. Nothing
+/// is deleted here.
 ///
 /// `free_of` is the free-space query (`sys::disk::get_available_bytes`, whose
 /// `None` means "can't tell"); `capture_dirs` are the Destinations
@@ -488,10 +494,15 @@ pub fn plan_room(
     if drives.is_empty() {
         return RoomPlan::Unknown;
     }
-    let ledger = RoomLedger::new(drives, need.headroom_bytes, need.pieces.clone());
+    let ledger = RoomLedger::new(drives.clone(), need.headroom_bytes, need.pieces.clone());
     if ledger.has_room() {
         return RoomPlan::Enough;
     }
+    let fallback = need
+        .fallback_pieces
+        .as_ref()
+        .filter(|pieces| **pieces != need.pieces)
+        .map(|pieces| RoomLedger::new(drives, need.headroom_bytes, pieces.clone()));
 
     progress(RoomStep::Looking);
     let (finished, moved) = scan_takes(capture_dirs, busy);
@@ -511,7 +522,7 @@ pub fn plan_room(
     // Each take is sized once, when the search first needs it.
     let mut sized: Vec<Option<Option<TakeDeletion>>> = (0..total).map(|_| None).collect();
     let mut measured = 0usize;
-    let result = choose_deletions(&ledger, &volumes, |i| {
+    let mut size_of = |i: usize| {
         if sized[i].is_none() {
             progress(RoomStep::Measuring {
                 done: measured,
@@ -526,9 +537,15 @@ pub fn plan_room(
             .as_ref()
             .and_then(|p| p.as_ref())
             .map(|p| p.size_bytes)
-    });
+    };
+    let result = match (choose_deletions(&ledger, &volumes, &mut size_of), &fallback) {
+        (Err(_), Some(smaller)) if smaller.has_room() => Ok(Vec::new()),
+        (Err(_), Some(smaller)) => choose_deletions(smaller, &volumes, &mut size_of),
+        (result, _) => result,
+    };
     progress(RoomStep::Measuring { done: total, total });
     match result {
+        Ok(chosen) if chosen.is_empty() => RoomPlan::Enough,
         Ok(chosen) => RoomPlan::Delete(
             chosen
                 .into_iter()
