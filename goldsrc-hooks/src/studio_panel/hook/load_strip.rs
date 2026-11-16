@@ -2,6 +2,8 @@
 //! showing, saying how far the demo player has read the demo and how far the
 //! highlights analysis has got, while either still runs. The tabs' controls
 //! sit below it while it shows ([`inset`]); it goes once both are done.
+//! While a demo found damaged plays, it also carries that demo's line
+//! (`demo_damage::tell::strip_line`, #1373), and stays.
 //!
 //! It is `DodStudio.res`'s `LoadStrip` label, moved onto the page showing:
 //! a page paints over whatever of the window lies under it, so a strip left
@@ -63,7 +65,7 @@ pub(super) unsafe fn update(vgui: &Vgui, frame_vp: Vpanel) {
             }
             None => Some(HIGHLIGHTS.load(Ordering::Acquire)).filter(|&p| p != NONE),
         };
-        let text = load_strip_text(demo, highlights);
+        let text = load_strip_text(demo, highlights, crate::demo_damage::tell::strip_line());
         let page = PAGE_OBJECTS
             .iter()
             .map(|p| vpanel_of(p.load(Ordering::Acquire) as *mut c_void))

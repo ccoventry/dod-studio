@@ -13,6 +13,9 @@ pub mod disk;
 /// symlinks and stops at a depth cap (#376).
 pub mod folder_walk;
 pub mod foreground_lock;
+/// The game tells Studio, over the same pipe, a demo it plays is damaged
+/// (#1373).
+pub mod game_damage_notices;
 pub mod game_remote;
 /// The game asks Studio, over the same pipe, to review its demo (#1142).
 pub mod game_review_requests;

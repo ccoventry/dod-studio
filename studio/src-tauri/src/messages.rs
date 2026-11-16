@@ -358,6 +358,10 @@ pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
 pub fn game_review_not_handed_on(e: impl std::fmt::Display) -> String {
     format!("DoD Studio's window could not take the request: {e}")
 }
+/// The game said a demo is damaged, and the page could not be told (#1373).
+pub fn damage_notice_not_handed_on(e: impl std::fmt::Display) -> String {
+    format!("DoD Studio's window could not take the damaged-demo notice: {e}")
+}
 pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
     format!("Could not save the list of highlights to review: {e}")
 }
