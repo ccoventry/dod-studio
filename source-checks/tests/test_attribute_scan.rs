@@ -8,8 +8,10 @@
 //!
 //! 1. Test modules are `#[cfg(test)] mod name { .. }` blocks and the files of
 //!    `#[cfg(test)] mod name;` (`name.rs` or `name/mod.rs` beside the file, or
-//!    under `<stem>/` for a file that is not `mod.rs`/`lib.rs`/`main.rs`).
-//!    `#[path]` modules are not followed.
+//!    under `<stem>/` for a file that is not `mod.rs`/`lib.rs`/`main.rs`), or
+//!    the file a `#[path = "x_tests.rs"]` on the declaration names, resolved
+//!    beside the declaring file (read from the un-blanked source: string
+//!    contents are blanked).
 //! 2. Candidates are `fn`s whose enclosing blocks are all `mod` blocks: methods
 //!    of an `impl` or `trait`, `extern` blocks, nested `fn`s and macro bodies
 //!    are skipped.
@@ -83,16 +85,42 @@ fn skip_ws(text: &str, mut i: usize) -> usize {
 }
 
 /// What follows a `#[cfg(test)]` at `after`: `mod name {` gives the block's
-/// span, `mod name;` gives the name for the external file.
+/// span, `mod name;` gives the name for the external file and the line of its
+/// `#[path = ".."]` attribute, if it has one.
 enum TestMod {
     Inline(usize, usize),
-    External(String),
+    External(String, Option<usize>),
+}
+
+/// A `mod name;` file to read: by name, or by the `#[path]` on its declaration.
+#[derive(Debug, PartialEq)]
+struct ExternalMod {
+    name: String,
+    /// The `#[path = ".."]` value, relative to the declaring file's folder.
+    path: Option<String>,
+}
+
+fn line_of_offset(text: &str, offset: usize) -> usize {
+    text[..offset].matches(char::from(10)).count()
+}
+
+/// The value of a `#[path = "x.rs"]` on `line` of the un-blanked source.
+fn path_attr_value(raw: &str, line: usize) -> Option<String> {
+    let line = raw.lines().nth(line)?;
+    let rest = &line[line.find("#[path")?..];
+    let open = rest.find('"')? + 1;
+    let len = rest[open..].find('"')?;
+    Some(rest[open..open + len].to_string())
 }
 
 fn test_mod_after(text: &str, after: usize) -> Option<TestMod> {
     let mut i = skip_ws(text, after);
+    let mut path_line = None;
     // Further attributes between `#[cfg(test)]` and `mod`.
     while text[i..].starts_with("#[") {
+        if text[i..].starts_with("#[path") {
+            path_line = Some(line_of_offset(text, i));
+        }
         let close = text[i..].find(']')? + i;
         i = skip_ws(text, close + 1);
     }
@@ -111,27 +139,36 @@ fn test_mod_after(text: &str, after: usize) -> Option<TestMod> {
     let j = skip_ws(text, name_end);
     match text[j..].chars().next()? {
         '{' => Some(TestMod::Inline(j + 1, matching_brace(text, j)? - 1)),
-        ';' => Some(TestMod::External(name)),
+        ';' => Some(TestMod::External(name, path_line)),
         _ => None,
     }
 }
 
 /// The text of every test module inside one file, with the offset it starts
 /// at, plus the names of `#[cfg(test)] mod name;` files to read separately.
-fn test_modules(text: &str) -> (Vec<(usize, usize)>, Vec<String>) {
+fn test_modules(text: &str, raw: &str) -> (Vec<(usize, usize)>, Vec<ExternalMod>) {
     let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut external = Vec::new();
     let mut from = 0;
     while let Some(p) = text[from..].find("#[cfg(test)]") {
         let at = from + p;
         from = at + "#[cfg(test)]".len();
+        // A `#[path]` written above the `#[cfg(test)]` instead of below it.
+        let above = line_of_offset(text, at).checked_sub(1).filter(|&l| {
+            text.lines()
+                .nth(l)
+                .is_some_and(|t| t.trim_start().starts_with("#[path"))
+        });
         match test_mod_after(text, from) {
             Some(TestMod::Inline(s, e)) => {
                 if !spans.iter().any(|&(a, b)| a <= s && e <= b) {
                     spans.push((s, e));
                 }
             }
-            Some(TestMod::External(name)) => external.push(name),
+            Some(TestMod::External(name, below)) => {
+                let path = below.or(above).and_then(|l| path_attr_value(raw, l));
+                external.push(ExternalMod { name, path });
+            }
             None => {}
         }
     }
@@ -275,8 +312,12 @@ fn untested_fns(
         .collect()
 }
 
-fn external_module_files(file: &Path, name: &str) -> Vec<PathBuf> {
+fn external_module_files(file: &Path, module: &ExternalMod) -> Vec<PathBuf> {
     let dir = file.parent().unwrap_or(Path::new("."));
+    if let Some(path) = &module.path {
+        return vec![dir.join(path)];
+    }
+    let name = &module.name;
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let base = if matches!(stem, "mod" | "lib" | "main") {
         dir.to_path_buf()
@@ -292,15 +333,16 @@ fn external_module_files(file: &Path, name: &str) -> Vec<PathBuf> {
 #[test]
 fn every_fn_in_a_test_module_is_a_test_or_is_used() {
     let files = rust_files();
-    let blanked: HashMap<PathBuf, String> = files
+    let raw: HashMap<PathBuf, String> = files.iter().map(|p| (p.clone(), read(p))).collect();
+    let blanked: HashMap<PathBuf, String> = raw
         .iter()
-        .map(|p| (p.clone(), blank_comments_and_strings(&read(p))))
+        .map(|(p, t)| (p.clone(), blank_comments_and_strings(t)))
         .collect();
 
     let mut findings = Vec::new();
     for file in &files {
         let text = &blanked[file];
-        let (spans, external) = test_modules(text);
+        let (spans, external) = test_modules(text, &raw[file]);
         let elsewhere = |name: &str| {
             word_count(text, name) > 1
                 || blanked
@@ -314,8 +356,8 @@ fn every_fn_in_a_test_module_is_a_test_or_is_used() {
                 findings.push(format!("{}:{}: fn {}", relative(file), f.line, f.name));
             }
         }
-        for name in external {
-            let Some(path) = external_module_files(file, &name)
+        for module in external {
+            let Some(path) = external_module_files(file, &module)
                 .into_iter()
                 .find(|p| blanked.contains_key(p))
             else {
@@ -369,12 +411,35 @@ fn flags_a_fn_that_lost_its_test_attribute() {
 
 #[test]
 fn finds_inline_and_external_test_modules() {
-    let src = blank_comments_and_strings(
-        "fn real() {}\n#[cfg(test)]\nmod tests { #[test] fn t() {} }\n#[cfg(test)]\nmod more;\n",
-    );
-    let (spans, external) = test_modules(&src);
+    let raw = "fn real() {}\n#[cfg(test)]\nmod tests { #[test] fn t() {} }\n#[cfg(test)]\nmod more;\n\
+        #[cfg(test)]\n#[path = \"x_tests.rs\"]\nmod below;\n\
+        #[path = \"y_tests.rs\"]\n#[cfg(test)]\nmod above;\n";
+    let (spans, external) = test_modules(&blank_comments_and_strings(raw), raw);
     assert_eq!(spans.len(), 1);
-    assert_eq!(external, vec!["more".to_string()]);
+    let ext = |name: &str, path: Option<&str>| ExternalMod {
+        name: name.to_string(),
+        path: path.map(str::to_string),
+    };
+    assert_eq!(
+        external,
+        vec![
+            ext("more", None),
+            ext("below", Some("x_tests.rs")),
+            ext("above", Some("y_tests.rs"))
+        ]
+    );
+}
+
+#[test]
+fn a_path_module_resolves_beside_the_declaring_file() {
+    let module = ExternalMod {
+        name: "tests".to_string(),
+        path: Some("cfg_scan_tests.rs".to_string()),
+    };
+    assert_eq!(
+        external_module_files(Path::new("native/src/patch/cfg_scan.rs"), &module),
+        vec![PathBuf::from("native/src/patch/cfg_scan_tests.rs")]
+    );
 }
 
 #[test]
