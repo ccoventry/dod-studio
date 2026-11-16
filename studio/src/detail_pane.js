@@ -484,11 +484,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       : '';
 
     tr.innerHTML = `
-      <td style="padding: 8px;">${rowNum}</td>
-      <td style="padding: 8px;">
+      <td>${rowNum}</td>
+      <td>
         <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
-      <td style="padding: 8px;">
+      <td>
         <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:var(--warn-deep);' : ''}">
           <input type="number" class="kr-start-input" min="1" max="${maxKillIdx + 1}"
                  value="${streak.start_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
@@ -498,16 +498,16 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid var(--border-accent);border-radius:2px;color:var(--text-subtle);cursor:pointer;">↺</button>` : ''}
         </div>
       </td>
-      <td class="streak-kills" style="padding: 8px;"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
-      <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
-      ${showPlayer ? `<td class="streak-player col-wide" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
-      <td class="col-wide" style="padding: 8px;">${timeStr}</td>
-      <td class="streak-duration col-wide" style="padding: 8px;">${durationText(durSecs)}</td>
-      <td class="col-stack streak-stack" style="padding: 8px;" title="${escapeHtml(timelineText)}">
-        ${showPlayer ? `<div class="streak-stack-player" title="${escapeHtml(streak.target_player || '')}">${escapeHtml(streak.target_player || '')}</div>` : ''}
-        <div class="streak-stack-when">${timeStr} · ${durationText(durSecs)}</div>
+      <td class="streak-kills"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
+      <td class="streak-headshots">${headshotsCell(streak)}</td>
+      ${showPlayer ? `<td class="streak-player col-wide">${escapeHtml(streak.target_player || '')}</td>` : ''}
+      <td class="col-wide">${timeStr}</td>
+      <td class="streak-duration col-wide">${durationText(durSecs)}</td>
+      <td class="col-stack streak-stack" title="${escapeHtml(timelineText)}">
+        ${showPlayer ? `<div class="streak-stack-player" title="${escapeHtml(STRINGS.HIGHLIGHTS.stackedPlayerTitle(streak.target_player || '', timelineText))}">${escapeHtml(streak.target_player || '')}</div>` : ''}
+        <div class="streak-stack-when">${STRINGS.HIGHLIGHTS.stackedWhen(timeStr, durationText(durSecs))}</div>
       </td>
-      <td style="padding: 8px;">
+      <td>
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
             // Each option in its own colour, not the selected one's (#527).
@@ -515,10 +515,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ).join('')}
         </select>${byHandMark}${mergedBadge}
       </td>
-      <td style="padding: 8px;">
-        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+      <td>
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%;" />
       </td>
-      <td style="padding: 8px;">
+      <td>
         <select class="streak-curation-select" style="font-size: 0.85em;">
           <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
           <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
@@ -526,7 +526,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
           <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
         </select>
       </td>
-      <td style="padding: 8px;">
+      <td>
         <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
       <td class="details-cell col-details" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>

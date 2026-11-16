@@ -327,7 +327,11 @@ export const STRINGS = {
     COL_DUR: 'Dur.',
     // The narrow layout stacks Time and Dur. (and Player, in an HLTV demo) in one column (#46).
     COL_STACK: 'Time · Dur.',
-    COL_STACK_PLAYER: 'Player / Time',
+    COL_STACK_PLAYER: 'Player / Time · Dur.',
+    // The stacked cell's second line, and its player line's tooltip (the name
+    // is cut to fit, so the tooltip carries the name and the weapon chain).
+    stackedWhen: (time, dur) => `${time} · ${dur}`,
+    stackedPlayerTitle: (player, chain) => (chain ? `${player} — ${chain}` : player),
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
     COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',

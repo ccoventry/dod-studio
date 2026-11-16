@@ -1085,6 +1085,16 @@ button.danger-btn {
 #master-demo-table td:nth-child(2) {
   contain: inline-size;
   width: 100%;
+  /* Badges (missing, multi-map, damaged, tracked) must not paint over the
+     count columns beside this cell. */
+  overflow: hidden;
+}
+
+/* The name keeps a few characters when badges take the room. !important beats
+   master_pane.js's inline min-width: 0, which stays as it is while #1284
+   changes that file. */
+#master-demo-table td:nth-child(2) > span:first-child {
+  min-width: 4em !important;
 }
 
 #master-demo-table tr:hover {
@@ -1787,7 +1797,7 @@ button.danger-btn {
 
 .analyzer-kv-table .kv-value {
   /* A file name with no spaces would run under the next column (#46). */
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   padding: 3px 0;
   color: var(--text-emphasis);
 }
@@ -3614,9 +3624,9 @@ input[type="checkbox"].hd-box-pattern {
   white-space: nowrap;
 }
 
-/* Narrow panes stack Player, Time and Dur. into one column (#46): at about
-   714 px the table needs ~1035 px and scrolled sideways. The wide layout keeps
-   the separate columns. Switched on the table wrapper's own width, not the
+/* Narrow panes stack Player, Time and Dur. into one column (#46): the separate
+   columns need about 1200 px with a long HLTV player name (1100 at 1920's
+   default split scrolled sideways). The wide layout keeps them. Switched on the table wrapper's own width, not the
    window's, since the queue/details split moves it. */
 #detail-pane .table-wrapper {
   container: detail-table / inline-size;
@@ -3626,8 +3636,17 @@ input[type="checkbox"].hd-box-pattern {
   display: none;
 }
 
+/* Cell padding and the Clip Name box's minimum live here, not inline, so the
+   narrow layout below can tighten them without !important. */
+#detail-streaks-table td {
+  padding: 8px;
+}
+
+#detail-streaks-table .streak-clip-name-input {
+  min-width: 14em;
+}
+
 #detail-streaks-table .streak-stack-player {
-  max-width: 14em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3639,7 +3658,7 @@ input[type="checkbox"].hd-box-pattern {
   white-space: nowrap;
 }
 
-@container detail-table (max-width: 1040px) {
+@container detail-table (max-width: 1200px) {
   #detail-streaks-table .col-wide {
     display: none;
   }
@@ -3648,9 +3667,9 @@ input[type="checkbox"].hd-box-pattern {
     display: table-cell;
   }
 
-  /* The weapon/timing chain is on the stacked cell's tooltip instead. */
-  #detail-streaks-table .col-details {
-    display: none;
+  /* The stacked player line is cut to this; its tooltip has the full name. */
+  #detail-streaks-table .streak-stack-player {
+    max-width: 7em;
   }
 
   #detail-streaks-table .streak-notes-input {
@@ -3658,14 +3677,22 @@ input[type="checkbox"].hd-box-pattern {
   }
 
   #detail-streaks-table .streak-clip-name-input {
-    min-width: 9em !important; /* beats the input's inline min-width */
+    min-width: 7em;
   }
 
-  /* Cell padding is inline (8px); !important tightens it to fit. */
   #detail-streaks-table th,
   #detail-streaks-table td {
-    padding-left: 4px !important;
-    padding-right: 4px !important;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
+/* Below this the table cannot take the Details column (weapon/timing chain,
+   also on the stacked cell's tooltip). Lower than the stacking threshold, so a
+   1920 window's default split still shows it. */
+@container detail-table (max-width: 800px) {
+  #detail-streaks-table .col-details {
+    display: none;
   }
 }
 

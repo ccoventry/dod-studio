@@ -34,12 +34,17 @@ export function makeDemos(count) {
       : `match${n}.dem`;
     const path = `${LONG_DIR}/${name}`;
     return {
-      path, name, tickrate: 100, is_pov: n % 4 !== 0, local_player_index: 2, playback_frames: 40000,
-      streaks: Array.from({ length: 6 }, (__, i) => makeStreak(i, path)),
+      // Every fourth demo is an HLTV one (no single recorder), so its Highlight
+      // Details table has the Player column the POV demos lack.
+      path, name, tickrate: 100, is_pov: n % 4 !== 0, local_player_index: n % 4 === 0 ? null : 2, playback_frames: 40000,
+      streaks: Array.from({ length: 6 }, (__, i) => ({ ...makeStreak(i, path), ...(n === 1 && i === 0 ? { curation: 'keep' } : {}) })),
+      // Demo 1 carries every badge the queue can show beside a name: missing,
+      // multi-map (Split now), damaged and tracked.
+      ...(n === 1 ? { missing: true, damage: { read_up_to_secs: 600 }, peak_packet_entities: 5000 } : {}),
       file_key: `k${n}`, map_name: n % 2 ? 'dod_anzio' : 'dod_lennon_beta_special_edition_final',
       modified_unix_secs: 1760000000 + n * 86400, peak_packet_entities: 100, no_camera_data: false,
       recorder_id: '76561198000000001', recorder_name: PLAYERS[n % PLAYERS.length],
-      teams: [], signon_maps: ['dod_anzio'], highlights_version: 99,
+      teams: [], signon_maps: n === 1 ? ['dod_anzio', 'dod_lennon'] : ['dod_anzio'], highlights_version: 99,
     };
   });
 }
