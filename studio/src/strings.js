@@ -2834,6 +2834,17 @@ export const STRINGS = {
     ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024 and plays the original: set its hl.exe in Configuration → Paths for these.',
   },
 
+  // ── analyzer_protocol47.js: protocol-47 demos (#239) ────────────────────
+  PROTOCOL_47: {
+    NOTICE: 'Protocol 47 demo (2004 or a little after): everything here reads fine, but the game refuses to play it as it is. '
+      + 'Convert saves a copy the game plays next to it, as <name>_p48.dem: preview and capture that copy.',
+    BUTTON: 'Convert',
+    BUTTON_TITLE: 'Save a protocol 48 copy of this demo next to it (<name>_p48.dem). The original is not changed.',
+    CONVERTING: 'Converting…',
+    done: (name) => `Converted: ${name} is next to the original.`,
+    failed: (err) => `Couldn't convert it: ${err}`,
+  },
+
   // ── camera_data.js: demos with no camera data (#920) ───────────────────
   CAMERA_DATA: {
     BADGE: 'no camera',

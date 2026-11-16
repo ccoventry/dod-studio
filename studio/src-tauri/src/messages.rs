@@ -39,6 +39,7 @@ pub mod open_with;
 pub mod overview;
 pub mod preview;
 pub mod preview_start;
+pub mod protocol47;
 pub mod render;
 pub mod repair;
 pub mod review;

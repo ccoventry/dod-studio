@@ -41,11 +41,12 @@
 //!     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //! ```
 //!
-//! Where HLAE's tool reads each network frame's messages one by one and
-//! gives up at the first it doesn't know (an HLTV demo's `svc_hltv` before
-//! the server info stops it), this pass finds `svc_serverinfo` the way
-//! `demo_split::quick_maps` does: its id and the protocol, confirmed by a
-//! game folder, a host name and a `maps/*.bsp` where they belong.
+//! HLAE's tool reads each network frame's first messages one by one
+//! (`svc_nop`, `svc_time`, `svc_print`, `svc_hltv`) and gives up at the first
+//! other one before the server info. This pass finds `svc_serverinfo` the way
+//! `demo_split::quick_maps` does, wherever it sits in the frame: its id and
+//! the protocol, confirmed by a game folder, a host name and a `maps/*.bsp`
+//! where they belong.
 
 use dem::protocol::{NETWORK_PROTOCOL_47, NETWORK_PROTOCOL_48};
 use std::fmt;
@@ -689,5 +690,103 @@ mod tests {
         let converted = convert_in_place(&mut old).unwrap();
         assert_eq!(converted.server_infos, flipped);
         assert_eq!(old, fixture);
+    }
+
+    /// One real protocol-47 demo, converted in memory: `Err` says what failed.
+    /// The copy says 48 in the header and each server info; every other byte
+    /// is the recorder's (so every frame without a server info comes back as
+    /// it was); it parses; and it analyses to the original's map, players,
+    /// kills and rounds.
+    fn check_real_conversion(source: &[u8]) -> Result<String, String> {
+        let mut bytes = source.to_vec();
+        let converted = convert_in_place(&mut bytes).map_err(|e| e.to_string())?;
+        let changed: Vec<usize> = (0..bytes.len())
+            .filter(|&i| bytes[i] != source[i])
+            .collect();
+        if changed.len() != 1 + converted.server_infos
+            || changed[0] != 12
+            || changed.iter().any(|&i| (source[i], bytes[i]) != (47, 48))
+        {
+            return Err(format!("unexpected bytes changed: {changed:?}"));
+        }
+        // Kill events, and the scoreboard's kills summed over players.
+        let kills = |a: &analysis::Analysis| {
+            let scoreboard: i64 = a.state.players.iter().map(|p| i64::from(p.stats.1)).sum();
+            (a.state.kill_positions.len(), scoreboard)
+        };
+        let summary = |a: &analysis::Analysis| {
+            let (events, scoreboard) = kills(a);
+            format!(
+                "{} {}, {} players, {events} kills ({scoreboard} on the scoreboard), {} rounds",
+                a.demo_info.demo_type,
+                a.demo_info.map_name,
+                a.state.players.len(),
+                a.state.rounds.len()
+            )
+        };
+        let before = analysis::Analysis::try_from_bytes(source)?;
+        let after = analysis::Analysis::try_from_bytes(&bytes)?;
+        if after.demo_info.network_protocol != 48 {
+            return Err("the analyzer still reads protocol 47".into());
+        }
+        if summary(&after) != summary(&before) || after.state.players.is_empty() {
+            return Err(format!("{} became {}", summary(&before), summary(&after)));
+        }
+        if kills(&after).0 == 0 {
+            return Err("no kills".into());
+        }
+        // A copy cut short (its directory past the end) only reads tolerantly,
+        // as the original does.
+        let strict_before = dem::open_demo_from_bytes(source).is_ok();
+        if strict_before && dem::open_demo_from_bytes(&bytes).is_err() {
+            return Err("the copy no longer parses strictly".into());
+        }
+        Ok(format!(
+            "{}, {} server info(s)",
+            summary(&after),
+            converted.server_infos
+        ))
+    }
+
+    /// Every protocol-47 demo in the folder `DOD_PROTOCOL47_DEMOS` names
+    /// converts ([`check_real_conversion`]); one line per demo, then the
+    /// failures. No such demo is in the repo (community recordings are not
+    /// ours to commit):
+    ///
+    /// ```text
+    /// DOD_PROTOCOL47_DEMOS=<folder> cargo test -p native --release --lib -- --ignored --nocapture real_protocol_47
+    /// ```
+    #[test]
+    #[ignore]
+    fn real_protocol_47_demos_convert_parse_and_analyse_the_same() {
+        let folder = std::env::var_os("DOD_PROTOCOL47_DEMOS")
+            .map(PathBuf::from)
+            .expect("set DOD_PROTOCOL47_DEMOS to a folder of protocol-47 demos");
+        let mut demos: Vec<PathBuf> = std::fs::read_dir(&folder)
+            .unwrap_or_else(|e| panic!("{}: {e}", folder.display()))
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        let mut failures = Vec::new();
+        let mut checked = 0;
+        for path in &demos {
+            let source = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            if !is_protocol_47(&source) {
+                continue;
+            }
+            checked += 1;
+            match check_real_conversion(&source) {
+                Ok(line) => println!("pass {}: {line}", path.display()),
+                Err(e) => {
+                    println!("FAIL {}: {e}", path.display());
+                    failures.push(format!("{}: {e}", path.display()));
+                }
+            }
+        }
+        println!("{checked} protocol-47 demos, {} failed", failures.len());
+        assert!(checked > 0, "no protocol-47 demo in {}", folder.display());
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

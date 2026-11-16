@@ -2,20 +2,20 @@
 //!
 //! A demo's header names the network protocol it was recorded with, and so
 //! does every `svc_serverinfo` in it. The parsers were written for protocol
-//! 48, every DoD 1.3 demo recorded since 2004. Protocol 47, the one before
-//! it, lays its frames, messages and delta encoding out the same way: 77 of
-//! 78 protocol-47 match demos from 2004-2005 parse and analyse with no change,
-//! the 78th is a copy cut short (`docs/goldsrc_protocol_47.md`). Only the game
-//! tells them apart, and refuses to play a protocol-47 demo until it is
-//! converted (`native::patch::protocol47`).
+//! 48, today's game's. Protocol 47, the one before it, lays its frames,
+//! messages and delta encoding out the same way: all 78 protocol-47 demos of
+//! a community archive of 2004-2008 match demos parse and analyse with no
+//! change (`docs/goldsrc_protocol_47.md`). Only the game tells them apart,
+//! and refuses to play a protocol-47 demo until it is converted
+//! (`native::patch::protocol47`).
 //!
 //! No other protocol has been checked against a real demo, so the header
 //! parse refuses one by name rather than read it with rules that may not hold.
 
 use std::fmt;
 
-/// The protocol of every Steam-era DoD 1.3 demo since 2004, and the only one
-/// today's game plays.
+/// Today's game's protocol, and the only one it plays: every demo in the
+/// pre-Anniversary and Anniversary libraries is 48.
 pub const NETWORK_PROTOCOL_48: i32 = 48;
 /// The protocol before it: parses as 48 does, plays once converted.
 pub const NETWORK_PROTOCOL_47: i32 = 47;
