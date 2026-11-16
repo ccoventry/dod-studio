@@ -34,7 +34,7 @@ class FakeGh:
     def view(self, pr):
         p = self.prs[pr]
         return {"number": pr, "title": f"PR {pr}", "state": p.get("state", "OPEN"),
-                "isDraft": p.get("draft", False), "baseRefName": p.get("base", "dev"),
+                "isDraft": p.get("draft", False), "baseRefName": p.get("base", "dev"), "headRefName": f"feat/{pr}",
                 "mergeable": p.get("mergeable", "MERGEABLE"), "headRefOid": p["head"],
                 "autoMergeRequest": None}
 
@@ -211,7 +211,7 @@ class TrainTests(unittest.TestCase):
         self.assertEqual([c[0] for c in gh.calls], ["update-branch", "merge"])
 
     def test_a_stacked_pr_is_merged_once_github_retargets_it_to_dev(self):
-        gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/one")})
+        gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/1")})
         gh.retarget_after_views(2, 3)
         clock = FakeClock()
         lines = []
@@ -236,7 +236,50 @@ class TrainTests(unittest.TestCase):
         err = "gh pr update-branch 1 failed (1): merge conflict between base and head"
         gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error=err)}, [1])
         self.assertEqual(result.stopped_at, 1)
-        self.assertEqual(result.reason, "has conflicts with dev: resolve and rerun")
+        self.assertEqual(result.reason, f"has conflicts with dev: resolve and rerun ({err})")
+
+    def test_a_failure_that_merely_mentions_conflict_is_not_taken_for_one(self):
+        err = "gh pr update-branch 1 failed (1): could not resolve conflict-free ref"
+        _gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error=err)}, [1])
+        self.assertEqual(result.reason, err)
+
+    def test_gh_conflict_phrase_is_recognised(self):
+        err = "Cannot update PR branch due to conflicts"
+        _gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error=err)}, [1])
+        self.assertTrue(result.reason.startswith("has conflicts with dev"))
+        self.assertIn(err, result.reason)
+
+    def test_a_pr_on_a_branch_nobody_merged_stops_without_waiting(self):
+        clock = FakeClock()
+        gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/other")})
+        result = mt.Train(gh, mt.Options(), clock=clock, sleep=clock.sleep, out=lambda _l: None).run([1, 2])
+        self.assertEqual(result.stopped_at, 2)
+        self.assertEqual(clock.now, 0)
+
+    def test_a_child_of_a_parent_merged_in_an_earlier_run_still_waits_for_the_retarget(self):
+        gh = FakeGh({1: pr([(GREEN, "")], state="MERGED"), 2: pr([(GREEN, "")], base="feat/1")})
+        gh.retarget_after_views(2, 3)
+        clock = FakeClock()
+        result = mt.Train(gh, mt.Options(interval_secs=30, timeout_secs=600), clock=clock,
+                          sleep=clock.sleep, out=lambda _l: None).run([1, 2])
+        self.assertEqual((result.skipped, result.merged), ([1], [2]))
+
+    def test_dry_run_still_refuses_a_stacked_draft_or_conflict(self):
+        for extra, word in (({"draft": True}, "draft"), ({"mergeable": "CONFLICTING"}, "conflicts")):
+            gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/1", **extra)})
+            result = mt.Train(gh, mt.Options(dry_run=True), out=lambda _l: None).run([1, 2])
+            self.assertEqual(result.stopped_at, 2)
+            self.assertIn(word, result.reason)
+
+    def test_dry_run_does_not_wait_for_a_retarget(self):
+        gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/1")})
+        clock = FakeClock()
+        lines = []
+        result = mt.Train(gh, mt.Options(dry_run=True), clock=clock, sleep=clock.sleep,
+                          out=lines.append).run([1, 2])
+        self.assertIsNone(result.stopped_at)
+        self.assertEqual(clock.now, 0)
+        self.assertTrue(any("would wait for GitHub to retarget, then merge" in line for line in lines))
 
     def test_other_update_branch_failures_keep_gh_text(self):
         gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error="HTTP 502")}, [1])
