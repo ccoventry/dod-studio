@@ -23,6 +23,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, how Studio repairs damaged ones (`analysis::repair`) and the R&D behind it, and the engine's entity-packet flush rule (#15).
 - [goldsrc_demo_editing.md](goldsrc_demo_editing.md) — rewriting what happens in a demo: moving a player, filling seconds the demo never had, moving the recorder's view, and edit-the-file versus fake-it-in-the-hook (#1469).
+- [goldsrc_protocol_47.md](goldsrc_protocol_47.md) — protocol-47 demos (2004 and a little after): what the game does with one (an outdated-protocol warning, never a refusal; plain hl.exe doesn't survive these old demos, Studio's launch plays them), what differs from protocol 48 (only the protocol number), how they are read, and converting one to drop the warning (#239).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.
@@ -54,7 +55,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
 - [housekeeping.md](housekeeping.md) — the routine pass that keeps PRs, issues, branches, docs, CLAUDE.md, the coding-standards trend, CI, dependencies and the agents' notes current: what each part checks, and the report-first rule.
-- [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files).
+- [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files), and the MIT code our work derives from (HLAE's DemoTools, for converting protocol-47 demos).
 - [../tools/agent-kit/](../tools/agent-kit/README.md) — dev-only helpers for testing the app: the shared game lock, playing demos to the end on PRE and POST, a throwaway Studio driven over CDP, frame checks and the comparison-video stopwatch, the activity log, the open-PR board, issue audits, open PRs by file, demos and kill moments from the analyzer cache, the hook log by game run, and HLAE's command names.
 
 ## Folders

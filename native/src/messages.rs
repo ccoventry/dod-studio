@@ -23,6 +23,7 @@ pub mod killfeed_layout;
 pub mod menu_scale;
 pub mod movie_copy;
 pub mod player_overrides;
+pub mod protocol47;
 pub mod render;
 pub mod repair;
 pub mod schedule;

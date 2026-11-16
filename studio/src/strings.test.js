@@ -167,3 +167,13 @@ describe('AUDITOR.doneStatus', () => {
     expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4 s')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
   });
 });
+
+describe('networkProtocolValue (#239)', () => {
+  it('says a protocol-47 demo plays with a warning', () => {
+    expect(STRINGS.ANALYZER.networkProtocolValue(47)).toBe('47 (older build): plays with an outdated-protocol warning');
+  });
+
+  it('is the bare number for any other protocol', () => {
+    expect(STRINGS.ANALYZER.networkProtocolValue(48)).toBe('48');
+  });
+});

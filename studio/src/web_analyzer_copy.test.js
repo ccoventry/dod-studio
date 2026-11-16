@@ -85,6 +85,13 @@ describe('web-analyzer/www/strings.js is a copy of STRINGS.ANALYZER (#238)', () 
       else expect(value, key).toEqual(desk);
     }
   });
+
+  // A function's source can match while a constant it reads differs.
+  it('labels a protocol-47 demo as the desktop does (#239)', () => {
+    for (const protocol of [47, 48]) {
+      expect(WEB.ANALYZER.networkProtocolValue(protocol)).toBe(DESKTOP.ANALYZER.networkProtocolValue(protocol));
+    }
+  });
 });
 
 describe('the other copied modules match their desktop originals (#238)', () => {
