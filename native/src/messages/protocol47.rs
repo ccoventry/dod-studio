@@ -29,8 +29,7 @@ pub fn cannot_write(path: impl Display, err: impl Display) -> String {
 }
 
 /// Every part-file name beside the copy was taken.
-pub const NO_FREE_PART_NAME: &str =
-    "every temporary name beside the copy is taken by another file";
+pub const NO_FREE_PART_NAME: &str = "every temporary name beside the copy is taken by another file";
 
 /// How many map loads a conversion rewrote: one server info each, and a
 /// restart loads the same map again.

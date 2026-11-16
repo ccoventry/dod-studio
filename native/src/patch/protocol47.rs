@@ -552,7 +552,7 @@ mod tests {
         assert_eq!(converted.server_infos, 3);
         // Ten frames a segment, and the first's second next-section frame.
         assert_eq!(converted.frames, 3 * 10 + 1);
-        assert!(server_info_protocols(&bytes).0.is_empty(), "no 47 left");
+        assert!(server_info_protocols(&bytes).spots.is_empty(), "no 47 left");
     }
 
     #[test]
@@ -679,7 +679,10 @@ mod tests {
         let converted = convert_in_place(&mut bytes).unwrap();
         assert_eq!(converted.server_infos, 2);
         assert_eq!(converted.stopped_at, Some(len_at - FRAME_HEADER_SIZE));
-        assert!(server_infos_in(&bytes).is_empty(), "a server info still says 47");
+        assert!(
+            server_infos_in(&bytes).is_empty(),
+            "a server info still says 47"
+        );
     }
 
     /// A damaged length that lands on a later frame carries the walk past the
@@ -695,7 +698,10 @@ mod tests {
         let converted = convert_in_place(&mut bytes).unwrap();
         assert_eq!(converted.stopped_at, None);
         assert_eq!(converted.server_infos, 2);
-        assert!(server_infos_in(&bytes).is_empty(), "a server info still says 47");
+        assert!(
+            server_infos_in(&bytes).is_empty(),
+            "a server info still says 47"
+        );
     }
 
     #[test]
