@@ -39,6 +39,9 @@ pub fn partial_path(out_file: &Path) -> PathBuf {
 #[derive(Default)]
 pub struct InFlight {
     paths: Mutex<HashSet<PathBuf>>,
+    /// The listed files that are render segments (#1451), not a render's
+    /// own name: a segmented render holds one of each, and is one render.
+    segments: Mutex<HashSet<PathBuf>>,
 }
 
 /// One render's reserved name: where it writes and where it ends up. Keeps
@@ -52,13 +55,15 @@ pub struct Reserved<'a> {
 impl Drop for Reserved<'_> {
     fn drop(&mut self) {
         self.list.lock().remove(&self.partial);
+        self.list.lock_segments().remove(&self.partial);
     }
 }
 
 /// How removing the unfinished files went.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Removed {
-    /// The renders that were in flight.
+    /// The renders that were in flight (a segmented render's segment
+    /// counts with its render, not as one more).
     pub in_flight: usize,
     pub removed: usize,
     /// The files still there, with why.
@@ -70,6 +75,10 @@ impl InFlight {
     // insert or remove.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
         self.paths.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn lock_segments(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
+        self.segments.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Reserves `<stem><ext>` in `dir`, or the first free `<stem>_N<ext>`. A
@@ -106,6 +115,7 @@ impl InFlight {
     pub fn hold(&self, out_file: PathBuf) -> Reserved<'_> {
         let partial = partial_path(&out_file);
         self.lock().insert(partial.clone());
+        self.lock_segments().insert(partial.clone());
         Reserved {
             list: self,
             out_file,
@@ -146,8 +156,9 @@ impl InFlight {
     /// file already gone counts as neither removed nor failed.
     pub fn remove_all(&self) -> Removed {
         let mut left: Vec<PathBuf> = self.lock().iter().cloned().collect();
+        let segments = self.lock_segments().len();
         let mut result = Removed {
-            in_flight: left.len(),
+            in_flight: left.len().saturating_sub(segments),
             ..Removed::default()
         };
         let deadline = Instant::now() + RETRY_FOR;
@@ -320,7 +331,9 @@ mod tests {
         let writing = list.hold(dir.join("0001.seg"));
         assert_eq!(writing.partial, dir.join("0001.partial.seg"));
         std::fs::write(&writing.partial, b"half").unwrap();
-        assert_eq!(list.remove_all().removed, 1);
+        let _clip = list.reserve(&dir, "clip", ".mov");
+        let removed = list.remove_all();
+        assert_eq!((removed.in_flight, removed.removed), (1, 1));
         assert!(!writing.partial.exists());
         assert!(dir.join("0000.seg").exists());
     }
