@@ -1,4 +1,4 @@
-﻿// Every main tab fits the window width: no horizontal page scrollbar at the
+// Every main tab fits the window width: no horizontal page scrollbar at the
 // two common sizes (#46). Drives the real app shell against mocked IPC.
 import { readFileSync } from 'node:fs';
 import { bootWithDemos, makeRenderJobs } from './sizing-data.js';
