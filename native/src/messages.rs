@@ -1852,14 +1852,14 @@ pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Displa
 /// their drive have rendered.
 pub fn room_plan(one_at_a_time: usize, waits: usize) -> String {
     let wait_note = if waits == 0 {
-        "each has room beside the two takes recorded before it, so the batch only holds if renders fall further behind".to_string()
+        "each has room beside the two takes recorded before it".to_string()
     } else {
         format!(
             "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch holds before each of those until they have"
         )
     };
     format!(
-        "[render-while-capturing] Plan: the clips don't all fit the capture drives at once, so {one_at_a_time} clip(s) go to drives with room for them one at a time; {wait_note}"
+        "[render-while-capturing] Plan: the clips don't all fit the capture drives at once, so {one_at_a_time} clip(s) go to drives with room for them one at a time; {wait_note}. That is the best case, with renders one clip behind: when they fall further behind, the batch also holds until they catch up"
     )
 }
 

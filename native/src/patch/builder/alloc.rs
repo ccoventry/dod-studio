@@ -70,6 +70,10 @@ pub(super) struct DriveBudget {
     /// blocks, and how many of them have room only once the takes before
     /// them on their drive have rendered (the batch may hold before those).
     pub one_at_a_time: OneAtATimeCounts,
+    /// Per volume, the least room any one-at-a-time call left beside a block
+    /// there, across the whole batch: `free` only keeps the latest call's,
+    /// and the pre-launch check gets the batch's tightest figure.
+    least_left: Vec<Option<u64>>,
 }
 
 /// [`DriveBudget::one_at_a_time`]'s counts, for the plan's log line.
@@ -98,7 +102,9 @@ impl DriveBudget {
             free.push(u64::MAX);
         }
         let capacity = free.clone();
+        let least_left = vec![None; free.len()];
         DriveBudget {
+            least_left,
             volume_of_drive,
             free,
             capacity,
@@ -176,9 +182,15 @@ impl DriveBudget {
                         self.windows_drive_keep_free,
                     ))
                 })?;
-                for (free, left) in self.free.iter_mut().zip(plan.left) {
+                for ((free, least), left) in self
+                    .free
+                    .iter_mut()
+                    .zip(self.least_left.iter_mut())
+                    .zip(plan.left)
+                {
                     if let Some(left) = left {
                         *free = left;
+                        *least = Some(least.map_or(left, |l| l.min(left)));
                     }
                 }
                 self.one_at_a_time.blocks += plan.pairs.len();
@@ -215,7 +227,11 @@ impl DriveBudget {
                     .get(idx)
                     .map(|p| crate::patch::types::DriveHeadroom {
                         path: p.clone(),
-                        free_bytes: self.free[self.volume_of_drive[idx]],
+                        free_bytes: {
+                            let volume = self.volume_of_drive[idx];
+                            self.least_left[volume]
+                                .map_or(self.free[volume], |l| l.min(self.free[volume]))
+                        },
                     })
             })
             .collect()
@@ -336,9 +352,14 @@ pub(super) struct OneAtATime {
 ///    the batch was planned) holds it plus `threshold` beside the batch's
 ///    latest takes still on it (`recent`, [`TAKES_STILL_ON_DISK`]), so the
 ///    batch goes on without waiting for a render (#1438);
-/// 2. else to the earliest whose `capacity` holds it on its own: the batch
-///    holds before it until the earlier takes there have rendered (counted
-///    in [`OneAtATime::waits`]).
+/// 2. else, of the drives whose `capacity` holds it on its own, to the one
+///    with the fewest of those latest takes on it (ties: the one whose
+///    newest take is oldest): the batch holds before it until the earlier
+///    takes there have rendered (counted in [`OneAtATime::waits`]).
+///
+/// The plan is the best case, renders one clip behind: with a deeper render
+/// backlog the running batch finds more takes on a drive than counted here,
+/// and holds where the plan expected none.
 ///
 /// Deleting this batch's takes can never give a volume more room than its
 /// `capacity`, so a block no volume holds alone can never be recorded:
@@ -373,8 +394,19 @@ pub(super) fn allocate_blocks_one_at_a_time(
         let (drive, room) = match order().find(|&d| room_beside_recent(d) >= needed) {
             Some(d) => (d, room_beside_recent(d)),
             None => {
+                // Of the drives that hold it alone, the one with the fewest
+                // of the latest takes on it, and of those the one whose
+                // newest take is oldest, so the clip waits for a take that
+                // has had the longest to render. Taking the first from the
+                // active drive picked the drive just recorded to: two clips
+                // in a row on a drive that holds one, #1438's shape.
+                let newest_take = |volume: usize| recent.iter().rposition(|(v, _)| *v == volume);
                 let d = order()
-                    .find(|&d| capacity[volume_of_drive[d]] >= needed)
+                    .filter(|&d| capacity[volume_of_drive[d]] >= needed)
+                    .min_by_key(|&d| {
+                        let volume = volume_of_drive[d];
+                        (on_disk(volume), newest_take(volume))
+                    })
                     .ok_or(block_index)?;
                 waits += 1;
                 (d, capacity[volume_of_drive[d]])
@@ -500,6 +532,42 @@ mod one_at_a_time_tests {
         // F: keeps 28 GB beside its clip; G: 743 - 132 - 132.
         assert_eq!(plan.left[3], Some(28 * GB));
         assert_eq!(plan.left[4], Some(479 * GB));
+    }
+
+    /// Two drives that each hold one clip: once neither has room beside the
+    /// latest takes, a clip waits on the drive whose take is older, never
+    /// the one just recorded to. Taking the first drive from the active one
+    /// planned A B B A A B B A A: each pair is #1438's shape, the second clip
+    /// waiting for the first's whole render.
+    #[test]
+    fn with_no_room_beside_the_latest_takes_a_clip_waits_on_the_older_take() {
+        let mut active = 0;
+        let plan = plan(&[132 * GB; 9], &[0, 1], &[160 * GB, 160 * GB], &mut active).unwrap();
+        let drives: Vec<usize> = plan.pairs.iter().map(|&(_, d)| d).collect();
+        assert_eq!(drives, vec![0, 1, 0, 1, 0, 1, 0, 1, 0]);
+        assert_eq!(plan.waits, 7);
+    }
+
+    /// The figure the pre-launch check gets is the least room left on a
+    /// drive across every demo, not only the last demo's.
+    #[test]
+    fn the_pre_launch_figure_is_the_least_across_demos() {
+        let dirs = [std::path::PathBuf::from("takes_a")];
+        let mut budget = DriveBudget::snapshot(&dirs, |_| Some(300 * GB));
+        let config = crate::patch::types::PatcherConfig {
+            render_while_capturing: true,
+            ..Default::default()
+        };
+        // Three 140 GB clips: the second leaves 20 GB beside it and the
+        // first's take.
+        budget
+            .allocate(&[140 * GB, 140 * GB, 140 * GB], &config)
+            .unwrap();
+        // Then a small clip, planned with 290 GB beside it: the figure
+        // stays the batch's least.
+        budget.allocate(&[10 * GB], &config).unwrap();
+        let headroom = budget.headroom([0], &dirs);
+        assert_eq!(headroom[0].free_bytes, 20 * GB);
     }
 
     /// One drive that holds a clip at a time still plans every clip (the
