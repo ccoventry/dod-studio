@@ -14,7 +14,7 @@
 //! placed off the surface along the face normal, i.e. exactly where a camera
 //! looking at that decal would be — reaches it.
 
-use native::patch::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID};
+use native::maps::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID};
 
 fn main() {
     let mut args = std::env::args().skip(1);

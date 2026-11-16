@@ -4,7 +4,7 @@
 > Stage 5 declined, deliberately.**
 > The R&D direction for the decal flush ([#60](https://github.com/ccoventry/dod-studio/issues/60)).
 >
-> - **Stage 1 built** (`a4bed14`, `1c86571`): `native/src/patch/bsp.rs` reads BSP v30 geometry,
+> - **Stage 1 built** (`a4bed14`, `1c86571`): `native/src/maps/bsp.rs` reads BSP v30 geometry,
 >   leaves, the node tree and visibility.
 > - **Stage 2 passed** (`46957a2`): 98.93% of **107,584 coordinates the engine provably accepted**,
 >   across 83 demos and 18 maps, land on a world face within 1 unit. The node tree validates the
@@ -45,11 +45,11 @@ injected decal must land on a real surface, because a coordinate that misses cre
 allocates no pool slot, and silently costs the sweep a slot.
 
 Finding those 68 positions has been the whole difficulty. Four sources exist today, in priority
-order (`native/src/patch/decal_strip.rs`, `resolve_flush_positions`):
+order (`native/src/decals/decal_strip.rs`, `resolve_flush_positions`):
 
 1. **Tiled planes** — a 16-unit grid laid across planes fitted to real decal positions.
 2. **Harvested decals** — positions the demo proves the engine accepted.
-3. **Map coordinate store** (`native/src/patch/decal_atlas.rs`) — those positions pooled per map
+3. **Map coordinate store** (`native/src/decals/decal_atlas.rs`) — those positions pooled per map
    build and unioned across every demo processed.
 4. **Player floor path** — floor points under wherever the player stood.
 
@@ -496,9 +496,9 @@ BSP-derived coordinates existing, so it can land first if stage 2 says the parse
 
 ## Related
 
-- `native/src/patch/decal_strip.rs` — the flush, tiling, and position selection.
-- `native/src/patch/decal_atlas.rs` — the per-map coordinate store this would feed.
-- `native/src/patch/decal_probe.rs` — the measurement rig, and where the plane-fitting helpers
+- `native/src/decals/decal_strip.rs` — the flush, tiling, and position selection.
+- `native/src/decals/decal_atlas.rs` — the per-map coordinate store this would feed.
+- `native/src/decals/decal_probe.rs` — the measurement rig, and where the plane-fitting helpers
   came from before they moved into `decal_strip`.
 - `docs/goldsrc_dod_quirks.md` — engine constraints.
 - Issue #60 — the full flush history, including why the `r_decals` cvar approach cannot work.
@@ -548,7 +548,7 @@ map's checksum.
 
 ### Fetching
 
-`patch::map_fetch` downloads from the KTP mirror, which lays every file out at its path under
+`maps::map_fetch` downloads from the KTP mirror, which lays every file out at its path under
 `dod/` — so the URL is a pure function of the map name and there is no index to keep in step.
 
 The order is the whole point: download to a scratch file, read the checksum out of **what actually

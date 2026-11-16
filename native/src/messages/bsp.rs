@@ -1,5 +1,5 @@
 // messages/bsp.rs
-// Why a map file is refused (`patch/bsp.rs`, #237). Each function returns the
+// Why a map file is refused (`maps/bsp.rs`, #237). Each function returns the
 // text only.
 
 use std::fmt::Display;

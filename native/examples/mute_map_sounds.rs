@@ -66,7 +66,7 @@ fn main() {
         std::process::exit(2);
     };
 
-    let reference = match native::patch::map_reference(&demo_path) {
+    let reference = match native::maps::map_reference(&demo_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{e}");
@@ -79,7 +79,7 @@ fn main() {
         eprintln!("--maps-dir is required: the sounds come from the map, not from the demo");
         std::process::exit(2);
     };
-    let bsp_path = native::patch::map_check::map_path(&maps_dir, &reference.map_name);
+    let bsp_path = native::maps::map_check::map_path(&maps_dir, &reference.map_name);
     let bsp_bytes = match std::fs::read(&bsp_path) {
         Ok(b) => b,
         Err(e) => {
@@ -87,7 +87,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let entities = match native::patch::bsp_entities::parse_entities(&bsp_bytes) {
+    let entities = match native::maps::bsp_entities::parse_entities(&bsp_bytes) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{}: {e}", bsp_path.display());

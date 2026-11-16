@@ -356,8 +356,8 @@ mod tests {
         // Nothing in it is refused, a no-op at demo load, or renamed. (The
         // mid-demo list doesn't apply: these run once, at demo load.)
         let commands = &profile.init_commands;
-        assert!(native::patch::cfg_scan::banned_commands(commands).is_empty());
-        assert!(native::patch::cfg_scan::noop_commands_in_init(commands).is_empty());
-        assert!(native::patch::cfg_scan::renamed_commands(commands).is_empty());
+        assert!(native::game_config::cfg_scan::banned_commands(commands).is_empty());
+        assert!(native::game_config::cfg_scan::noop_commands_in_init(commands).is_empty());
+        assert!(native::game_config::cfg_scan::renamed_commands(commands).is_empty());
     }
 }

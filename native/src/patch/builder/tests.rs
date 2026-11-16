@@ -432,14 +432,14 @@ fn every_injected_command_fits_a_console_command_frame_and_passes_the_demo_filte
     for job in &jobs {
         for cmd in &job.init_commands {
             assert_eq!(
-                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                crate::game_config::cfg_scan::demo_filter_rule(cmd),
                 None,
                 "init command {cmd:?} is dropped by the demo filter"
             );
         }
         for (tick, cmd) in &job.scheduled_commands {
             assert_eq!(
-                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                crate::game_config::cfg_scan::demo_filter_rule(cmd),
                 None,
                 "scheduled command {cmd:?} at tick {tick} is dropped by the demo filter"
             );
@@ -1165,7 +1165,7 @@ fn turning_the_flush_off_drops_its_term_from_the_floor() {
     config.decal_flush = true;
     assert_eq!(
         roll_floors(&config).flush_lead,
-        crate::patch::DEFAULT_LEAD_SECONDS
+        crate::decals::DEFAULT_LEAD_SECONDS
     );
 
     config.decal_flush = false;
@@ -1620,7 +1620,7 @@ fn test_a_maximum_ring_sweep_stops_pinning_the_cvar() {
     // costs the precondition the rest of the design works around — that
     // nothing else may set r_decals.
     let mut config = mock_config();
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1670,7 +1670,7 @@ fn test_a_game_config_setting_the_cvar_to_zero_is_now_left_alone() {
     // (`decal_flush_is_noop` / `prepare_flushed_source`'s own zero-check)
     // rather than silently patched away.
     let mut config = mock_config_with_game_cfg("zero", "r_decals 0\nfps_max 999\n");
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1688,7 +1688,7 @@ fn test_a_game_config_setting_the_cvar_to_zero_is_now_left_alone() {
         jobs[1].init_commands
     );
     assert_eq!(
-        crate::patch::ring_limit(&config),
+        crate::game_config::ring_limit(&config),
         0,
         "and ring_limit agrees"
     );
@@ -1717,7 +1717,7 @@ fn test_a_nonzero_game_config_value_is_adopted_without_a_pin() {
         "the config's own line is already the pin, nothing to append: {:?}",
         jobs[1].init_commands
     );
-    assert_eq!(crate::patch::ring_limit(&config), 512);
+    assert_eq!(crate::game_config::ring_limit(&config), 512);
 }
 
 #[test]
@@ -1725,7 +1725,7 @@ fn test_a_maximum_ring_leaves_the_cvar_alone_when_no_config_touches_it() {
     // The other half of the rule, against a game folder proven empty rather
     // than one that merely happens to be.
     let mut config = mock_config_with_game_cfg("clean", "");
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1777,7 +1777,7 @@ fn test_anything_below_the_maximum_still_pins() {
     // Below the ceiling the sweep only covers the ring it was sized for, so
     // the cvar has to be held there or the sweep under-clears.
     let mut config = mock_config();
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS - 1;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS - 1;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],

@@ -39,9 +39,9 @@
 //! entity list, so an intact map predicts two more than a mid-match demo shows.
 //! Check a trimmed map against a fresh recording with the probe regardless.
 
-use native::patch::bsp::Bsp;
-use native::patch::bsp::map_checksum;
-use native::patch::bsp_entities::{
+use native::maps::bsp::Bsp;
+use native::maps::bsp::map_checksum;
+use native::maps::bsp_entities::{
     MapEntity, parse_entities, rewrite_entity_lump, serialize_entities,
 };
 
@@ -200,7 +200,7 @@ fn main() {
         .unwrap_or_else(|| fail("map path has no usable file name"))
         .to_string();
     let reach = demos_dir.as_deref().map(|dir| {
-        native::patch::reachability::harvest_directory(
+        native::decals::player_origins::harvest_directory(
             std::path::Path::new(dir),
             checksum,
             &map_name,
@@ -339,10 +339,11 @@ fn illusionary_rows(
             let texture = dominant_texture(bsp, s);
             let (distance, background) = match (reach, submodel_bounds(bsp, s)) {
                 (Some(cloud), Some((lo, hi))) => {
-                    let d = native::patch::reachability::distance_to_nearest_player(cloud, lo, hi);
+                    let d =
+                        native::decals::player_origins::distance_to_nearest_player(cloud, lo, hi);
                     (
                         Some(d),
-                        native::patch::reachability::reads_as_background(d, lo, hi),
+                        native::decals::player_origins::reads_as_background(d, lo, hi),
                     )
                 }
                 _ => (None, false),
@@ -595,7 +596,7 @@ fn fail(message: &str) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use native::patch::bsp_entities::parse_entity_text;
+    use native::maps::bsp_entities::parse_entity_text;
 
     fn one(text: &str) -> MapEntity {
         parse_entity_text(text).unwrap().pop().unwrap()

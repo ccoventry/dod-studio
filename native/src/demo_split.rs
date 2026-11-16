@@ -730,7 +730,7 @@ pub fn split_file_cancellable(
     let find_bsp = |map: &str| {
         dirs.iter().find_map(|d| {
             let bytes = std::fs::read(d.join(format!("{map}.bsp"))).ok()?;
-            crate::patch::bsp::map_checksum(&bytes).ok()
+            crate::maps::bsp::map_checksum(&bytes).ok()
         })
     };
     let mut written = Vec::new();
