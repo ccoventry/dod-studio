@@ -804,3 +804,6 @@ mod golden_tests;
 
 #[cfg(test)]
 mod rule_tests;
+
+#[cfg(test)]
+mod preview_tests;

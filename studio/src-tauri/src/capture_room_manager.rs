@@ -31,6 +31,7 @@ use native::hlcr::capture_room::{
 use native::hlcr::take_cleanup::{AfterFinish, CleanupPolicy, format_gb, volume_of};
 use native::log_markdown;
 use native::patch::types::CaptureBlock;
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -339,7 +340,7 @@ impl CaptureRoom {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|p| p.into_inner())
+        lock_or_recover(&self.state)
     }
 
     /// What the next clip after `after` needs, or `None` after the last.

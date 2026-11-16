@@ -18,9 +18,10 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use super::*;
 
-/// The demo the highlights were last asked for, so the path is worked out
-/// once per demo rather than every frame.
-static REQUESTED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// The demo file the highlights were last asked for, so they are asked
+/// once per demo rather than every frame; by path, so a same-name replay
+/// from another folder is asked again (#1474).
+static REQUESTED: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 /// The strip, and the text on it (`None` while hidden): a rebuilt window's
 /// new strip is written again.
 static SHOWN: std::sync::Mutex<(Vpanel, Option<String>)> = std::sync::Mutex::new((0, None));
@@ -38,12 +39,13 @@ pub(super) fn request_highlights() {
     let Some(name) = crate::demo_reload::current_demo() else {
         return;
     };
+    let path = crate::demo_locate::playing(&name);
     let mut requested = REQUESTED.lock().unwrap_or_else(|e| e.into_inner());
-    if *requested == name {
+    if requested.as_ref() == Some(&path) {
         return;
     }
-    crate::streaks::request(&crate::streaks::demo_path(&dod_dir(), &name));
-    *requested = name;
+    crate::streaks::request(&path);
+    *requested = Some(path);
 }
 
 /// How far the tabs' controls move down for the strip.

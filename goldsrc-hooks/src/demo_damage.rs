@@ -586,33 +586,15 @@ fn event_label(damage: &Damage, path: Option<&str>) -> String {
     label
 }
 
-/// The demo's file on disk: its name joined to the game folder (or its
-/// `_addon` folder, where the engine also finds demos), `.dem` added,
-/// `..` worked out by [`demo_path_in`]. Only the folder choice looks at the
-/// disk.
+/// The demo's file on disk, found as Review finds it: the file the game
+/// opened (`demo_locate::playing`: the game folder, `dod_addon` or another
+/// search path, #1474) with `..` worked out without the disk
+/// (`review_ask::demo_path`), so a network share stays `\\server\...`
+/// (`std::fs::canonicalize` gives `\\?\UNC\server\...`).
 fn demo_file_path(name: &str) -> String {
-    let game = crate::game_folder::mod_dir();
-    let addon = crate::game_folder::game_root().join(crate::game_folder::addon_name());
-    demo_path_in(&game, &addon, name, |path| path.is_file())
+    crate::review_ask::demo_path(&crate::demo_locate::playing(name))
         .display()
         .to_string()
-}
-
-/// `name`'s file under `game`, or under `addon` when only that one `exists`;
-/// `..` resolved without the disk, so a network share stays `\\server\...`
-/// (`std::fs::canonicalize` gives `\\?\UNC\server\...`).
-fn demo_path_in(
-    game: &std::path::Path,
-    addon: &std::path::Path,
-    name: &str,
-    exists: impl Fn(&std::path::Path) -> bool,
-) -> std::path::PathBuf {
-    let in_game = crate::review_ask::demo_path(game, name);
-    if exists(&in_game) {
-        return in_game;
-    }
-    let in_addon = crate::review_ask::demo_path(addon, name);
-    if exists(&in_addon) { in_addon } else { in_game }
 }
 
 /// The `ds_debug_status` line, or `None` when it was never installed.
@@ -754,22 +736,10 @@ mod tests {
 
     #[test]
     fn the_demo_path_resolves_dots_without_the_disk_and_keeps_a_share() {
-        let game = std::path::Path::new(r"\\server\share\Half-Life\dod");
-        let addon = std::path::Path::new(r"\\server\share\Half-Life\dod_addon");
+        let opened = std::path::Path::new(r"\\server\share\Half-Life\dod\../demos/match1.dem");
         assert_eq!(
-            demo_path_in(game, addon, "../demos/match1", |_| false),
+            crate::review_ask::demo_path(opened),
             std::path::PathBuf::from(r"\\server\share\Half-Life\demos\match1.dem")
-        );
-        let game = std::path::Path::new(r"C:\Games\Half-Life\dod");
-        let addon = std::path::Path::new(r"C:\Games\Half-Life\dod_addon");
-        let only_addon = |p: &std::path::Path| p.starts_with(addon);
-        assert_eq!(
-            demo_path_in(game, addon, "match1.dem", only_addon),
-            std::path::PathBuf::from(r"C:\Games\Half-Life\dod_addon\match1.dem")
-        );
-        assert_eq!(
-            demo_path_in(game, addon, "match1", |_| true),
-            std::path::PathBuf::from(r"C:\Games\Half-Life\dod\match1.dem")
         );
     }
 

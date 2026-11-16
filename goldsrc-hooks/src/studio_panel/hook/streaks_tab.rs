@@ -150,8 +150,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             show_filters(vgui, page, None);
             return;
         };
-        let game_dir = dod_dir();
-        let path = streaks::demo_path(&game_dir, &name);
+        let path = crate::demo_locate::playing(&name);
         streaks::request(&path);
         let Some((generation, status, percent)) = streaks::status() else {
             return;

@@ -208,6 +208,7 @@ fn remember(command: &'static str) -> Option<String> {
     };
     replay_line(command, &name)?;
     LAST.with(|last| *last.borrow_mut() = Last::Played(command, name.clone()));
+    crate::demo_locate::forget();
     Some(name)
 }
 
