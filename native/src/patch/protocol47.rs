@@ -1,13 +1,15 @@
 //! Converting a protocol-47 demo to protocol 48 (#239).
 //!
-//! Today's game refuses a demo whose header says network protocol 47 ("demo
-//! protocol outdated") and, past that, one whose `svc_serverinfo` says 47
-//! ("Server returned version 47, not 48"). Nothing else about a protocol-47
-//! demo differs: its frames, messages and delta encoding are laid out as 48's
-//! (`docs/goldsrc_protocol_47.md`). So the conversion rewrites those two
-//! numbers and nothing else: four bytes in the header and four in each
-//! `svc_serverinfo`, in place. Every other byte, the directory included,
-//! stays what the recorder wrote.
+//! Today's game plays a demo whose header says network protocol 47, but
+//! prints "WARNING! demo protocol outdated." first, on both engine builds,
+//! with HLAE or without. Nothing else about a protocol-47 demo differs: its
+//! frames, messages and delta encoding are laid out as 48's
+//! (`docs/goldsrc_protocol_47.md`). So the conversion rewrites the protocol
+//! in the header and in each `svc_serverinfo` and nothing else: four bytes
+//! in the header and four in each server info, in place. Every other byte,
+//! the directory included, stays what the recorder wrote. Patched batch
+//! copies convert as they are written (`engine::StreamPatcher`), and
+//! `dod-studio-cli convert-47` converts a demo on its own.
 //!
 //! The idea and the two places to change come from HLAE's DemoTools ("Try
 //! to convert demo version (47 -> 48)"), `AfxCppCli/old/tools/demotools/`
@@ -76,8 +78,9 @@ pub enum ConvertError {
     NotADemo,
     /// The header names another protocol than 47 (48 needs no conversion).
     NotProtocol47 { network_protocol: i32 },
-    /// No `svc_serverinfo` saying 47 was found in the frames, so the game
-    /// would still refuse the copy.
+    /// No `svc_serverinfo` saying 47 was found in the frames: a copy would
+    /// say 48 in its header and 47 where it loads the map, a mix no
+    /// recording has.
     NoServerInfo,
     /// The output would overwrite the demo being converted.
     OutputIsInput { path: PathBuf },
@@ -126,7 +129,8 @@ pub struct Converted {
 }
 
 /// Whether `bytes` are a demo whose header says protocol 47: one the game
-/// refuses until [`convert_in_place`] has run.
+/// plays with an outdated-protocol warning until [`convert_in_place`] has
+/// run.
 pub fn is_protocol_47(bytes: &[u8]) -> bool {
     header_protocol(bytes) == Some(NETWORK_PROTOCOL_47)
 }
@@ -147,7 +151,7 @@ fn header_protocol(bytes: &[u8]) -> Option<i32> {
 /// network frames. The length and every other byte stay as they were.
 ///
 /// Fails, changing nothing, on bytes that are not a protocol-47 demo, and on
-/// one with no `svc_serverinfo` to rewrite (the game would refuse the copy).
+/// one with no `svc_serverinfo` to rewrite ([`ConvertError::NoServerInfo`]).
 pub fn convert_in_place(bytes: &mut [u8]) -> Result<Converted, ConvertError> {
     match header_protocol(bytes) {
         None => return Err(ConvertError::NotADemo),
@@ -208,8 +212,8 @@ struct Found {
 /// folder, a host name and a `maps/*.bsp` where they belong
 /// ([`server_infos_in`]), rather than only the network frames a walk reaches:
 /// a damaged frame stops the walk (or, when its length still fits, carries
-/// it past a restart's server info), and a server info left at 47 makes the
-/// game refuse the copy there. Across the 78 demos of the survey this finds
+/// it past a restart's server info), and a server info left at 47 would
+/// leave the copy half converted. Across the 78 demos of the survey this finds
 /// exactly the server infos the walk does. The walk follows each frame's own
 /// length and says where it stopped short, for the caller to report.
 fn server_info_protocols(bytes: &[u8]) -> Found {
@@ -669,7 +673,7 @@ mod tests {
 
     /// A demo damaged between its two server infos (a mid-demo restart): the
     /// walk stops at the damage, and the second server info is still found
-    /// and converted, or the game would refuse the copy at the restart.
+    /// and converted, or the copy would still say 47 at the restart.
     #[test]
     fn damage_before_a_restart_s_server_info_still_converts_it() {
         let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);

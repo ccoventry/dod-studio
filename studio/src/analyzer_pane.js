@@ -12,7 +12,6 @@ import { renderDamageBanner } from './analyzer_damage.js';
 import { repairAnalyzedDemo, repairSplitAnalyzedDemo } from './analyzer_repair.js';
 import { repairableStatus } from './repair_status.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
-import { renderProtocol47Banner, convertAnalyzedDemo } from './analyzer_protocol47.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -118,7 +117,6 @@ async function loadAnalyzerDemo(path) {
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);
   renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), null);
-  renderProtocol47Banner(document.querySelector('#analyzer-protocol47-banner'), null);
   const seq = ++analyzerLoadSeq;
   analyzerLoadingPath = path;
   try {
@@ -129,8 +127,6 @@ async function loadAnalyzerDemo(path) {
     showReport(result);
     renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
-    renderProtocol47Banner(document.querySelector('#analyzer-protocol47-banner'), result,
-      () => convertAnalyzedDemo(path, { relistFolderOf, open: loadAnalyzerDemo, isShown: () => seq === analyzerLoadSeq }));
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

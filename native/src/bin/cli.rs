@@ -326,8 +326,9 @@ fn run_patch_streak_subcommand(
     println!("{}", messages::CLI_READING_RAW_BYTES);
     let mut demo_bytes =
         std::fs::read(&input).map_err(|e| messages::cli_failed_to_read(input.display(), e))?;
-    // The patched copy of a protocol-47 demo says 48, or the game refuses it
-    // (#239). The input file is not touched.
+    // The patched copy of a protocol-47 demo says 48, so the game plays it
+    // without an outdated-protocol warning (#239). The input file is not
+    // touched.
     if native::patch::protocol47::is_protocol_47(&demo_bytes) {
         native::patch::protocol47::convert_in_place(&mut demo_bytes)
             .map_err(|e| messages::labeled(input.display(), e))?;
@@ -405,9 +406,9 @@ enum Commands {
         /// List of paths to demo files
         demo_paths: Vec<PathBuf>,
     },
-    /// Convert protocol-47 demos (2004-era) to protocol 48 so today's game
-    /// plays them. Each copy goes beside its demo as <name>_p48.dem; the
-    /// demos themselves are only read.
+    /// Convert protocol-47 demos (2004-era) to protocol 48, so today's game
+    /// plays them without an outdated-protocol warning. Each copy goes
+    /// beside its demo as <name>_p48.dem; the demos themselves are only read.
     #[command(name = "convert-47")]
     Convert47 {
         /// Protocol-47 demo files

@@ -4,9 +4,7 @@
   tests/e2e/README.md for the general shape. Carries the banner, the report
   panel and one sub-tab. A test controls the backend with `analyze_demo_full`,
   `demo_map_segments` and `split_demo_maps` handlers on
-  window.__mockInvokeHandlers, then calls window.__openDemo(path). The
-  damage and protocol-47 banners are here too, for analyzer-repair.spec.js
-  and analyzer-protocol47.spec.js.
+  window.__mockInvokeHandlers, then calls window.__openDemo(path).
 -->
 <html lang="en">
 <head>
@@ -21,7 +19,6 @@
   </div>
   <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
   <div id="analyzer-damage-banner" class="analyzer-warning-banner" hidden></div>
-  <div id="analyzer-protocol47-banner" class="analyzer-warning-banner" hidden></div>
   <div id="analyzer-tab-content" class="analyzer-tab-content" style="width: 900px;"></div>
 
   <script type="module">

@@ -23,7 +23,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, how Studio repairs damaged ones (`analysis::repair`) and the R&D behind it, and the engine's entity-packet flush rule (#15).
 - [goldsrc_demo_editing.md](goldsrc_demo_editing.md) — rewriting what happens in a demo: moving a player, filling seconds the demo never had, moving the recorder's view, and edit-the-file versus fake-it-in-the-hook (#1469).
-- [goldsrc_protocol_47.md](goldsrc_protocol_47.md) — protocol-47 demos (2004 and a little after): what differs from protocol 48 (only two numbers), how they are read, and converting one so today's game plays it (#239).
+- [goldsrc_protocol_47.md](goldsrc_protocol_47.md) — protocol-47 demos (2004 and a little after): what the game does with one (plays it after an outdated-protocol warning), what differs from protocol 48 (only the protocol number), how they are read, and converting one to drop the warning (#239).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.

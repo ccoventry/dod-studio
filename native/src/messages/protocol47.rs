@@ -14,7 +14,7 @@ pub fn not_protocol_47(network_protocol: i32) -> String {
 }
 
 pub const NO_SERVER_INFO: &str = "no server info saying protocol 47 was found in the demo's \
-     frames, so the game would still refuse it: nothing was written";
+     frames, so a copy would say 48 in its header and 47 where it loads the map: nothing was written";
 
 pub fn output_is_input(path: impl Display) -> String {
     format!("{path} is the demo being converted: name another file for the copy")

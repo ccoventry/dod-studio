@@ -1930,16 +1930,6 @@ export async function cancelDamagedScan() {
     });
 }
 
-/** Converts the protocol-47 demo at `path` to a protocol-48 copy beside it
- *  (`<name>_p48.dem`, #239) and resolves the copy's path. */
-export async function convertProtocol47(path) {
-  return invoke("convert_protocol_47", { path })
-    .catch((err) => {
-      console.error("IPC Execution Error (convert_protocol_47):", err);
-      throw err;
-    });
-}
-
 /** Repairs the demo at `path` into `<name>_repaired.dem` beside it; resolves
  *  its RepairResult. Progress arrives as `repair_progress` events. */
 export async function repairDemo(path) {

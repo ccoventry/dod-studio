@@ -249,8 +249,9 @@ impl StreamPatcher {
         // refuses to play it (#402; see game_dir.rs).
         let game_folder = crate::shared::paths::game_folder();
         // A protocol-47 demo's copy says 48, in the header here and in each
-        // svc_serverinfo below, or the game refuses to play it (#239; see
-        // protocol47.rs). The game-folder rewrite then looks for 48.
+        // svc_serverinfo below, so the game plays it without its "demo
+        // protocol outdated" warning (#239; see protocol47.rs). The
+        // game-folder rewrite then looks for 48.
         let converting_47 = crate::patch::protocol47::convert_header_in_place(&mut header);
         let mut server_infos_converted = 0usize;
         let network_protocol = crate::patch::game_dir::header_network_protocol(&header);
@@ -544,9 +545,10 @@ impl StreamPatcher {
             }
         }
 
-        // A protocol-47 copy with no server info converted still says 47
-        // where the game signs on, and is refused there: fail as the
-        // standalone conversion does rather than hand the game that copy.
+        // A protocol-47 copy with no server info converted would say 48 in
+        // its header and 47 where it loads the map, a mix no recording has:
+        // fail as the standalone conversion does rather than hand the game
+        // that copy.
         if converting_47 {
             if server_infos_converted == 0 {
                 return Err(std::io::Error::new(
@@ -1174,7 +1176,7 @@ mod directory_tests {
     }
 
     /// A protocol-47 demo's patched copy says 48 in its header and its
-    /// `svc_serverinfo`, or the game refuses to play it (#239).
+    /// `svc_serverinfo`, so the game plays it without a warning (#239).
     #[test]
     fn a_protocol_47_demo_s_patched_copy_says_48() {
         let scratch = Scratch::new("patch_protocol47");
@@ -1198,7 +1200,7 @@ mod directory_tests {
 
     /// A protocol-47 demo with no server info to convert is refused, as the
     /// standalone conversion refuses it: its copy would say 48 in the header
-    /// and still be refused where the game signs on.
+    /// and 47 where it loads the map.
     #[test]
     fn a_protocol_47_demo_with_no_server_info_is_not_patched() {
         let scratch = Scratch::new("patch_protocol47_none");

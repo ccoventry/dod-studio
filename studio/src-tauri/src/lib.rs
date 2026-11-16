@@ -17,7 +17,6 @@ mod crash_maps_manager;
 mod damaged_demo_notices;
 mod dem_open_with;
 mod demo_cache_cmd;
-mod demo_convert;
 mod demo_preview;
 mod demo_rename_manager;
 mod demo_repair_manager;
@@ -1134,7 +1133,6 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
-            demo_convert::convert_protocol_47,
             demo_repair_manager::find_damaged_demos_cmd,
             demo_repair_manager::cancel_damaged_scan,
             demo_repair_manager::repair_demo_cmd,

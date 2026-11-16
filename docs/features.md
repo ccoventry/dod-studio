@@ -387,7 +387,7 @@ A highlight is one life's kills by one player, at least one kill, for every conn
 | Binary | What it does |
 |---|---|
 | `preview_cli` | Drag demos or folders onto it; writes `<stem>_preview.dem` bookmark files into a `previews` folder. `--player` picks one player in an HLTV demo. |
-| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `stats <demos>` prints league stats as JSON: teamkills, suicides, objective points, cap credits, every flag capture and cap blocks. `convert-47 <demos>` writes a protocol-48 copy (`<name>_p48.dem`) of each protocol-47 demo, which the game otherwise refuses to play (#239). `patch-streak` is an older standalone patcher. |
+| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `stats <demos>` prints league stats as JSON: teamkills, suicides, objective points, cap credits, every flag capture and cap blocks. `convert-47 <demos>` writes a protocol-48 copy (`<name>_p48.dem`) of each protocol-47 demo, which the game otherwise plays with an outdated-protocol warning; patched batch copies convert by themselves (#239). `patch-streak` is an older standalone patcher. |
 | `dod-studio-dump` | Header, frame and message counts, first commands and sounds of one demo. |
 | `dod-studio-inspect` | Library statistics across folders: maps, message frequency, duplicates. |
 | `check_maps` | Per-demo map status against a maps folder, with optional download. |

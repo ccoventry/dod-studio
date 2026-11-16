@@ -1998,9 +1998,7 @@ button.danger-btn {
 
 .analyzer-damage-repair,
 .analyzer-damage-cannot-repair,
-.analyzer-damage-already-split,
-.analyzer-protocol47-convert,
-.analyzer-protocol47-status {
+.analyzer-damage-already-split {
   margin-left: 8px;
 }
 

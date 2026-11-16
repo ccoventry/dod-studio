@@ -1873,6 +1873,10 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #239: protocol 47 is an older build's; the game warns and plays it.
+    networkProtocolValue: (protocol) => (protocol === 47
+      ? '47 (older build): plays with an outdated-protocol warning'
+      : String(protocol)),
     // #207: what decides whether the pre-Anniversary engine can play it.
     PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
     peakEntitiesValue: (peak) => (peak > 256
@@ -2846,17 +2850,6 @@ export const STRINGS = {
     BADGE: 'trimmed copy',
     badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so captures and previews play a trimmed copy: fog, invisible collision hulls and a few far decorations are left out of every snapshot. The original file is unchanged.`,
     ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024 and plays the original: set its hl.exe in Configuration → Paths for these.',
-  },
-
-  // ── analyzer_protocol47.js: protocol-47 demos (#239) ────────────────────
-  PROTOCOL_47: {
-    NOTICE: 'Protocol 47 demo (2004 or a little after): everything here reads fine, but the game refuses to play it as it is. '
-      + 'Convert saves a copy the game plays next to it, as <name>_p48.dem: preview and capture that copy.',
-    BUTTON: 'Convert',
-    BUTTON_TITLE: 'Save a protocol 48 copy of this demo next to it (<name>_p48.dem). The original is not changed.',
-    CONVERTING: 'Converting…',
-    done: (name) => `Converted: ${name} is next to the original.`,
-    failed: (err) => `Couldn't convert it: ${err}`,
   },
 
   // ── camera_data.js: demos with no camera data (#920) ───────────────────

@@ -181,6 +181,10 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #239: protocol 47 is an older build's; the game warns and plays it.
+    networkProtocolValue: (protocol) => (protocol === 47
+      ? '47 (older build): plays with an outdated-protocol warning'
+      : String(protocol)),
     // #207: what decides whether the pre-Anniversary engine can play it.
     PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
     peakEntitiesValue: (peak) => (peak > 256
