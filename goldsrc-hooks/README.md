@@ -484,6 +484,21 @@ there but not in an HLTV demo (#894): one byte, both builds
 (`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
 On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
+`src/demo_damage.rs` notices a `playdemo` (or `timedemo`) that stops on a
+damaged frame, or at the engine's entity limit (256 on the pre-Anniversary
+build), and says so in the console, the hook log and a `DEMO_DAMAGED` /
+`DEMO_ENTITY_LIMIT` event to Studio (#1373): one entry detour on each of
+`Host_EndGame` and `Host_Error`, both builds
+(`tools/verify_demo_damage_offsets.py`). Under `viewdemo`, which reaches
+neither, `src/demo_damage/viewdemo.rs` holds what the demo player loaded
+against a walk of the file's frames once the load ends. A damaged demo also
+gets a line on the DoD Studio window's loading strip, a centre print while
+nothing is being captured (`pfnCenterPrint`, checked per build by
+`tools/verify_center_print_offsets.py`), and a `damaged` request over
+Studio's game pipe, which shows a toast with Repair
+(`src/demo_damage/tell.rs`). It only reads. On by default;
+`GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
+
 `src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo
 plays (#1441). The recorder's presses replay there and cycle the viewer's
 `_cl_minimap`; the map never draws in POV playback (#897), so all that shows
