@@ -46,13 +46,12 @@ pub(crate) fn request_line(demo: &Path, start: Start) -> String {
     }
 }
 
-/// The loaded demo's full path: the name `viewdemo` was given, from the
-/// game's `dod` folder, with `.dem` added when missing and `..` worked out
-/// (`viewdemo "../../demos/a"` names `<Steam>\demos\a.dem`).
-pub(crate) fn demo_path(dod_dir: &Path, name: &str) -> PathBuf {
-    let joined = crate::streaks::demo_path(dod_dir, name);
+/// The loaded demo's full path for Studio: the file the game opened
+/// (`demo_locate::playing`, which may be in `dod_addon`, #1474) with `..`
+/// worked out (`viewdemo "../../demos/a"` names `<Steam>\demos\a.dem`).
+pub(crate) fn demo_path(opened: &Path) -> PathBuf {
     let mut out = PathBuf::new();
-    for part in joined.components() {
+    for part in opened.components() {
         match part {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -62,6 +61,24 @@ pub(crate) fn demo_path(dod_dir: &Path, name: &str) -> PathBuf {
         }
     }
     out
+}
+
+/// The file an ask names for the demo `name`, from where the game opened
+/// it (`opened`), or why it isn't asked: with no file found, Studio would
+/// be asked to review one that isn't there (#1474).
+pub(crate) fn ask_target(
+    opened: Option<std::path::PathBuf>,
+    name: &str,
+) -> Result<std::path::PathBuf, String> {
+    match opened {
+        Some(opened) => Ok(demo_path(&opened)),
+        None => Err(not_found(name)),
+    }
+}
+
+/// What an ask says when [`ask_target`] finds no file.
+fn not_found(name: &str) -> String {
+    format!("can't find {name} in the game's folders, so DoD Studio isn't asked")
 }
 
 /// What the last request is doing, for the Review tab.
@@ -356,15 +373,44 @@ mod tests {
     }
 
     #[test]
-    fn a_demo_named_from_the_game_folder_becomes_a_plain_full_path() {
-        let dod = Path::new(r"C:\Steam\common\Half-Life\dod");
+    fn an_ask_names_the_file_the_game_opened_or_says_it_is_missing() {
+        use std::path::PathBuf;
+        let opened = PathBuf::from("C:/Games/Half-Life/dod_addon/../dod_addon/match1.dem");
         assert_eq!(
-            demo_path(dod, "../../../demos/./m"),
+            ask_target(Some(opened), "match1"),
+            Ok(PathBuf::from("C:/Games/Half-Life/dod_addon/match1.dem"))
+        );
+        let missing = ask_target(None, "match1").unwrap_err();
+        assert!(missing.starts_with("can't find match1"), "{missing}");
+    }
+
+    #[test]
+    fn a_demo_named_from_the_game_folder_becomes_a_plain_full_path() {
+        // The file the game opens for `name` when it is in `folder` (a full
+        // path has one candidate, itself).
+        let opened = |folder: &str, name: &str| {
+            let root = Path::new(r"C:\Steam\common\Half-Life");
+            let found = crate::demo_locate::candidates(root, "dod", true, name);
+            let only = found.len() == 1;
+            crate::demo_locate::first_existing(found, |p| only || p.starts_with(root.join(folder)))
+                .unwrap()
+        };
+        assert_eq!(
+            demo_path(&opened("dod", "../../../demos/./m")),
             PathBuf::from(r"C:\Steam\demos\m.dem")
         );
         assert_eq!(
-            demo_path(dod, "ktps8w11sf.dem"),
+            demo_path(&opened("dod", "ktps8w11sf.dem")),
             PathBuf::from(r"C:\Steam\common\Half-Life\dod\ktps8w11sf.dem")
+        );
+        // #1474: a demo the game found in dod_addon is reviewed from there.
+        assert_eq!(
+            demo_path(&opened("dod_addon", "ktps8w11sf")),
+            PathBuf::from(r"C:\Steam\common\Half-Life\dod_addon\ktps8w11sf.dem")
+        );
+        assert_eq!(
+            demo_path(&opened("dod", "D:/demos/ktp.dem")),
+            PathBuf::from(r"D:\demos\ktp.dem")
         );
     }
 

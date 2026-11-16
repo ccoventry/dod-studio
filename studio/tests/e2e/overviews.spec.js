@@ -4,7 +4,7 @@
 // colours or hides an area and the edits are saved, labels, and what Save
 // hands the backend: the drawing at the game's 1024x768 with the format and
 // place chosen.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const square = (x, y, size) => [[x, y], [x + size, y], [x + size, y + size], [x, y + size]];
 

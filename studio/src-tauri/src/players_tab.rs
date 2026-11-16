@@ -3,6 +3,7 @@
 //! a sprite for the tile picker, and tells running games the "Use in the
 //! game" box (`ds_player_overrides`).
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -84,6 +85,7 @@ pub fn add_crosshair_file(
     let dir = game_dir(&game_path, &game_folder)
         .ok_or_else(|| "set the Half-Life executable and game folder first".to_string())?;
     native::crosshair_import::import_crosshair(&dir, Path::new(&source), &name)
+        .map_err(|e| e.to_string())
 }
 
 /// Sends the box's value to every running game that takes commands, and
@@ -102,10 +104,7 @@ pub fn set_player_overrides(on: bool) -> usize {
 /// yet (#1322). True once: this clears the notice and saves that.
 #[tauri::command(async)]
 pub fn take_pov_own_spray_notice(state: tauri::State<'_, SettingsManager>) -> Result<bool, String> {
-    let mut settings = state
-        .inner
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = lock_or_recover(&state.inner);
     if !std::mem::take(&mut settings.pov_own_spray_notice) {
         return Ok(false);
     }

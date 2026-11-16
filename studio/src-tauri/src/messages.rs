@@ -31,6 +31,7 @@ pub mod batch;
 pub mod blender;
 pub mod capture;
 pub mod catch_up;
+pub mod clip_relink;
 pub mod combine;
 pub mod game_process;
 pub mod hd;
@@ -176,6 +177,8 @@ pub fn hd_not_python(path: &str) -> String {
 
 pub const CAPTURE_BATCH_ALREADY_RUNNING: &str = "Capture batch already in progress";
 pub const NO_STREAKS_IN_PAYLOAD: &str = "No streaks in payload";
+pub const AGR_FPS_REQUIRED: &str =
+    "AGR FPS is empty: set it on Configuration > Output Format before starting an AGR capture.";
 
 pub fn configure_paths_before(action: &str) -> String {
     format!(
@@ -354,6 +357,10 @@ pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
 /// The game asked for a review, and the page could not be told (#1142).
 pub fn game_review_not_handed_on(e: impl std::fmt::Display) -> String {
     format!("DoD Studio's window could not take the request: {e}")
+}
+/// The game said a demo is damaged, and the page could not be told (#1373).
+pub fn damage_notice_not_handed_on(e: impl std::fmt::Display) -> String {
+    format!("DoD Studio's window could not take the damaged-demo notice: {e}")
 }
 pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
     format!("Could not save the list of highlights to review: {e}")

@@ -32,7 +32,10 @@ export function createProjectRenders({ getTakeIndex, markDirty, io = defaultIo }
   /** Records the render `render_take_finished` reports, for a take the
    *  project knows. */
   function noteFinished(payload) {
-    const { take_key: takeKey, render } = payload || {};
+    const { take_key: takeKey, content_hash: contentHash } = payload || {};
+    // The fingerprint taken as the render finished (#1442) rides beside the
+    // attempt, which is the take folder's history entry.
+    const render = payload?.render && contentHash ? { ...payload.render, content_hash: contentHash } : payload?.render;
     if (!recordRender(getTakeIndex(), takeKey, render)) return;
     io.log(renderRecordedLine(takeKey, render.output_path));
     markDirty();

@@ -26,6 +26,7 @@
 //!
 //! The hook DLL's side is `goldsrc-hooks/src/review_ask.rs`.
 
+use crate::shared::lock::lock_or_recover;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -90,7 +91,7 @@ pub fn set_review_handler(handler: impl Fn(ReviewRequest) + Send + Sync + 'stati
 /// has already ended (answered, timed out, or the game hung up) takes no
 /// more, which is not an error: the game no longer listens.
 pub fn report(id: u64, update: ReviewUpdate) {
-    let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let pending = lock_or_recover(&PENDING);
     if let Some(sender) = pending.as_ref().and_then(|map| map.get(&id)) {
         let _ = sender.send(update);
     }
@@ -136,7 +137,7 @@ pub fn parse_request(line: &str) -> Result<(PathBuf, ReviewStart), String> {
 /// `path` with every `.` dropped and every `..` taken back a folder, as the
 /// game names a demo from its own folder (`dod/../../demos/a.dem`) and the
 /// Master Demo Queue lists it plainly. Lexical: nothing is read from disk.
-fn without_dots(path: &Path) -> PathBuf {
+pub(crate) fn without_dots(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
         match part {
@@ -177,15 +178,13 @@ pub fn serve(line: &str, writer: &mut impl Write) {
     };
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = channel();
-    PENDING
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    lock_or_recover(&PENDING)
         .get_or_insert_with(HashMap::new)
         .insert(id, sender);
     crate::log_markdown(&crate::messages::review_from_game(demo.display(), &start));
     handler(ReviewRequest { id, demo, start });
     forward(&receiver, writer, FIRST_ANSWER_TIMEOUT, ANSWER_TIMEOUT);
-    if let Some(map) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+    if let Some(map) = lock_or_recover(&PENDING).as_mut() {
         map.remove(&id);
     }
 }

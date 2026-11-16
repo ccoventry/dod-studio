@@ -42,12 +42,13 @@
 //!
 //! `m_fMenuDisplayed` is left set on purpose. It is what sends the recorded
 //! `slot1`..`slot10` presses to the menu rather than to weapon selection, the
-//! way they went in the recording; selecting clears both fields
-//! (`+0x28880`). The one thing `Draw` does besides drawing is time the menu
-//! out: its first branch clears both fields once `m_flShutoffTime`
-//! (`+0x1c`) passes `gHUD.m_flTime`, before it draws anything. While the menu
-//! is hidden, [`poll`] watches that time and puts the bit back the moment it
-//! passes, so the game's own `Draw` closes it without drawing a frame.
+//! way they went in the recording; closing the menu with
+//! `CHudAmmo::UserCmd_Close` (`+0x28880`) clears both fields, as selecting
+//! (`CHudMenu::SelectMenuItem`, `+0x3e390`) does. The one thing `Draw` does
+//! besides drawing is time the menu out: its first branch clears both fields
+//! once `m_flShutoffTime` (`+0x1c`) passes `gHUD.m_flTime`, before it draws
+//! anything. While the menu is hidden, [`poll`] watches that time and puts the
+//! bit back the moment it passes, so the game's own `Draw` closes it without drawing a frame.
 //!
 //! Server plugin menus (AMX Mod X menus, votes, KTP's) come through the same
 //! `ShowMenu`. This cvar leaves them alone: only the nine voice keys are

@@ -31,8 +31,8 @@ Usage:
     python goldsrc-hooks/tools/verify_lambda_spray_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_lambda_spray_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one. Needs `pip install pefile capstone`.
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install. Needs `pip install pefile capstone`.
 """
 
 import re

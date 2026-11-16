@@ -7,7 +7,7 @@
 // page says it will use, the build's choices, progress and cancel, and the
 // style comparison, the map list (hd_maps.txt), the custom-style form
 // (my_styles.txt), and the misses view read from the hook log.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** native::hd::HdStatus, as serde sends it (snake_case). */
 const STATUS = {

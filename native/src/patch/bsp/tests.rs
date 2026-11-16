@@ -545,3 +545,44 @@ fn texture_count_beyond_the_lump_does_not_over_allocate() {
     data.extend_from_slice(&[0; 8]);
     assert!(parse_texture_names(&data).unwrap().len() <= 2);
 }
+
+#[test]
+fn each_way_a_map_is_refused_has_its_own_error() {
+    let short = Bsp::parse(&[0u8; 8]).err().unwrap();
+    assert!(matches!(short, BspError::ShorterThanHeader));
+
+    let mut other_version = vec![0u8; HEADER_SIZE];
+    other_version[0..4].copy_from_slice(&46_i32.to_le_bytes());
+    let err = Bsp::parse(&other_version).err().unwrap();
+    assert!(matches!(err, BspError::NotGoldSrc { version: 46 }));
+    assert_eq!(
+        err.to_string(),
+        "BSP version 46 is not the GoldSrc version 30"
+    );
+
+    let mut past_end = vec![0u8; HEADER_SIZE];
+    past_end[0..4].copy_from_slice(&BSP_VERSION.to_le_bytes());
+    past_end[4 + LUMP_PLANES * 8 + 4..4 + LUMP_PLANES * 8 + 8]
+        .copy_from_slice(&1_000_000_i32.to_le_bytes());
+    let err = Bsp::parse(&past_end).err().unwrap();
+    assert!(matches!(err, BspError::LumpPastEnd { index: LUMP_PLANES }));
+    assert_eq!(
+        err.to_string(),
+        format!("lump {LUMP_PLANES} runs past the end of the file")
+    );
+}
+
+#[test]
+fn a_missing_map_file_is_a_read_error_with_its_io_cause() {
+    use std::error::Error;
+    let path = std::env::temp_dir().join("dod_studio_no_such_map_1382.bsp");
+
+    let loaded = Bsp::from_file(&path).err().unwrap();
+    assert!(matches!(loaded, BspError::Read { .. }));
+    assert!(loaded.to_string().starts_with("could not read "));
+    assert!(loaded.source().is_some());
+
+    let summed = map_checksum_of_file(&path).unwrap_err();
+    assert!(matches!(summed, BspError::ReadForChecksum { .. }));
+    assert!(!summed.to_string().starts_with("could not read "));
+}

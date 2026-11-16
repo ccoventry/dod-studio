@@ -19,6 +19,8 @@ import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } 
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
 import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
+import { readWindowsDriveKeepFree, applyWindowsDriveKeepFree } from './windows_drive_setting.js';
+import { readResumableRenders, applyResumableRenders } from './resumable_renders_setting.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
@@ -44,7 +46,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 120, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    // 0 = empty: Start is blocked in AGR mode; elsewhere DEFAULT_AGR_FPS is only a fallback (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 5.0);
     const postRoll = numberField('#config-post-roll', 1.0);
@@ -193,6 +195,9 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       ...getTakeCleanupSetting(),
       // "Render while capturing" (#861).
       ...getRenderWhileCapturing(),
+      // "Keep free on the Windows drive" (#1430).
+      windows_drive_keep_free_gb: readWindowsDriveKeepFree(),
+      render_resumable: readResumableRenders(),
       ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -272,7 +277,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const selectEl = document.querySelector('#config-obs-recording-quality');
     if (selectEl) selectEl.value = settings.obs_recording_quality;
   }
-  // 0 is "the same as Capture FPS" and stays an empty box.
+  // 0 stays an empty box, whose placeholder is only a hint (config_wiring.js).
   if (settings.agr_fps > 0) {
     const inputEl = document.querySelector('#config-agr-fps');
     if (inputEl) inputEl.value = settings.agr_fps;
@@ -421,4 +426,6 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
   setRenderWhileCapturing(settings.render_while_capturing, settings.renders_while_capturing);
+  applyWindowsDriveKeepFree(settings.windows_drive_keep_free_gb);
+  applyResumableRenders(settings.render_resumable);
 }
