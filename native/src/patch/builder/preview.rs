@@ -1,6 +1,7 @@
 //! Preview patches: the playdemo-safe name and the director messages a
 //! preview injects.
 
+use super::blocks::{group_highlights, highlight_order_key};
 use super::*;
 
 /// Makes a demo stem safe as a `playdemo`/`viewdemo` target.
@@ -49,43 +50,77 @@ pub fn playdemo_safe_stem(raw: &str) -> String {
     format!("{}{}", &sanitized[..keep], hash_suffix)
 }
 
+/// How many characters of a player's name go on a label: the director message
+/// holds 224 bytes, and the kill list after the name is what gets cut first.
+const PLAYER_TAG_CHARS: usize = 24;
+
+/// " <name>" for a label (a missing name shows as "?").
+fn player_tag(name: Option<&str>) -> String {
+    let name: String = name.unwrap_or("?").chars().take(PLAYER_TAG_CHARS).collect();
+    format!(" {name}")
+}
+
 pub fn build_preview_patch_jobs(
     raw_streaks: Vec<CaptureStreak>,
     output_dir: Option<&std::path::Path>,
 ) -> Vec<PatchJob> {
-    // Group all streaks by source demo path.
-    let mut grouped: std::collections::HashMap<String, Vec<CaptureStreak>> =
+    // Labels use the grouping and order a capture job uses: per demo and
+    // player, by first kill, then last kill (#1417, #1449). So the numbers
+    // match a capture's only for the same set of highlights: a capture
+    // numbers the ones selected, a preview every one it is given. A demo
+    // with several players names the player on each label, since the `#i/n`
+    // restarts per player. Indexed like `raw_streaks`.
+    let groups = group_highlights(&raw_streaks);
+    let mut players_in_demo: std::collections::HashMap<&str, usize> =
         std::collections::HashMap::new();
-    for streak in raw_streaks {
+    for group in &groups {
+        *players_in_demo.entry(group.source_demo).or_default() += 1;
+    }
+    let mut labels: Vec<String> = vec![String::new(); raw_streaks.len()];
+    for group in &groups {
+        let total = group.highlights.len();
+        let who = if players_in_demo[group.source_demo] > 1 {
+            player_tag(group.target_player)
+        } else {
+            String::new()
+        };
+        for (row, (idx, s)) in group.highlights.iter().enumerate() {
+            labels[*idx] = format!(
+                "#{}/{}{}: {} kills: {}",
+                row + 1,
+                total,
+                who,
+                s.kill_count,
+                s.timeline_string
+            );
+        }
+    }
+
+    // Group all streaks by source demo path.
+    let mut grouped: std::collections::HashMap<String, Vec<(CaptureStreak, String)>> =
+        std::collections::HashMap::new();
+    for (streak, label) in raw_streaks.into_iter().zip(labels) {
         grouped
             .entry(streak.source_demo.clone())
             .or_default()
-            .push(streak);
+            .push((streak, label));
     }
 
     let mut jobs = Vec::new();
 
-    for (source_demo, mut streaks) in grouped {
-        // Sort chronologically.
-        streaks.sort_by_key(|s| s.start_tick);
+    for (source_demo, mut labelled) in grouped {
+        // Chronological, ties by the capture job's order key (not sent order).
+        labelled.sort_by_cached_key(|(s, _)| (s.start_tick, highlight_order_key(s)));
 
-        // Build (tick, label) for each streak — same format as the highlight table.
-        let mut director_events: Vec<(i32, String)> = streaks
+        let mut director_events: Vec<(i32, String)> = labelled
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let label = format!(
-                    "#{}/{}: {} kills: {}",
-                    i + 1,
-                    streaks.len(),
-                    s.kill_count,
-                    s.timeline_string
-                );
+            .map(|(s, label)| {
                 let preview_tick =
                     find_tick_backwards(s.start_tick as usize, 3.0, &s.frame_times, s.demo_fps);
-                (preview_tick, label)
+                (preview_tick, label.clone())
             })
             .collect();
+        let streaks: Vec<CaptureStreak> = labelled.into_iter().map(|(s, _)| s).collect();
 
         if let Some(first_streak) = streaks.first() {
             let match_frame_idx = 0; // Float time unavailable for match start
