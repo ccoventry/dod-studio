@@ -808,6 +808,11 @@
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
                   <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
                 </div>
+                <!-- #1451: resumable_renders_setting.js. -->
+                <div class="control-group">
+                  <label><input type="checkbox" id="render-resumable-checkbox" checked /> <span data-str="RENDER.RESUMABLE_LABEL">Resumable renders (split long renders into pieces)</span></label>
+                  <p class="setting-hint" data-str="RENDER.RESUMABLE_HINT">A stopped render picks up where it left off. While rendering it needs up to about twice the clip's size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room.</p>
+                </div>
               </div>
 
               <!-- #108: named render setups. -->

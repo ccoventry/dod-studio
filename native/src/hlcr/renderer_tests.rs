@@ -389,6 +389,7 @@ fn source_copy_config(export_dir: &Path) -> RenderConfig {
         custom_codec_args: String::new(),
         max_concurrent_renders: 1,
         clip_tag: None,
+        resumable_renders: true,
     }
 }
 
@@ -1463,9 +1464,10 @@ fn no_room_even_for_the_clip_fits_nothing() {
 fn an_ffmpeg_that_is_not_there_is_logged_as_unread() {
     let dir = scratch("ffmpeg_version_missing");
     let missing = dir.join("ffmpeg.exe");
-    let line = ffmpeg_version_line(&missing.to_string_lossy());
+    let line = ffmpeg_version_line(&missing.to_string_lossy(), false);
     assert!(
         line.starts_with("[render] could not read the version of the FFmpeg"),
         "{line}"
     );
+    assert!(line.ends_with("; resumable renders off"), "{line}");
 }

@@ -949,6 +949,8 @@ export const STRINGS = {
     SOURCE_FPS_LABEL: 'Source FPS:',
     SOURCE_FPS_TITLE: 'The frame rate a take is read at when it does not say what it was captured at (takes from older versions). Takes captured by this version render at their own capture FPS, and each row says which it used.',
     MAX_CONCURRENT_LABEL: 'Max Concurrent Renders:',
+    RESUMABLE_LABEL: 'Resumable renders (split long renders into pieces)',
+    RESUMABLE_HINT: 'A stopped render picks up where it left off. While rendering it needs up to about twice the clip\'s size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room.',
     EXPORT_DIR_PLACEHOLDER: 'Add export drive/folder...',
     EXPORT_DIR_ROW_PLACEHOLDER: 'Export drive/folder path...',
     ADD_DRIVE_BUTTON: 'Add Drive',

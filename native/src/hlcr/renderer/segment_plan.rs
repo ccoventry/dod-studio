@@ -637,6 +637,7 @@ mod tests {
             custom_codec_args: String::new(),
             max_concurrent_renders: 1,
             clip_tag: None,
+            resumable_renders: true,
         }
     }
 

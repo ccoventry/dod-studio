@@ -44,6 +44,7 @@ fn config_for(export_dirs: &[&Path], codec: RenderCodec, ffmpeg: &str) -> Render
         custom_codec_args: String::new(),
         max_concurrent_renders: 1,
         clip_tag: Some("v1/s/take0000/1/all".to_string()),
+        resumable_renders: true,
     }
 }
 
@@ -383,6 +384,93 @@ fn a_join_is_checked_by_its_containers_count_without_a_frame_line() {
     // The container wins over a progress line that lost the last frames.
     assert_eq!(check_frames(Some(1000), Some(990), 1000), FrameCheck::Whole);
     assert_eq!(check_frames(None, None, 1000), FrameCheck::Unknown);
+}
+
+/// Windows refuses a working folder past 257 characters (#1451 review: an
+/// export path over about 204 characters failed every join with os error
+/// 267), so such a segment folder is not used.
+#[test]
+fn a_segment_folder_too_long_to_work_in_is_not_used() {
+    let root = Scratch::new("segmented_long_path");
+    let take = bare_take(&root);
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let key = prepared(&job).key;
+    // The segments root and folder name add 54 characters to the export
+    // folder's path: `\.dodstudio-segments\` and 33 for the key.
+    let added = PathBuf::from("x")
+        .join(SEGMENTS_DIR)
+        .join(key.folder_name())
+        .as_os_str()
+        .len()
+        - 1;
+    assert_eq!(added, 54);
+    let export_of = |len: usize| PathBuf::from("D:".to_string() + &"a".repeat(len - 2));
+    assert!(fits_as_working_dir(
+        &export_of(MAX_WORKING_DIR_UNITS - 1 - added),
+        &key
+    ));
+    assert!(!fits_as_working_dir(
+        &export_of(MAX_WORKING_DIR_UNITS - added),
+        &key
+    ));
+}
+
+/// "Resumable renders" off (#1451): no segments, and any a stopped render
+/// left are left alone, its own and a deleted take's.
+#[tokio::test]
+async fn with_resumable_renders_off_a_take_is_not_segmented_and_segments_stay() {
+    let root = Scratch::new("segmented_off");
+    let take = bare_take(&root);
+    let export = root.join("export");
+    let mut config = config_for(&[&export], RenderCodec::ProRes422, "ffmpeg");
+    let on = job_for(clip_for(&take, None, false), config.clone());
+    let (_, folder) = claim(&on, &export).await;
+    let dir = folder.unwrap().dir.clone();
+    std::fs::write(dir.join(segment_name(0)), b"a").unwrap();
+    config.resumable_renders = false;
+    let off = job_for(clip_for(&take, None, false), config);
+    assert!(prepare(&off, FPS).is_none());
+    assert!(dir.join(segment_name(0)).exists());
+}
+
+/// What `reserve_room` reserved for `job`, and whether it is segmented.
+async fn reserved_for(job: &RenderJob) -> (u64, bool) {
+    let ledger = Arc::new(Mutex::new(HashMap::new()));
+    let (_, _guard, segments) = super::super::reserve_room(job, &ledger, FPS)
+        .await
+        .expect("room on the test drive");
+    let reserved = ledger.lock().unwrap().values().sum();
+    (reserved, segments.is_some())
+}
+
+/// Off, a long take reserves the clip alone and renders in one piece, and
+/// its stopped segments stay; on, it reserves for the segments too.
+#[tokio::test]
+async fn with_resumable_renders_off_room_is_reserved_for_the_clip_alone() {
+    let root = Scratch::new("segmented_off_room");
+    let take = bare_take(&root);
+    let export = root.join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    let mut config = config_for(&[&export], RenderCodec::ProRes422, "ffmpeg");
+    let clip = clip_for(&take, None, false);
+    let one_piece =
+        crate::hlcr::renderer::job_reservation_estimate(&clip, RenderCodec::ProRes422, "");
+    let on = job_for(clip.clone(), config.clone());
+    assert_eq!(reserved_for(&on).await, (2 * one_piece, true));
+
+    let (_, folder) = claim(&on, &export).await;
+    let dir = folder.unwrap().dir.clone();
+    std::fs::write(dir.join(segment_name(0)), b"a").unwrap();
+    config.resumable_renders = false;
+    let off = job_for(clip, config);
+    assert_eq!(reserved_for(&off).await, (one_piece, false));
+    assert!(
+        dir.join(segment_name(0)).exists(),
+        "a one-piece render with the setting off sweeps nothing"
+    );
 }
 
 /// A take deleted with its segments still in an export folder (#1451

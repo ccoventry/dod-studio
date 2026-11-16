@@ -268,9 +268,13 @@ struct Stopped {
 }
 
 /// `job` as a segmented render, or `None` when it renders in one piece:
-/// `segment_plan::plan` says so, FFmpeg isn't given settings for the codec,
-/// or another render (or a sweep) has this key's folder, which is logged.
+/// "Resumable renders" is off, `segment_plan::plan` says so, FFmpeg isn't
+/// given settings for the codec, or another render (or a sweep) has this
+/// key's folder, which is logged.
 pub(super) fn prepare(job: &RenderJob, fps_used: u32) -> Option<Prepared> {
+    if !job.config.resumable_renders {
+        return None;
+    }
     let plan =
         super::segment_plan::plan(&take_facts(&job.clip, job.config.target_codec, fps_used))?;
     // The one-piece path refuses a codec without settings, with its reason.
@@ -395,6 +399,18 @@ pub(super) async fn claim_folder(
         return None;
     }
     Some(folder)
+}
+
+/// The longest working folder Windows takes, in UTF-16 units with the
+/// trailing separator it adds: `MAX_PATH` (260) less 2. A longer one fails
+/// to start FFmpeg with "The directory name is invalid" (os error 267).
+const MAX_WORKING_DIR_UNITS: usize = 258;
+
+/// Whether `key`'s segment folder in `output_folder` is short enough for
+/// the join to run in (see [`MAX_WORKING_DIR_UNITS`]).
+pub(super) fn fits_as_working_dir(output_folder: &Path, key: &SegmentKey) -> bool {
+    let dir = output_folder.join(SEGMENTS_DIR).join(key.folder_name());
+    dir.as_os_str().to_string_lossy().encode_utf16().count() < MAX_WORKING_DIR_UNITS
 }
 
 /// The disk work of making a segment folder, run off the async worker.

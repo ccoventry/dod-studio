@@ -180,6 +180,14 @@ pub fn segments_no_room(job_id: impl Display, segmented: u64) -> String {
     )
 }
 
+/// The export folder's path is too long for the join to run in its segment
+/// folder (Windows' limit on a working folder), so the render runs whole.
+pub fn segments_path_too_long(job_id: impl Display, export_dir: impl Display) -> String {
+    format!(
+        "[render] job {job_id}: the export folder's path is too long for the segment folder Windows would run the join in ({export_dir}); rendering it in one piece"
+    )
+}
+
 /// The Render tab row's speed cell while the segments are joined.
 pub fn joining_segments(count: usize) -> String {
     format!("Joining {count} segments")
@@ -204,14 +212,23 @@ pub fn join_uncounted(job_id: impl Display) -> String {
 /// Which FFmpeg a render batch runs, logged once as it starts: `banner` is
 /// the first line of its `-version`. A user's log then shows the build if a
 /// join ever fails (#1451).
-pub fn ffmpeg_version(banner: &str, path: impl Display) -> String {
-    format!("[render] Rendering with FFmpeg {banner} ({path})")
+pub fn ffmpeg_version(banner: &str, path: impl Display, resumable: bool) -> String {
+    format!(
+        "[render] Rendering with FFmpeg {banner} ({path}); resumable renders {}",
+        on_off(resumable)
+    )
+}
+
+/// "on" or "off", for a setting in a log line.
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
 }
 
 /// The batch's FFmpeg version could not be read; the batch goes ahead.
-pub fn ffmpeg_version_unread(configured: &str, why: impl Display) -> String {
+pub fn ffmpeg_version_unread(configured: &str, why: impl Display, resumable: bool) -> String {
     format!(
-        "[render] could not read the version of the FFmpeg this batch renders with ({configured}): {why}"
+        "[render] could not read the version of the FFmpeg this batch renders with ({configured}): {why}; resumable renders {}",
+        on_off(resumable)
     )
 }
 

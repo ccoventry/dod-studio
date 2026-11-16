@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[path = "render_scan_merge.rs"]
 mod scan_merge;
@@ -1362,6 +1362,7 @@ async fn scan_and_merge(
         custom_codec_args: payload.custom_codec_args.clone(),
         max_concurrent_renders: payload.max_concurrent_renders.max(1),
         clip_tag: None,
+        resumable_renders: true,
     };
     let new_job_settings = NewJobSettings {
         codec: config.target_codec,
@@ -1425,26 +1426,36 @@ pub(crate) struct QueuedTake {
 /// job, since each job writes to one drive: the largest `max_concurrent`
 /// estimates among the `queued` takes ([`RenderManager::queued_takes`]),
 /// which is what `run_render_job`'s drive routing checks as they start
-/// together. Two lists: with room for a long take's segments and clip
-/// together (#1451), and with room for the clip alone, which the render
-/// falls back to (`SpaceNeed::fallback_pieces`). Later jobs reserve from
-/// what finished renders actually wrote (#120). Reads take headers: run it
-/// off the async worker.
-fn first_wave_pieces(queued: &[QueuedTake], max_concurrent: usize) -> (Vec<u64>, Vec<u64>) {
+/// together. With `resumable` ("Resumable renders", #1451), room for a long
+/// take's segments and clip together, and the clip alone as the fallback
+/// the render falls back to (`SpaceNeed::fallback_pieces`); without, the
+/// clip alone and no fallback, so no take is deleted for segment room.
+/// Later jobs reserve from what finished renders actually wrote (#120).
+/// Reads take headers: run it off the async worker.
+fn first_wave_pieces(
+    queued: &[QueuedTake],
+    max_concurrent: usize,
+    resumable: bool,
+) -> (Vec<u64>, Option<Vec<u64>>) {
     let largest = |mut estimates: Vec<u64>| {
         estimates.sort_unstable_by(|a, b| b.cmp(a));
         estimates.truncate(max_concurrent.max(1));
         estimates
     };
+    let one_piece = largest(
+        queued
+            .iter()
+            .map(|t| job_reservation_estimate(&t.clip, t.codec, &t.custom_args))
+            .collect(),
+    );
+    if !resumable {
+        return (one_piece, None);
+    }
     let peak = queued
         .iter()
         .map(|t| job_peak_reservation_estimate(&t.clip, t.codec, &t.custom_args, t.fps))
         .collect();
-    let one_piece = queued
-        .iter()
-        .map(|t| job_reservation_estimate(&t.clip, t.codec, &t.custom_args))
-        .collect();
-    (largest(peak), largest(one_piece))
+    (largest(peak), Some(one_piece))
 }
 
 /// Starts the scheduler on whatever `queue_render_batch` already staged.
@@ -1464,13 +1475,21 @@ pub async fn start_queued_render(
         log_markdown(crate::messages::render::START_REJECTED);
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
-    let (config, starting) = match state.start_config() {
+    let (mut config, starting) = match state.start_config() {
         Ok(found) => found,
         Err(e) => {
             state.is_rendering.store(false, Ordering::SeqCst);
             return Err(e);
         }
     };
+    // "Resumable renders" (#1451) as Settings has it now, like the export
+    // folders: a change reaches the next Start.
+    config.resumable_renders = app
+        .state::<crate::settings_manager::SettingsManager>()
+        .inner
+        .lock()
+        .unwrap()
+        .render_resumable;
 
     // #644: with "Only when space is needed", finished takes make room on the
     // export drives before the first jobs reserve theirs there.
@@ -1478,13 +1497,14 @@ pub async fn start_queued_render(
         let queued = state.queued_takes();
         let targets = config.export_directories.clone();
         let max_concurrent = config.max_concurrent_renders;
+        let resumable = config.resumable_renders;
         let cleanup_app = app.clone();
         let _ = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
-            let (pieces, one_piece) = first_wave_pieces(&queued, max_concurrent);
+            let (pieces, fallback_pieces) = first_wave_pieces(&queued, max_concurrent, resumable);
             let need = native::hlcr::take_cleanup::SpaceNeed {
                 targets,
                 pieces,
-                fallback_pieces: Some(one_piece),
+                fallback_pieces,
                 headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
             };
             crate::take_cleanup_manager::make_room(
@@ -1502,8 +1522,12 @@ pub async fn start_queued_render(
     // Which FFmpeg this batch runs, once, off the async worker (#1451); the
     // batch doesn't wait for it.
     let ffmpeg_path = config.ffmpeg_path.clone();
+    let resumable = config.resumable_renders;
     tokio::task::spawn_blocking(move || {
-        log_markdown(&native::hlcr::renderer::ffmpeg_version_line(&ffmpeg_path));
+        log_markdown(&native::hlcr::renderer::ffmpeg_version_line(
+            &ffmpeg_path,
+            resumable,
+        ));
     });
     state.global_cancel.store(false, Ordering::SeqCst);
     *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
@@ -2128,6 +2152,40 @@ mod tests {
             "{}",
             views[0].settings_summary
         );
+    }
+
+    /// "Resumable renders" off (#1451): the cleanup before a batch makes room
+    /// for the clips alone, with no fallback, so no take goes for segments.
+    #[test]
+    fn with_resumable_renders_off_the_first_wave_needs_the_clips_alone() {
+        let clip = |frames: usize| ClipData {
+            take_folder: "Z:/no-such-take".to_string(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: Some("sound.wav".to_string()),
+            base_name: "t".to_string(),
+            frame_count: frames,
+            width: 64,
+            height: 48,
+            date: String::new(),
+            video_file: None,
+            alpha_folder: None,
+            clip_name: None,
+        };
+        let queued: Vec<QueuedTake> = [100, 300]
+            .into_iter()
+            .map(|frames| QueuedTake {
+                clip: clip(frames),
+                codec: RenderCodec::ProRes422,
+                custom_args: String::new(),
+                fps: 300,
+            })
+            .collect();
+        let (pieces, fallback) = first_wave_pieces(&queued, 2, false);
+        assert_eq!(pieces, [64 * 48 * 3 * 300, 64 * 48 * 3 * 100]);
+        assert_eq!(fallback, None);
+        let (_, fallback) = first_wave_pieces(&queued, 2, true);
+        assert_eq!(fallback, Some(pieces));
     }
 
     #[test]

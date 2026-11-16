@@ -346,8 +346,11 @@ pub async fn run_render_job(
         return;
     }
     log_render_fps(&job, fps_used, fps_from_take);
-    // A deleted take's segments go whatever this render is (#1451).
-    segmented::remove_orphans(&job).await;
+    // A deleted take's segments go whatever this render is (#1451), unless
+    // "Resumable renders" is off, which leaves segments on disk alone.
+    if job.config.resumable_renders {
+        segmented::remove_orphans(&job).await;
+    }
 
     // The guard releases this job's reservation on every exit path below —
     // see `ReservationGuard`'s own doc comment.
@@ -448,7 +451,20 @@ async fn reserve_room(
         ));
         prepared = None;
     }
-    if prepared.is_none() {
+    // FFmpeg joins in the segment folder, and Windows refuses a working
+    // folder past its path limit (#1451 review): a long export path renders
+    // in one piece from the start rather than failing at the join.
+    if let Some(segments) = &prepared
+        && !segmented::fits_as_working_dir(&output_folder, &segments.key)
+    {
+        crate::log_markdown(&crate::messages::render::segments_path_too_long(
+            &job.job_id,
+            output_folder.display(),
+        ));
+        prepared = None;
+    }
+    // Off, "Resumable renders" leaves segments on disk alone.
+    if prepared.is_none() && job.config.resumable_renders {
         segmented::remove_take_segments(job).await;
     }
     Some((output_folder, guard, prepared))
@@ -456,17 +472,17 @@ async fn reserve_room(
 
 /// The activity log's line naming the FFmpeg `configured` (Render Settings'
 /// path, or a bare `ffmpeg` on PATH) resolves to and its `-version` banner,
-/// or why it can't be read. Starts FFmpeg once and waits up to 5 s
+/// or why it can't be read, with whether `resumable` renders are on. Starts FFmpeg once and waits up to 5 s
 /// (`hlae_ffmpeg::verify_is_ffmpeg`): call it once per batch, off the main
 /// thread. Only logged: whether a join is whole never depends on the version.
-pub fn ffmpeg_version_line(configured: &str) -> String {
+pub fn ffmpeg_version_line(configured: &str, resumable: bool) -> String {
     use crate::messages::render as msg;
     let Some(exe) = crate::shared::hlae_ffmpeg::resolve_absolute(configured) else {
-        return msg::ffmpeg_version_unread(configured, "not found");
+        return msg::ffmpeg_version_unread(configured, "not found", resumable);
     };
     match crate::shared::hlae_ffmpeg::verify_is_ffmpeg(&exe) {
-        Ok(banner) => msg::ffmpeg_version(&banner, exe.display()),
-        Err(why) => msg::ffmpeg_version_unread(configured, why),
+        Ok(banner) => msg::ffmpeg_version(&banner, exe.display(), resumable),
+        Err(why) => msg::ffmpeg_version_unread(configured, why, resumable),
     }
 }
 
