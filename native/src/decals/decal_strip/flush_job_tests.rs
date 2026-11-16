@@ -1,4 +1,5 @@
 use super::*;
+use crate::game_config::{capture_fov, capture_fov_from_init, ring_limit_from_init};
 use crate::patch::types::CaptureBlock;
 use crate::test_support::Scratch;
 
@@ -46,10 +47,10 @@ fn a_cancelled_batch_abandons_the_flush_before_reading_the_demo() {
     config.decal_flush = true;
 
     let token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let result = prepare_flushed_source(&job, &config, crate::patch::Cancel::new(&token));
+    let result = prepare_flushed_source(&job, &config, crate::decals::Cancel::new(&token));
 
     assert!(
-        matches!(result, Err(crate::patch::Cancelled)),
+        matches!(result, Err(crate::decals::Cancelled)),
         "a cancelled batch must not fall back to the unflushed demo and carry on"
     );
 }
@@ -63,7 +64,7 @@ fn an_unset_token_leaves_the_flush_decision_alone() {
     config.decal_flush = true;
 
     let token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let result = prepare_flushed_source(&job, &config, crate::patch::Cancel::new(&token));
+    let result = prepare_flushed_source(&job, &config, crate::decals::Cancel::new(&token));
 
     // No blocks -> nothing to keep clean -> a plain skip, not an error.
     assert!(matches!(result, Ok(None)));
@@ -305,7 +306,7 @@ fn a_ring_past_the_engine_ceiling_is_clamped_to_it() {
         ..PatcherConfig::default()
     };
 
-    assert_eq!(ring_limit(&config), crate::patch::MAX_RENDER_DECALS);
+    assert_eq!(ring_limit(&config), crate::decals::MAX_RENDER_DECALS);
 }
 
 #[test]
@@ -333,7 +334,7 @@ fn decals_switched_off_entirely_leaves_the_demo_alone() {
 
     assert_eq!(ring_limit(&config), 0);
     assert!(
-        prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+        prepare_flushed_source(&job, &config, crate::decals::Cancel::never())
             .unwrap()
             .is_none()
     );
@@ -348,7 +349,7 @@ fn flush_disabled_leaves_the_demo_alone() {
     let job = job_with_blocks(vec![block(0, 1000, 2000)]);
 
     assert!(
-        prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+        prepare_flushed_source(&job, &config, crate::decals::Cancel::never())
             .unwrap()
             .is_none()
     );
@@ -364,7 +365,7 @@ fn jobs_with_no_blocks_are_skipped() {
         prepare_flushed_source(
             &job,
             &PatcherConfig::default(),
-            crate::patch::Cancel::never()
+            crate::decals::Cancel::never()
         )
         .unwrap()
         .is_none()
@@ -382,7 +383,7 @@ fn one_block_missing_its_record_bounds_skips_the_whole_job() {
         prepare_flushed_source(
             &job,
             &PatcherConfig::default(),
-            crate::patch::Cancel::never()
+            crate::decals::Cancel::never()
         )
         .unwrap()
         .is_none()

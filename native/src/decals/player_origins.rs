@@ -1,4 +1,4 @@
-// patch/reachability.rs
+// decals/player_origins.rs
 // Where players have actually been, harvested from real demos, as a signal
 // for which map entities are safe background scenery rather than something
 // a player could ever get near (#207).

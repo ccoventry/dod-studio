@@ -1,4 +1,4 @@
-// patch/decal_strip/mod.rs
+// decals/decal_strip/mod.rs
 // Decal hygiene for capture demos: keeps walls clean at the start of every
 // recorded clip without reloading the demo.
 //
@@ -55,10 +55,7 @@ mod geometry;
 mod placement;
 mod survey;
 
-pub use flush_job::{
-    CleanedSource, capture_fov, capture_fov_from_init, capture_fov_resolved, on_screen_half_angle,
-    prepare_flushed_source, ring_limit, ring_limit_from_game_config, ring_limit_from_init,
-};
+pub use flush_job::{CleanedSource, on_screen_half_angle, prepare_flushed_source};
 pub use placement::{FlushSource, VisibilityBasis};
 pub use survey::DEFAULT_LEAD_SECONDS;
 
@@ -324,7 +321,7 @@ pub struct DecalCleanStats {
     /// Tiles laid across the fitted planes, before camera filtering.
     pub tiled_candidates: usize,
     /// What the map's coordinate store held, gained and offers after this demo.
-    pub atlas: crate::patch::decal_atlas::AtlasStats,
+    pub atlas: crate::decals::decal_atlas::AtlasStats,
     /// Which map build the store was keyed on, when one was resolved.
     pub atlas_map: Option<String>,
     /// What the on-screen test was actually able to consult.
@@ -489,7 +486,7 @@ pub fn clean_demo_decals(
     demo_bytes: &[u8],
     keep_windows: &[(i32, i32)],
     opts: &DecalCleanOptions,
-    cancel: crate::patch::Cancel<'_>,
+    cancel: crate::decals::Cancel<'_>,
 ) -> Result<(Vec<u8>, DecalCleanStats), DecalCleanError> {
     // Checked at every stage boundary below. The stages are not equal: measured
     // on a 110MB, 730k-frame demo (`native/examples/flush_stage_timing.rs`),
@@ -649,7 +646,7 @@ pub fn clean_demo_decals(
             // and reached into an earlier clip on 10 of 85 demos.
             .filter(|&(_, _, ordinal)| !in_window(ordinal, keep_windows))
             .filter(|&(entry_idx, frame_idx, _)| {
-                crate::patch::is_injectable_frame(&demo, entry_idx, frame_idx)
+                crate::decals::is_injectable_frame(&demo, entry_idx, frame_idx)
             })
             .collect();
 
@@ -803,7 +800,7 @@ pub fn strip_decals_outside_windows(
         demo_bytes,
         keep_windows,
         &opts,
-        crate::patch::Cancel::never(),
+        crate::decals::Cancel::never(),
     )
 }
 
@@ -946,7 +943,7 @@ mod tests {
         };
 
         let (cleaned, stats) =
-            clean_demo_decals(&bytes, &[CLIP], &opts, crate::patch::Cancel::never()).unwrap();
+            clean_demo_decals(&bytes, &[CLIP], &opts, crate::decals::Cancel::never()).unwrap();
 
         let original = vec![0, 1, 0, 1, 0, 1, 9];
         let injected = vec![8, 0, 16, 0, 24, 0, 5];
@@ -979,7 +976,7 @@ mod tests {
         };
 
         let (cleaned, _) =
-            clean_demo_decals(&bytes, &[CLIP], &opts, crate::patch::Cancel::never()).unwrap();
+            clean_demo_decals(&bytes, &[CLIP], &opts, crate::decals::Cancel::never()).unwrap();
         assert_eq!(cleaned, bytes);
     }
 
