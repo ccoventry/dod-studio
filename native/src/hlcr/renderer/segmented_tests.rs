@@ -386,11 +386,14 @@ fn a_join_is_checked_by_its_containers_count_without_a_frame_line() {
     assert_eq!(check_frames(None, None, 1000), FrameCheck::Unknown);
 }
 
-/// Windows refuses a working folder past 257 characters (#1451 review: an
-/// export path over about 204 characters failed every join with os error
-/// 267), so such a segment folder is not used.
+/// A segment folder path of at most 242 characters (`MAX_SEGMENT_DIR_UNITS`)
+/// keeps `\\NNNN.partial.seg` within 259, for FFmpeg builds before 5.1, and
+/// the join's working folder within Windows' 258 (#1451 review: an export
+/// path over about 204 characters failed every join with os error 267). The
+/// segments root and folder add 54 characters, so an export folder of up to
+/// 188 holds one.
 #[test]
-fn a_segment_folder_too_long_to_work_in_is_not_used() {
+fn an_export_folder_of_up_to_188_characters_holds_a_segment_folder() {
     let root = Scratch::new("segmented_long_path");
     let take = bare_take(&root);
     let job = job_for(
@@ -398,8 +401,6 @@ fn a_segment_folder_too_long_to_work_in_is_not_used() {
         config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
     );
     let key = prepared(&job).key;
-    // The segments root and folder name add 54 characters to the export
-    // folder's path: `\.dodstudio-segments\` and 33 for the key.
     let added = PathBuf::from("x")
         .join(SEGMENTS_DIR)
         .join(key.folder_name())
@@ -407,33 +408,47 @@ fn a_segment_folder_too_long_to_work_in_is_not_used() {
         .len()
         - 1;
     assert_eq!(added, 54);
+    assert_eq!(MAX_SEGMENT_DIR_UNITS + 1 + "0000.partial.seg".len(), 259);
     let export_of = |len: usize| PathBuf::from("D:".to_string() + &"a".repeat(len - 2));
-    assert!(fits_as_working_dir(
-        &export_of(MAX_WORKING_DIR_UNITS - 1 - added),
-        &key
-    ));
-    assert!(!fits_as_working_dir(
-        &export_of(MAX_WORKING_DIR_UNITS - added),
-        &key
-    ));
+    assert!(segments_fit_under(&export_of(
+        MAX_SEGMENT_DIR_UNITS - added
+    )));
+    assert!(segments_fit_under(&export_of(188)));
+    assert!(!segments_fit_under(&export_of(189)));
 }
 
-/// "Resumable renders" off (#1451): no segments, and any a stopped render
-/// left are left alone, its own and a deleted take's.
+/// Only export folders that can hold a segment folder are asked for
+/// segment room (#1451 review): a short one is preferred over a long one
+/// first in the list, and with none, nothing is asked (one piece).
+#[test]
+fn segment_room_is_asked_only_of_folders_short_enough() {
+    let root = Scratch::new("segmented_long_asks");
+    let take = bare_take(&root);
+    let short = root.join("e");
+    let long = PathBuf::from(format!("D:/{}", "a".repeat(200)));
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&long, &short], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let asks = prepared(&job).room_asks(&job.config.export_directories, 700);
+    let shown: Vec<(Vec<PathBuf>, u64)> = asks.into_iter().map(|a| (a.dirs, a.amount)).collect();
+    assert_eq!(shown, [(vec![short], 1400)]);
+    assert!(
+        prepared(&job)
+            .room_asks(std::slice::from_ref(&long), 700)
+            .is_empty()
+    );
+}
+
+/// "Resumable renders" off (#1451): no segments.
 #[tokio::test]
-async fn with_resumable_renders_off_a_take_is_not_segmented_and_segments_stay() {
+async fn with_resumable_renders_off_a_take_is_not_segmented() {
     let root = Scratch::new("segmented_off");
     let take = bare_take(&root);
-    let export = root.join("export");
-    let mut config = config_for(&[&export], RenderCodec::ProRes422, "ffmpeg");
-    let on = job_for(clip_for(&take, None, false), config.clone());
-    let (_, folder) = claim(&on, &export).await;
-    let dir = folder.unwrap().dir.clone();
-    std::fs::write(dir.join(segment_name(0)), b"a").unwrap();
+    let mut config = config_for(&[&root], RenderCodec::ProRes422, "ffmpeg");
     config.resumable_renders = false;
     let off = job_for(clip_for(&take, None, false), config);
     assert!(prepare(&off, FPS).is_none());
-    assert!(dir.join(segment_name(0)).exists());
 }
 
 /// What `reserve_room` reserved for `job`, and whether it is segmented.
@@ -447,7 +462,8 @@ async fn reserved_for(job: &RenderJob) -> (u64, bool) {
 }
 
 /// Off, a long take reserves the clip alone and renders in one piece, and
-/// its stopped segments stay; on, it reserves for the segments too.
+/// its stopped segments are removed, so turning the setting off to save
+/// space gets the space back; on, it reserves for the segments too.
 #[tokio::test]
 async fn with_resumable_renders_off_room_is_reserved_for_the_clip_alone() {
     let root = Scratch::new("segmented_off_room");
@@ -467,10 +483,30 @@ async fn with_resumable_renders_off_room_is_reserved_for_the_clip_alone() {
     config.resumable_renders = false;
     let off = job_for(clip, config);
     assert_eq!(reserved_for(&off).await, (one_piece, false));
-    assert!(
-        dir.join(segment_name(0)).exists(),
-        "a one-piece render with the setting off sweeps nothing"
-    );
+    assert!(!dir.exists(), "the stopped segments are removed");
+}
+
+/// Off, a deleted take's segments are removed too (#1451 review).
+#[tokio::test]
+async fn with_resumable_renders_off_a_gone_takes_segments_are_removed() {
+    let root = Scratch::new("segmented_off_orphans");
+    let take = bare_take(&root);
+    let export = root.join("export");
+    let mut config = config_for(&[&export], RenderCodec::ProRes422, "ffmpeg");
+    config.resumable_renders = false;
+    let job = job_for(clip_for(&take, None, false), config);
+    let segments_root = export.join(SEGMENTS_DIR);
+    segment_folders(&segments_root, &["gone_while_off"]);
+    std::fs::write(
+        segments_root.join("gone_while_off").join(TAKE_FILE),
+        root.join("demo")
+            .join("take0099")
+            .to_string_lossy()
+            .as_bytes(),
+    )
+    .unwrap();
+    remove_orphans(&job).await;
+    assert!(!segments_root.join("gone_while_off").exists());
 }
 
 /// A take deleted with its segments still in an export folder (#1451

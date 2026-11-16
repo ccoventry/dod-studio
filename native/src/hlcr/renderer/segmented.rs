@@ -335,10 +335,24 @@ impl Prepared {
     /// segments are on (the clip plus the segments still to render, sized
     /// from what the finished ones weigh, since right after a restart the
     /// estimate has learned nothing), then a fresh start on any (twice the
-    /// clip). The caller adds the one-piece ask after these.
+    /// clip). Only export folders short enough for a segment folder
+    /// ([`segments_fit_under`]) are asked; none when no folder is. The
+    /// caller adds the one-piece ask after these.
     pub(super) fn room_asks(&self, export_dirs: &[PathBuf], clip_bytes: u64) -> Vec<RoomAsk> {
         let mut asks = Vec::new();
-        if let Some(stopped) = &self.stopped {
+        let fitting: Vec<PathBuf> = export_dirs
+            .iter()
+            .filter(|dir| segments_fit_under(dir))
+            .cloned()
+            .collect();
+        if fitting.is_empty() {
+            return asks;
+        }
+        if let Some(stopped) = self
+            .stopped
+            .as_ref()
+            .filter(|stopped| segments_fit_under(&stopped.export_dir))
+        {
             let clip = resume_clip_bytes(
                 clip_bytes,
                 &self.plan,
@@ -352,7 +366,7 @@ impl Prepared {
             });
         }
         asks.push(RoomAsk {
-            dirs: export_dirs.to_vec(),
+            dirs: fitting,
             amount: peak_bytes(clip_bytes, &self.plan, 0),
         });
         asks
@@ -401,16 +415,32 @@ pub(super) async fn claim_folder(
     Some(folder)
 }
 
-/// The longest working folder Windows takes, in UTF-16 units with the
-/// trailing separator it adds: `MAX_PATH` (260) less 2. A longer one fails
-/// to start FFmpeg with "The directory name is invalid" (os error 267).
-const MAX_WORKING_DIR_UNITS: usize = 258;
+/// The longest segment folder path used, in UTF-16 units: 242. Its longest
+/// file, `\NNNN.partial.seg` (1 + 16 units), then ends at 259, within
+/// Windows' `MAX_PATH` (260 with the terminating null), which FFmpeg
+/// builds before 5.1 need (they don't add the long-path prefix); and the
+/// folder is well within the 258 Windows takes as a working folder, where
+/// the join runs (a longer one fails it with os error 267).
+pub(super) const MAX_SEGMENT_DIR_UNITS: usize = 242;
 
-/// Whether `key`'s segment folder in `output_folder` is short enough for
-/// the join to run in (see [`MAX_WORKING_DIR_UNITS`]).
-pub(super) fn fits_as_working_dir(output_folder: &Path, key: &SegmentKey) -> bool {
-    let dir = output_folder.join(SEGMENTS_DIR).join(key.folder_name());
-    dir.as_os_str().to_string_lossy().encode_utf16().count() < MAX_WORKING_DIR_UNITS
+/// A segment folder's name: two 16-digit hashes and the `_` between them
+/// (`SegmentKey::folder_name`).
+const SEGMENT_FOLDER_NAME_UNITS: usize = 33;
+
+/// Whether a segment folder in export folder `export_dir`
+/// (`<export_dir>\.dodstudio-segments\<key>`) is at most
+/// [`MAX_SEGMENT_DIR_UNITS`] long: an export folder of up to 188 units.
+pub(super) fn segments_fit_under(export_dir: &Path) -> bool {
+    let units = export_dir
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .count()
+        + 1
+        + SEGMENTS_DIR.len()
+        + 1
+        + SEGMENT_FOLDER_NAME_UNITS;
+    units <= MAX_SEGMENT_DIR_UNITS
 }
 
 /// The disk work of making a segment folder, run off the async worker.

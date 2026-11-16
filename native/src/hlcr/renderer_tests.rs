@@ -1464,7 +1464,7 @@ fn no_room_even_for_the_clip_fits_nothing() {
 fn an_ffmpeg_that_is_not_there_is_logged_as_unread() {
     let dir = scratch("ffmpeg_version_missing");
     let missing = dir.join("ffmpeg.exe");
-    let line = ffmpeg_version_line(&missing.to_string_lossy(), false);
+    let line = render_batch_start_line(&missing.to_string_lossy(), false);
     assert!(
         line.starts_with("[render] could not read the version of the FFmpeg"),
         "{line}"

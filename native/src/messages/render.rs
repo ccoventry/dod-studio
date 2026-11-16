@@ -180,11 +180,11 @@ pub fn segments_no_room(job_id: impl Display, segmented: u64) -> String {
     )
 }
 
-/// The export folder's path is too long for the join to run in its segment
-/// folder (Windows' limit on a working folder), so the render runs whole.
-pub fn segments_path_too_long(job_id: impl Display, export_dir: impl Display) -> String {
+/// No export folder's path is short enough for a segment folder of at most
+/// `max_units` characters (Windows' path limits), so the render runs whole.
+pub fn segments_path_too_long(job_id: impl Display, max_units: usize) -> String {
     format!(
-        "[render] job {job_id}: the export folder's path is too long for the segment folder Windows would run the join in ({export_dir}); rendering it in one piece"
+        "[render] job {job_id}: every export folder's path is too long for a segment folder (at most {max_units} characters in all); rendering it in one piece"
     )
 }
 
@@ -209,10 +209,11 @@ pub fn join_uncounted(job_id: impl Display) -> String {
     format!("[render] job {job_id}: could not count the joined clip's frames; keeping it unchecked")
 }
 
-/// Which FFmpeg a render batch runs, logged once as it starts: `banner` is
-/// the first line of its `-version`. A user's log then shows the build if a
-/// join ever fails (#1451).
-pub fn ffmpeg_version(banner: &str, path: impl Display, resumable: bool) -> String {
+/// A render batch's first line, logged once as it starts: which FFmpeg it
+/// runs (`banner` is the first line of its `-version`), so a user's log shows
+/// the build if a join ever fails, and whether "Resumable renders" is on
+/// (#1451).
+pub fn render_batch_start(banner: &str, path: impl Display, resumable: bool) -> String {
     format!(
         "[render] Rendering with FFmpeg {banner} ({path}); resumable renders {}",
         on_off(resumable)
@@ -224,8 +225,9 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 
-/// The batch's FFmpeg version could not be read; the batch goes ahead.
-pub fn ffmpeg_version_unread(configured: &str, why: impl Display, resumable: bool) -> String {
+/// [`render_batch_start`] when the FFmpeg version could not be read; the
+/// batch goes ahead.
+pub fn render_batch_start_unread(configured: &str, why: impl Display, resumable: bool) -> String {
     format!(
         "[render] could not read the version of the FFmpeg this batch renders with ({configured}): {why}; resumable renders {}",
         on_off(resumable)

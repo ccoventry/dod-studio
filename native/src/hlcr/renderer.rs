@@ -346,11 +346,9 @@ pub async fn run_render_job(
         return;
     }
     log_render_fps(&job, fps_used, fps_from_take);
-    // A deleted take's segments go whatever this render is (#1451), unless
-    // "Resumable renders" is off, which leaves segments on disk alone.
-    if job.config.resumable_renders {
-        segmented::remove_orphans(&job).await;
-    }
+    // A deleted take's segments go whatever this render is (#1451), the
+    // setting off included: turning it off to save space gets the space back.
+    segmented::remove_orphans(&job).await;
 
     // The guard releases this job's reservation on every exit path below —
     // see `ReservationGuard`'s own doc comment.
@@ -432,6 +430,17 @@ async fn reserve_room(
         .as_ref()
         .map(|s| s.room_asks(&job.config.export_directories, one_piece_bytes))
         .unwrap_or_default();
+    // FFmpeg joins in the segment folder, and Windows refuses a working
+    // folder past its path limit (#1451 review): with no export folder short
+    // enough, the take renders in one piece from the start, reserving and
+    // making room for the clip alone.
+    if prepared.is_some() && asks.is_empty() {
+        crate::log_markdown(&crate::messages::render::segments_path_too_long(
+            &job.job_id,
+            segmented::MAX_SEGMENT_DIR_UNITS,
+        ));
+        prepared = None;
+    }
     asks.push(RoomAsk {
         dirs: job.config.export_directories.clone(),
         amount: one_piece_bytes,
@@ -451,39 +460,37 @@ async fn reserve_room(
         ));
         prepared = None;
     }
-    // FFmpeg joins in the segment folder, and Windows refuses a working
-    // folder past its path limit (#1451 review): a long export path renders
-    // in one piece from the start rather than failing at the join.
-    if let Some(segments) = &prepared
-        && !segmented::fits_as_working_dir(&output_folder, &segments.key)
-    {
-        crate::log_markdown(&crate::messages::render::segments_path_too_long(
-            &job.job_id,
-            output_folder.display(),
-        ));
-        prepared = None;
-    }
-    // Off, "Resumable renders" leaves segments on disk alone.
-    if prepared.is_none() && job.config.resumable_renders {
+    // A take rendering in one piece, the setting off included, frees the
+    // room its stopped segments hold: nothing will join them.
+    if prepared.is_none() {
         segmented::remove_take_segments(job).await;
     }
     Some((output_folder, guard, prepared))
 }
 
-/// The activity log's line naming the FFmpeg `configured` (Render Settings'
-/// path, or a bare `ffmpeg` on PATH) resolves to and its `-version` banner,
-/// or why it can't be read, with whether `resumable` renders are on. Starts FFmpeg once and waits up to 5 s
+/// A render batch's first activity log line: the FFmpeg `configured`
+/// (Render Settings' path, or a bare `ffmpeg` on PATH) resolves to and its
+/// `-version` banner, or why that can't be read, and whether "Resumable
+/// renders" is on as it starts. Starts FFmpeg once and waits up to 5 s
 /// (`hlae_ffmpeg::verify_is_ffmpeg`): call it once per batch, off the main
-/// thread. Only logged: whether a join is whole never depends on the version.
-pub fn ffmpeg_version_line(configured: &str, resumable: bool) -> String {
+/// thread. Only logged: whether a join is whole never depends on the
+/// version.
+pub fn render_batch_start_line(configured: &str, resumable: bool) -> String {
     use crate::messages::render as msg;
     let Some(exe) = crate::shared::hlae_ffmpeg::resolve_absolute(configured) else {
-        return msg::ffmpeg_version_unread(configured, "not found", resumable);
+        return msg::render_batch_start_unread(configured, "not found", resumable);
     };
     match crate::shared::hlae_ffmpeg::verify_is_ffmpeg(&exe) {
-        Ok(banner) => msg::ffmpeg_version(&banner, exe.display(), resumable),
-        Err(why) => msg::ffmpeg_version_unread(configured, why, resumable),
+        Ok(banner) => msg::render_batch_start(&banner, exe.display(), resumable),
+        Err(why) => msg::render_batch_start_unread(configured, why, resumable),
     }
+}
+
+/// Whether export folder `export_dir`'s path is short enough to hold a
+/// render's segment folder (#1451): one longer renders long takes in one
+/// piece, and room is made for the clip alone there.
+pub fn segments_fit_under(export_dir: &Path) -> bool {
+    segmented::segments_fit_under(export_dir)
 }
 
 /// What a render of `clip` reserves on its export drive at most when it

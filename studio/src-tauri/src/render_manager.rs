@@ -10,6 +10,7 @@
 // for the batch's duration.
 
 use crate::render_export_dirs::LiveExportDirs;
+use crate::render_live_resumable::LiveResumable;
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
 use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
@@ -29,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 #[path = "render_scan_merge.rs"]
 mod scan_merge;
@@ -378,6 +379,8 @@ pub struct RenderManager {
     room_volume: Arc<RwLock<Option<String>>>,
     /// The export folders as Settings saved them last (#1430).
     export_dirs: LiveExportDirs,
+    /// "Resumable renders" as Settings saved it last (#1451).
+    resumable: LiveResumable,
 }
 
 /// What the scheduler may run at once: the batch's own number, or, while a
@@ -423,6 +426,33 @@ struct SchedulerHandles {
     capture_held: Arc<AtomicBool>,
     room_volume: Arc<RwLock<Option<String>>>,
     export_dirs: LiveExportDirs,
+    resumable: LiveResumable,
+}
+
+/// What one job's config takes from the moment it starts rather than from
+/// the batch's: the export folders (#1430) and "Resumable renders" (#1451)
+/// as Settings has them now, its share of the threads, and its clip tag.
+struct PerJob {
+    export_directories: Vec<PathBuf>,
+    thread_share: usize,
+    clip_tag: Option<String>,
+    resumable: bool,
+}
+
+/// The config `job` renders with: codec and fps from the job itself, not
+/// the batch's shared config (see the comment on `RenderJobRuntime`), and
+/// `per_job`. The rest (FFmpeg path, source folder) is the batch's.
+fn job_config(config: &RenderConfig, job: &RenderJobRuntime, per_job: PerJob) -> RenderConfig {
+    RenderConfig {
+        export_directories: per_job.export_directories,
+        target_codec: job.codec,
+        custom_codec_args: job.custom_codec_args.clone(),
+        fps: job.fps,
+        max_concurrent_renders: per_job.thread_share,
+        clip_tag: per_job.clip_tag,
+        resumable_renders: per_job.resumable,
+        ..config.clone()
+    }
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -455,6 +485,7 @@ impl RenderManager {
             capture_held: Arc::new(AtomicBool::new(false)),
             room_volume: Arc::new(RwLock::new(None)),
             export_dirs: LiveExportDirs::default(),
+            resumable: LiveResumable::default(),
         }
     }
 
@@ -477,6 +508,12 @@ impl RenderManager {
     /// to them, and so does Start Render Batch on the rows already listed.
     pub(crate) fn export_dirs(&self) -> LiveExportDirs {
         self.export_dirs.clone()
+    }
+
+    /// "Resumable renders" as Settings has it (#1451), which settings loading
+    /// and `save_settings` update: each render reads it as it starts.
+    pub(crate) fn resumable(&self) -> LiveResumable {
+        self.resumable.clone()
     }
 
     /// The volume (`volume_of`) a capture holds for room on, whose takes'
@@ -709,6 +746,7 @@ impl RenderManager {
             capture_held: self.capture_held.clone(),
             room_volume: self.room_volume.clone(),
             export_dirs: self.export_dirs.clone(),
+            resumable: self.resumable.clone(),
         }
     }
 }
@@ -1094,18 +1132,16 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             let job_id = job.id.clone();
                             let clip = job.clip.clone();
                             let cancel_flag = job.cancel_flag.clone();
-                            // Codec/fps come from the job itself, not the
-                            // scheduler's shared config — see the comment on
-                            // RenderJobRuntime. Everything else (ffmpeg path,
-                            // export pool, concurrency) genuinely is
-                            // batch-wide, so still comes from config.
-                            let mut job_config = config.clone();
-                            job_config.export_directories = exports_now.clone();
-                            job_config.target_codec = job.codec;
-                            job_config.custom_codec_args = job.custom_codec_args.clone();
-                            job_config.fps = job.fps;
-                            job_config.max_concurrent_renders = thread_share;
-                            job_config.clip_tag = clip_tag;
+                            let job_config = job_config(
+                                &config,
+                                job,
+                                PerJob {
+                                    export_directories: exports_now.to_vec(),
+                                    thread_share,
+                                    clip_tag,
+                                    resumable: handles.resumable.is_on(),
+                                },
+                            );
                             let tx2 = tx.clone();
                             let reservations = handles.export_reservations.clone();
                             tokio::spawn(async move {
@@ -1422,20 +1458,44 @@ pub(crate) struct QueuedTake {
     fps: u32,
 }
 
+/// What room the cleanup before a batch makes for each render (#1451).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PieceRoom {
+    /// A long take's segments and clip together, else the clip alone, as
+    /// the render itself falls back (`SpaceNeed::fallback_pieces`).
+    SegmentsFirst,
+    /// The clip alone, with no fallback, so no take is deleted for segment
+    /// room: "Resumable renders" is off, or no export folder's path is short
+    /// enough for a segment folder (`renderer::segments_fit_under`).
+    ClipAlone,
+}
+
+impl PieceRoom {
+    /// The room for a batch starting with `resumable` on or off and
+    /// `export_dirs`.
+    fn for_batch(resumable: bool, export_dirs: &[PathBuf]) -> Self {
+        let fits = export_dirs
+            .iter()
+            .any(|dir| native::hlcr::renderer::segments_fit_under(dir));
+        if resumable && fits {
+            Self::SegmentsFirst
+        } else {
+            Self::ClipAlone
+        }
+    }
+}
+
 /// What the first jobs to start need on the export drives, one figure per
 /// job, since each job writes to one drive: the largest `max_concurrent`
 /// estimates among the `queued` takes ([`RenderManager::queued_takes`]),
 /// which is what `run_render_job`'s drive routing checks as they start
-/// together. With `resumable` ("Resumable renders", #1451), room for a long
-/// take's segments and clip together, and the clip alone as the fallback
-/// the render falls back to (`SpaceNeed::fallback_pieces`); without, the
-/// clip alone and no fallback, so no take is deleted for segment room.
-/// Later jobs reserve from what finished renders actually wrote (#120).
-/// Reads take headers: run it off the async worker.
+/// together, with room as `room` says. Later jobs reserve from what
+/// finished renders actually wrote (#120). Reads take headers: run it off
+/// the async worker.
 fn first_wave_pieces(
     queued: &[QueuedTake],
     max_concurrent: usize,
-    resumable: bool,
+    room: PieceRoom,
 ) -> (Vec<u64>, Option<Vec<u64>>) {
     let largest = |mut estimates: Vec<u64>| {
         estimates.sort_unstable_by(|a, b| b.cmp(a));
@@ -1448,7 +1508,7 @@ fn first_wave_pieces(
             .map(|t| job_reservation_estimate(&t.clip, t.codec, &t.custom_args))
             .collect(),
     );
-    if !resumable {
+    if room == PieceRoom::ClipAlone {
         return (one_piece, None);
     }
     let peak = queued
@@ -1475,21 +1535,18 @@ pub async fn start_queued_render(
         log_markdown(crate::messages::render::START_REJECTED);
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
-    let (mut config, starting) = match state.start_config() {
+    let (config, starting) = match state.start_config() {
         Ok(found) => found,
         Err(e) => {
             state.is_rendering.store(false, Ordering::SeqCst);
             return Err(e);
         }
     };
-    // "Resumable renders" (#1451) as Settings has it now, like the export
-    // folders: a change reaches the next Start.
-    config.resumable_renders = app
-        .state::<crate::settings_manager::SettingsManager>()
-        .inner
-        .lock()
-        .unwrap()
-        .render_resumable;
+    // "Resumable renders" (#1451) as Settings has it now. Each render reads
+    // it again as it starts (`job_config`), so a change reaches a running
+    // batch's next renders; this is the value for the room made up front and
+    // the batch's first log line.
+    let resumable = state.resumable().is_on();
 
     // #644: with "Only when space is needed", finished takes make room on the
     // export drives before the first jobs reserve theirs there.
@@ -1497,10 +1554,10 @@ pub async fn start_queued_render(
         let queued = state.queued_takes();
         let targets = config.export_directories.clone();
         let max_concurrent = config.max_concurrent_renders;
-        let resumable = config.resumable_renders;
+        let room = PieceRoom::for_batch(resumable, &config.export_directories);
         let cleanup_app = app.clone();
         let _ = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
-            let (pieces, fallback_pieces) = first_wave_pieces(&queued, max_concurrent, resumable);
+            let (pieces, fallback_pieces) = first_wave_pieces(&queued, max_concurrent, room);
             let need = native::hlcr::take_cleanup::SpaceNeed {
                 targets,
                 pieces,
@@ -1519,12 +1576,11 @@ pub async fn start_queued_render(
     }
 
     log_markdown(&crate::messages::render::scheduler_starting(starting));
-    // Which FFmpeg this batch runs, once, off the async worker (#1451); the
-    // batch doesn't wait for it.
+    // Which FFmpeg this batch runs and whether renders are resumable, once,
+    // off the async worker (#1451); the batch doesn't wait for it.
     let ffmpeg_path = config.ffmpeg_path.clone();
-    let resumable = config.resumable_renders;
     tokio::task::spawn_blocking(move || {
-        log_markdown(&native::hlcr::renderer::ffmpeg_version_line(
+        log_markdown(&native::hlcr::renderer::render_batch_start_line(
             &ffmpeg_path,
             resumable,
         ));
@@ -2181,11 +2237,51 @@ mod tests {
                 fps: 300,
             })
             .collect();
-        let (pieces, fallback) = first_wave_pieces(&queued, 2, false);
+        let (pieces, fallback) = first_wave_pieces(&queued, 2, PieceRoom::ClipAlone);
         assert_eq!(pieces, [64 * 48 * 3 * 300, 64 * 48 * 3 * 100]);
         assert_eq!(fallback, None);
-        let (_, fallback) = first_wave_pieces(&queued, 2, true);
+        let (_, fallback) = first_wave_pieces(&queued, 2, PieceRoom::SegmentsFirst);
         assert_eq!(fallback, Some(pieces));
+    }
+
+    /// Segment room is only planned for when the setting is on and an
+    /// export folder's path is short enough for a segment folder (#1451
+    /// review): otherwise no take goes for room the render won't use.
+    #[test]
+    fn segment_room_is_planned_only_with_the_setting_on_and_a_short_enough_folder() {
+        let short = PathBuf::from("D:/clips");
+        let long = PathBuf::from(format!("D:/{}", "a".repeat(200)));
+        let both = [long.clone(), short.clone()];
+        assert_eq!(PieceRoom::for_batch(true, &both), PieceRoom::SegmentsFirst);
+        assert_eq!(PieceRoom::for_batch(false, &both), PieceRoom::ClipAlone);
+        assert_eq!(PieceRoom::for_batch(true, &[long]), PieceRoom::ClipAlone);
+    }
+
+    /// A job started after "Resumable renders" was changed mid-batch renders
+    /// with the new value, like the export folders (#1430).
+    #[test]
+    fn a_job_started_after_the_setting_changes_gets_the_new_value() {
+        let manager = RenderManager::new();
+        let handles = manager.handles();
+        let jobs = recovered_jobs(&session(vec![autosave_job(
+            "a",
+            AutosaveJobStatus::Pending,
+            true,
+        )]));
+        let per_job = |handles: &SchedulerHandles| PerJob {
+            export_directories: Vec::new(),
+            thread_share: 1,
+            clip_tag: None,
+            resumable: handles.resumable.is_on(),
+        };
+        let config = RenderConfig::default();
+        assert!(job_config(&config, &jobs[0], per_job(&handles)).resumable_renders);
+        manager.resumable().saved(false);
+        assert!(!job_config(&config, &jobs[0], per_job(&handles)).resumable_renders);
+        assert!(
+            config.resumable_renders,
+            "the batch's own config is not what decides"
+        );
     }
 
     #[test]
