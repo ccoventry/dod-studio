@@ -3,7 +3,7 @@
 //!
 //! Unlike patching HLAE's own source, this doesn't need HLAE's build
 //! toolchain, and doesn't touch any function HLAE itself already hooks (see
-//! `engine.rs` for exactly which functions this DLL depends on). It's built
+//! `engine.rs` and `engine/` for exactly which functions this DLL depends on). It's built
 //! as a separate workspace crate specifically so it doesn't have to live
 //! inside a forked copy of HLAE's own repository. How it gets a foothold in
 //! `client.dll` is genuinely non-obvious -- patching that DLL's export table

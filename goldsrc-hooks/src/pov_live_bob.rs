@@ -333,7 +333,7 @@ fn gun_from_camera(view: &View, gun: [f32; 3]) -> [f32; 3] {
     [dot(rel, view.forward), dot(rel, view.right), rel[2]]
 }
 
-/// Called by `engine.rs` right after `client.dll`'s `V_CalcRefdef`, with the
+/// Called by `engine/client_exports.rs` right after `client.dll`'s `V_CalcRefdef`, with the
 /// view it worked out live.
 pub fn after_calc_refdef(params: *const RefParamsPartial) {
     if params.is_null() {

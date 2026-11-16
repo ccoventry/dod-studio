@@ -841,9 +841,9 @@ same location in three places:
 
 | location | ours | HLAE's |
 | --- | --- | --- |
-| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine.rs` | at load |
+| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine/loader.rs` | at load |
 | the `connect` command's handler | `connect_guard.rs` | after `Host_Init` |
-| `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
+| `cldll_func_t` slot 19 | `engine/client_exports.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
 
 In every one, **both sides save the slot's current value and call through it**
 — `hook_import` stores `*slot` as the real function, `cmd_list::wrap`

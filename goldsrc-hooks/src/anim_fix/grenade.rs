@@ -72,7 +72,7 @@ pub(super) const WINDUP_SECONDS: f64 = 0.5;
 /// played. `apply()` only reaches it on frames that are in-eye on this
 /// grenade; if none came for this long the camera was elsewhere, and the
 /// grenade is long gone. A hitch hands `HUD_Frame` at most 1.0s at a time
-/// (`engine::tramp_hud_frame`), so an honest frame can never be later.
+/// (`engine::frame::tramp_hud_frame`), so an honest frame can never be later.
 const STALE_THROW_SECONDS: f64 = 1.0;
 
 /// How long after the throw to keep looking for the grenade it put in the

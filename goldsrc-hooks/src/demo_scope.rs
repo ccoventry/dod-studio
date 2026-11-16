@@ -315,7 +315,7 @@ fn angles_from_axes(forward: [f32; 3], right: [f32; 3], up: [f32; 3]) -> [f32; 3
 
 /// Keeps the view this frame is drawn from, from the engine's render origin
 /// and axes.
-/// Called from `engine::tramp_draw_transparent_triangles`, just before the
+/// Called from `engine::client_exports::tramp_draw_transparent_triangles`, just before the
 /// client draws the scope; only while the setting is on.
 pub fn before_transparent_triangles() {
     if !ON.load(Ordering::Relaxed) {
