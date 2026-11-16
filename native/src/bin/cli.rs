@@ -23,6 +23,11 @@ fn main() {
                 run_analyze_subcommand(demo_paths, output_format);
             }
             Commands::Stats { demo_paths } => run_stats_subcommand(demo_paths),
+            Commands::Convert47 { demo_paths, output } => {
+                if !run_convert_47_subcommand(demo_paths, output) {
+                    std::process::exit(1);
+                }
+            }
             Commands::PatchStreak {
                 input,
                 output,
@@ -83,6 +88,47 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
             println!("{output}");
         }),
     };
+}
+
+/// Converts each protocol-47 demo to a protocol-48 copy (#239), beside it as
+/// `<stem>_p48.dem` or at `output` for a single demo, one line per demo.
+/// Returns whether every demo converted.
+fn run_convert_47_subcommand(demo_paths: Vec<PathBuf>, output: Option<PathBuf>) -> bool {
+    use messages::protocol47 as m;
+    if output.is_some() && demo_paths.len() != 1 {
+        eprintln!("{}", m::CLI_OUTPUT_NEEDS_ONE_DEMO);
+        return false;
+    }
+    let mut failed = 0;
+    for input in &demo_paths {
+        let started = std::time::Instant::now();
+        match native::patch::protocol47::convert_file(input, output.as_deref()) {
+            Ok((written, converted)) => {
+                println!(
+                    "{}",
+                    m::cli_converted(
+                        input.display(),
+                        written.display(),
+                        converted.server_infos,
+                        native::utils::duration_text::duration_text(
+                            started.elapsed().as_secs_f64()
+                        ),
+                    )
+                );
+                if let Some(at) = converted.stopped_at {
+                    eprintln!("{}", m::walk_stopped(input.display(), at));
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}", m::cli_not_converted(input.display(), e));
+            }
+        }
+    }
+    if demo_paths.len() > 1 {
+        println!("{}", m::cli_summary(demo_paths.len() - failed, failed));
+    }
+    failed == 0
 }
 
 /// One read-only stats document per demo, as JSON (#192): the columns a
@@ -278,8 +324,22 @@ fn run_patch_streak_subcommand(
     }
 
     println!("{}", messages::CLI_READING_RAW_BYTES);
-    let demo_bytes =
+    let mut demo_bytes =
         std::fs::read(&input).map_err(|e| messages::cli_failed_to_read(input.display(), e))?;
+    // The patched copy of a protocol-47 demo says 48, so the game plays it
+    // without an outdated-protocol warning (#239). One with no server info
+    // to convert stays 47 throughout, as StreamPatcher leaves it, since the
+    // game plays that too. The input file is not touched.
+    if native::patch::protocol47::is_protocol_47(&demo_bytes) {
+        use messages::protocol47 as m;
+        match native::patch::protocol47::convert_in_place(&mut demo_bytes) {
+            Ok(converted) => println!(
+                "{}",
+                m::cli_patch_converted(input.display(), converted.server_infos)
+            ),
+            Err(e) => println!("{}", m::cli_patch_left_at_47(input.display(), e)),
+        }
+    }
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -352,6 +412,19 @@ enum Commands {
     Stats {
         /// List of paths to demo files
         demo_paths: Vec<PathBuf>,
+    },
+    /// Convert protocol-47 demos (2004-era) to protocol 48, so today's game
+    /// plays them without an outdated-protocol warning. Each copy goes
+    /// beside its demo as <name>_p48.dem; the demos themselves are only read.
+    #[command(name = "convert-47")]
+    Convert47 {
+        /// Protocol-47 demo files
+        #[arg(required = true)]
+        demo_paths: Vec<PathBuf>,
+
+        /// Where to write the copy (one demo only)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Export patched demo capturing player killstreaks
     PatchStreak {

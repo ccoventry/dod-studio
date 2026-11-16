@@ -219,6 +219,15 @@ pub struct Build {
     /// the sizes in a layout file: the 25th Anniversary GameUI's is twice as
     /// tall at 1440 lines (#781).
     pub font_scales_with_screen: bool,
+    /// `TextEntry`'s vftable, and where a `TextEntry` keeps its font
+    /// (`HFont`): what `GetStartDrawIndex` (its slot 190) divides the box's
+    /// height by, plus one, for the lines it shows. The kill range and note
+    /// form makes its boxes taller than their font from these (#1311): a box
+    /// that shows no line reads past its line-break list on a click, and the
+    /// Anniversary GameUI's asserts put up two dialogs per click (`UtlVector.h`
+    /// 184, `UtlMemory.h` 155, from `TextEntry::PixelToCursorSpace`).
+    pub text_entry_vftable: usize,
+    pub text_entry_font: usize,
     /// `EditablePanel::LoadControlSettings(const char *path, const char
     /// *pathID)`, thiscall.
     pub load_control_settings: usize,
@@ -292,6 +301,8 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor: 0x4_a610,
         frame_ctor_fourth_arg: false,
         font_scales_with_screen: false,
+        text_entry_vftable: 0x9_ff34,
+        text_entry_font: 0xe8,
         load_control_settings: 0x4_d6b0,
         frame_size: 0x110,
         sheet_ctor: 0x7_74f0,
@@ -321,6 +332,8 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor: 0x5_2950,
         frame_ctor_fourth_arg: true,
         font_scales_with_screen: true,
+        text_entry_vftable: 0xa_8a48,
+        text_entry_font: 0xec,
         load_control_settings: 0x5_4620,
         frame_size: 0x118,
         sheet_ctor: 0x8_54f0,
@@ -909,14 +922,23 @@ fn load_strip_bounds(page_wide: i32) -> (i32, i32, i32, i32) {
 }
 
 /// What the loading strip says: how far the demo player has read the demo
-/// and how far the highlights analysis has got, each while it runs; `None`
-/// once both are done, and the strip goes.
-fn load_strip_text(demo: Option<u32>, highlights: Option<u32>) -> Option<String> {
+/// and how far the highlights analysis has got, each while it runs, and the
+/// damaged-demo line (`demo_damage::tell::strip_line`, #1373) while that
+/// demo plays; `None` once there is nothing to say, and the strip goes.
+fn load_strip_text(
+    demo: Option<u32>,
+    highlights: Option<u32>,
+    damaged: Option<String>,
+) -> Option<String> {
     let parts: Vec<String> = [("Demo", demo), ("Highlights", highlights)]
         .into_iter()
         .filter_map(|(what, percent)| Some(format!("{what} {}%", percent?)))
         .collect();
-    (!parts.is_empty()).then(|| format!("Loading: {}", parts.join("   ")))
+    let loading = (!parts.is_empty()).then(|| format!("Loading: {}", parts.join("   ")));
+    match (loading, damaged) {
+        (Some(loading), Some(damaged)) => Some(format!("{damaged}   {loading}")),
+        (loading, damaged) => loading.or(damaged),
+    }
 }
 
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
@@ -3638,18 +3660,31 @@ mod tests {
     #[test]
     fn the_loading_strip_names_each_load_still_running() {
         assert_eq!(
-            load_strip_text(Some(45), Some(60)).as_deref(),
+            load_strip_text(Some(45), Some(60), None).as_deref(),
             Some("Loading: Demo 45%   Highlights 60%")
         );
         assert_eq!(
-            load_strip_text(Some(0), None).as_deref(),
+            load_strip_text(Some(0), None, None).as_deref(),
             Some("Loading: Demo 0%")
         );
         assert_eq!(
-            load_strip_text(None, Some(100)).as_deref(),
+            load_strip_text(None, Some(100), None).as_deref(),
             Some("Loading: Highlights 100%")
         );
-        assert_eq!(load_strip_text(None, None), None);
+        assert_eq!(load_strip_text(None, None, None), None);
+    }
+
+    #[test]
+    fn the_loading_strip_keeps_a_damaged_demos_line() {
+        let damaged = || Some("This demo is damaged at 8:27.75.".to_string());
+        assert_eq!(
+            load_strip_text(None, None, damaged()).as_deref(),
+            Some("This demo is damaged at 8:27.75.")
+        );
+        assert_eq!(
+            load_strip_text(None, Some(40), damaged()).as_deref(),
+            Some("This demo is damaged at 8:27.75.   Loading: Highlights 40%")
+        );
     }
 
     #[test]

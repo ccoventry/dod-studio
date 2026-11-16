@@ -37,12 +37,13 @@ pub fn read_mov_tag(file: &Path, key: &str) -> Option<String> {
     read_tag(&mut reader, key).ok().flatten()
 }
 
-/// One atom: its four-letter type and where its body starts and ends.
+/// One atom: its four-letter type and where its body starts and ends. Also
+/// read by the renderer's frame count of a joined clip (#1451).
 #[derive(Debug, Clone, Copy)]
-struct Atom {
-    kind: [u8; 4],
-    body: u64,
-    end: u64,
+pub(crate) struct Atom {
+    pub(crate) kind: [u8; 4],
+    pub(crate) body: u64,
+    pub(crate) end: u64,
 }
 
 /// [`read_mov_tag`] over any reader: the walk `moov` → `udta` → `meta` (or
@@ -90,7 +91,7 @@ fn meta_children_start<R: Read + Seek>(reader: &mut R, meta: Atom) -> io::Result
 }
 
 /// The first child of type `kind` between `start` and `end`.
-fn find_child<R: Read + Seek>(
+pub(crate) fn find_child<R: Read + Seek>(
     reader: &mut R,
     start: u64,
     end: u64,
@@ -112,7 +113,11 @@ fn find_child<R: Read + Seek>(
 /// The atom whose header starts at `pos`, or `None` when no whole atom fits
 /// before `end` (the container's last child has been passed, or the header
 /// is garbage).
-fn atom_at<R: Read + Seek>(reader: &mut R, pos: u64, end: u64) -> io::Result<Option<Atom>> {
+pub(crate) fn atom_at<R: Read + Seek>(
+    reader: &mut R,
+    pos: u64,
+    end: u64,
+) -> io::Result<Option<Atom>> {
     if pos.saturating_add(8) > end {
         return Ok(None);
     }

@@ -36,6 +36,17 @@ pub(super) fn log_windows_drive_folders(
     }
 }
 
+/// How many of the batch's latest takes a Render While Capturing plan counts
+/// as still on their drive when the next clip's room is checked, at least
+/// (#1438; [`push_recent`] keeps a big take longer): the
+/// clip recording then (`capture_room_manager` checks the next clip's room as
+/// each clip starts, counting the one recording) and the one before it,
+/// still rendering. A drive is only first choice for a clip while it has
+/// room beside those; two clips in a row on a drive that holds one at a time
+/// held a batch until the first one rendered, behind every other
+/// drive's queued renders.
+pub(super) const TAKES_STILL_ON_DISK: usize = 2;
+
 /// A batch's capture drives and the room left on their volumes as its blocks
 /// are routed, demo by demo (the AOT disk-space simulation). Directories on
 /// one volume share one budget (#774).
@@ -52,6 +63,26 @@ pub(super) struct DriveBudget {
     /// What "Keep free on the Windows drive" keeps there, when it raised a
     /// capture directory's headroom (#1430): the refusal says so.
     windows_drive_keep_free: Option<u64>,
+    /// The blocks routed whose takes the plan counts as still on disk, in
+    /// record order across the whole batch, newest last: their volume and
+    /// estimate. At least the latest [`TAKES_STILL_ON_DISK`] ([`push_recent`]).
+    recent: std::collections::VecDeque<(usize, u64)>,
+    /// What the Render While Capturing plan routed one at a time: how many
+    /// blocks, and how many of them have room only once the takes before
+    /// them on their drive have rendered (the batch may hold before those).
+    pub one_at_a_time: OneAtATimeCounts,
+    /// Per volume, the least room the one-at-a-time plan left beside a block
+    /// there, across the whole batch: with what fitting at once left in
+    /// `free` (which stops counting once the batch goes one at a time), the
+    /// figure the pre-launch check gets for that volume.
+    least_left: Vec<Option<u64>>,
+}
+
+/// [`DriveBudget::one_at_a_time`]'s counts, for the plan's log line.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct OneAtATimeCounts {
+    pub blocks: usize,
+    pub waits: usize,
 }
 
 impl DriveBudget {
@@ -73,12 +104,30 @@ impl DriveBudget {
             free.push(u64::MAX);
         }
         let capacity = free.clone();
+        let least_left = vec![None; free.len()];
         DriveBudget {
+            least_left,
             volume_of_drive,
             free,
             capacity,
             active_drive: 0,
             windows_drive_keep_free: None,
+            recent: std::collections::VecDeque::new(),
+            one_at_a_time: OneAtATimeCounts::default(),
+        }
+    }
+
+    /// Notes routed blocks, `(block_index, drive_index)` in any order, as
+    /// the batch's latest takes, in record (block index) order.
+    fn note_recent(&mut self, pairs: &[(usize, usize)], estimates: &[u64]) {
+        let mut in_order = pairs.to_vec();
+        in_order.sort_unstable();
+        for (block_index, drive) in in_order {
+            push_recent(
+                &mut self.recent,
+                self.volume_of_drive[drive],
+                estimates[block_index],
+            );
         }
     }
 
@@ -96,10 +145,12 @@ impl DriveBudget {
     /// When they don't all fit and `config.render_while_capturing` is on, they
     /// are routed [`allocate_blocks_one_at_a_time`] instead: renders free
     /// space as the batch runs and it holds between clips until there is
-    /// room, so each block only has to fit a drive on its own, counted as if
-    /// the earlier blocks will have been freed by the time it records. A
-    /// block bigger than any drive could ever hold is still refused, rather
-    /// than starting a batch that can't finish.
+    /// room, so each block goes first to a drive with room beside the
+    /// batch's latest takes still on it, and else to one it fits on its own
+    /// once the earlier takes there have rendered. A block bigger than any
+    /// drive could ever hold is still refused, rather than starting a batch
+    /// that can't finish. From then on every later demo's blocks go one at a
+    /// time too.
     ///
     /// Errors with [`no_room_message`] for the first block that fits nowhere.
     pub fn allocate(
@@ -107,19 +158,32 @@ impl DriveBudget {
         estimates: &[u64],
         config: &crate::patch::types::PatcherConfig,
     ) -> std::io::Result<Vec<(usize, usize)>> {
-        match allocate_blocks_first_fit_decreasing(
-            estimates,
-            &self.volume_of_drive,
-            &mut self.free,
-            &mut self.active_drive,
-            FAILOVER_THRESHOLD,
-        ) {
-            Ok(assignments) => Ok(assignments),
+        // Once one demo's blocks went one at a time, the rest of the batch
+        // does too: `free` no longer says what the drives hold beside the
+        // takes still on them, so a later demo that "fits at once" against
+        // it would skip the latest takes and go uncounted (#1438).
+        let at_once = if self.one_at_a_time.blocks == 0 {
+            allocate_blocks_first_fit_decreasing(
+                estimates,
+                &self.volume_of_drive,
+                &mut self.free,
+                &mut self.active_drive,
+                FAILOVER_THRESHOLD,
+            )
+        } else {
+            Err(0)
+        };
+        match at_once {
+            Ok(assignments) => {
+                self.note_recent(&assignments, estimates);
+                Ok(assignments)
+            }
             Err(_) if config.render_while_capturing => {
-                let (pairs, left) = allocate_blocks_one_at_a_time(
+                let plan = allocate_blocks_one_at_a_time(
                     estimates,
                     &self.volume_of_drive,
                     &self.capacity,
+                    &mut self.recent,
                     &mut self.active_drive,
                     FAILOVER_THRESHOLD,
                 )
@@ -130,12 +194,14 @@ impl DriveBudget {
                         self.windows_drive_keep_free,
                     ))
                 })?;
-                for (free, left) in self.free.iter_mut().zip(left) {
+                for (least, left) in self.least_left.iter_mut().zip(plan.left) {
                     if let Some(left) = left {
-                        *free = left;
+                        *least = Some(least.map_or(left, |l| l.min(left)));
                     }
                 }
-                Ok(pairs)
+                self.one_at_a_time.blocks += plan.pairs.len();
+                self.one_at_a_time.waits += plan.waits;
+                Ok(plan.pairs)
             }
             Err(block_index) => Err(std::io::Error::other(no_room_message(
                 estimates[block_index] + FAILOVER_THRESHOLD,
@@ -149,7 +215,9 @@ impl DriveBudget {
     /// that is a configured capture directory, handed back so the pre-launch
     /// abort in `capture_engine.rs` re-validates the exact numbers this
     /// allocation pass already computed instead of recomputing a third,
-    /// narrower (primary-drive-only) answer.
+    /// narrower (primary-drive-only) answer. A drive planned one block at a
+    /// time reports the least room the plan left beside a block there, the
+    /// takes still on it counted ([`OneAtATime::left`]).
     pub fn headroom(
         &self,
         drives: impl IntoIterator<Item = usize>,
@@ -165,7 +233,13 @@ impl DriveBudget {
                     .get(idx)
                     .map(|p| crate::patch::types::DriveHeadroom {
                         path: p.clone(),
-                        free_bytes: self.free[self.volume_of_drive[idx]],
+                        free_bytes: {
+                            let volume = self.volume_of_drive[idx];
+                            // Both phases: what fitting at once left, and the
+                            // least the one-at-a-time plan left after it.
+                            self.least_left[volume]
+                                .map_or(self.free[volume], |l| l.min(self.free[volume]))
+                        },
                     })
             })
             .collect()
@@ -254,44 +328,112 @@ pub(super) fn allocate_blocks_first_fit_decreasing(
     Ok(result)
 }
 
+/// Adds a routed block to the batch's takes still on disk. The oldest goes
+/// once more than [`TAKES_STILL_ON_DISK`] are there and the takes recorded
+/// after it add up to its size: renders run in record order, and a take
+/// takes about as long to render as later clips of its size take to record.
+/// Counting only the latest two forgot a 300 GB take after two 15 GB clips,
+/// and planned the next small clips onto its drive, which then held.
+fn push_recent(recent: &mut std::collections::VecDeque<(usize, u64)>, volume: usize, bytes: u64) {
+    recent.push_back((volume, bytes));
+    while recent.len() > TAKES_STILL_ON_DISK {
+        let oldest = recent[0].1;
+        let after: u64 = recent.iter().skip(1).map(|(_, b)| b).sum();
+        if after < oldest {
+            break;
+        }
+        recent.pop_front();
+    }
+}
+
+/// What [`allocate_blocks_one_at_a_time`] planned.
+#[derive(Debug, PartialEq)]
+pub(super) struct OneAtATime {
+    /// `(block_index, drive_index)` pairs, like
+    /// [`allocate_blocks_first_fit_decreasing`]'s.
+    pub pairs: Vec<(usize, usize)>,
+    /// Per volume, the least room the plan left beside a block there: all
+    /// the batch can count on there from now on, and what the pre-launch
+    /// check re-validates. `None` for a volume that got no block.
+    pub left: Vec<Option<u64>>,
+    /// How many blocks have room only once the takes before them on their
+    /// drive have rendered: the batch may hold before each.
+    pub waits: usize,
+}
+
 /// Render While Capturing (#861), for a demo whose blocks don't all fit at
 /// once: renders free room between clips and the batch holds until they
-/// have, so each block only has to fit **on its own**. Each goes to the
-/// earliest drive, from `*active_drive_idx` and wrapping, whose volume's
-/// `capacity` (its free space when the batch was planned) holds it plus
-/// `threshold`. Deleting this batch's takes can never give a volume more room
-/// than that, so a block no volume holds alone can never be recorded:
-/// `Err(block_index)`.
+/// have. Each block goes, from `*active_drive_idx` and wrapping:
 ///
-/// Returns the pairs like [`allocate_blocks_first_fit_decreasing`] and, per
-/// volume, the room left beside its largest block, which is all the batch can
-/// count on there from now on.
+/// 1. to the earliest drive whose volume's `capacity` (its free space when
+///    the batch was planned) holds it plus `threshold` beside the batch's
+///    latest takes still on it (`recent`, [`TAKES_STILL_ON_DISK`]), so the
+///    batch goes on without waiting for a render (#1438);
+/// 2. else, of the drives whose `capacity` holds it on its own, to the one
+///    whose newest take still on disk is oldest: the batch holds before it
+///    until the earlier takes there have rendered (counted in
+///    [`OneAtATime::waits`]).
+///
+/// The plan is the best case, renders one clip behind: with a deeper render
+/// backlog the running batch finds more takes on a drive than counted here,
+/// and holds where the plan expected none.
+///
+/// Deleting this batch's takes can never give a volume more room than its
+/// `capacity`, so a block no volume holds alone can never be recorded:
+/// `Err(block_index)`. `recent` carries on from one demo's blocks to the
+/// next's, since they record one after another.
 pub(super) fn allocate_blocks_one_at_a_time(
     block_estimates: &[u64],
     volume_of_drive: &[usize],
     capacity: &[u64],
+    recent: &mut std::collections::VecDeque<(usize, u64)>,
     active_drive_idx: &mut usize,
     threshold: u64,
-) -> Result<(Vec<(usize, usize)>, Vec<Option<u64>>), usize> {
+) -> Result<OneAtATime, usize> {
     let num_drives = volume_of_drive.len();
-    let mut result = Vec::with_capacity(block_estimates.len());
-    let mut largest: Vec<Option<u64>> = vec![None; capacity.len()];
+    let mut pairs = Vec::with_capacity(block_estimates.len());
+    let mut left: Vec<Option<u64>> = vec![None; capacity.len()];
+    let mut waits = 0;
     for (block_index, &estimate) in block_estimates.iter().enumerate() {
-        let drive = (0..num_drives)
-            .map(|step| (*active_drive_idx + step) % num_drives)
-            .find(|&d| capacity[volume_of_drive[d]] >= estimate.saturating_add(threshold))
-            .ok_or(block_index)?;
-        result.push((block_index, drive));
+        let needed = estimate.saturating_add(threshold);
+        let on_disk = |volume: usize| -> u64 {
+            recent
+                .iter()
+                .filter(|(v, _)| *v == volume)
+                .map(|(_, bytes)| bytes)
+                .sum()
+        };
+        let room_beside_recent = |d: usize| {
+            let volume = volume_of_drive[d];
+            capacity[volume].saturating_sub(on_disk(volume))
+        };
+        let order = || (0..num_drives).map(|step| (*active_drive_idx + step) % num_drives);
+        let (drive, room) = match order().find(|&d| room_beside_recent(d) >= needed) {
+            Some(d) => (d, room_beside_recent(d)),
+            None => {
+                // Of the drives that hold it alone, the one whose newest
+                // take still on disk is oldest (none at all first), so the
+                // clip waits for a take that has had the longest to render.
+                // Taking the first from the active drive, or the one with the
+                // fewest bytes on it, picked the drive just recorded to: two
+                // clips in a row on a drive that holds one, #1438's shape.
+                let newest_take = |volume: usize| recent.iter().rposition(|(v, _)| *v == volume);
+                let d = order()
+                    .filter(|&d| capacity[volume_of_drive[d]] >= needed)
+                    .min_by_key(|&d| newest_take(volume_of_drive[d]))
+                    .ok_or(block_index)?;
+                waits += 1;
+                (d, capacity[volume_of_drive[d]])
+            }
+        };
+        pairs.push((block_index, drive));
         *active_drive_idx = drive;
         let volume = volume_of_drive[drive];
-        largest[volume] = Some(largest[volume].map_or(estimate, |l| l.max(estimate)));
+        let beside = room - estimate;
+        left[volume] = Some(left[volume].map_or(beside, |l| l.min(beside)));
+        push_recent(recent, volume, estimate);
     }
-    let left = largest
-        .iter()
-        .zip(capacity)
-        .map(|(l, &cap)| l.map(|l| cap - l))
-        .collect();
-    Ok((result, left))
+    Ok(OneAtATime { pairs, left, waits })
 }
 
 #[cfg(test)]
@@ -315,33 +457,49 @@ mod one_at_a_time_tests {
         assert_eq!(none.free, vec![u64::MAX]);
     }
 
+    /// [`allocate_blocks_one_at_a_time`] with no earlier takes.
+    fn plan(
+        estimates: &[u64],
+        volume_of_drive: &[usize],
+        capacity: &[u64],
+        active: &mut usize,
+    ) -> Result<OneAtATime, usize> {
+        allocate_blocks_one_at_a_time(
+            estimates,
+            volume_of_drive,
+            capacity,
+            &mut std::collections::VecDeque::new(),
+            active,
+            5 * GB,
+        )
+    }
+
     #[test]
     fn blocks_that_fit_alone_go_to_the_first_drive_that_holds_each() {
         let mut active = 0;
-        let (pairs, left) = allocate_blocks_one_at_a_time(
+        let plan = plan(
             &[30 * GB, 50 * GB],
             &[0, 1],
             &[40 * GB, 100 * GB],
             &mut active,
-            5 * GB,
         )
         .unwrap();
         // 30 GB fits drive 0 alone; 50 GB only fits drive 1.
-        assert_eq!(pairs, vec![(0, 0), (1, 1)]);
+        assert_eq!(plan.pairs, vec![(0, 0), (1, 1)]);
         assert_eq!(active, 1);
-        assert_eq!(left, vec![Some(10 * GB), Some(50 * GB)]);
+        assert_eq!(plan.left, vec![Some(10 * GB), Some(50 * GB)]);
+        assert_eq!(plan.waits, 0);
     }
 
     #[test]
     fn a_block_no_drive_holds_alone_is_refused() {
         let mut active = 0;
         assert_eq!(
-            allocate_blocks_one_at_a_time(
+            plan(
                 &[10 * GB, 96 * GB],
                 &[0, 1],
                 &[40 * GB, 100 * GB],
-                &mut active,
-                5 * GB
+                &mut active
             ),
             Err(1)
         );
@@ -351,29 +509,394 @@ mod one_at_a_time_tests {
     fn folders_on_one_volume_get_drive_indexes_and_share_its_room() {
         let mut active = 0;
         // Folders 0 and 2 share volume 0; folder 1 is volume 1.
-        let (pairs, left) = allocate_blocks_one_at_a_time(
+        let first = plan(
             &[30 * GB, 50 * GB],
             &[0, 1, 0],
             &[40 * GB, 100 * GB],
             &mut active,
-            5 * GB,
         )
         .unwrap();
-        assert_eq!(pairs, vec![(0, 0), (1, 1)]);
-        assert_eq!(left, vec![Some(10 * GB), Some(50 * GB)]);
+        assert_eq!(first.pairs, vec![(0, 0), (1, 1)]);
+        assert_eq!(first.left, vec![Some(10 * GB), Some(50 * GB)]);
 
         // Starting from folder 2 (volume 0), a block that fits volume 0 stays
         // on folder 2: the pair names the folder, not the volume.
         let mut active = 2;
-        let (pairs, _) = allocate_blocks_one_at_a_time(
-            &[30 * GB],
-            &[0, 1, 0],
-            &[40 * GB, 100 * GB],
+        let second = plan(&[30 * GB], &[0, 1, 0], &[40 * GB, 100 * GB], &mut active).unwrap();
+        assert_eq!(second.pairs, vec![(0, 2)]);
+    }
+
+    /// #1438: F: held one clip at a time, and the plan put two in a row
+    /// there; the batch then held before the second until the first had
+    /// rendered. Now the second goes to a drive with room beside it.
+    #[test]
+    fn a_drive_holding_one_clip_at_a_time_does_not_get_two_in_a_row() {
+        // Folders C: D: E: F: G: H:, starting on F:.
+        let capacity = [19 * GB, 540 * GB, 1068 * GB, 160 * GB, 743 * GB, 1998 * GB];
+        let mut active = 3;
+        let plan = plan(
+            &[132 * GB, 132 * GB, 132 * GB],
+            &[0, 1, 2, 3, 4, 5],
+            &capacity,
             &mut active,
-            5 * GB,
         )
         .unwrap();
-        assert_eq!(pairs, vec![(0, 2)]);
+        assert_eq!(plan.pairs, vec![(0, 3), (1, 4), (2, 4)]);
+        assert_eq!(plan.waits, 0);
+        // F: keeps 28 GB beside its clip; G: 743 - 132 - 132.
+        assert_eq!(plan.left[3], Some(28 * GB));
+        assert_eq!(plan.left[4], Some(479 * GB));
+    }
+
+    /// Two drives that each hold one clip: once neither has room beside the
+    /// latest takes, a clip waits on the drive whose take is older, never
+    /// the one just recorded to. Taking the first drive from the active one
+    /// planned A B B A A B B A A: each pair is #1438's shape, the second clip
+    /// waiting for the first's whole render.
+    #[test]
+    fn with_no_room_beside_the_latest_takes_a_clip_waits_on_the_older_take() {
+        let mut active = 0;
+        let plan = plan(&[132 * GB; 9], &[0, 1], &[160 * GB, 160 * GB], &mut active).unwrap();
+        let drives: Vec<usize> = plan.pairs.iter().map(|&(_, d)| d).collect();
+        assert_eq!(drives, vec![0, 1, 0, 1, 0, 1, 0, 1, 0]);
+        assert_eq!(plan.waits, 7);
+    }
+
+    /// Unequal clips on two drives that each hold one: the clip after a
+    /// 120 GB take still goes to the other drive, whose take is older.
+    /// Keying on the bytes on each drive first sent it behind the 120 GB
+    /// take just recorded (B A A B).
+    #[test]
+    fn a_waiting_clip_goes_behind_the_older_take_whatever_the_sizes() {
+        let mut active = 0;
+        let plan = plan(
+            &[132 * GB, 120 * GB, 132 * GB, 132 * GB],
+            &[0, 1],
+            &[160 * GB, 160 * GB],
+            &mut active,
+        )
+        .unwrap();
+        let drives: Vec<usize> = plan.pairs.iter().map(|&(_, d)| d).collect();
+        assert_eq!(drives, vec![0, 1, 0, 1]);
+    }
+
+    /// Drives of 450 GB, one demo of four 300 GB clips, then twenty one-clip
+    /// demos of 15 GB. Counting only the latest two takes forgot the last
+    /// 300 GB take after two small clips and planned the small ones onto its
+    /// drive, which then held (uncounted). A take now counts until the clips
+    /// after it add up to its size.
+    #[test]
+    fn a_big_take_counts_until_the_clips_after_it_add_up_to_its_size() {
+        let dirs = dirs(&["a", "b"]);
+        let capacity = |_: usize| 450 * GB;
+        let mut demos = vec![vec![300 * GB; 4]];
+        demos.extend(std::iter::repeat_n(vec![15 * GB], 20));
+        let (budget, routed) = run_batch(&dirs, |_| Some(450 * GB), &demos);
+        assert_eq!(budget.one_at_a_time.waits, rule_waits(&routed, capacity));
+        assert_eq!(budget.one_at_a_time.waits, 2, "the 3rd and 4th big clips");
+        // The 300 GB take on drive 0 is still there: eight small clips fit
+        // beside it, then they go to drive 1 instead of holding.
+        let small: Vec<usize> = routed[4..].iter().map(|&(d, _)| d).collect();
+        let mut expected = vec![0; 8];
+        expected.extend([1; 12]);
+        assert_eq!(small, expected);
+    }
+
+    /// The figure the pre-launch check gets is the least room left on a
+    /// drive across every demo, not only the last demo's.
+    #[test]
+    fn the_pre_launch_figure_is_the_least_across_demos() {
+        let dirs = [std::path::PathBuf::from("takes_a")];
+        let mut budget = DriveBudget::snapshot(&dirs, |_| Some(300 * GB));
+        let config = crate::patch::types::PatcherConfig {
+            render_while_capturing: true,
+            ..Default::default()
+        };
+        // Three 140 GB clips: the second leaves 20 GB beside it and the
+        // first's take.
+        budget
+            .allocate(&[140 * GB, 140 * GB, 140 * GB], &config)
+            .unwrap();
+        // Then a small clip, planned with 290 GB beside it: the figure
+        // stays the batch's least.
+        budget.allocate(&[10 * GB], &config).unwrap();
+        let headroom = budget.headroom([0], &dirs);
+        assert_eq!(headroom[0].free_bytes, 20 * GB);
+    }
+
+    /// The figure the pre-launch check gets is the lower of the two phases:
+    /// what fitting at once left (a demo that fit) against what the plan one
+    /// at a time left (a later demo that did not).
+    #[test]
+    fn the_pre_launch_figure_is_the_lower_of_fitting_at_once_and_one_at_a_time() {
+        let dirs = [std::path::PathBuf::from("takes_a")];
+        let mut budget = DriveBudget::snapshot(&dirs, |_| Some(300 * GB));
+        let config = crate::patch::types::PatcherConfig {
+            render_while_capturing: true,
+            ..Default::default()
+        };
+        // Fits at once: 40 GB left.
+        budget.allocate(&[260 * GB], &config).unwrap();
+        assert_eq!(budget.one_at_a_time.blocks, 0);
+        // Does not fit at once, so planned one at a time, leaving more
+        // (100 GB beside the last clip) than the first demo did.
+        budget.allocate(&[100 * GB, 100 * GB], &config).unwrap();
+        assert_eq!(budget.one_at_a_time.blocks, 2);
+        let headroom = budget.headroom([0], &dirs);
+        assert_eq!(headroom[0].free_bytes, 40 * GB);
+    }
+
+    /// One drive that holds a clip at a time still plans every clip (the
+    /// batch holds between them), and says how many will wait.
+    #[test]
+    fn a_lone_drive_holding_one_clip_at_a_time_still_plans_and_counts_the_waits() {
+        let mut active = 0;
+        let plan = plan(&[132 * GB; 3], &[0], &[160 * GB], &mut active).unwrap();
+        assert_eq!(plan.pairs, vec![(0, 0), (1, 0), (2, 0)]);
+        assert_eq!(plan.waits, 2);
+        assert_eq!(plan.left, vec![Some(28 * GB)]);
+    }
+
+    /// The room left on a drive is the least beside any of its blocks, the
+    /// takes still on it counted: what the pre-launch check re-validates.
+    #[test]
+    fn the_room_left_is_the_least_beside_any_block_with_the_takes_on_disk() {
+        let mut active = 0;
+        let plan = plan(&[100 * GB, 100 * GB], &[0], &[300 * GB], &mut active).unwrap();
+        assert_eq!(plan.waits, 0);
+        assert_eq!(plan.left, vec![Some(100 * GB)]);
+    }
+
+    /// Only the latest takes count: one three clips back has rendered.
+    #[test]
+    fn a_take_older_than_the_latest_two_no_longer_counts() {
+        let mut active = 0;
+        let plan = plan(&[100 * GB; 4], &[0], &[310 * GB], &mut active).unwrap();
+        // Each clip has the two before it beside it: 310 - 200 >= 105.
+        assert_eq!(plan.waits, 0);
+        assert_eq!(plan.left, vec![Some(10 * GB)]);
+    }
+
+    /// The takes recorded at the end of one demo are still on disk when the
+    /// next demo's first clip records.
+    #[test]
+    fn the_latest_takes_carry_from_one_demo_to_the_next() {
+        let mut recent = std::collections::VecDeque::new();
+        let mut active = 0;
+        let capacity = [160 * GB, 1000 * GB];
+        let mut demo = |active: &mut usize| {
+            allocate_blocks_one_at_a_time(
+                &[132 * GB],
+                &[0, 1],
+                &capacity,
+                &mut recent,
+                active,
+                5 * GB,
+            )
+            .unwrap()
+            .pairs
+        };
+        assert_eq!(demo(&mut active), vec![(0, 0)]);
+        // Back on drive 0, whose last take is still there.
+        active = 0;
+        assert_eq!(demo(&mut active), vec![(0, 1)]);
+    }
+
+    /// A batch through [`DriveBudget`] with Render While Capturing on: the
+    /// budget after it, and each block's drive and estimate in record order.
+    fn run_batch(
+        dirs: &[std::path::PathBuf],
+        free: impl Fn(&std::path::Path) -> Option<u64>,
+        demos: &[Vec<u64>],
+    ) -> (DriveBudget, Vec<(usize, u64)>) {
+        let mut budget = DriveBudget::snapshot(dirs, &free);
+        let config = crate::patch::types::PatcherConfig {
+            render_while_capturing: true,
+            ..Default::default()
+        };
+        let mut routed = Vec::new();
+        for estimates in demos {
+            let mut pairs = budget.allocate(estimates, &config).unwrap();
+            pairs.sort_unstable();
+            routed.extend(pairs.iter().map(|&(b, d)| (d, estimates[b])));
+        }
+        (budget, routed)
+    }
+
+    /// The blocks in `routed` without room beside the takes still on their
+    /// drive, recounted from scratch: what the plan's `waits` must say. A take
+    /// is still on disk while it is one of the latest two, or the clips
+    /// recorded after it add up to less than its size.
+    fn rule_waits(routed: &[(usize, u64)], capacity: impl Fn(usize) -> u64) -> usize {
+        // `first`: the oldest take still on disk before block `i` records.
+        let mut first = 0;
+        let mut waits = 0;
+        for (i, &(drive, bytes)) in routed.iter().enumerate() {
+            while i - first > TAKES_STILL_ON_DISK
+                && routed[first + 1..i].iter().map(|(_, b)| b).sum::<u64>() >= routed[first].1
+            {
+                first += 1;
+            }
+            let before: u64 = routed[first..i]
+                .iter()
+                .filter(|(d, _)| *d == drive)
+                .map(|(_, b)| b)
+                .sum();
+            if capacity(drive) < before + bytes + FAILOVER_THRESHOLD {
+                waits += 1;
+            }
+        }
+        waits
+    }
+
+    fn dirs(names: &[&str]) -> Vec<std::path::PathBuf> {
+        names
+            .iter()
+            .map(|d| std::path::PathBuf::from(format!("takes_{d}")))
+            .collect()
+    }
+
+    /// One 300 GB drive and ten one-clip demos of 100 GB: the first two fit
+    /// at once, and every clip after waits for the take two before it. Each
+    /// demo used to try "fits at once" again against what the last one left
+    /// and go uncounted: the log said 4 waits of 4.
+    #[test]
+    fn every_clip_after_the_batch_goes_one_at_a_time_is_counted() {
+        let dirs = dirs(&["a"]);
+        let (budget, routed) = run_batch(&dirs, |_| Some(300 * GB), &vec![vec![100 * GB]; 10]);
+        assert_eq!(routed.len(), 10);
+        assert_eq!(
+            budget.one_at_a_time,
+            OneAtATimeCounts {
+                blocks: 8,
+                waits: 8
+            }
+        );
+        assert_eq!(
+            budget.one_at_a_time.waits,
+            rule_waits(&routed, |_| 300 * GB)
+        );
+    }
+
+    /// Drives of 300 and 110 GB, demos [100, 100], [100], [90]: the last
+    /// clip has room on the small drive, so it goes there rather than
+    /// waiting on the big one, whose two takes are still on it.
+    #[test]
+    fn a_later_demo_sees_the_takes_still_on_disk() {
+        let dirs = dirs(&["v", "w"]);
+        let free = |d: &std::path::Path| Some(if d.ends_with("takes_v") { 300 } else { 110 } * GB);
+        let (budget, routed) = run_batch(
+            &dirs,
+            free,
+            &[vec![100 * GB, 100 * GB], vec![100 * GB], vec![90 * GB]],
+        );
+        let drives: Vec<usize> = routed.iter().map(|&(d, _)| d).collect();
+        assert_eq!(drives, vec![0, 0, 0, 1]);
+        assert_eq!(
+            budget.one_at_a_time,
+            OneAtATimeCounts {
+                blocks: 2,
+                waits: 1
+            }
+        );
+    }
+
+    /// Draws a batch of 67 demos, 1 to 6 clips each, `lo`..`lo + span` GB
+    /// apiece, the same for the same `seed` (xorshift).
+    fn random_batch(seed: u64, lo: u64, span: u64) -> Vec<Vec<u64>> {
+        let mut x = seed * 2_654_435_761 + 1;
+        let mut draw = |n: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % n
+        };
+        (0..67)
+            .map(|_| {
+                let clips = 1 + draw(6) as usize;
+                (0..clips).map(|_| (lo + draw(span)) * GB).collect()
+            })
+            .collect()
+    }
+
+    /// Small drives that can't keep up: the plan's wait count is exactly the
+    /// clips without room beside the latest takes, in every batch, and the
+    /// pre-launch figures all pass.
+    #[test]
+    fn the_wait_count_matches_the_rule_across_many_demos() {
+        let dirs = dirs(&["a", "b"]);
+        let capacity = |d: usize| [220, 160][d] * GB;
+        let free = |p: &std::path::Path| Some(capacity(usize::from(p.ends_with("takes_b"))));
+        let mut any_waits = false;
+        for seed in 0..40 {
+            let (budget, routed) = run_batch(&dirs, free, &random_batch(seed, 70, 60));
+            assert_eq!(
+                budget.one_at_a_time.waits,
+                rule_waits(&routed, capacity),
+                "seed {seed}"
+            );
+            any_waits |= budget.one_at_a_time.waits > 0;
+            let used: std::collections::HashSet<usize> = routed.iter().map(|&(d, _)| d).collect();
+            for entry in budget.headroom(used, &dirs) {
+                assert!(entry.free_bytes >= FAILOVER_THRESHOLD, "seed {seed}");
+            }
+        }
+        assert!(any_waits, "the layout is small enough that some clips wait");
+    }
+
+    /// A batch of six capture drives and too many clips to hold at once,
+    /// laid out like the one in #1438: C: with 54 GB free, short of its
+    /// 50 GiB "Keep free on the Windows drive", F: holding about one clip,
+    /// H: with 16 earlier takes still queued on it. Forty batches of 67
+    /// demos with 1 to 6 clips each, 40-260 GB apiece by the planner's
+    /// estimate: every clip's drive has room for it beside the two takes
+    /// before it there, so the batch never waits for a render. Counting
+    /// only each clip alone (before #1438), 21 of these batches had clips
+    /// that would.
+    #[test]
+    fn six_drives_like_1438s_plan_every_clip_beside_the_takes_still_on_disk() {
+        let dirs = dirs(&["c", "d", "e", "f", "g", "h"]);
+        // What `plannable_free_bytes` counts on the Windows drive: its free
+        // space less what the setting keeps beyond the usual headroom. Done
+        // here by hand: the setting is process-wide, and other tests plan
+        // into the temp folder at the same time.
+        let keep_free: u64 = 50 * 1024 * 1024 * 1024;
+        let c = (54 * GB).saturating_sub(keep_free - FAILOVER_THRESHOLD);
+        let capacity = |d: usize| {
+            [
+                c,
+                540 * GB,
+                1068 * GB,
+                160 * GB,
+                743 * GB,
+                (2478 - 16 * 30) * GB,
+            ][d]
+        };
+        let free = |p: &std::path::Path| {
+            let d = dirs.iter().position(|n| n == p).unwrap();
+            Some(capacity(d))
+        };
+        for seed in 0..40 {
+            let (budget, routed) = run_batch(&dirs, free, &random_batch(seed, 40, 220));
+            assert!(
+                routed.iter().map(|&(_, b)| b).sum::<u64>() > 6000 * GB,
+                "seed {seed}: too many to hold at once"
+            );
+            assert_eq!(budget.one_at_a_time.waits, 0, "seed {seed}");
+            assert_eq!(rule_waits(&routed, capacity), 0, "seed {seed}");
+            assert!(
+                routed.iter().all(|&(d, _)| d != 0),
+                "C: never holds a clip past what it keeps free"
+            );
+            let used: std::collections::HashSet<usize> = routed.iter().map(|&(d, _)| d).collect();
+            for entry in budget.headroom(used, &dirs) {
+                assert!(
+                    entry.free_bytes >= FAILOVER_THRESHOLD,
+                    "seed {seed}: {}",
+                    entry.path.display()
+                );
+            }
+        }
     }
 }
 

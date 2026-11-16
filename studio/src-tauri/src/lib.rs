@@ -14,6 +14,7 @@ mod clip_verdicts;
 mod combine_manager;
 mod config_checks_cmd;
 mod crash_maps_manager;
+mod damaged_demo_notices;
 mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_preview;
@@ -45,6 +46,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_export_dirs;
+mod render_live_resumable;
 mod render_manager;
 mod review_library;
 mod review_manager;
@@ -74,6 +76,7 @@ use demo_preview::{
 use game_process_manager::{
     check_engine_processes, kill_engine_processes, launch_standalone_game, start_steam, steam_state,
 };
+use native::shared::lock::lock_or_recover;
 use obs_manager::launch_obs;
 use render_manager::{
     RenderManager, cancel_queued_render_jobs, cancel_render_batch, cancel_render_job,
@@ -112,7 +115,7 @@ impl Default for ScanManager {
 async fn get_settings(state: tauri::State<'_, SettingsManager>) -> Result<AppSettings, String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&inner_arc);
         Ok(guard.clone())
     }))
     .await
@@ -129,13 +132,16 @@ async fn save_settings(
     // starts next (#1430). Handed over under the settings lock, so two saves
     // close together can't leave it the older list.
     let export_dirs = render.export_dirs();
+    // "Resumable renders" reaches a running batch's next renders the same way
+    // (#1451).
+    let resumable = render.resumable();
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
         // would put the launch and every file Studio writes somewhere other
         // than beside hl.exe (#402).
         native::shared::paths::validate_game_folder(&settings.game_folder)?;
-        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = lock_or_recover(&inner_arc);
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
@@ -145,6 +151,11 @@ async fn save_settings(
         settings_manager::apply_game_folder(&settings);
         settings_manager::apply_windows_drive_keep_free(&settings);
         export_dirs.saved(&settings.render_export_dirs);
+        if resumable.saved(settings.render_resumable) {
+            native::log_markdown(&messages::render::resumable_turned(
+                settings.render_resumable,
+            ));
+        }
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");
@@ -284,12 +295,7 @@ async fn run_demo_audit(
     queued: Vec<String>,
     look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
-    let hl_path = settings
-        .inner
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .hl_path
-        .clone();
+    let hl_path = lock_or_recover(&settings.inner).hl_path.clone();
     let game_folders: Vec<PathBuf> = native::shared::paths::mod_dir_for_exe(Path::new(&hl_path))
         .filter(|_| !hl_path.trim().is_empty())
         .into_iter()
@@ -932,9 +938,14 @@ pub fn run() {
     // them by a running batch (#1430).
     let settings_manager = SettingsManager::new();
     let render_manager = RenderManager::new();
-    render_manager
-        .export_dirs()
-        .saved(&native::shared::lock::lock_or_recover(&settings_manager.inner).render_export_dirs);
+    {
+        let loaded = native::shared::lock::lock_or_recover(&settings_manager.inner);
+        render_manager
+            .export_dirs()
+            .saved(&loaded.render_export_dirs);
+        // As loaded, not a change: nothing to log.
+        render_manager.resumable().saved(loaded.render_resumable);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -990,6 +1001,9 @@ pub fn run() {
             }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
+            // ...and to say a demo it plays is damaged, for a toast with
+            // Repair (#1373).
+            damaged_demo_notices::serve_damage_notices(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]

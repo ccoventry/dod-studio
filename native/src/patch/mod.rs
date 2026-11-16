@@ -141,6 +141,7 @@ pub mod launch_settings;
 pub mod map_check;
 pub mod map_fetch;
 pub mod map_text;
+pub mod protocol47;
 pub mod reachability;
 pub mod runtime_batch;
 pub mod scanner;

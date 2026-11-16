@@ -9,6 +9,7 @@
 //! the LOADING segment adds in front (#810).
 
 use std::ffi::{CString, c_void};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use super::*;
@@ -16,9 +17,10 @@ use super::*;
 const LABEL: &str = "LoadLabel";
 const BAR: &str = "LoadProgress";
 
-/// The demo whose length is known, and that length; and the last percent
+/// The demo file whose length is known (by path, so a same-name replay
+/// from another folder is read again, #1474), and that length; and the last percent
 /// shown (`None` while hidden).
-static LENGTH: std::sync::Mutex<Option<(String, Option<crate::demo_file::DemoLength>)>> =
+static LENGTH: std::sync::Mutex<Option<(PathBuf, Option<crate::demo_file::DemoLength>)>> =
     std::sync::Mutex::new(None);
 static SHOWN: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
 
@@ -88,26 +90,25 @@ pub(super) fn demo_percent() -> Option<u32> {
     })
 }
 
-/// The demo whose loaded span is being worked out, and the span once known
-/// (#866). A background thread walks the file; until it answers, the
+/// The demo file whose loaded span is being worked out (by path, as
+/// [`LENGTH`]), and the span once known (#866). A background thread walks the file; until it answers, the
 /// directory's estimate stands. `try_lock` only: this runs every frame.
-static SPAN: std::sync::Mutex<Option<(String, Option<f32>)>> = std::sync::Mutex::new(None);
+static SPAN: std::sync::Mutex<Option<(PathBuf, Option<f32>)>> = std::sync::Mutex::new(None);
 
 fn loaded_span_of_current_demo() -> Option<f32> {
-    let name = crate::demo_reload::current_demo()?;
+    let path = crate::demo_locate::playing(&crate::demo_reload::current_demo()?);
     let mut known = SPAN.try_lock().ok()?;
     match known.as_ref() {
-        Some((demo, span)) if *demo == name => return *span,
+        Some((demo, span)) if *demo == path => return *span,
         _ => {}
     }
-    *known = Some((name.clone(), None));
+    *known = Some((path.clone(), None));
     drop(known);
-    let path = crate::streaks::demo_path(&dod_dir(), &name);
     std::thread::spawn(move || {
         let span = crate::demo_file::loaded_span(&path);
         let mut known = SPAN.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((demo, slot)) = known.as_mut()
-            && *demo == name
+            && *demo == path
         {
             *slot = span;
         }
@@ -117,15 +118,14 @@ fn loaded_span_of_current_demo() -> Option<f32> {
 
 /// The playing demo's playback length, read once per demo.
 fn length_of_current_demo() -> Option<crate::demo_file::DemoLength> {
-    let name = crate::demo_reload::current_demo()?;
+    let path = crate::demo_locate::playing(&crate::demo_reload::current_demo()?);
     let mut known = LENGTH.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((demo, length)) = known.as_ref()
-        && *demo == name
+        && *demo == path
     {
         return *length;
     }
-    let game_dir = dod_dir();
-    let length = crate::demo_file::length(&crate::streaks::demo_path(&game_dir, &name));
-    *known = Some((name, length));
+    let length = crate::demo_file::length(&path);
+    *known = Some((path, length));
     length
 }

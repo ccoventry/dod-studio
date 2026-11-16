@@ -29,7 +29,13 @@ function cacheCounts(already, failed, upgraded = 0) {
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
 
+/** The network protocol of older game builds' demos (#239): the game plays
+ *  one with an outdated-protocol warning. */
+const OLDER_BUILD_NETWORK_PROTOCOL = 47;
+
 export const STRINGS = {
+  // A sticky toast's close button (toast.js).
+  TOAST_DISMISS: 'Dismiss',
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
     APP_TITLE: 'DoD Studio',
@@ -323,6 +329,13 @@ export const STRINGS = {
     playerFilterOption: (name, n) => `${name} (${n})`,
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
+    // The narrow layout stacks Time and Dur. (and Player, in an HLTV demo) in one column (#46).
+    COL_STACK: 'Time · Dur.',
+    COL_STACK_PLAYER: 'Player / Time · Dur.',
+    // The stacked cell's second line, and its player line's tooltip (the name
+    // is cut to fit, so the tooltip carries the name and the weapon chain).
+    stackedWhen: (time, dur) => `${time} · ${dur}`,
+    stackedPlayerTitle: (player, chain) => (chain ? `${player} — ${chain}` : player),
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
     COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
@@ -947,6 +960,8 @@ export const STRINGS = {
     SOURCE_FPS_LABEL: 'Source FPS:',
     SOURCE_FPS_TITLE: 'The frame rate a take is read at when it does not say what it was captured at (takes from older versions). Takes captured by this version render at their own capture FPS, and each row says which it used.',
     MAX_CONCURRENT_LABEL: 'Max Concurrent Renders:',
+    RESUMABLE_LABEL: 'Resumable renders (split long renders into pieces)',
+    RESUMABLE_HINT: 'A stopped render picks up where it left off. While rendering it needs up to about twice the clip\'s size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room. When off, renders run in one piece, and a stopped render\'s saved pieces are deleted the next time that take renders.',
     EXPORT_DIR_PLACEHOLDER: 'Add export drive/folder...',
     EXPORT_DIR_ROW_PLACEHOLDER: 'Export drive/folder path...',
     ADD_DRIVE_BUTTON: 'Add Drive',
@@ -1395,6 +1410,16 @@ export const STRINGS = {
       ambiguous: 'the same player and kills fit more than one highlight',
       taken: "another highlight's work went to the same highlight",
     },
+    // The game's damaged-demo notice (#1373, damaged_demo_toast.js).
+    gameDamaged: (name, clock) => (clock
+      ? `${name} is damaged at ${clock}: the game stops playing it there.`
+      : `${name} is damaged: the game stops playing it partway.`),
+    gameDamagedDuringBatch: (name, clock) => `${name} is damaged${clock ? ` at ${clock}` : ''}: the game stops playing it there. Repair it once the capture batch has ended (its row's Repair in the Master Demo Queue, or Damaged Demos).`,
+    GAME_DAMAGED_ACTION: 'Repair',
+    gameDamagedWorkingCopyLog: (name) => `[repair] no toast for ${name}: it is one of DoD Studio's own working copies`,
+    gameDamagedLog: (path, clock, reason) => `[repair] the game says ${path} is damaged${clock ? ` at ${clock}` : ''} (${reason})`,
+    gameRepairStartLog: (name) => `[repair] from the game's notice: repairing ${name}`,
+    gameRepairEndLog: (name, verdict, elapsed) => `[repair] from the game's notice: ${name}: ${verdict} in ${elapsed}`,
     queueStartLog: (name) => `[repair] queue: repairing ${name}`,
     queueEndLog: (name, elapsed) => `[repair] queue: ${name} swapped for its repair in ${elapsed}`,
     // The Demo Analyzer's damaged-demo notice (analyzer_damage.js).
@@ -1574,6 +1599,11 @@ export const STRINGS = {
     ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
     CAPTURE_SPLIT_LABEL: 'Capture Studio split',
     ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    OVERVIEWS_MAPS_LABEL: 'Overviews Maps panel',
+    OVERVIEWS_EDIT_LABEL: 'Overviews Edit panel',
+    RENDER_TABLE_LABEL: 'Render queue table',
+    AUDITOR_TABLE_LABEL: 'Demo Auditor results table',
+    splitResetLog: (label) => `${label} size reset to the default`,
     splitNotSaved: (label, err) => `${label} not saved: ${err}`,
   },
 
@@ -1859,6 +1889,10 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #239: protocol 47 is an older build's; the game warns and plays it.
+    networkProtocolValue: (protocol) => (protocol === OLDER_BUILD_NETWORK_PROTOCOL
+      ? `${protocol} (older build): plays with an outdated-protocol warning`
+      : String(protocol)),
     // #207: what decides whether the pre-Anniversary engine can play it.
     PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
     peakEntitiesValue: (peak) => (peak > 256

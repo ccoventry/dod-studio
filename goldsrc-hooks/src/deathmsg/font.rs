@@ -849,7 +849,7 @@ fn keep_handle(handles: &mut Vec<(HandleKey, u32)>, key: HandleKey, handle: u32)
 }
 
 #[cfg(target_arch = "x86")]
-mod hook {
+pub(crate) mod hook {
     use std::ffi::{CStr, CString, c_char, c_void};
 
     use super::*;
@@ -868,7 +868,8 @@ mod hook {
     const SURFACE_DRAW_FLUSH_TEXT: usize = 21;
     const SURFACE_CREATE_FONT: usize = 59;
     const SURFACE_ADD_GLYPH_SET_TO_FONT: usize = 60;
-    const SURFACE_GET_FONT_TALL: usize = 62;
+    /// Also how the review form sizes its boxes to their font (#1311).
+    pub(crate) const SURFACE_GET_FONT_TALL: usize = 62;
     /// What `DrawUnicodeChar` advances by (`call [eax+0xfc]` in it, both
     /// builds); see [`drawn_width`].
     const SURFACE_GET_CHAR_ABC_WIDE: usize = 63;
@@ -895,7 +896,8 @@ mod hook {
         i32,
         i32,
     ) -> u32;
-    type FontTallFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
+    /// `GetFontTall(font)`.
+    pub(crate) type FontTallFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
     /// `(font, ch, &a, &b, &c)`.
     type CharAbcFn =
         unsafe extern "thiscall" fn(*mut c_void, u32, i32, *mut i32, *mut i32, *mut i32);

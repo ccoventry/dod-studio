@@ -321,6 +321,11 @@ pub type HookUserMsgFn = unsafe extern "C" fn(msg_name: *const c_char, pfn: User
 pub type UserMsgHookFn =
     unsafe extern "C" fn(name: *const c_char, size: i32, buf: *mut c_void) -> i32;
 pub type ConsolePrintFn = unsafe extern "C" fn(text: *const c_char);
+/// Slot 31, `pfnCenterPrint(text)`: the engine's wrapper that hands `text`,
+/// unformatted, to `SCR_CenterPrint` (which copies up to 1023 bytes). Call
+/// it only through `demo_damage::tell::center_print`, which checks the slot
+/// still points at the wrapper each build is known to have.
+pub type CenterPrintFn = unsafe extern "C" fn(text: *const c_char);
 pub type CmdArgcFn = unsafe extern "C" fn() -> i32;
 pub type CmdArgvFn = unsafe extern "C" fn(arg: i32) -> *const c_char;
 pub type RegisterVariableFn = unsafe extern "C" fn(
@@ -723,7 +728,11 @@ pub struct ClEngineFuncsPartial {
     /// `+0x2b00d` and `+0x2b04e`).
     pub pfn_draw_console_string_len: DrawConsoleStringLenFn,
     pub pfn_console_print: ConsolePrintFn,
-    _slots_before_cmd_argc: [*mut c_void; 7], // pfnCenterPrint .. Cvar_SetValue
+    /// Slot 31. See [`CenterPrintFn`]; the engine's table holds it at
+    /// pre-Anniversary `hw.dll+0x1362dc` (`+0xb0e0`) and 25th Anniversary
+    /// `+0x319b84` (`+0x195480`), 31 slots in (`tools/verify_center_print_offsets.py`).
+    pub pfn_center_print: CenterPrintFn,
+    _slots_before_cmd_argc: [*mut c_void; 6], // GetWindowCenterX .. Cvar_SetValue
     pub cmd_argc: CmdArgcFn,
     pub cmd_argv: CmdArgvFn,
     _slots_before_get_local_player: [*mut c_void; 11], // Con_Printf .. IsNoClipping

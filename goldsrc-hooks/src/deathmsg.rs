@@ -80,11 +80,12 @@ mod butt;
 mod clear;
 mod colour;
 mod even;
-mod font;
+pub(crate) mod font;
 mod layout_report;
 mod name_cap;
 mod replace;
 mod scale;
+pub(crate) mod seek_restamp;
 
 /// A translucent box under a HUD draw; the review's panel (#660) uses it too.
 #[cfg(target_arch = "x86")]
@@ -715,6 +716,38 @@ pub(crate) fn lift_name_cap() -> Result<(), String> {
     unsafe { name_cap::lift(base, array) }
 }
 
+/// How long a kill notice stays up, in seconds: `hud_deathnotice_time`,
+/// truncated as the game does. `None` before the engine is up.
+// Only the 32-bit demo player rewinds; a host build has none.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn notice_lifetime() -> Option<f64> {
+    let engfuncs = engine::engfuncs()?;
+    // Safety: the engine's own cvar lookup, with a NUL-terminated name.
+    let lifetime = unsafe { (engfuncs.pfn_get_cvar_float)(c"hud_deathnotice_time".as_ptr()) };
+    Some(f64::from(lifetime.trunc()))
+}
+
+/// Empties the kill feed during a stepped seek (`demo_seek`, #1085): its
+/// steps replay every kill before the landing within a second or two. The
+/// kills replayed from here, with the clock at `clock`, are re-dated at the
+/// landing ([`seek_restamp`]). With `keep` (a plain forward seek shorter than
+/// a notice lifetime) the lines up stay and are re-dated with them. Returns
+/// how many lines went.
+// Only the 32-bit demo player steps; a host build has none.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn clear_for_rewind(clock: f64, keep: bool) -> Result<usize, String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    if keep {
+        seek_restamp::adopt(clock);
+        return Ok(0);
+    }
+    seek_restamp::begin(clock);
+    Ok(clear::expire_all())
+}
+
 /// Whether the kill feed holds 63-character names now.
 pub(crate) fn name_cap_lifted() -> bool {
     engine::client_module_base().is_some_and(name_cap::lifted)
@@ -938,6 +971,9 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     if let Some([killer, victim, butt::BUTT_WEAPON]) = shown {
         note_butt(i32::from(killer), i32::from(victim));
     }
+    if shown.is_some() {
+        seek_restamp::on_arrival();
+    }
     // After the game has added the line, so `clear_on death` takes it too.
     // The death happened whatever `replace` or `block` showed of it.
     if let Some(victim) = victim {
@@ -1056,6 +1092,7 @@ pub fn poll() {
         || clear::wants_death_msg()
         || even::wanted()
         || crate::headshot_sound::wants_kills()
+        || seek_restamp::recording()
     {
         install_hook();
     }

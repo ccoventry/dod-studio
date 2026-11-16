@@ -137,6 +137,11 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_damage`: when a demo stops because its file is damaged (or
+//!   `viewdemo` loads it only up to the damage), says so in the console, the
+//!   DoD Studio window and on screen, and tells Studio over the events pipe
+//!   and its game pipe (#1373).
+//!   `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 //! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
 //!   through its event dictionary's lookup cache, the 25th Anniversary crash
 //!   on a second `viewdemo` of an HLTV demo (#1392). On by default for the
@@ -300,8 +305,10 @@ mod debug_texture;
 mod decals;
 mod demo_bar_progress;
 mod demo_console_keys;
+mod demo_damage;
 mod demo_file;
 mod demo_list_folders;
+mod demo_locate;
 mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
@@ -507,6 +514,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only reads, when a demo has already stopped on a damaged frame, so on
+    // unless asked not to.
+    demo_damage::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_DAMAGE", true),
+        Ordering::Relaxed,
+    );
     // Only empties a cache the demo player rebuilds, so on unless asked not to.
     demoplayer_dict_cache::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX", true),
@@ -661,6 +674,8 @@ fn install_fixes() {
     particle_hide::reinstall_if_used();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // hw.dll, once; before the first demo, which is the one it may catch.
+    demo_damage::install();
     // Before any map loads, so before the first demo's InitHUD.
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
