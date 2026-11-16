@@ -1850,10 +1850,12 @@ pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Displa
 /// don't all fit the capture drives at once: how many were routed one at a
 /// time, and how many of those have room only once the takes before them on
 /// their drive have rendered. `takes_counted`: how many of the latest takes
-/// the plan counts as still on disk.
+/// the plan counts as still on disk at least (a big take counts longer).
 pub fn room_plan(one_at_a_time: usize, waits: usize, takes_counted: usize) -> String {
     let wait_note = if waits == 0 {
-        format!("each has room beside the {takes_counted} take(s) recorded before it")
+        format!(
+            "each has room beside the takes still on its drive (at least the {takes_counted} recorded before it, and a big take until the clips after it add up to its size)"
+        )
     } else {
         format!(
             "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch holds before each of those until they have"
