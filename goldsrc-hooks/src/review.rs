@@ -681,11 +681,35 @@ fn send_ask(start: crate::review_ask::Start) {
         say("no demo is playing: play one with viewdemo first");
         return;
     };
-    let demo = crate::review_ask::demo_path(&crate::demo_locate::playing(&name));
+    let demo = match ask_target(crate::demo_locate::playing_found(&name), &name) {
+        Ok(demo) => demo,
+        Err(why) => {
+            say(&why);
+            return;
+        }
+    };
     match crate::review_ask::send(demo.clone(), start) {
         Ok(()) => say(&format!("asked DoD Studio to review {}", demo.display())),
         Err(why) => say(&why),
     }
+}
+
+/// The file an ask names for the demo `name`, from where the game opened
+/// it (`opened`), or why it isn't asked: with no file found, Studio would
+/// be asked to review one that isn't there (#1474).
+fn ask_target(
+    opened: Option<std::path::PathBuf>,
+    name: &str,
+) -> Result<std::path::PathBuf, String> {
+    match opened {
+        Some(opened) => Ok(crate::review_ask::demo_path(&opened)),
+        None => Err(not_found(name)),
+    }
+}
+
+/// What an ask says when [`ask_target`] finds no file.
+fn not_found(name: &str) -> String {
+    format!("can't find {name} in the game's folders, so DoD Studio isn't asked")
 }
 
 /// Where a review starts: the first highlight whose first kill is at or
@@ -1498,6 +1522,18 @@ fn start(path: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ask_names_the_file_the_game_opened_or_says_it_is_missing() {
+        use std::path::PathBuf;
+        let opened = PathBuf::from("C:/Games/Half-Life/dod_addon/../dod_addon/match1.dem");
+        assert_eq!(
+            super::ask_target(Some(opened), "match1"),
+            Ok(PathBuf::from("C:/Games/Half-Life/dod_addon/match1.dem"))
+        );
+        let missing = super::ask_target(None, "match1").unwrap_err();
+        assert!(missing.starts_with("can't find match1"), "{missing}");
+    }
+
     use super::*;
     use crate::review_keys::clock_text;
 

@@ -164,22 +164,36 @@ static DEMO_INFO: std::sync::Mutex<Vec<(String, u64, Option<DemoInfo>)>> =
 /// How much of a demo `demo_info` reads.
 const DEMO_START: usize = 4096;
 
+thread_local! {
+    /// Each row's file, found once per fill (engine thread, like the list).
+    static ROW_FILES: std::cell::RefCell<crate::demo_locate::RowFiles> =
+        std::cell::RefCell::new(crate::demo_locate::RowFiles::default());
+}
+
 /// The demo file a row names (a path from `dod/`, which the game also
 /// looks for in `dod_addon` and `dod_downloads`, #1474), or `None` for a
-/// folder row.
+/// folder row. Found once per row until the list fills again.
 pub(super) fn row_path(row: &str) -> Option<std::path::PathBuf> {
     let name = row.trim().trim_matches('"');
     if name.ends_with('/') || name.is_empty() {
         return None;
     }
-    Some(crate::demo_locate::file_for(name))
+    Some(ROW_FILES.with(|rows| rows.borrow_mut().file(name, crate::demo_locate::file_for)))
 }
 
-/// The header facts of the demo a row names (a path from `dod/`).
+/// The header facts of the demo a row names (a path from `dod/`). A row
+/// whose remembered file has gone is looked for once more.
 fn info_for(row: &str) -> Option<DemoInfo> {
     let name = row.trim().trim_matches('"');
-    let path = row_path(row)?;
-    let meta = std::fs::metadata(&path).ok()?;
+    let mut path = row_path(row)?;
+    let meta = match std::fs::metadata(&path) {
+        Ok(meta) => meta,
+        Err(_) => {
+            ROW_FILES.with(|rows| rows.borrow_mut().drop_row(name));
+            path = row_path(row)?;
+            std::fs::metadata(&path).ok()?
+        }
+    };
     let modified = meta
         .modified()
         .ok()?
@@ -797,6 +811,7 @@ pub(super) unsafe fn navigate(step: fn() -> bool) -> Result<(), String> {
 /// Lists the demos again in our Load Demo window (new recordings, or a
 /// folder change), with the window's own fill.
 pub(super) unsafe fn refill_demo_list() {
+    ROW_FILES.with(|rows| rows.borrow_mut().clear());
     let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
     if dialog.is_null() {
         return;
