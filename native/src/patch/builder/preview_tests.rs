@@ -1,7 +1,6 @@
 //! `build_preview_patch_jobs`: a preview demo's Event List numbers its highlights
 //! the way the capture job does (#1417, #1449).
 
-use super::blocks::group_highlights;
 use super::tests::streak_with_kills;
 use super::*;
 
@@ -62,16 +61,39 @@ fn two_kills_on_one_frame_are_ordered_by_kill_range_not_sent_order() {
     second.start_index = 1;
     second.end_index = 1;
 
-    let order = |h: Vec<CaptureStreak>| -> Vec<String> {
-        group_highlights(&h)[0]
-            .highlights
-            .iter()
-            .map(|(_, s)| s.timeline_string.clone())
-            .collect()
-    };
+    let sent_first_first = labels(vec![first.clone(), second.clone()]);
+    let sent_second_first = labels(vec![second, first]);
 
-    assert_eq!(
-        order(vec![first.clone(), second.clone()]),
-        order(vec![second, first])
-    );
+    assert_eq!(sent_first_first, sent_second_first);
+    assert!(sent_first_first["first"].starts_with("#1/2"));
+    assert!(sent_first_first["second"].starts_with("#2/2"));
+}
+
+#[test]
+fn a_demo_with_one_player_keeps_the_plain_label() {
+    let got = labels(vec![tagged("t", "A", 1000, 1100, &[1000, 1100])]);
+
+    assert_eq!(got["t"], "#1/1: 2 kills: t");
+}
+
+#[test]
+fn a_demo_with_several_players_names_each_one_on_its_labels() {
+    let got = labels(vec![
+        tagged("a1", "Alpha", 1000, 1100, &[1000, 1100]),
+        tagged("b1", "Bravo", 1500, 1600, &[1500, 1600]),
+    ]);
+
+    assert_eq!(got["a1"], "#1/1 Alpha: 2 kills: a1");
+    assert_eq!(got["b1"], "#1/1 Bravo: 2 kills: b1");
+}
+
+#[test]
+fn a_long_player_name_is_cut_so_the_kill_list_survives() {
+    let long = "N".repeat(100);
+    let got = labels(vec![
+        tagged("a1", &long, 1000, 1100, &[1000, 1100]),
+        tagged("b1", "B", 1500, 1600, &[1500, 1600]),
+    ]);
+
+    assert_eq!(got["a1"], format!("#1/1 {}: 2 kills: a1", "N".repeat(24)));
 }

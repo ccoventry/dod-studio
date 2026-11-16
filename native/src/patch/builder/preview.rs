@@ -50,22 +50,46 @@ pub fn playdemo_safe_stem(raw: &str) -> String {
     format!("{}{}", &sanitized[..keep], hash_suffix)
 }
 
+/// How many characters of a player's name go on a label: the director message
+/// holds 224 bytes, and the kill list after the name is what gets cut first.
+const PLAYER_TAG_CHARS: usize = 24;
+
+/// " <name>" for a label (a missing name shows as "?").
+fn player_tag(name: Option<&str>) -> String {
+    let name: String = name.unwrap_or("?").chars().take(PLAYER_TAG_CHARS).collect();
+    format!(" {name}")
+}
+
 pub fn build_preview_patch_jobs(
     raw_streaks: Vec<CaptureStreak>,
     output_dir: Option<&std::path::Path>,
 ) -> Vec<PatchJob> {
-    // Labels come from the same grouping and order a capture job uses: per
-    // demo and player, by first kill, then last kill (#1417, #1449), so a
-    // preview's Event List numbers match the capture's. Indexed like
-    // `raw_streaks`.
+    // Labels use the grouping and order a capture job uses: per demo and
+    // player, by first kill, then last kill (#1417, #1449). So the numbers
+    // match a capture's only for the same set of highlights: a capture
+    // numbers the ones selected, a preview every one it is given. A demo
+    // with several players names the player on each label, since the `#i/n`
+    // restarts per player. Indexed like `raw_streaks`.
+    let groups = group_highlights(&raw_streaks);
+    let mut players_in_demo: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for group in &groups {
+        *players_in_demo.entry(group.source_demo).or_default() += 1;
+    }
     let mut labels: Vec<String> = vec![String::new(); raw_streaks.len()];
-    for group in group_highlights(&raw_streaks) {
+    for group in &groups {
         let total = group.highlights.len();
+        let who = if players_in_demo[group.source_demo] > 1 {
+            player_tag(group.target_player)
+        } else {
+            String::new()
+        };
         for (row, (idx, s)) in group.highlights.iter().enumerate() {
             labels[*idx] = format!(
-                "#{}/{}: {} kills: {}",
+                "#{}/{}{}: {} kills: {}",
                 row + 1,
                 total,
+                who,
                 s.kill_count,
                 s.timeline_string
             );
