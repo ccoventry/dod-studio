@@ -1,7 +1,7 @@
 //! Where a damaged-demo notice goes besides the console, the hook log and
-//! the events pipe (#1373): the owner's choice of 2026-11-11 was a line in
-//! the in-game DoD Studio window, a toast in Studio with Repair, and a
-//! message on screen only when nothing is being captured.
+//! the events pipe (#1373): a line in the in-game DoD Studio window, a toast
+//! in Studio with Repair, and a message on screen only when nothing is being
+//! captured.
 //!
 //! - **The window**: the loading strip along the top of its tabs shows
 //!   [`strip_line`] while the damaged demo is still the current one.
@@ -25,7 +25,8 @@ static STRIP: Mutex<Option<(String, String)>> = Mutex::new(None);
 const STRIP_DAMAGED: &str = "This demo is damaged at {at}: it plays only up to there. \
                              DoD Studio can repair it.";
 
-/// The centre print's text: no `%`, since the engine formats it.
+/// The centre print's text. `SCR_CenterPrint` copies it as it is (up to
+/// 1023 bytes) and breaks lines at each newline.
 const CENTRE_DAMAGED: &str = "This demo is damaged at {at}.\nDoD Studio can repair it.";
 
 /// One engine build's `pfnCenterPrint` wrapper, by offset in `hw.dll`
@@ -79,7 +80,7 @@ pub(super) fn on_screen(at_text: &str) {
 }
 
 /// `text` through the engine's `pfnCenterPrint`, when the slot points at
-/// the wrapper a known build has. `text` holds no `%`.
+/// the wrapper a known build has.
 fn center_print(text: &str) -> Result<&'static str, String> {
     let engfuncs = crate::engine::engfuncs().ok_or("no engine function table yet")?;
     let base = crate::engine::engine_module_base().ok_or("hw.dll is not loaded")?;
@@ -91,9 +92,9 @@ fn center_print(text: &str) -> Result<&'static str, String> {
         .ok_or_else(|| {
             format!("pfnCenterPrint is at +{at:#x}, not a wrapper this was checked against")
         })?;
-    let text = std::ffi::CString::new(text.replace('%', "")).map_err(|e| e.to_string())?;
-    // Safety: the engine's own wrapper (checked above), on its thread, with a
-    // format that has no conversions.
+    let text = std::ffi::CString::new(text).map_err(|e| e.to_string())?;
+    // Safety: the engine's own wrapper (checked above), on its thread; it
+    // hands the string to `SCR_CenterPrint` unformatted.
     unsafe { (engfuncs.pfn_center_print)(text.as_ptr()) };
     Ok(build)
 }
@@ -159,11 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn the_texts_name_the_time_and_the_centre_print_has_no_format() {
+    fn the_texts_name_the_time() {
         for text in [STRIP_DAMAGED, CENTRE_DAMAGED] {
             assert!(text.contains("{at}"));
         }
-        assert!(!CENTRE_DAMAGED.contains('%'));
         assert!(!STRIP_DAMAGED.contains('\n'));
     }
 

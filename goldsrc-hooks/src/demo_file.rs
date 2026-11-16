@@ -222,6 +222,9 @@ pub struct Walk {
     /// [`loaded_span`]'s figure: the `svc_time` span up to the first turn
     /// back or the first bad frame.
     pub span: Option<f32>,
+    /// The first `svc_time`, where the demo player's world starts: the two
+    /// must agree before a span is held against the player's (#1373).
+    pub first: Option<f32>,
     /// The walk stopped on a frame no reader can make sense of (an unknown
     /// type, a size past [`MAX_POSSIBLE_MSG`] or below zero, a frame running
     /// past the end of the file) before the clock turned back: the file is
@@ -251,6 +254,7 @@ pub fn walk(path: &Path) -> Option<Walk> {
     }
     Some(Walk {
         span: clock.span(),
+        first: clock.first,
         bad_frame,
     })
 }
@@ -593,6 +597,7 @@ mod tests {
         let walked = walk(&path).unwrap();
         assert!(walked.bad_frame);
         assert!((walked.span.unwrap() - 497.7).abs() < 0.01);
+        assert_eq!(walked.first, Some(10.0));
         // A negative size and an unknown frame type are the same.
         for bad in [oversized(-1), vec![42u8; 9]] {
             let frames = [net(10.0), net(20.0), bad, net(30.0)].concat();

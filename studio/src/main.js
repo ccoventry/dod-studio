@@ -395,7 +395,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The in-game Review tab's From the start / From here (#1142).
   startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
     scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
-  startDamagedDemoToasts({ getDemos: queue.getDemos, repairQueuedDemo }); // the game's damaged-demo notice (#1373)
+  startDamagedDemoToasts({ getDemos: queue.getDemos, repairQueuedDemo, isHeld: batchGuard.isHeld }); // the game's damaged-demo notice (#1373)
 
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),

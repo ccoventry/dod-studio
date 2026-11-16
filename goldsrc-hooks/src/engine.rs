@@ -321,11 +321,11 @@ pub type HookUserMsgFn = unsafe extern "C" fn(msg_name: *const c_char, pfn: User
 pub type UserMsgHookFn =
     unsafe extern "C" fn(name: *const c_char, size: i32, buf: *mut c_void) -> i32;
 pub type ConsolePrintFn = unsafe extern "C" fn(text: *const c_char);
-/// Slot 31, `pfnCenterPrint(fmt, ...)`: the engine's wrapper that formats
-/// `fmt` and hands the text to `SCR_CenterPrint`. Call it only through
-/// `demo_damage::tell::center_print`, which checks the slot still points
-/// at the wrapper each build is known to have.
-pub type CenterPrintFn = unsafe extern "C" fn(fmt: *const c_char, ...);
+/// Slot 31, `pfnCenterPrint(text)`: the engine's wrapper that hands `text`,
+/// unformatted, to `SCR_CenterPrint` (which copies up to 1023 bytes). Call
+/// it only through `demo_damage::tell::center_print`, which checks the slot
+/// still points at the wrapper each build is known to have.
+pub type CenterPrintFn = unsafe extern "C" fn(text: *const c_char);
 pub type CmdArgcFn = unsafe extern "C" fn() -> i32;
 pub type CmdArgvFn = unsafe extern "C" fn(arg: i32) -> *const c_char;
 pub type RegisterVariableFn = unsafe extern "C" fn(

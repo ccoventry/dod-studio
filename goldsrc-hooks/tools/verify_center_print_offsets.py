@@ -3,9 +3,10 @@
 
 For each build it checks, in that build's hw.dll:
 
-- the wrapper at the table's offset is `push ebp; mov ebp, esp; lea eax,
-  [ebp+8]` (it formats its `fmt, ...`) and calls `SCR_CenterPrint`, whose
-  offset `src/engine_center_print.rs` already names;
+- the wrapper at the table's offset starts `push ebp; mov ebp, esp; lea
+  eax, [ebp+8]` and calls `SCR_CenterPrint` (whose offset
+  `src/engine_center_print.rs` already names) with its one argument, the
+  text, unformatted;
 - one pointer to it sits in .data, and that pointer is slot 31 of a table:
   the dword 32 slots before it is not a code pointer (the table's start)
   while slots 0 to 31 are, and slot 30 is a function too (`pfnConsolePrint`).

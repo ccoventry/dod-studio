@@ -30,6 +30,8 @@ function cacheCounts(already, failed, upgraded = 0) {
 }
 
 export const STRINGS = {
+  // A sticky toast's close button (toast.js).
+  TOAST_DISMISS: 'Dismiss',
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
     APP_TITLE: 'DoD Studio',
@@ -1399,11 +1401,12 @@ export const STRINGS = {
     gameDamaged: (name, clock) => (clock
       ? `${name} is damaged at ${clock}: the game stops playing it there.`
       : `${name} is damaged: the game stops playing it partway.`),
+    gameDamagedDuringBatch: (name, clock) => `${name} is damaged${clock ? ` at ${clock}` : ''}: the game stops playing it there. Repair it once the capture batch has ended (its row's Repair in the Master Demo Queue, or Damaged Demos).`,
     GAME_DAMAGED_ACTION: 'Repair',
+    gameDamagedWorkingCopyLog: (name) => `[repair] no toast for ${name}: it is one of DoD Studio's own working copies`,
     gameDamagedLog: (path, clock, reason) => `[repair] the game says ${path} is damaged${clock ? ` at ${clock}` : ''} (${reason})`,
     gameRepairStartLog: (name) => `[repair] from the game's notice: repairing ${name}`,
     gameRepairEndLog: (name, verdict, elapsed) => `[repair] from the game's notice: ${name}: ${verdict} in ${elapsed}`,
-    gameRepairing: (name) => `Repairing ${name}…`,
     queueStartLog: (name) => `[repair] queue: repairing ${name}`,
     queueEndLog: (name, elapsed) => `[repair] queue: ${name} swapped for its repair in ${elapsed}`,
     // The Demo Analyzer's damaged-demo notice (analyzer_damage.js).

@@ -17,7 +17,15 @@
 //!   percent: the span the player should hold, and whether a frame no reader
 //!   can make sense of cut the walk short;
 //! - once the player's `IsLoading` clears, its buffered span
-//!   (`GetEndTime - GetStartTime`) is held against that ([`verdict`]).
+//!   (`GetEndTime - GetStartTime`) is held against that ([`verdict`]), once
+//!   its start matches the file's first `svc_time`.
+//!
+//! Only a load that stopped where the walk found a bad frame is reported.
+//! A player holding less of a file the walk read whole is logged only
+//! ([`Verdict::Unconfirmed`]): no real damaged demo has ended that way yet,
+//! and it is the one verdict a healthy demo could get.
+//!
+//! The verdict is dropped if another demo was started before it came in.
 //!
 //! No new engine address: the player's slots are `demo_seek`'s, checked on
 //! both builds by `tools/verify_demo_seek_offsets.py`.
@@ -58,9 +66,17 @@ struct Watch {
     walk: WalkState,
     /// The player has been seen loading this demo.
     seen_loading: bool,
-    /// Once loaded: the player's buffered span, its end on the world clock,
-    /// and when.
-    loaded: Option<(f64, f64, Instant)>,
+    /// Once loaded: what the player holds.
+    loaded: Option<Loaded>,
+}
+
+/// The player's world once it has loaded, on its clock, and when.
+#[derive(Clone, Copy)]
+struct Loaded {
+    start: f64,
+    span: f64,
+    end: f64,
+    at: Instant,
 }
 
 enum WalkState {
@@ -129,12 +145,12 @@ fn step(watch: &mut Watch) -> Step {
             Err(TryRecvError::Empty) => {}
         }
     }
-    let Some((span, end, loaded_at)) = watch.loaded else {
+    let Some(loaded) = watch.loaded else {
         return watch_loading(watch);
     };
     let walk = match &watch.walk {
         WalkState::Done(walk) => *walk,
-        WalkState::Running(_) if loaded_at.elapsed() < WALK_WAIT => return Step::Wait,
+        WalkState::Running(_) if loaded.at.elapsed() < WALK_WAIT => return Step::Wait,
         WalkState::Running(_) => {
             log(&watch.name, "the file took too long to read, no verdict");
             return Step::Done(None);
@@ -144,26 +160,44 @@ fn step(watch: &mut Watch) -> Step {
         log(&watch.name, "the file's directory doesn't read, no verdict");
         return Step::Done(None);
     };
-    let reason = verdict(span, &walk);
+    // The demo may have changed while the walk ran (a playdemo, a timedemo,
+    // another viewdemo's name): the verdict is only about the watched one.
+    if crate::demo_reload::current_demo().as_deref() != Some(watch.name.as_str()) {
+        log(
+            &watch.name,
+            "another demo was started before the verdict, none given",
+        );
+        return Step::Done(None);
+    }
+    let verdict = verdict(loaded.start, loaded.span, &walk);
     log(
         &watch.name,
         &format!(
-            "loaded {span:.2} s (to {end:.2}), the file {:?}{}: {}",
+            "loaded {:.2} s ({:.2} to {:.2}), the file {:?} from {:?}{}: {verdict:?}",
+            loaded.span,
+            loaded.start,
+            loaded.end,
             walk.span,
+            walk.first,
             if walk.bad_frame {
                 " up to a bad frame"
             } else {
                 ""
             },
-            reason.unwrap_or("not damaged")
         ),
     );
-    Step::Done(reason.map(|reason| Damage {
+    let Verdict::Damaged(reason) = verdict else {
+        return Step::Done(None);
+    };
+    Step::Done(Some(Damage {
         cause: Cause::DamagedAtLoad,
         reason,
-        message: format!("viewdemo loaded {span:.2} s of the file's {:?}", walk.span),
+        message: format!(
+            "viewdemo loaded {:.2} s of the file's {:?}",
+            loaded.span, walk.span
+        ),
         demo: Some(watch.name.clone()),
-        at: Some(end),
+        at: Some(loaded.end),
         clock: "demo player",
     }))
 }
@@ -178,7 +212,12 @@ fn watch_loading(watch: &mut Watch) -> Step {
             Step::Wait
         }
         Some(c) if c.active && watch.seen_loading => {
-            watch.loaded = Some((c.end - c.start, c.end, Instant::now()));
+            watch.loaded = Some(Loaded {
+                start: c.start,
+                span: c.end - c.start,
+                end: c.end,
+                at: Instant::now(),
+            });
             Step::Wait
         }
         _ if watch.seen_loading => {
@@ -193,23 +232,53 @@ fn watch_loading(watch: &mut Watch) -> Step {
     }
 }
 
-/// Why the demo is damaged, when it is: `player_span` is what the player
-/// holds once loaded, `walk` what the file does.
+/// What a load came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// Damaged, for this reason: said everywhere.
+    Damaged(&'static str),
+    /// What would be said, in the hook log only: the `stopped_loading` case
+    /// has not yet been seen on a real damaged demo, while it is the one way
+    /// a healthy demo could be called damaged, so it waits for a survey.
+    Unconfirmed(&'static str),
+    NotDamaged,
+    /// The player's world starts somewhere else than the file the walk read
+    /// (another file of the same name, or a clock read wrong): no verdict.
+    OtherStart,
+}
+
+/// What a load came to: `player_start` and `player_span` are what the player
+/// holds once loaded, on its world clock, and `walk` what the file does.
 ///
-/// - The walk stopped on a bad frame and the player stopped there too: the
+/// Both must start at the same `svc_time` first, or the two are not the same
+/// recording. Then:
+/// - the walk stopped on a bad frame and the player stopped there too: the
 ///   loader read up to the same frame (`bad_frame`). If the player read well
-///   past it, the walk misread the file, and nothing is said.
-/// - Otherwise the player holding less than the file means the loader
-///   refused a message the frame walk doesn't parse (`stopped_loading`).
-pub(super) fn verdict(player_span: f64, walk: &Walk) -> Option<&'static str> {
-    let file_span = f64::from(walk.span?);
-    if !player_span.is_finite() {
-        return None;
+///   past it, the walk misread the file, and nothing is said;
+/// - otherwise the player holding less than the file means the loader
+///   refused a message the frame walk doesn't parse (`stopped_loading`, only
+///   logged for now: see [`Verdict::Unconfirmed`]).
+pub(super) fn verdict(player_start: f64, player_span: f64, walk: &Walk) -> Verdict {
+    let (Some(file_span), Some(first)) = (walk.span, walk.first) else {
+        return Verdict::NotDamaged;
+    };
+    if !player_span.is_finite() || !player_start.is_finite() {
+        return Verdict::NotDamaged;
     }
+    if (player_start - f64::from(first)).abs() > SAME_PLACE {
+        return Verdict::OtherStart;
+    }
+    let file_span = f64::from(file_span);
     if walk.bad_frame {
-        (player_span <= file_span + SAME_PLACE).then_some("bad_frame")
+        if player_span <= file_span + SAME_PLACE {
+            Verdict::Damaged("bad_frame")
+        } else {
+            Verdict::NotDamaged
+        }
+    } else if player_span + SAME_PLACE < file_span {
+        Verdict::Unconfirmed("stopped_loading")
     } else {
-        (player_span + SAME_PLACE < file_span).then_some("stopped_loading")
+        Verdict::NotDamaged
     }
 }
 
@@ -224,6 +293,7 @@ mod tests {
     fn walk(span: f32, bad_frame: bool) -> Walk {
         Walk {
             span: Some(span),
+            first: Some(5.0),
             bad_frame,
         }
     }
@@ -231,29 +301,54 @@ mod tests {
     #[test]
     fn a_healthy_load_is_not_damaged() {
         // solifotw-bewton (#866): the player and the walk both hold 1952.1 s.
-        assert_eq!(verdict(1952.1, &walk(1952.1, false)), None);
-        assert_eq!(verdict(1951.0, &walk(1952.1, false)), None);
+        assert_eq!(
+            verdict(5.0, 1952.1, &walk(1952.1, false)),
+            Verdict::NotDamaged
+        );
+        assert_eq!(
+            verdict(5.0, 1951.0, &walk(1952.1, false)),
+            Verdict::NotDamaged
+        );
         // A whole-file length past a map restart is the walk's business: it
         // stops where the clock turns back, as the player does.
-        assert_eq!(verdict(1952.1, &walk(1952.6, false)), None);
+        assert_eq!(
+            verdict(5.0, 1952.1, &walk(1952.6, false)),
+            Verdict::NotDamaged
+        );
     }
 
     #[test]
     fn a_bad_frame_where_the_player_stopped_is_damage() {
         // monday-wsod25_r07_m1_h1: both stop at the oversized message.
-        assert_eq!(verdict(507.7, &walk(507.7, true)), Some("bad_frame"));
-        assert_eq!(verdict(500.0, &walk(507.7, true)), Some("bad_frame"));
+        assert_eq!(
+            verdict(5.5, 507.7, &walk(507.7, true)),
+            Verdict::Damaged("bad_frame")
+        );
+        assert_eq!(
+            verdict(5.0, 500.0, &walk(507.7, true)),
+            Verdict::Damaged("bad_frame")
+        );
         // The player read well past the walk's bad frame: the walk misread.
-        assert_eq!(verdict(900.0, &walk(507.7, true)), None);
+        assert_eq!(verdict(5.0, 900.0, &walk(507.7, true)), Verdict::NotDamaged);
     }
 
     #[test]
-    fn a_player_stopped_short_of_a_readable_file_is_damage() {
-        // A message the loader refuses (Server::ParseBad) inside frames the
-        // walk reads through.
+    fn a_player_stopped_short_of_a_readable_file_is_only_logged() {
         assert_eq!(
-            verdict(397.0, &walk(1503.0, false)),
-            Some("stopped_loading")
+            verdict(5.0, 397.0, &walk(1503.0, false)),
+            Verdict::Unconfirmed("stopped_loading")
+        );
+    }
+
+    #[test]
+    fn a_player_starting_elsewhere_is_not_judged() {
+        assert_eq!(
+            verdict(400.0, 507.7, &walk(507.7, true)),
+            Verdict::OtherStart
+        );
+        assert_eq!(
+            verdict(400.0, 10.0, &walk(1503.0, false)),
+            Verdict::OtherStart
         );
     }
 
@@ -261,9 +356,13 @@ mod tests {
     fn nothing_is_said_without_a_span() {
         let none = Walk {
             span: None,
+            first: None,
             bad_frame: true,
         };
-        assert_eq!(verdict(10.0, &none), None);
-        assert_eq!(verdict(f64::NAN, &walk(507.7, true)), None);
+        assert_eq!(verdict(5.0, 10.0, &none), Verdict::NotDamaged);
+        assert_eq!(
+            verdict(5.0, f64::NAN, &walk(507.7, true)),
+            Verdict::NotDamaged
+        );
     }
 }
