@@ -13,6 +13,12 @@ pub(crate) fn avi_frame_rate(path: &Path) -> Option<(u32, u32)> {
     media_probe::avi_frame_rate(path)
 }
 
+/// An AVI's frame count from its header: see `media_probe::avi_frame_count`.
+/// For checking a segmented render's joined clip (#1451).
+pub(crate) fn avi_video_frames(path: &Path) -> Option<usize> {
+    avi_frame_count(path)
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ClipData {
     pub take_folder: String,

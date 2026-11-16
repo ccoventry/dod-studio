@@ -96,7 +96,7 @@ fn prepared(job: &RenderJob) -> Prepared {
 /// use.
 async fn claim(job: &RenderJob, output_folder: &Path) -> (SegmentPlan, Option<SegmentFolder>) {
     let prepared = prepared(job);
-    let folder = claim_folder(job, &prepared.key, output_folder).await;
+    let folder = claim_folder(job, &prepared, output_folder).await;
     (prepared.plan, folder)
 }
 
@@ -162,13 +162,36 @@ async fn a_second_render_of_the_same_segments_renders_in_one_piece() {
         clip_for(&take, None, false),
         config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
     );
-    let (_, first) = claim(&job, &root).await;
+    let first = prepare(&job, FPS);
     assert!(first.is_some());
-    let (_, second) = claim(&job, &root).await;
-    assert!(second.is_none());
+    assert!(prepare(&job, FPS).is_none());
     drop(first);
-    let (_, third) = claim(&job, &root).await;
-    assert!(third.is_some(), "free again once the first render ends");
+    assert!(
+        prepare(&job, FPS).is_some(),
+        "free again once the first render ends"
+    );
+}
+
+/// The claim is taken before the render reserves its room (#1451 review):
+/// another render of the take in one piece, started meanwhile, leaves the
+/// resume's segments alone.
+#[tokio::test]
+async fn a_resumes_segments_are_safe_from_a_one_piece_sweep_while_it_reserves() {
+    let root = Scratch::new("segmented_claimed_early");
+    let take = bare_take(&root);
+    let job = job_for(
+        clip_for(&take, None, false),
+        config_for(&[&root], RenderCodec::ProRes422, "ffmpeg"),
+    );
+    let (_, folder) = claim(&job, &root).await;
+    let dir = folder.unwrap().dir.clone();
+    std::fs::write(dir.join(segment_name(0)), b"a").unwrap();
+    let resume = prepared(&job);
+    remove_take_segments(&job).await;
+    assert!(dir.join(segment_name(0)).exists());
+    drop(resume);
+    remove_take_segments(&job).await;
+    assert!(!dir.exists(), "swept once nothing holds it");
 }
 
 #[tokio::test]
@@ -186,7 +209,9 @@ async fn a_claimed_folder_names_its_take() {
 
 /// A stopped render's segments are found in whichever export folder holds
 /// them, with the frames they cover, and the render asks for room there
-/// first: the clip and the one segment still to render.
+/// first: the clip and the one segment still to render, sized from what the
+/// finished ones weigh (2 bytes for 60 frames: a clip of 4 bytes with the
+/// 1.5 margin, and 1 more for the last 10 frames), not from the estimate.
 #[tokio::test]
 async fn a_stopped_render_is_found_and_asks_for_room_on_its_own_drive_first() {
     let root = Scratch::new("segmented_stopped");
@@ -210,6 +235,7 @@ async fn a_stopped_render_is_found_and_asks_for_room_on_its_own_drive_first() {
         Some(Stopped {
             export_dir: second.clone(),
             frames_on_disk: 60,
+            bytes_on_disk: 2,
         })
     );
     let asks = resume.room_asks(&job.config.export_directories, 700);
@@ -217,7 +243,7 @@ async fn a_stopped_render_is_found_and_asks_for_room_on_its_own_drive_first() {
     assert_eq!(
         shown,
         [
-            (vec![second.clone()], 800),
+            (vec![second.clone()], 5),
             (vec![first.clone(), second.clone()], 1400),
         ]
     );
@@ -306,6 +332,57 @@ fn a_folder_a_render_is_using_is_never_swept() {
     remove_unclaimed(std::slice::from_ref(&root), |_, _| Some("test"));
     lock_in_use().remove(name);
     assert!(root.join(name).join("0000.seg").exists());
+}
+
+/// A take on a drive that isn't there now (unplugged, offline) may still
+/// exist: its segments stay.
+#[test]
+fn a_take_on_a_missing_drive_is_not_taken_for_gone() {
+    let Some(letter) = ('D'..='Z')
+        .rev()
+        .find(|l| !Path::new(&format!("{l}:\\")).is_dir())
+    else {
+        return;
+    };
+    let root = Scratch::new("segmented_missing_drive");
+    let dir = root.join("folder");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(TAKE_FILE),
+        format!("{letter}:\\takes\\demo\\take0000"),
+    )
+    .unwrap();
+    assert!(!take_is_gone(&dir));
+    std::fs::write(
+        dir.join(TAKE_FILE),
+        root.join("nope").to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    assert!(take_is_gone(&dir));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_paths_root_is_its_drive_or_share() {
+    assert_eq!(root_of(Path::new("D:\\a\\b")), Some(PathBuf::from("D:\\")));
+    assert_eq!(
+        root_of(Path::new("\\\\host\\share\\a")),
+        Some(PathBuf::from("\\\\host\\share\\"))
+    );
+    assert_eq!(root_of(Path::new("a\\b")), None);
+}
+
+/// FFmpeg 6.1 and 7.0 print no `frame=` for a stream-copy join (#1451
+/// review): the container's own count decides, and a file neither can count
+/// is kept, not failed.
+#[test]
+fn a_join_is_checked_by_its_containers_count_without_a_frame_line() {
+    assert_eq!(check_frames(Some(1000), None, 1000), FrameCheck::Whole);
+    assert_eq!(check_frames(Some(300), None, 1000), FrameCheck::Short(300));
+    assert_eq!(check_frames(None, Some(300), 1000), FrameCheck::Short(300));
+    // The container wins over a progress line that lost the last frames.
+    assert_eq!(check_frames(Some(1000), Some(990), 1000), FrameCheck::Whole);
+    assert_eq!(check_frames(None, None, 1000), FrameCheck::Unknown);
 }
 
 /// A take deleted with its segments still in an export folder (#1451
@@ -745,4 +822,65 @@ async fn a_damaged_segment_fails_the_join_instead_of_a_short_clip() {
         left.is_empty(),
         "no clip and no segments are left: {left:?}"
     );
+}
+
+/// An export folder with a `#` in its path (#1451 review): FFmpeg reads the
+/// concat list's path as a URL, so the join runs in the segment folder and
+/// names everything by bare name.
+#[tokio::test]
+#[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+async fn an_export_folder_with_a_hash_in_its_name_joins() {
+    let ffmpeg = real_ffmpeg();
+    let root = Scratch::new("segmented_hash");
+    let take = make_take(&ffmpeg, &root, false, false);
+    let export = root.join("ex #1");
+    std::fs::create_dir_all(&export).unwrap();
+    let clip = clip_for(&take, None, false);
+    let config = config_for(&[&export], RenderCodec::ProRes422, &ffmpeg);
+    let updates = render(clip, config).await;
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, RenderUpdate::Speed(_, s) if s.starts_with("Joining"))),
+        "it was segmented: {updates:?}"
+    );
+    let clip_file = finished_clip(&updates);
+    assert!(clip_file.starts_with(&export));
+    assert_eq!(frame_hashes(&ffmpeg, &clip_file).len(), FRAMES);
+    assert!(!export.join(SEGMENTS_DIR).exists());
+}
+
+/// A take whose last BMP can't be read (#1451 review): one piece renders
+/// the frames there are, so the segmented render, whose last segment comes
+/// out short, falls back to that instead of failing.
+#[tokio::test]
+#[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+async fn a_take_whose_last_frame_is_damaged_renders_in_one_piece() {
+    let ffmpeg = real_ffmpeg();
+    let root = Scratch::new("segmented_short_take");
+    let take = make_take(&ffmpeg, &root, false, false);
+    let last = take.join("all").join(format!("{:05}.bmp", FRAMES - 1));
+    std::fs::write(&last, b"BM broken").unwrap();
+    let export = root.join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    let clip = clip_for(&take, None, false);
+    let config = config_for(&[&export], RenderCodec::ProRes422, &ffmpeg);
+    // The bar starts again with the one-piece render, so `finished_clip`'s
+    // check that it only rises doesn't hold here.
+    let updates = render(clip, config).await;
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, RenderUpdate::Finished(_, true, _))),
+        "{updates:?}"
+    );
+    let clip_file = updates
+        .iter()
+        .find_map(|u| match u {
+            RenderUpdate::OutputPath(_, path) => Some(PathBuf::from(path)),
+            _ => None,
+        })
+        .expect("no output path");
+    assert_eq!(frame_hashes(&ffmpeg, &clip_file).len(), FRAMES - 1);
+    assert!(!export.join(SEGMENTS_DIR).exists());
 }

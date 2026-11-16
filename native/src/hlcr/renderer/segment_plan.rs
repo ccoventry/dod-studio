@@ -340,8 +340,9 @@ pub(super) fn concat_list(segment_names: &[String]) -> String {
         .collect()
 }
 
-/// The join's command line: the segments listed in `list_file` copied into
-/// `out_file` as they are, with the render's DoD Studio tag (#1442).
+/// The join's command line: the segments listed in `list_file` (a bare name,
+/// read in the segment folder FFmpeg runs in) copied into `out_file` as they
+/// are, with the render's DoD Studio tag (#1442).
 /// `-xerror` ends it with an error at a segment it can't read: without it the
 /// concat demuxer stops at a missing or damaged segment and FFmpeg still
 /// exits 0 with a short clip. The caller checks the joined frame count too.
@@ -459,6 +460,25 @@ fn hex(parts: &[&str]) -> String {
         hash.update(&[0]);
     }
     format!("{:016x}", hash.finish())
+}
+
+/// The clip size a resume reserves for: what its finished segments weigh
+/// per frame, over the whole take, with `margin` (the learned rates' head
+/// room, `LEARNED_RATE_MARGIN`), and never more than `clip_estimate`. Right
+/// after a restart the estimate is the raw size, and twice that seldom fits.
+pub(super) fn resume_clip_bytes(
+    clip_estimate: u64,
+    plan: &SegmentPlan,
+    frames_on_disk: usize,
+    bytes_on_disk: u64,
+    margin: f64,
+) -> u64 {
+    if frames_on_disk == 0 {
+        return clip_estimate;
+    }
+    let per_frame = bytes_on_disk as f64 / frames_on_disk as f64;
+    let learned = (per_frame * plan.total_frames as f64 * margin).ceil() as u64;
+    learned.min(clip_estimate)
 }
 
 /// The most a segmented render has on its export drive at once, for a clip
@@ -802,6 +822,16 @@ mod tests {
         assert_eq!(peak_bytes(1000, &plan, 600), 1334);
         assert_eq!(peak_bytes(1000, &plan, 900), 1000);
         assert_eq!(peak_bytes(u64::MAX, &plan, 0), u64::MAX);
+    }
+
+    /// Two of three segments (600 of 900 frames) weigh 6000 bytes: 10 a
+    /// frame, so the clip is 900 x 10 x 1.5.
+    #[test]
+    fn a_resume_sizes_the_clip_from_its_finished_segments() {
+        let plan = plan_of(Pictures::Sequence);
+        assert_eq!(resume_clip_bytes(1_000_000, &plan, 600, 6000, 1.5), 13_500);
+        assert_eq!(resume_clip_bytes(10_000, &plan, 600, 6000, 1.5), 10_000);
+        assert_eq!(resume_clip_bytes(10_000, &plan, 0, 0, 1.5), 10_000);
     }
 
     #[test]

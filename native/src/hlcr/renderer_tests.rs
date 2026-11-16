@@ -1456,3 +1456,16 @@ fn no_room_even_for_the_clip_fits_nothing() {
     assert_eq!((fitted, dir), (None, None));
     assert!(ledger.is_empty());
 }
+
+/// The batch's FFmpeg line (#1451): an FFmpeg that isn't there is logged as
+/// unread, and the batch carries on.
+#[test]
+fn an_ffmpeg_that_is_not_there_is_logged_as_unread() {
+    let dir = scratch("ffmpeg_version_missing");
+    let missing = dir.join("ffmpeg.exe");
+    let line = ffmpeg_version_line(&missing.to_string_lossy());
+    assert!(
+        line.starts_with("[render] could not read the version of the FFmpeg"),
+        "{line}"
+    );
+}

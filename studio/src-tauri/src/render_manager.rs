@@ -579,13 +579,19 @@ impl RenderManager {
 
     /// The queued jobs' takes and settings, for [`first_wave_pieces`]: copied
     /// out so the estimates, which read take headers, run without the lock.
-    pub(crate) fn queued_takes(&self) -> Vec<(ClipData, RenderCodec, String)> {
+    pub(crate) fn queued_takes(&self) -> Vec<QueuedTake> {
         self.jobs
             .lock()
             .unwrap()
             .iter()
             .filter(|j| j.status == "Queued")
-            .map(|j| (j.clip.clone(), j.codec, j.custom_codec_args.clone()))
+            .map(|j| QueuedTake {
+                clip: j.clip.clone(),
+                codec: j.codec,
+                custom_args: j.custom_codec_args.clone(),
+                // The scheduler hands each job its own fps snapshot.
+                fps: j.fps,
+            })
             .collect()
     }
 
@@ -1407,35 +1413,46 @@ async fn scan_and_merge(
     Ok(summary)
 }
 
+/// One queued job's take and settings, as [`first_wave_pieces`] reads them.
+pub(crate) struct QueuedTake {
+    clip: ClipData,
+    codec: RenderCodec,
+    custom_args: String,
+    fps: u32,
+}
+
+/// What the first jobs to start need on the export drives, one figure per
+/// job, since each job writes to one drive: the largest `max_concurrent`
+/// estimates among the `queued` takes ([`RenderManager::queued_takes`]),
+/// which is what `run_render_job`'s drive routing checks as they start
+/// together. Two lists: with room for a long take's segments and clip
+/// together (#1451), and with room for the clip alone, which the render
+/// falls back to (`SpaceNeed::fallback_pieces`). Later jobs reserve from
+/// what finished renders actually wrote (#120). Reads take headers: run it
+/// off the async worker.
+fn first_wave_pieces(queued: &[QueuedTake], max_concurrent: usize) -> (Vec<u64>, Vec<u64>) {
+    let largest = |mut estimates: Vec<u64>| {
+        estimates.sort_unstable_by(|a, b| b.cmp(a));
+        estimates.truncate(max_concurrent.max(1));
+        estimates
+    };
+    let peak = queued
+        .iter()
+        .map(|t| job_peak_reservation_estimate(&t.clip, t.codec, &t.custom_args, t.fps))
+        .collect();
+    let one_piece = queued
+        .iter()
+        .map(|t| job_reservation_estimate(&t.clip, t.codec, &t.custom_args))
+        .collect();
+    (largest(peak), largest(one_piece))
+}
+
 /// Starts the scheduler on whatever `queue_render_batch` already staged.
 /// Takes no settings of its own — a queued job carries its own
 /// codec/fps snapshot (including any Skip toggle applied while it sat
 /// Queued), and batch-wide infrastructure (ffmpeg path, export pool,
 /// concurrency) came from `queue_render_batch`'s payload via `last_config`.
 ///
-/// What the first jobs to start need on the export drives, one figure per
-/// job, since each job writes to one drive: the largest `max_concurrent`
-/// estimates among the `queued` takes ([`RenderManager::queued_takes`]),
-/// which is what `run_render_job`'s drive routing checks as they start
-/// together, with room for a long take's segments and clip together (#1451).
-/// Later jobs reserve from what finished renders actually wrote (#120).
-/// Reads take headers: run it off the async worker.
-fn first_wave_pieces(
-    queued: &[(ClipData, RenderCodec, String)],
-    max_concurrent: usize,
-    setting_fps: u32,
-) -> Vec<u64> {
-    let mut estimates: Vec<u64> = queued
-        .iter()
-        .map(|(clip, codec, custom_args)| {
-            job_peak_reservation_estimate(clip, *codec, custom_args, setting_fps)
-        })
-        .collect();
-    estimates.sort_unstable_by(|a, b| b.cmp(a));
-    estimates.truncate(max_concurrent.max(1));
-    estimates
-}
-
 /// Every Queued row renders (#70): the tick boxes scope Cancel, Retry,
 /// Remove and Delete, not Start. A row to leave out is cancelled or removed.
 #[tauri::command]
@@ -1460,12 +1477,14 @@ pub async fn start_queued_render(
     if crate::take_cleanup_manager::makes_room(&app) && !config.export_directories.is_empty() {
         let queued = state.queued_takes();
         let targets = config.export_directories.clone();
-        let (max_concurrent, setting_fps) = (config.max_concurrent_renders, config.fps);
+        let max_concurrent = config.max_concurrent_renders;
         let cleanup_app = app.clone();
         let _ = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+            let (pieces, one_piece) = first_wave_pieces(&queued, max_concurrent);
             let need = native::hlcr::take_cleanup::SpaceNeed {
                 targets,
-                pieces: first_wave_pieces(&queued, max_concurrent, setting_fps),
+                pieces,
+                fallback_pieces: Some(one_piece),
                 headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
             };
             crate::take_cleanup_manager::make_room(
@@ -1480,6 +1499,12 @@ pub async fn start_queued_render(
     }
 
     log_markdown(&crate::messages::render::scheduler_starting(starting));
+    // Which FFmpeg this batch runs, once, off the async worker (#1451); the
+    // batch doesn't wait for it.
+    let ffmpeg_path = config.ffmpeg_path.clone();
+    tokio::task::spawn_blocking(move || {
+        log_markdown(&native::hlcr::renderer::ffmpeg_version_line(&ffmpeg_path));
+    });
     state.global_cancel.store(false, Ordering::SeqCst);
     *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
     spawn_scheduler(app, state.handles(), config);

@@ -9,24 +9,30 @@
 //! Segments live in `<export folder>/.dodstudio-segments/<take>_<settings>/`
 //! as `0000.seg`, `0001.seg`, ...: no video extension, so Find Moved Videos'
 //! folder walk never takes one for a clip. Each is written under its partial
-//! name (`0003.partial.seg`) and renamed once FFmpeg has finished it, so a
-//! file under a finished name is always whole. They survive Studio closing
-//! or crashing, which is the point; a cancel, a failure or the join removes
-//! them. Beside them, `take.txt` names the take, so a folder whose take was
-//! deleted is found and removed by the next render.
+//! name (`0003.partial.seg`) and renamed once FFmpeg has finished it and its
+//! frames are counted, so a file under a finished name is always whole. They
+//! survive Studio closing or crashing, which is the point; a cancel, a
+//! failure or the join removes them. Beside them, `take.txt` names the take,
+//! so a folder whose take was deleted is found and removed by the next
+//! render.
+//!
+//! A segment that comes out short (the take's pictures or sound end early
+//! there) ends the segments and the take renders in one piece, which trims
+//! to what is there as it always did.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
+use super::clip_frames::count_frames;
 use super::ffmpeg_args::{Encode, encode_settings};
-use super::ffmpeg_run::{ProgressScale, RunEnd, finish_render, run_to_end};
+use super::ffmpeg_run::{ProgressScale, RunEnd, name_output, run_to_end, send_named};
 use super::partial_output::{self, Reserved};
 use super::segment_plan::{
     FrameRate, KeySettings, Pictures, SEGMENT_EXT, Segment, SegmentArgs, SegmentKey, SegmentPlan,
-    TakeFacts, concat_list, join_args, peak_bytes, segment_key, take_key,
+    TakeFacts, concat_list, join_args, peak_bytes, resume_clip_bytes, segment_key, take_key,
 };
-use super::{RenderJob, RenderUpdate, RoomAsk, remove_partial_output};
+use super::{LEARNED_RATE_MARGIN, RenderJob, RenderUpdate, RoomAsk, remove_partial_output};
 use crate::hlcr::config::RenderCodec;
 use crate::hlcr::scanner::ClipData;
 use crate::messages::render as msg;
@@ -34,7 +40,10 @@ use crate::messages::render as msg;
 /// The folder in each export folder that holds renders' segments.
 pub(super) const SEGMENTS_DIR: &str = ".dodstudio-segments";
 
-/// The concat demuxer's list, written beside the segments for the join.
+/// The concat demuxer's list, written beside the segments for the join. The
+/// join runs in the segment folder and names the list and the segments by
+/// these bare names: FFmpeg reads the list's path as a URL, where a `#` in
+/// an export folder's path would start a fragment.
 const JOIN_LIST: &str = "join.txt";
 
 /// The file in each segment folder that holds its take folder's path.
@@ -86,9 +95,9 @@ pub(super) fn take_facts(clip: &ClipData, codec: RenderCodec, fps_used: u32) -> 
     }
 }
 
-/// The segment folders renders running now are using, or a sweep is
+/// The segment folders renders running now have claimed, or a sweep is
 /// removing, by name: two renders of one take and stream never write one
-/// folder, and neither throws the other's away.
+/// folder, and no sweep removes one a render is about to use.
 fn folders_in_use() -> &'static Mutex<HashSet<String>> {
     static IN_USE: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
     IN_USE.get_or_init(|| Mutex::new(HashSet::new()))
@@ -101,16 +110,29 @@ fn lock_in_use() -> std::sync::MutexGuard<'static, HashSet<String>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// One render's segment folder, claimed until dropped.
-pub(super) struct SegmentFolder {
-    dir: PathBuf,
-    name: String,
+/// A segment folder name claimed in [`folders_in_use`] until dropped.
+struct NameClaim(String);
+
+impl NameClaim {
+    /// Claims `name`, or `None` when a render or a sweep has it.
+    fn take(name: String) -> Option<Self> {
+        // The guard goes before a claim is made: a claim that drops (not
+        // inserted) takes the lock itself, and must not remove the holder's.
+        let inserted = lock_in_use().insert(name.clone());
+        inserted.then(|| Self(name))
+    }
 }
 
-impl Drop for SegmentFolder {
+impl Drop for NameClaim {
     fn drop(&mut self) {
-        lock_in_use().remove(&self.name);
+        lock_in_use().remove(&self.0);
     }
+}
+
+/// One render's segment folder. Its name is claimed by the render's
+/// [`Prepared`], which outlives it.
+pub(super) struct SegmentFolder {
+    dir: PathBuf,
 }
 
 impl SegmentFolder {
@@ -225,32 +247,46 @@ fn segment_roots(job: &RenderJob) -> Vec<PathBuf> {
 }
 
 /// A render of `job` that would run in segments, decided before any room is
-/// reserved: its plan, its segment key, and the segments a stopped render of
-/// the same key left, if any.
+/// reserved: its plan, its segment key, the segments a stopped render of the
+/// same key left, if any, and the claim on the key's folder name, held from
+/// here so no other render's sweep removes those segments while this one
+/// reserves its room (#1451 review).
 pub(super) struct Prepared {
     pub(super) plan: SegmentPlan,
     pub(super) key: SegmentKey,
     stopped: Option<Stopped>,
+    _claim: NameClaim,
 }
 
-/// Segments a stopped render left: the export folder they are in and how
-/// many of the take's frames they hold.
+/// Segments a stopped render left: the export folder they are in, how many
+/// of the take's frames they hold, and what they weigh.
 #[derive(Debug, PartialEq)]
 struct Stopped {
     export_dir: PathBuf,
     frames_on_disk: usize,
+    bytes_on_disk: u64,
 }
 
-/// `job` as a segmented render, or `None` when it renders in one piece
-/// (`segment_plan::plan`, or a codec FFmpeg isn't given settings for).
+/// `job` as a segmented render, or `None` when it renders in one piece:
+/// `segment_plan::plan` says so, FFmpeg isn't given settings for the codec,
+/// or another render (or a sweep) has this key's folder, which is logged.
 pub(super) fn prepare(job: &RenderJob, fps_used: u32) -> Option<Prepared> {
     let plan =
         super::segment_plan::plan(&take_facts(&job.clip, job.config.target_codec, fps_used))?;
     // The one-piece path refuses a codec without settings, with its reason.
     let encode = encode_settings(job.is_hud, &job.config).ok()?;
     let key = key_for(job, &plan, &encode);
+    let Some(claim) = NameClaim::take(key.folder_name()) else {
+        crate::log_markdown(&msg::segments_busy(&job.job_id));
+        return None;
+    };
     let stopped = find_stopped(&job.config.export_directories, &key, &plan);
-    Some(Prepared { plan, key, stopped })
+    Some(Prepared {
+        plan,
+        key,
+        stopped,
+        _claim: claim,
+    })
 }
 
 /// `job`'s segment key under `plan` and `encode`.
@@ -267,36 +303,48 @@ fn key_for(job: &RenderJob, plan: &SegmentPlan, encode: &Encode) -> SegmentKey {
     )
 }
 
-/// The first export folder holding finished segments of `key`, and how many
-/// frames they cover.
+/// The first export folder holding finished segments of `key`, with the
+/// frames they cover and their size.
 fn find_stopped(export_dirs: &[PathBuf], key: &SegmentKey, plan: &SegmentPlan) -> Option<Stopped> {
     let name = key.folder_name();
     export_dirs.iter().find_map(|export_dir| {
         let dir = export_dir.join(SEGMENTS_DIR).join(&name);
-        let frames_on_disk: usize = plan
+        let (frames_on_disk, bytes_on_disk) = plan
             .segments()
             .iter()
-            .filter(|s| dir.join(segment_name(s.index)).is_file())
-            .map(|s| s.frames)
-            .sum();
+            .filter_map(|s| {
+                let meta = std::fs::metadata(dir.join(segment_name(s.index))).ok()?;
+                meta.is_file().then_some((s.frames, meta.len()))
+            })
+            .fold((0, 0), |(frames, bytes), (f, b)| (frames + f, bytes + b));
         (frames_on_disk > 0).then(|| Stopped {
             export_dir: export_dir.clone(),
             frames_on_disk,
+            bytes_on_disk,
         })
     })
 }
 
 impl Prepared {
     /// What this render asks of the export drives, in order of preference,
-    /// for a clip of `clip_bytes`: a resume on the drive its segments are on
-    /// (the clip plus the segments still to render), then a fresh start on
-    /// any (twice the clip). The caller adds the one-piece ask after these.
+    /// for a clip estimated at `clip_bytes`: a resume on the drive its
+    /// segments are on (the clip plus the segments still to render, sized
+    /// from what the finished ones weigh, since right after a restart the
+    /// estimate has learned nothing), then a fresh start on any (twice the
+    /// clip). The caller adds the one-piece ask after these.
     pub(super) fn room_asks(&self, export_dirs: &[PathBuf], clip_bytes: u64) -> Vec<RoomAsk> {
         let mut asks = Vec::new();
         if let Some(stopped) = &self.stopped {
+            let clip = resume_clip_bytes(
+                clip_bytes,
+                &self.plan,
+                stopped.frames_on_disk,
+                stopped.bytes_on_disk,
+                LEARNED_RATE_MARGIN,
+            );
             asks.push(RoomAsk {
                 dirs: vec![stopped.export_dir.clone()],
-                amount: peak_bytes(clip_bytes, &self.plan, stopped.frames_on_disk),
+                amount: peak_bytes(clip, &self.plan, stopped.frames_on_disk),
             });
         }
         asks.push(RoomAsk {
@@ -307,26 +355,22 @@ impl Prepared {
     }
 }
 
-/// Claims this render's segment folder in `output_folder`, the export folder
+/// Makes this render's segment folder in `output_folder`, the export folder
 /// its room was reserved in: a stopped render's segments of the same key are
 /// used there, and thrown away in any other export folder (nothing was
 /// reserved on that drive for the segments still to render). Throws away,
 /// and logs, segments of this take and stream under other settings that no
-/// running render is using. `None`, and a log line, when another render is
-/// using the folder or it can't be made: the render then runs in one piece.
+/// running render is using. `None`, and a log line, when the folder can't be
+/// made: the render then runs in one piece.
 pub(super) async fn claim_folder(
     job: &RenderJob,
-    key: &SegmentKey,
+    prepared: &Prepared,
     output_folder: &Path,
 ) -> Option<SegmentFolder> {
-    let name = key.folder_name();
-    if !lock_in_use().insert(name.clone()) {
-        crate::log_markdown(&msg::segments_busy(&job.job_id));
-        return None;
-    }
     let folder = SegmentFolder {
-        dir: output_folder.join(SEGMENTS_DIR).join(&name),
-        name,
+        dir: output_folder
+            .join(SEGMENTS_DIR)
+            .join(prepared.key.folder_name()),
     };
     let mut roots = segment_roots(job);
     let own_root = output_folder.join(SEGMENTS_DIR);
@@ -335,7 +379,7 @@ pub(super) async fn claim_folder(
     }
     let setup = FolderSetup {
         roots,
-        key: key.clone(),
+        key: prepared.key.clone(),
         dir: folder.dir.clone(),
         take_folder: job.clip.take_folder.clone(),
     };
@@ -353,7 +397,7 @@ pub(super) async fn claim_folder(
     Some(folder)
 }
 
-/// The disk work of claiming a segment folder, run off the async worker.
+/// The disk work of making a segment folder, run off the async worker.
 struct FolderSetup {
     roots: Vec<PathBuf>,
     key: SegmentKey,
@@ -385,8 +429,9 @@ impl FolderSetup {
 }
 
 /// Removes every segment folder whose take is gone (its take file names a
-/// folder that isn't there), in any export folder, and logs each. Run as
-/// every render starts, so a deleted take's segments don't stay.
+/// folder that isn't there, on a drive that is), in any export folder, and
+/// logs each. Run as every render starts, so a deleted take's segments
+/// don't stay.
 pub(super) async fn remove_orphans(job: &RenderJob) {
     let roots = segment_roots(job);
     let _ = tokio::task::spawn_blocking(move || {
@@ -398,10 +443,26 @@ pub(super) async fn remove_orphans(job: &RenderJob) {
 }
 
 /// Whether segment folder `dir`'s take file names a folder that isn't
-/// there. A folder without one (being made, or unreadable) is kept.
+/// there. A folder without one (being made, or unreadable) is kept, and so
+/// is one whose take is on a drive or share that isn't there now (unplugged,
+/// offline): its take may well be.
 fn take_is_gone(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join(TAKE_FILE))
-        .is_ok_and(|take| !take.trim().is_empty() && !Path::new(take.trim()).is_dir())
+    let Ok(text) = std::fs::read_to_string(dir.join(TAKE_FILE)) else {
+        return false;
+    };
+    let take = Path::new(text.trim());
+    !text.trim().is_empty() && !take.is_dir() && root_of(take).is_some_and(|root| root.is_dir())
+}
+
+/// The drive or share `path` is on (`D:\`, `\\server\share\`), or `None` for
+/// a relative path.
+fn root_of(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let root: PathBuf = path
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    root.has_root().then_some(root)
 }
 
 /// Removes every segment folder of `job`'s take and stream, under any
@@ -439,26 +500,18 @@ fn remove_unclaimed(roots: &[PathBuf], pick: impl Fn(&str, &Path) -> Option<&'st
             }
         }
     }
-    if picked.is_empty() {
-        return;
-    }
-    let claimed: HashSet<String> = {
-        let mut in_use = lock_in_use();
-        picked
-            .iter()
-            .filter(|(name, _, _)| in_use.insert(name.clone()))
-            .map(|(name, _, _)| name.clone())
-            .collect()
-    };
+    // Held until every pick is removed.
+    let mut claims: Vec<NameClaim> = Vec::new();
     for (name, path, why) in &picked {
-        if claimed.contains(name) {
-            remove_logged(path, why);
-            remove_root_if_empty(path);
+        // A name seen twice (one key in two export folders) is claimed once.
+        if !claims.iter().any(|c| &c.0 == name) {
+            let Some(claim) = NameClaim::take(name.clone()) else {
+                continue;
+            };
+            claims.push(claim);
         }
-    }
-    let mut in_use = lock_in_use();
-    for name in &claimed {
-        in_use.remove(name);
+        remove_logged(path, why);
+        remove_root_if_empty(path);
     }
 }
 
@@ -490,6 +543,29 @@ fn segment_ranges(indexes: &[usize]) -> String {
     ranges.join(", ")
 }
 
+/// What a finished file's frame count says against the frames it should
+/// hold. The container's own count comes first; FFmpeg's last `frame=` is
+/// the fallback (6.1 and 7.0 print none for a stream copy).
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum FrameCheck {
+    Whole,
+    Short(usize),
+    /// Neither count could be read: nothing to hold the file against.
+    Unknown,
+}
+
+pub(super) fn check_frames(
+    container: Option<usize>,
+    progress: Option<usize>,
+    expected: usize,
+) -> FrameCheck {
+    match container.or(progress) {
+        Some(frames) if frames >= expected => FrameCheck::Whole,
+        Some(frames) => FrameCheck::Short(frames),
+        None => FrameCheck::Unknown,
+    }
+}
+
 /// Everything a segmented render needs beyond the job.
 pub(super) struct SegmentedRender<'a> {
     pub(super) plan: &'a SegmentPlan,
@@ -500,13 +576,24 @@ pub(super) struct SegmentedRender<'a> {
     pub(super) output: &'a Reserved<'a>,
 }
 
+/// How a segmented render ended.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SegmentedEnd {
+    /// The job's last updates are sent (or Studio is closing).
+    Ended,
+    /// A segment came out short; its segments are gone, and the take is to
+    /// render in one piece.
+    RenderWhole,
+}
+
 /// Renders `job` in segments and sends every update up to its `Finished`,
 /// like `ffmpeg_run::run_ffmpeg`: the segments a stopped render finished are
 /// kept, the rest rendered one after another with one progress bar across
 /// them, then all joined into `render.output` and removed. A cancel or a
 /// failure removes them too; Studio closing leaves the finished ones for
-/// the next start's recovery to resume from.
-pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) {
+/// the next start's recovery to resume from. `RenderWhole`, with nothing
+/// sent, when a segment comes out short.
+pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) -> SegmentedEnd {
     job.send(RenderUpdate::Status(
         job.job_id.clone(),
         "Rendering".to_string(),
@@ -531,16 +618,38 @@ pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) 
         reused,
     ));
     for segment in segments.iter().filter(|s| !finished.contains(&s.index)) {
-        if !render_segment(job, &render, *segment).await {
-            return;
+        match render_segment(job, &render, *segment).await {
+            Step::Next => {}
+            Step::Ended => return SegmentedEnd::Ended,
+            Step::Short(frames) => {
+                crate::log_markdown(&msg::segment_short(
+                    &job.job_id,
+                    segment.index + 1,
+                    frames,
+                    segment.frames,
+                ));
+                render.folder.remove_for(job, msg::SEGMENTS_SHORT).await;
+                return SegmentedEnd::RenderWhole;
+            }
         }
     }
     join_segments(job, &render, segments.len()).await;
+    SegmentedEnd::Ended
 }
 
-/// Renders one segment into its file. `false` when the render ended here
-/// (cancelled, failed, or Studio closing), with its updates sent.
-async fn render_segment(job: &RenderJob, render: &SegmentedRender<'_>, segment: Segment) -> bool {
+/// How rendering one segment went.
+enum Step {
+    /// It is on disk under its finished name.
+    Next,
+    /// The render ended here (cancelled, failed, or Studio closing), with
+    /// its updates sent.
+    Ended,
+    /// It holds only this many frames: the take ends early there.
+    Short(usize),
+}
+
+/// Renders one segment into its file and counts its frames.
+async fn render_segment(job: &RenderJob, render: &SegmentedRender<'_>, segment: Segment) -> Step {
     let held = partial_output::in_flight().hold(render.folder.segment_file(segment.index));
     let args = SegmentArgs {
         clip: &job.clip,
@@ -556,27 +665,32 @@ async fn render_segment(job: &RenderJob, render: &SegmentedRender<'_>, segment: 
         total_frames: render.plan.total_frames,
         max_percent: 99,
     };
-    match run_to_end(job, args, Some(scale)).await {
-        RunEnd::Succeeded { .. } => {
+    match run_to_end(job, args, &job.take_folder, Some(scale)).await {
+        RunEnd::Succeeded { last_frame } => {
+            let container = count_frames(&held.partial, render.encode.file_ext);
+            if let FrameCheck::Short(frames) = check_frames(container, last_frame, segment.frames) {
+                remove_partial_output(&held.partial).await;
+                return Step::Short(frames);
+            }
             flush_to_disk(&held.partial).await;
             match partial_output::in_flight().finish(&held) {
-                Ok(_) => true,
+                Ok(_) => Step::Next,
                 Err(e) => {
                     let message =
                         msg::rename_failed(held.partial.display(), held.out_file.display(), e);
                     remove_partial_output(&held.partial).await;
                     render.folder.remove_for(job, msg::SEGMENTS_FAILED).await;
                     job.finish_error(message);
-                    false
+                    Step::Ended
                 }
             }
         }
         // The finished segments stay; Studio's way out removes this one.
-        RunEnd::Exiting => false,
+        RunEnd::Exiting => Step::Ended,
         end => {
             remove_partial_output(&held.partial).await;
             end_without_clip(job, render, end).await;
-            false
+            Step::Ended
         }
     }
 }
@@ -619,7 +733,8 @@ async fn flush_to_disk(path: &Path) {
 
 /// Joins every segment into the clip's partial file by stream copy, checks
 /// it holds every frame, gives it its name, removes the segments and sends
-/// the job's last updates.
+/// the job's last updates. FFmpeg runs in the segment folder, given the list
+/// and the segments by bare name (see [`JOIN_LIST`]).
 async fn join_segments(job: &RenderJob, render: &SegmentedRender<'_>, count: usize) {
     job.send(RenderUpdate::Speed(
         job.job_id.clone(),
@@ -634,28 +749,41 @@ async fn join_segments(job: &RenderJob, render: &SegmentedRender<'_>, count: usi
     }
     let output = render.output;
     let args = join_args(
-        &list,
+        Path::new(JOIN_LIST),
         &output.partial,
         render.encode.file_ext,
         job.config.clip_tag.as_deref(),
     );
     let began = std::time::Instant::now();
-    match run_to_end(job, args, None).await {
-        RunEnd::Succeeded { last_frame } if last_frame == Some(render.plan.total_frames) => {
+    let end = run_to_end(job, args, &render.folder.dir, None).await;
+    if !matches!(end, RunEnd::Exiting) {
+        // The row's speed cell said it was joining; that is over.
+        job.send(RenderUpdate::Speed(job.job_id.clone(), String::new()));
+    }
+    match end {
+        RunEnd::Succeeded { last_frame } => {
+            let container = count_frames(&output.partial, render.encode.file_ext);
+            match check_frames(container, last_frame, render.plan.total_frames) {
+                FrameCheck::Short(frames) => {
+                    let message = msg::join_short(frames, render.plan.total_frames);
+                    crate::log_markdown(&msg::join_failed(&job.job_id, &message));
+                    remove_partial_output(&output.partial).await;
+                    render.folder.remove_for(job, msg::SEGMENTS_FAILED).await;
+                    job.finish_error(message);
+                    return;
+                }
+                FrameCheck::Unknown => {
+                    crate::log_markdown(&msg::join_uncounted(&job.job_id));
+                }
+                FrameCheck::Whole => {}
+            }
             crate::log_markdown(&msg::segments_joined(&job.job_id, count, began.elapsed()));
             // Named before the segments go: Studio closing in between leaves
-            // the clip, or the segments to join again, never neither.
-            finish_render(job, output);
+            // the clip, or the segments to join again, never neither. The
+            // job's `Finished` waits for the removal.
+            let named = name_output(job, output);
             render.folder.remove().await;
-        }
-        // A segment the concat demuxer read only part of, without an error
-        // even under `-xerror`: the clip is short, so it is no clip.
-        RunEnd::Succeeded { last_frame } => {
-            let message = msg::join_short(last_frame, render.plan.total_frames);
-            crate::log_markdown(&msg::join_failed(&job.job_id, &message));
-            remove_partial_output(&output.partial).await;
-            render.folder.remove_for(job, msg::SEGMENTS_FAILED).await;
-            job.finish_error(message);
+            send_named(job, named);
         }
         // The segments stay for the resume; Studio's way out removes the
         // half-joined clip.

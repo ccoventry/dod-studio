@@ -7,6 +7,7 @@ use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
 use crate::shared::lock::lock_or_recover;
 
+mod clip_frames;
 mod ffmpeg_args;
 mod ffmpeg_run;
 mod partial_output;
@@ -379,7 +380,7 @@ pub async fn run_render_job(
         job.config.max_concurrent_renders,
     );
     if let Some(prepared) = &segments
-        && let Some(folder) = segmented::claim_folder(&job, &prepared.key, &output_folder).await
+        && let Some(folder) = segmented::claim_folder(&job, prepared, &output_folder).await
     {
         let render = segmented::SegmentedRender {
             plan: &prepared.plan,
@@ -388,8 +389,10 @@ pub async fn run_render_job(
             threads,
             output: &output,
         };
-        segmented::run_segmented(&job, render).await;
-        return;
+        // A segment that came out short sends the take to one piece, below.
+        if segmented::run_segmented(&job, render).await == segmented::SegmentedEnd::Ended {
+            return;
+        }
     }
     let args = ffmpeg_args::FfmpegArgs {
         clip: &job.clip,
@@ -449,6 +452,22 @@ async fn reserve_room(
         segmented::remove_take_segments(job).await;
     }
     Some((output_folder, guard, prepared))
+}
+
+/// The activity log's line naming the FFmpeg `configured` (Render Settings'
+/// path, or a bare `ffmpeg` on PATH) resolves to and its `-version` banner,
+/// or why it can't be read. Starts FFmpeg once and waits up to 5 s
+/// (`hlae_ffmpeg::verify_is_ffmpeg`): call it once per batch, off the main
+/// thread. Only logged: whether a join is whole never depends on the version.
+pub fn ffmpeg_version_line(configured: &str) -> String {
+    use crate::messages::render as msg;
+    let Some(exe) = crate::shared::hlae_ffmpeg::resolve_absolute(configured) else {
+        return msg::ffmpeg_version_unread(configured, "not found");
+    };
+    match crate::shared::hlae_ffmpeg::verify_is_ffmpeg(&exe) {
+        Ok(banner) => msg::ffmpeg_version(&banner, exe.display()),
+        Err(why) => msg::ffmpeg_version_unread(configured, why),
+    }
 }
 
 /// What a render of `clip` reserves on its export drive at most when it

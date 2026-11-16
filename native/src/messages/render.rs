@@ -138,6 +138,21 @@ pub fn segments_joined(job_id: impl Display, segments: usize, took: std::time::D
 /// Why a segmented render's finished segments were removed without a clip.
 pub const SEGMENTS_CANCELLED: &str = "the render was cancelled";
 pub const SEGMENTS_FAILED: &str = "the render failed";
+pub const SEGMENTS_SHORT: &str = "a segment came out short, so the take renders in one piece";
+
+/// A segment came out with fewer frames than it was cut for: the take's
+/// pictures or sound end early there, which one piece trims to as it always
+/// did (`number` counts from 1).
+pub fn segment_short(
+    job_id: impl Display,
+    number: usize,
+    frames: usize,
+    expected: usize,
+) -> String {
+    format!(
+        "[render] job {job_id}: segment {number} came out with {frames} of its {expected} frames (the take ends early there); rendering it in one piece"
+    )
+}
 
 /// A segmented render that ended without its clip removed its segments.
 pub fn segments_removed(job_id: impl Display, removed: usize, why: &str) -> String {
@@ -171,16 +186,33 @@ pub fn joining_segments(count: usize) -> String {
 }
 
 /// Why a join that FFmpeg finished without an error is no clip: it holds
-/// fewer frames than the take (a segment it read only part of).
-pub fn join_short(joined: Option<usize>, total: usize) -> String {
-    match joined {
-        Some(frames) => format!(
-            "Joining the segments gave {frames} of the take's {total} frames: a segment is damaged. Render the take again."
-        ),
-        None => format!(
-            "Joining the segments gave a clip FFmpeg counted no frames in (the take has {total}): a segment is damaged. Render the take again."
-        ),
-    }
+/// fewer frames than the segments did when each was counted, so one was
+/// damaged on the disk since. The segments are removed with it, so the next
+/// render of the take starts afresh.
+pub fn join_short(frames: usize, total: usize) -> String {
+    format!(
+        "Joining the segments gave {frames} of the take's {total} frames: a segment was damaged on the disk. The segments were removed; render the take again to render it afresh."
+    )
+}
+
+/// Neither the joined clip's header nor FFmpeg said how many frames it
+/// holds, so the clip is kept unchecked.
+pub fn join_uncounted(job_id: impl Display) -> String {
+    format!("[render] job {job_id}: could not count the joined clip's frames; keeping it unchecked")
+}
+
+/// Which FFmpeg a render batch runs, logged once as it starts: `banner` is
+/// the first line of its `-version`. A user's log then shows the build if a
+/// join ever fails (#1451).
+pub fn ffmpeg_version(banner: &str, path: impl Display) -> String {
+    format!("[render] Rendering with FFmpeg {banner} ({path})")
+}
+
+/// The batch's FFmpeg version could not be read; the batch goes ahead.
+pub fn ffmpeg_version_unread(configured: &str, why: impl Display) -> String {
+    format!(
+        "[render] could not read the version of the FFmpeg this batch renders with ({configured}): {why}"
+    )
 }
 
 /// A segmented render's join failed: the activity log's line.
@@ -193,10 +225,12 @@ pub fn segments_left(dir: impl Display, err: impl Display) -> String {
     format!("[render] could not remove the render segments in {dir}: {err}")
 }
 
-/// Another render is using this take's segments, so this one runs whole.
+/// Another render of this take and stream with the same settings holds its
+/// segment folder (or a clean-up of old segments is removing it), so this
+/// one runs whole.
 pub fn segments_busy(job_id: impl Display) -> String {
     format!(
-        "[render] job {job_id}: another render is using this take's segments; rendering it in one piece"
+        "[render] job {job_id}: another render of this take with the same settings, or a clean-up of old segments, is using its segment folder; rendering it in one piece"
     )
 }
 
@@ -244,9 +278,8 @@ mod tests {
     #[test]
     fn a_short_join_says_how_many_frames_it_got() {
         assert_eq!(
-            join_short(Some(300), 1000),
-            "Joining the segments gave 300 of the take's 1000 frames: a segment is damaged. Render the take again."
+            join_short(300, 1000),
+            "Joining the segments gave 300 of the take's 1000 frames: a segment was damaged on the disk. The segments were removed; render the take again to render it afresh."
         );
-        assert!(join_short(None, 1000).contains("no frames in (the take has 1000)"));
     }
 }
