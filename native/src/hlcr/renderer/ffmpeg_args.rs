@@ -379,6 +379,7 @@ mod tests {
             custom_codec_args: custom.to_string(),
             max_concurrent_renders: 1,
             clip_tag: None,
+            resumable_renders: true,
         }
     }
 

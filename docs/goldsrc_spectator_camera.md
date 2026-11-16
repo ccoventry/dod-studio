@@ -93,8 +93,10 @@ loads, the client runs ahead through the demo, then playback starts again
 from the beginning, so a click or Space during the load left that time far
 ahead of the restarted clock, and every spectator button did nothing until
 playback caught up (#1296, both builds; a seek back restarts the demo and
-clears it). `spectator_input_gate.rs` sets it back to 0 whenever
-it is more than a second ahead of the clock;
+clears it). `spectator_input_gate.rs` sets it back to 0 (to the clock, while the clock
+is below 0, as it can be after a jump past a demo's end: #1464) whenever it
+is more than a second ahead of the clock, or at or above 0 while the clock is
+below it;
 `goldsrc-hooks/tools/verify_spectator_input_gate_offsets.py` checks its two
 patterns.
 

@@ -31,6 +31,7 @@ use native::hlcr::capture_room::{
 use native::hlcr::take_cleanup::{AfterFinish, CleanupPolicy, format_gb, volume_of};
 use native::log_markdown;
 use native::patch::types::CaptureBlock;
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -339,7 +340,7 @@ impl CaptureRoom {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|p| p.into_inner())
+        lock_or_recover(&self.state)
     }
 
     /// What the next clip after `after` needs, or `None` after the last.
@@ -616,6 +617,7 @@ impl CaptureRoom {
                         // One target drive, so one piece: the block being
                         // written and the next one both land on it.
                         pieces: vec![check.writing.saturating_add(check.next_bytes)],
+                        fallback_pieces: None,
                         headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
                     },
                     Some(&self.cancel),
