@@ -148,6 +148,50 @@ pub(super) fn avi_dimensions(path: &Path) -> Option<(u32, u32)> {
     None
 }
 
+/// An AVI's frame rate as its video stream header states it: `(rate,
+/// scale)`, so frames per second are `rate / scale` and FFmpeg's time base
+/// for the stream is `scale / rate` (#1451: a segmented render seeks by it).
+/// `None` when there is no video `strh`, a zero rate or scale, or a stream
+/// that doesn't start at 0 (`dwStart`), whose timestamps a seek by frame
+/// number would get wrong.
+pub(super) fn avi_frame_rate(path: &Path) -> Option<(u32, u32)> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; AVI_HEADER_SCAN_BYTES];
+    let read = file.read(&mut buf).ok()?;
+    buf.truncate(read);
+
+    if buf.len() < 12 || &buf[0..4] != b"RIFF" || &buf[8..12] != b"AVI " {
+        return None;
+    }
+    let u32_at = |b: &[u8], at: usize| -> Option<u32> {
+        b.get(at..at + 4)
+            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    };
+    let mut pos = 12usize;
+    while pos + 8 <= buf.len() {
+        let id = &buf[pos..pos + 4];
+        let size = u32_at(&buf, pos + 4)? as usize;
+        let body = pos + 8;
+        match id {
+            b"LIST" => {
+                pos = body + 4;
+                continue;
+            }
+            b"strh" if buf.get(body..body + 4) == Some(b"vids") => {
+                let scale = u32_at(&buf, body + 20)?;
+                let rate = u32_at(&buf, body + 24)?;
+                let start = u32_at(&buf, body + 28)?;
+                return (scale > 0 && rate > 0 && start == 0).then_some((rate, scale));
+            }
+            _ => {}
+        }
+        pos = body + size + (size & 1);
+    }
+    None
+}
+
 /// A BMP frame sequence's resolution, read from the first frame's own
 /// 54-byte header (`BITMAPFILEHEADER` + `BITMAPINFOHEADER`) — width/height
 /// are little-endian `i32` at offsets 18/22. Same file `get_clip_date`

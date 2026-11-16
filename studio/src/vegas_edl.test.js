@@ -79,7 +79,7 @@ describe('edlClips', () => {
 });
 
 describe('vegasEdl', () => {
-  const dir = 'C:\\Users\\chris\\Repos\\dod-studio\\local\\hud-overlay-test\\clips\\';
+  const dir = 'C:\\Users\\someone\\Repos\\dod-studio\\local\\hud-overlay-test\\clips\\';
   const main1 = { name: 'm1', path: `${dir}main_1.mov`, seconds: 6, hud: false, takeFolder: 'T1' };
   const hud1 = { name: 'm1 hud', path: `${dir}main_1_hud.mov`, seconds: 6, hud: true, takeFolder: 'T1' };
   const main2 = { name: 'm2', path: `${dir}main_2.mov`, seconds: 6, hud: false, takeFolder: 'T2' };

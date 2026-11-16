@@ -1,6 +1,6 @@
 // The Review box's HLTV choices (#822) and "Players I pick" (#828) —
 // driven against tests/e2e/review-hltv.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/review-hltv.html');

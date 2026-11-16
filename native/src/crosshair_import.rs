@@ -12,8 +12,9 @@
 //! The `customxhair-` prefix is the one `goldsrc-hooks`' texture hook already
 //! knows as a crosshair sheet, so the HD path leaves these stock too.
 
+use std::fmt;
 use std::io::{Cursor, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::player_overrides::{addon_of, decode_sprite, list_sprites};
 
@@ -29,6 +30,114 @@ pub const MAX_NAME_CHARS: usize = 40;
 const MAX_SOURCE_BYTES: u64 = 32 * 1024 * 1024;
 /// A sprite larger than this is refused, whether picked or inside a ZIP.
 const MAX_SPRITE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Why a crosshair file could not be imported. `Display` is the text the
+/// callers showed before this type existed (`messages::crosshair_*`), so the
+/// Players tab and the log read the same (#1382).
+#[derive(Debug)]
+pub enum CrosshairError {
+    /// Nothing of the typed name is usable in a file name.
+    NameMissing,
+    /// The sprite is bigger than [`MAX_SPRITE_BYTES`].
+    SpriteTooBig { kilobytes: usize },
+    /// The bytes are not a sprite the crosshair can use (the decoder's text).
+    Sprite { why: String },
+    /// A ZIP holds no `.spr`.
+    ZipEmpty,
+    /// A ZIP holds several `.spr` and none is the creator's file.
+    ZipMany { count: usize, names: String },
+    /// The ZIP's directory could not be read.
+    ZipUnreadable { source: zip::result::ZipError },
+    /// One ZIP entry could not be opened or read.
+    ZipEntryUnreadable {
+        name: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// A ZIP entry declares a size over [`MAX_SPRITE_BYTES`].
+    EntryTooBig { name: String },
+    /// The sprite inside a ZIP entry failed [`validate_sprite`].
+    ZipEntryInvalid {
+        name: String,
+        source: Box<CrosshairError>,
+    },
+    /// The file name is already used in either sprites folder.
+    NameTaken { file: String },
+    /// The picked file is bigger than [`MAX_SOURCE_BYTES`].
+    SourceTooBig { path: PathBuf, megabytes: u64 },
+    /// The picked file could not be read.
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// The picked file is not a usable sprite or ZIP.
+    SourceInvalid {
+        path: PathBuf,
+        source: Box<CrosshairError>,
+    },
+    /// The sprites folder or the new file could not be created.
+    Create {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// The new file could not be written (it is removed again).
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl fmt::Display for CrosshairError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::messages as m;
+        match self {
+            Self::NameMissing => f.write_str(&m::crosshair_name_missing()),
+            Self::SpriteTooBig { kilobytes } => {
+                f.write_str(&m::crosshair_sprite_too_big(*kilobytes))
+            }
+            Self::Sprite { why } => f.write_str(why),
+            Self::ZipEmpty => f.write_str(&m::crosshair_zip_empty()),
+            Self::ZipMany { count, names } => f.write_str(&m::crosshair_zip_many(*count, names)),
+            Self::ZipUnreadable { source } => f.write_str(&m::crosshair_zip_unreadable(source)),
+            Self::ZipEntryUnreadable { name, source } => {
+                f.write_str(&m::crosshair_zip_entry_unreadable(name, source))
+            }
+            Self::EntryTooBig { name } => f.write_str(&m::crosshair_entry_too_big(name)),
+            Self::ZipEntryInvalid { name, source } => {
+                f.write_str(&m::crosshair_zip_entry_invalid(name, source))
+            }
+            Self::NameTaken { file } => f.write_str(&m::crosshair_name_taken(file)),
+            Self::SourceTooBig { path, megabytes } => {
+                f.write_str(&m::crosshair_source_too_big(path.display(), *megabytes))
+            }
+            Self::Read { path, source } => f.write_str(&m::path_failed(path.display(), source)),
+            Self::SourceInvalid { path, source } => {
+                f.write_str(&m::path_failed(path.display(), source))
+            }
+            Self::Create { path, source } => {
+                f.write_str(&m::could_not_create(path.display(), source))
+            }
+            Self::Write { path, source } => {
+                f.write_str(&m::could_not_write(path.display(), source))
+            }
+        }
+    }
+}
+
+impl std::error::Error for CrosshairError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ZipUnreadable { source } => Some(source),
+            Self::ZipEntryUnreadable { source, .. } => Some(source.as_ref()),
+            Self::ZipEntryInvalid { source, .. } | Self::SourceInvalid { source, .. } => {
+                Some(source.as_ref())
+            }
+            Self::Read { source, .. }
+            | Self::Create { source, .. }
+            | Self::Write { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 /// The part of `raw` kept for a file name: lower-case ASCII letters, digits,
 /// `-` and `_`; spaces, dots and other punctuation become one `-`; other
@@ -70,10 +179,10 @@ pub fn sanitize_name(raw: &str) -> String {
 }
 
 /// `customxhair-<name>.spr`, or an error when nothing of `name` is usable.
-pub fn file_name_for(name: &str) -> Result<String, String> {
+pub fn file_name_for(name: &str) -> Result<String, CrosshairError> {
     let name = sanitize_name(name);
     if name.is_empty() {
-        return Err(crate::messages::crosshair_name_missing());
+        return Err(CrosshairError::NameMissing);
     }
     Ok(format!("{PREFIX}{name}.spr"))
 }
@@ -81,13 +190,15 @@ pub fn file_name_for(name: &str) -> Result<String, String> {
 /// Whether `bytes` are a Half-Life sprite the crosshair can use: `IDSP`,
 /// version 2, no bigger than [`MAX_SPRITE_BYTES`], and a first frame that
 /// reads to the end (the same check the picker's preview makes).
-pub fn validate_sprite(bytes: &[u8]) -> Result<(), String> {
+pub fn validate_sprite(bytes: &[u8]) -> Result<(), CrosshairError> {
     if bytes.len() as u64 > MAX_SPRITE_BYTES {
-        return Err(crate::messages::crosshair_sprite_too_big(
-            bytes.len() / 1024,
-        ));
+        return Err(CrosshairError::SpriteTooBig {
+            kilobytes: bytes.len() / 1024,
+        });
     }
-    decode_sprite(bytes).map(|_| ())
+    decode_sprite(bytes)
+        .map(|_| ())
+        .map_err(|why| CrosshairError::Sprite { why })
 }
 
 fn base_name(entry: &str) -> &str {
@@ -106,7 +217,7 @@ fn is_sprite_entry(entry: &str) -> bool {
 /// Which of a ZIP's sprite entries to take: the creator's `customxhair.spr`,
 /// else the only one. Several others are refused with their names, so the
 /// user can unzip and pick one.
-fn pick_entry(sprites: &[String]) -> Result<&str, String> {
+fn pick_entry(sprites: &[String]) -> Result<&str, CrosshairError> {
     if let Some(e) = sprites
         .iter()
         .find(|e| base_name(e).eq_ignore_ascii_case(CREATOR_FILE))
@@ -114,18 +225,18 @@ fn pick_entry(sprites: &[String]) -> Result<&str, String> {
         return Ok(e);
     }
     match sprites {
-        [] => Err(crate::messages::crosshair_zip_empty()),
+        [] => Err(CrosshairError::ZipEmpty),
         [only] => Ok(only),
-        many => Err(crate::messages::crosshair_zip_many(
-            many.len(),
-            many.join(", "),
-        )),
+        many => Err(CrosshairError::ZipMany {
+            count: many.len(),
+            names: many.join(", "),
+        }),
     }
 }
 
-fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, String> {
+fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, CrosshairError> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(crate::messages::crosshair_zip_unreadable)?;
+        .map_err(|source| CrosshairError::ZipUnreadable { source })?;
     let sprites: Vec<String> = zip
         .file_names()
         .filter(|n| is_sprite_entry(n))
@@ -134,23 +245,32 @@ fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let name = pick_entry(&sprites)?.to_string();
     let entry = zip
         .by_name(&name)
-        .map_err(|e| crate::messages::crosshair_zip_entry_unreadable(&name, e))?;
+        .map_err(|e| CrosshairError::ZipEntryUnreadable {
+            name: name.clone(),
+            source: Box::new(e),
+        })?;
     if entry.size() > MAX_SPRITE_BYTES {
-        return Err(crate::messages::crosshair_entry_too_big(&name));
+        return Err(CrosshairError::EntryTooBig { name });
     }
     // The header's size can lie: never read past the limit whatever it says.
     let mut out = Vec::new();
     entry
         .take(MAX_SPRITE_BYTES + 1)
         .read_to_end(&mut out)
-        .map_err(|e| crate::messages::crosshair_zip_entry_unreadable(&name, e))?;
-    validate_sprite(&out).map_err(|e| crate::messages::crosshair_zip_entry_invalid(&name, e))?;
+        .map_err(|e| CrosshairError::ZipEntryUnreadable {
+            name: name.clone(),
+            source: Box::new(e),
+        })?;
+    validate_sprite(&out).map_err(|e| CrosshairError::ZipEntryInvalid {
+        name,
+        source: Box::new(e),
+    })?;
     Ok(out)
 }
 
 /// The sprite in a picked file: the file itself when it is one, the
 /// sprite inside when it is a ZIP. Validated either way.
-pub fn extract_sprite(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub fn extract_sprite(bytes: &[u8]) -> Result<Vec<u8>, CrosshairError> {
     if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
         return sprite_from_zip(bytes);
     }
@@ -162,33 +282,42 @@ pub fn extract_sprite(bytes: &[u8]) -> Result<Vec<u8>, String> {
 /// `<game_dir>_addon\sprites\customxhair-<name>.spr` and returns the file
 /// name. `game_dir` is `<hl.exe's folder>\<game folder>`. Refuses a name
 /// either sprites folder already has, and never replaces a file.
-pub fn import_crosshair(game_dir: &Path, source: &Path, name: &str) -> Result<String, String> {
+pub fn import_crosshair(
+    game_dir: &Path,
+    source: &Path,
+    name: &str,
+) -> Result<String, CrosshairError> {
     let file = file_name_for(name)?;
     let taken = |file: &str| {
         list_sprites(game_dir)
             .iter()
             .any(|n| n.eq_ignore_ascii_case(file))
     };
-    let already = || crate::messages::crosshair_name_taken(&file);
+    let already = || CrosshairError::NameTaken { file: file.clone() };
     if taken(&file) {
         return Err(already());
     }
-    let size = std::fs::metadata(source)
-        .map_err(|e| crate::messages::path_failed(source.display(), e))?
-        .len();
+    let read_failed = |source_err| CrosshairError::Read {
+        path: source.to_path_buf(),
+        source: source_err,
+    };
+    let size = std::fs::metadata(source).map_err(read_failed)?.len();
     if size > MAX_SOURCE_BYTES {
-        return Err(crate::messages::crosshair_source_too_big(
-            source.display(),
-            size / (1024 * 1024),
-        ));
+        return Err(CrosshairError::SourceTooBig {
+            path: source.to_path_buf(),
+            megabytes: size / (1024 * 1024),
+        });
     }
-    let bytes =
-        std::fs::read(source).map_err(|e| crate::messages::path_failed(source.display(), e))?;
-    let sprite =
-        extract_sprite(&bytes).map_err(|e| crate::messages::path_failed(source.display(), e))?;
+    let bytes = std::fs::read(source).map_err(read_failed)?;
+    let sprite = extract_sprite(&bytes).map_err(|e| CrosshairError::SourceInvalid {
+        path: source.to_path_buf(),
+        source: Box::new(e),
+    })?;
     let dir = addon_of(game_dir).join("sprites");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| crate::messages::could_not_create(dir.display(), e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| CrosshairError::Create {
+        path: dir.clone(),
+        source: e,
+    })?;
     let path = dir.join(&file);
     let mut out = match std::fs::OpenOptions::new()
         .write(true)
@@ -197,12 +326,12 @@ pub fn import_crosshair(game_dir: &Path, source: &Path, name: &str) -> Result<St
     {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(already()),
-        Err(e) => return Err(crate::messages::could_not_create(path.display(), e)),
+        Err(source) => return Err(CrosshairError::Create { path, source }),
     };
     if let Err(e) = out.write_all(&sprite).and_then(|()| out.flush()) {
         drop(out);
         let _ = std::fs::remove_file(&path);
-        return Err(crate::messages::could_not_write(path.display(), e));
+        return Err(CrosshairError::Write { path, source: e });
     }
     Ok(file)
 }
@@ -317,9 +446,15 @@ mod tests {
         assert!(extract_sprite(&zip).is_ok());
         let zip = zip_of(&[("a.spr", &spr), ("b.spr", &spr)], false);
         let err = extract_sprite(&zip).unwrap_err();
-        assert!(err.contains("a.spr, b.spr"), "{err}");
+        assert!(
+            matches!(&err, CrosshairError::ZipMany { count: 2, names } if names == "a.spr, b.spr"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("a.spr, b.spr"), "{err}");
         let zip = zip_of(&[("README.txt", b"hi")], false);
-        assert!(extract_sprite(&zip).unwrap_err().contains("no crosshair"));
+        let err = extract_sprite(&zip).unwrap_err();
+        assert!(matches!(err, CrosshairError::ZipEmpty), "{err}");
+        assert!(err.to_string().contains("no crosshair"));
     }
 
     #[test]
@@ -336,7 +471,9 @@ mod tests {
         v1[4] = 1;
         assert!(extract_sprite(&v1).is_err());
         let huge = vec![0u8; MAX_SPRITE_BYTES as usize + 1];
-        assert!(validate_sprite(&huge).unwrap_err().contains("too big"));
+        let err = validate_sprite(&huge).unwrap_err();
+        assert!(matches!(err, CrosshairError::SpriteTooBig { .. }), "{err}");
+        assert!(err.to_string().contains("too big"));
     }
 
     #[test]
@@ -358,9 +495,10 @@ mod tests {
 
         // Taken in either folder, whatever the case: refused, nothing changed.
         let err = import_crosshair(&game, &source, "RED dot").unwrap_err();
-        assert!(err.contains("already"), "{err}");
+        assert!(matches!(err, CrosshairError::NameTaken { .. }), "{err}");
+        assert!(err.to_string().contains("already"), "{err}");
         let err = import_crosshair(&game, &source, "taken").unwrap_err();
-        assert!(err.contains("already"), "{err}");
+        assert!(matches!(err, CrosshairError::NameTaken { .. }), "{err}");
         assert_eq!(
             std::fs::read(game.join("sprites").join("customxhair-taken.spr")).unwrap(),
             b"x"
@@ -369,7 +507,12 @@ mod tests {
         // A bad file writes nothing.
         let bad = dir.join("bad.spr");
         std::fs::write(&bad, b"not a sprite").unwrap();
-        assert!(import_crosshair(&game, &bad, "bad").is_err());
+        let err = import_crosshair(&game, &bad, "bad").unwrap_err();
+        assert!(matches!(err, CrosshairError::SourceInvalid { .. }), "{err}");
+        assert!(
+            err.to_string().starts_with(&bad.display().to_string()),
+            "the text names the picked file first: {err}"
+        );
         assert!(!dir.join("dod_addon/sprites/customxhair-bad.spr").exists());
     }
 }

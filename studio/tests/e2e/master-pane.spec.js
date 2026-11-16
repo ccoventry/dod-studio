@@ -1,6 +1,6 @@
 // master_pane.js's missing-demo row (#21) — driven against
 // tests/e2e/master-pane.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/master-pane.html');

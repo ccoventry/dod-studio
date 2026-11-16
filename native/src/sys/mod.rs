@@ -1,6 +1,8 @@
 /// Studio analyses demos for the game's Highlights tab (#565).
 #[cfg(windows)]
 pub mod analysis_server;
+/// A job object that ends the processes put in it when Studio exits (#1439).
+pub mod child_job;
 /// Whether reading a file would download it from a cloud drive (#992).
 pub mod cloud_file;
 /// Releases the mouse a killed game left confined (#1095).
@@ -11,6 +13,9 @@ pub mod disk;
 /// symlinks and stops at a depth cap (#376).
 pub mod folder_walk;
 pub mod foreground_lock;
+/// The game tells Studio, over the same pipe, a demo it plays is damaged
+/// (#1373).
+pub mod game_damage_notices;
 pub mod game_remote;
 /// The game asks Studio, over the same pipe, to review its demo (#1142).
 pub mod game_review_requests;
@@ -43,6 +48,9 @@ pub mod steam;
 /// game (#1235).
 #[cfg(windows)]
 pub mod studio_pipe;
+/// "Keep free on the Windows drive" (#1430): what captures and renders leave
+/// free on the drive Windows is installed on.
+pub mod windows_drive;
 /// Ends a launcher a cancelled WMI call starts late (#1243).
 pub mod wmi_late_start;
 /// Starts a process through WMI, outside every job of Studio's (#545).

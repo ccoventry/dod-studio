@@ -67,6 +67,12 @@ Caveats:
 - **`dem_forcehltv 1` drops them.** `Server::ProcessMessage` keeps demo data
   only when not forcing HLTV. Default is 0. (ReHLDS source; not re-derived from
   the binary.)
+- **A POV demo played with `dem_forcehltv 1` never runs `CHud::Think`**
+  (measured, PRE, `tr2.dem`, #1462): the recorder's `ResetHUD`, `YouDied` and
+  `SetFOV` messages still set the HUD's FOV, and nothing resets it, so from the
+  recorder's spawn to his death it sits at 0 and DoD's `StudioDrawModel` skips
+  the in-eye viewmodel (it does under 90, the scoped-in rule).
+  `goldsrc-hooks/src/hltv_fov.rs` puts `Think`'s spectator FOV back each frame.
 
 ## 2. The trailing directory: followed, and ours is right
 
@@ -214,6 +220,25 @@ The engine already has `dem_jump <seconds>` (relative, then pauses),
 `dem_start`, `dem_pause <0|1>`, `dem_speed <rate>` and `dem_save`, all from
 `DemoPlayer.dll`.
 
+**`dem_jump` is relative, and past the end it shows the start (#1465).**
+`dem_jump 293` typed at 4:50 goes to 9:43, not to 4:53 (ReHLDS
+`DemoPlayer::CMD_Jump` is `SetWorldTime(atof(arg), true)`). Measured on
+both builds with `ktps8w3-dyelife_ih_anzio_h2` (POV, the demo runs 0:05 to
+22:27): `dem_jump 20` at 5:36 landed at 5:56, `dem_jump -30` from there
+landed at 5:26 and played on from it, and `dem_jump 590` at 5:35 landed at
+15:25. `dem_jump 9000` put the clock at 165:25; the player then held it at
+the demo's last frame (22:27), but the view froze on the demo's first frames
+(warm-up, "Clan Match Begins in : 142 mins") and the client clock went to
+-8,524 s. That is what looked like "a jump back lands at the start" in
+#1452's probe: it typed absolute times into `dem_jump`, so its third jump
+ran past the end of an 18-minute demo. It is the engine, not the hook:
+nothing in the hook moves the clock on a `dem_jump` (the #893 gap skip
+logged nothing). So to go back by an amount, `dem_jump -<seconds>` (it
+pauses); to go to a time, `ds_demo_seek_to <seconds>` (it doesn't pause, and
+going back in an HLTV demo it replays from the start so names, teams and
+zooms are right).
+A jump past the end is undone with `ds_demo_seek_to`.
+
 `ds_demo_seek_to <seconds>` and `ds_demo_seek_by <seconds>`
 (`goldsrc-hooks/src/demo_seek.rs`) jump without pausing and refuse while the
 demo is still loading. With `ds_demo_seek_skip_between 1` they also move the
@@ -267,7 +292,44 @@ sent, then step forward to the target as above. Every message before the
 landing arrives in order. On `wsod25_grp2_h1_hltv` a jump back to 15:40
 took 182 steps, 1.4 s on PRE and 1.7 s on POST. The table is also cleared
 whenever a demo is loaded, since `client.dll` stays loaded between demos.
-POV demos and `ds_demo_seek_skip_between 1` still jump back at once.
+
+### Backward jumps in a POV demo (#1085)
+
+A POV demo is not harmless either: a jump back kept the later position's
+flags, capture icons and scoreboard (an Allied star on a flag the Axis held,
+later kills and deaths in every row; PRE and POST, tested 2026-11-06 on 4 POV
+demos from 4 players). So every backward jump now starts over, POV included;
+only `ds_demo_seek_skip_between 1` still jumps back at once.
+
+A POV demo starts over from its first recorded frame, not the clock's start:
+its clock starts at the LOADING frames, often minutes before the recording
+(#893, `demo_seek.rs`), and stepping through that gap costs 10 waited frames per 5 s
+step with nothing to send (7-15 s a rewind). Jumping to 0.01 s before the
+first frame after the gap, as the player's own gap jump would, skips no
+message (the LOADING frames' sign-on was read at load) and took 1.0-2.6 s on
+5 POV demos from 5 players. Each rewind steps to exactly `hud_deathnotice_time`
+before the landing, empties the kill feed there and steps on, so the feed
+shows only the kills of that last notice lifetime, not the last few the steps
+replayed from earlier (`demo_seek/rewind.rs`). A forward stepped seek does the
+same: without it, a jump from 878.7 to 978.6 s in `solifotw-pb2` landed with three
+kills from before the last 10 s still up, on PRE and POST. A seek made while
+another is still stepping (two quick presses of the Playback tab's -10, Review's
+Next twice) counts a relative time from that seek's target, not from the clock
+mid-steps, and steps even when short, so the feed is emptied of what the first
+one's steps replayed (`demo_seek/chain.rs`). The kills replayed after the
+clear need their time put right too: the HUD stamps each notice with its own
+clock (`gHUD.m_flTime`), which runs in real time and ignores the demo clock's
+jumps, so every kill of those last 10 s came out stamped as new and stayed up a
+full 10 s past the landing (PRE, rr2/thunder/pb2: 9.97-9.99 s left on every
+notice, where playing in leaves 0.05-7.5 s). So after the clear the steps are
+0.5 s, each notice is noted with the step it arrived in, and the landing
+re-stamps it to its kill's demo time plus the lifetime, counted in the HUD's
+seconds from the engine's client clock (`deathmsg/seek_restamp.rs`, #1392).
+`m_flTime` stands still while the console or the game menu is up, so a seek
+typed there stamps every kill alike; equal stamps are matched to the kills by
+order. A plain forward stepped seek shorter than a lifetime keeps the kills
+already up and re-dates them too, rather than emptying the feed. A capture batch goes back with its
+`back` line (`goldsrc-hooks/src/batch.rs`).
 
 ### The replayed console commands (#702)
 
@@ -290,7 +352,7 @@ same as reaching it by fast-forward.
 and nothing else. Where that comes from, read out of both installs' DLLs
 (#776): every demo open ends in the file system's `Open(name, "rb", pathID
 = 0)` -- `hw.dll`'s `FS_Open` for `playdemo`, `Core.dll`'s
-`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadDemo`,
+`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadGame(char*)`,
 slot 41) for `viewdemo` -- and `FileSystem_Stdio.dll`'s `Open` only tries
 `<search path> + name` for each search path in turn. Nothing on the way
 checks the name (the "Relative pathnames are not allowed" test belongs to

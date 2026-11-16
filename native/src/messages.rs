@@ -27,6 +27,7 @@ pub mod render;
 pub mod repair;
 pub mod schedule;
 pub mod take_delete;
+pub mod windows_drive;
 
 use std::fmt::Display;
 
@@ -1237,6 +1238,18 @@ pub fn obs_scene_switched(scene: &str) -> String {
     format!("🎬 **OBS** — switched to scene `{scene}` (restored afterwards).")
 }
 
+pub fn obs_audio_offset_set(source: &str, ms: i64) -> String {
+    format!(
+        "🎬 **OBS** — set `{source}`'s sync offset to {ms} ms, so its sound lines up with the picture."
+    )
+}
+
+pub fn obs_audio_offset_not_set(source: &str, e: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — could not set `{source}`'s sync offset, so its sound may be about 0.3 s late: {e}"
+    )
+}
+
 pub fn obs_preflight_warning(warning: impl Display) -> String {
     format!("⚠️ **OBS** — {warning}")
 }
@@ -1542,6 +1555,27 @@ pub fn analysis_server_request(path: impl std::fmt::Display) -> String {
     format!("Analysis server: the game asked for {path}")
 }
 
+// ── sys/game_damage_notices.rs: activity log (#1373) ──────────────────────
+
+pub fn game_damage_notice(
+    path: impl std::fmt::Display,
+    seconds: Option<f64>,
+    reason: &str,
+) -> String {
+    let at = seconds.map_or_else(|| "an unknown time".to_string(), |s| format!("{s:.2} s"));
+    format!("Damaged demo: the game says {path} is damaged at {at} ({reason})")
+}
+
+pub fn game_damage_bad_notice(why: &str) -> String {
+    format!("Damaged demo: the game's notice could not be read: {why}")
+}
+
+pub fn game_damage_not_handed_on(why: &str) -> String {
+    format!("Damaged demo: the notice could not be passed to the window: {why}")
+}
+
+pub const GAME_DAMAGE_STUDIO_STARTING: &str = "DoD Studio is still starting";
+
 // ── patch/engine.rs: activity log (#237) ──────────────────────────────────
 
 pub fn demo_buffer_eof(
@@ -1830,6 +1864,26 @@ pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Displa
         "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{codec_args}`) instead of \
          writing a BMP sequence, one `{video_file}` per stream folder. Render Studio reads these the \
          same way it reads frame sequences."
+    )
+}
+
+/// The Render While Capturing plan (#861, #1438), when the batch's clips
+/// don't all fit the capture drives at once: how many were routed one at a
+/// time, and how many of those have room only once the takes before them on
+/// their drive have rendered. `takes_counted`: how many of the latest takes
+/// the plan counts as still on disk at least (a big take counts longer).
+pub fn room_plan(one_at_a_time: usize, waits: usize, takes_counted: usize) -> String {
+    let wait_note = if waits == 0 {
+        format!(
+            "each has room beside the takes still on its drive (at least the {takes_counted} recorded before it, and a big take until the clips after it add up to its size)"
+        )
+    } else {
+        format!(
+            "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch may hold before those until they have"
+        )
+    };
+    format!(
+        "[render-while-capturing] Plan: the clips don't all fit the capture drives at once, so {one_at_a_time} clip(s) go to drives with room for them one at a time; {wait_note}. That is the best case, with renders one clip behind: when they fall further behind, the batch also holds until they catch up"
     )
 }
 

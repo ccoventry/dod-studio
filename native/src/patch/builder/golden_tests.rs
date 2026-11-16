@@ -25,18 +25,18 @@ use crate::test_support::Scratch;
 use std::sync::Arc;
 
 /// Every fixture demo's frame count, at [`FPS`].
-const FRAMES: i32 = 60_000;
-const FPS: f32 = 100.0;
+pub(super) const FRAMES: i32 = 60_000;
+pub(super) const FPS: f32 = 100.0;
 /// Where the fixture demos' server clock starts: the viewdemo clock is not
 /// the playback clock, so the batch file's seconds must come from it.
 const SERVER_CLOCK_START: f32 = 120.0;
 
-fn frame_times() -> Arc<Vec<f32>> {
+pub(super) fn frame_times() -> Arc<Vec<f32>> {
     Arc::new((0..FRAMES).map(|i| i as f32 / FPS).collect())
 }
 
 /// One highlight of `player` (name, slot) over `kill_ticks` in `demo`.
-fn highlight(
+pub(super) fn highlight(
     demo: &str,
     player: (&str, usize),
     kill_ticks: &[i32],
@@ -76,7 +76,7 @@ fn highlight(
 
 /// A project's picked highlights, deliberately not in play order, so the
 /// indices each block points back at are tested too.
-fn payload() -> Vec<CaptureStreak> {
+pub(super) fn payload() -> Vec<CaptureStreak> {
     let frames = frame_times();
     let alpha = "D:/demos/alpha_pov.dem";
     let bravo = "D:/demos/bravo_hltv.dem";
@@ -99,7 +99,7 @@ fn payload() -> Vec<CaptureStreak> {
 
 /// A batch's config as Studio sends it, in `mode`, with the game, hook DLL
 /// and capture folder under `root`.
-fn config(root: &std::path::Path, mode: CaptureMode) -> PatcherConfig {
+pub(super) fn config(root: &std::path::Path, mode: CaptureMode) -> PatcherConfig {
     let game = root.join("game");
     std::fs::create_dir_all(game.join("dod")).unwrap();
     let hook_dll = root.join("dodstudio_goldsrc_hooks.dll");
@@ -204,7 +204,7 @@ fn jobs_text(jobs: &[PatchJob]) -> String {
 const CAPTURE_DRIVE_FREE: u64 = 1_000_000_000_000;
 
 /// [`build_batch_queue`] on a capture drive with [`CAPTURE_DRIVE_FREE`].
-fn build_golden_batch(
+pub(super) fn build_golden_batch(
     streaks: &[CaptureStreak],
     config: &PatcherConfig,
 ) -> (Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>) {

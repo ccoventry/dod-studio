@@ -313,9 +313,12 @@ is the complete list):
   `src/review.rs`. The answer comes from keys on the game screen (Y M N R B Space S,
   ESC for the Review tab), while a highlight plays (#1141) or at its end,
   through `client.dll`'s `HUD_Key_Event`, with a box
-  drawn from `HUD_Redraw` saying which highlight plays (#660,
-  `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
-  instead.
+  drawn from `HUD_Redraw` saying which highlight plays, whose, its kill range
+  (with the scan's in grey beside it when it was changed) and its whole
+  note, labels and values in two colours (#660, #1399, #1437,
+  `src/review_keys.rs`, `src/review_header.rs`); Up and Down step the speed
+  through 0.25x to 4x while it plays (`src/review_speed.rs`).
+  `ds_ui_review_keys 0` pauses on the Review tab instead.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
@@ -481,6 +484,28 @@ there but not in an HLTV demo (#894): one byte, both builds
 (`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
 On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
+`src/demo_damage.rs` notices a `playdemo` (or `timedemo`) that stops on a
+damaged frame, or at the engine's entity limit (256 on the pre-Anniversary
+build), and says so in the console, the hook log and a `DEMO_DAMAGED` /
+`DEMO_ENTITY_LIMIT` event to Studio (#1373): one entry detour on each of
+`Host_EndGame` and `Host_Error`, both builds
+(`tools/verify_demo_damage_offsets.py`). Under `viewdemo`, which reaches
+neither, `src/demo_damage/viewdemo.rs` holds what the demo player loaded
+against a walk of the file's frames once the load ends. A damaged demo also
+gets a line on the DoD Studio window's loading strip, a centre print while
+nothing is being captured (`pfnCenterPrint`, checked per build by
+`tools/verify_center_print_offsets.py`), and a `damaged` request over
+Studio's game pipe, which shows a toast with Repair
+(`src/demo_damage/tell.rs`). It only reads. On by default;
+`GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
+
+`src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo
+plays (#1441). The recorder's presses replay there and cycle the viewer's
+`_cl_minimap`; the map never draws in POV playback (#897), so all that shows
+is the full map's side effects: no crosshair and no flag row, for the rest of
+the session. Wrapped through the command list, no code patch. On by default;
+`GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise
@@ -490,10 +515,11 @@ crash. Set the variable to `0` to turn it off.
 | --- | --- | --- |
 | `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `ds_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
 | `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/demoplayer_dict_cache.rs` | `DemoPlayer.dll+0x48e0` crash on a second `viewdemo` of an HLTV demo in one session (25th Anniversary): the demo player's event dictionary grows and keeps a lookup cache that points into the freed array (part of #1392). Both builds patched (`tools/verify_demoplayer_dict_cache_offsets.py`). `ds_debug_status` shows how often it cleared the cache. | `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` |
 | `src/map_file_leak.rs` | `Fatal Error: COM_LoadFile: not enough space for maps/<map>.bsp`, or a silent exit, after about 30 map loads on the pre-Anniversary build: DoD's client leaks a copy of every map's `.bsp` (#1232). `ds_debug_status` shows how many it freed. | `GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX=0` |
 | `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
 | `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
-faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. A panic in this DLL ends the game through `panic = "abort"`, which skips that handler, so `src/panic_log.rs` writes a `PANIC:` line (message, source file and line, thread) first. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.
+faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. A panic in this DLL ends the game through `panic = "abort"`, which skips that handler, so `src/panic_log.rs` writes a `PANIC:` line (message, source file and line, thread) first. A freeze leaves only Windows' "not responding", so `src/hang.rs` watches for the engine thread drawing no frame for 20 s (`ds_debug_hang_report_seconds`, `0` off) and then logs where it is stuck as a `HANG:` block (`module+offset` frames), writes a minidump to `%APPDATA%\dod-studio\logs\dumps\`, and logs `HANG-END:` if frames come back; it only reads and never ends the game. `tools/crash_report.py` summarises every crash and freeze on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

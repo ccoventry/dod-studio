@@ -11,7 +11,7 @@ import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { watchPreviewTrim } from './preview_trim_status.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
-import { clockFloor, clockRound, durationText } from './time_format.js';
+import { clockFloor, durationText } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
@@ -20,6 +20,7 @@ import { headshotsCell } from './headshots.js';
 import { flagTagChips } from './flag_tags.js';
 import { fileNameOf } from './path_display.js';
 import { createCaptureHistory } from './capture_history.js';
+import { updateStreakVisuals } from './streak_visuals.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -132,46 +133,8 @@ function updatePreviewButtonStates() {
   if (currentOnSelectionChange) currentOnSelectionChange();
 }
 
-/**
- * Recomputes start_tick/end_tick/kill_count/duration_string/timeline_string
- * from streak.kills[start_index..=end_index]. Mirrors
- * `CaptureStreak::update_visuals` in native/src/patch/types.rs — must be
- * called after any mutation of start_index/end_index so the display and the
- * eventual capture payload (which is built from these same fields) agree.
- */
-export function updateStreakVisuals(streak) {
-  if (!streak.kills || streak.kills.length === 0) return;
-
-  // A session saved before start_index/end_index existed (or a streak never
-  // touched by the range editor) may have either as undefined.
-  if (streak.end_index === undefined) streak.end_index = streak.kills.length - 1;
-  if (streak.start_index === undefined) streak.start_index = 0;
-
-  const end = Math.min(streak.end_index, streak.kills.length - 1);
-  const start = Math.min(streak.start_index, end);
-  streak.start_index = start;
-  streak.end_index = end;
-
-  const slice = streak.kills.slice(start, end + 1);
-  streak.start_tick = slice[0][0];
-  streak.end_tick = slice[slice.length - 1][0];
-  streak.kill_count = slice.length;
-
-  const totalSecs = Math.round(Math.max(slice[slice.length - 1][1] - slice[0][1], 0));
-  streak.duration_string = clockRound(totalSecs);
-
-  const parts = slice.map(([, absTime, weapon], i) => {
-    // Falls back to a labelled placeholder rather than an empty string so an
-    // unresolved weapon name (e.g. a missing localization key) can never
-    // leave a blank array element — `Array.prototype.join` would otherwise
-    // render that as an orphaned leading/embedded separator with no name.
-    const weaponClean = String(weapon || '').replace(/^Weapon::/, '').trim() || STRINGS.ANALYZER.WEAPON_UNKNOWN;
-    if (i === 0) return weaponClean;
-    const gapSec = Math.round(Math.max(absTime - slice[i - 1][1], 0));
-    return `(+${clockRound(gapSec)}) ${weaponClean}`;
-  });
-  streak.timeline_string = parts.join(', ');
-}
+// Re-exported: the recompute lives in streak_visuals.js so the pure Review code can call it too.
+export { updateStreakVisuals };
 
 /** Selects every currently-visible (Player filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
