@@ -20,7 +20,7 @@ use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_backgro
 use native::hlcr::take_cleanup::attempt_stream;
 use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
-use native::shared::lock::lock_or_recover;
+use native::shared::lock::{lock_or_recover, read_or_recover, write_or_recover};
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -481,7 +481,7 @@ impl RenderManager {
     /// The volume (`volume_of`) a capture holds for room on, whose takes'
     /// renders start first (#1438), or `None` once it has room again.
     pub(crate) fn set_room_volume(&self, volume: Option<String>) {
-        *self.room_volume.write().unwrap_or_else(|p| p.into_inner()) = volume;
+        *write_or_recover(&self.room_volume) = volume;
     }
 
     /// The render jobs of the take(s) under `folder`, a capture block's
@@ -1032,11 +1032,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         effective_concurrent
                     };
 
-                    let room_volume = handles
-                        .room_volume
-                        .read()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .clone();
+                    let room_volume = read_or_recover(&handles.room_volume).clone();
                     let order = start_order(
                         guard
                             .iter()

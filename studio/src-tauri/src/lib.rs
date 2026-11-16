@@ -74,6 +74,7 @@ use demo_preview::{
 use game_process_manager::{
     check_engine_processes, kill_engine_processes, launch_standalone_game, start_steam, steam_state,
 };
+use native::shared::lock::lock_or_recover;
 use obs_manager::launch_obs;
 use render_manager::{
     RenderManager, cancel_queued_render_jobs, cancel_render_batch, cancel_render_job,
@@ -112,7 +113,7 @@ impl Default for ScanManager {
 async fn get_settings(state: tauri::State<'_, SettingsManager>) -> Result<AppSettings, String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&inner_arc);
         Ok(guard.clone())
     }))
     .await
@@ -135,7 +136,7 @@ async fn save_settings(
         // would put the launch and every file Studio writes somewhere other
         // than beside hl.exe (#402).
         native::shared::paths::validate_game_folder(&settings.game_folder)?;
-        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = lock_or_recover(&inner_arc);
         // The frontend doesn't carry this field; the loaded value stands, or a
         // migration would run again at every start.
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
@@ -284,12 +285,7 @@ async fn run_demo_audit(
     queued: Vec<String>,
     look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
-    let hl_path = settings
-        .inner
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .hl_path
-        .clone();
+    let hl_path = lock_or_recover(&settings.inner).hl_path.clone();
     let game_folders: Vec<PathBuf> = native::shared::paths::mod_dir_for_exe(Path::new(&hl_path))
         .filter(|_| !hl_path.trim().is_empty())
         .into_iter()
