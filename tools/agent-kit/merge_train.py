@@ -44,6 +44,9 @@ CHECKS_TIMEOUT_SECS = 45 * 60
 HEAD_MOVE_TIMEOUT_SECS = 120
 MERGED_TIMEOUT_SECS = 60
 SHORT_POLL_SECS = 5
+# A stacked PR's base branch is deleted when its parent merges and GitHub then retargets
+# the PR to dev; that takes a few seconds, so the train waits this long before it stops.
+RETARGET_TIMEOUT_SECS = 60
 # A PR whose base moves while its checks run is updated again, at most this often.
 MAX_UPDATES_PER_PR = 3
 # What `gh pr checks` prints before the new head commit has any check runs; it means
@@ -217,6 +220,7 @@ class Train:
 
     def ride(self, pr, required):
         view = self.gh.view(pr)
+        view = self.wait_for_retarget(pr, view)
         self.log(pr, f"{view['title']} (head {view['headRefOid'][:8]})")
         if view["state"] in ("MERGED", "CLOSED"):
             raise Skip(f"already {view['state'].lower()}")
@@ -239,6 +243,21 @@ class Train:
         self.gh.merge(pr, head)
         self.confirm_merged(pr)
 
+    def wait_for_retarget(self, pr, view):
+        """The PR's view once its base is dev. A PR stacked on a branch the train just merged
+        is retargeted by GitHub a few seconds later; polls for that before pr_problem
+        refuses it. Any other base (main) and a PR that is not open are returned as they are."""
+        if view["state"] != "OPEN" or view["baseRefName"] in (BASE, "main"):
+            return view
+        self.log(pr, f"targets {view['baseRefName']}, not {BASE}; waiting for GitHub to retarget it")
+        deadline = self.clock() + RETARGET_TIMEOUT_SECS
+        while self.clock() < deadline:
+            self.sleep(SHORT_POLL_SECS)
+            view = self.gh.view(pr)
+            if view["state"] != "OPEN" or view["baseRefName"] == BASE:
+                break
+        return view
+
     def dry_run(self, pr, view, required):
         behind = self.gh.behind_by(view["headRefOid"])
         if behind:
@@ -257,7 +276,12 @@ class Train:
             self.log(pr, f"up to date with {BASE}")
             return head
         self.log(pr, f"{behind} commits behind {BASE}; gh pr update-branch")
-        self.gh.update_branch(pr)
+        try:
+            self.gh.update_branch(pr)
+        except ToolError as e:
+            if "conflict" in str(e).lower():
+                raise Stop(f"has conflicts with {BASE}: resolve and rerun") from e
+            raise
         deadline = self.clock() + HEAD_MOVE_TIMEOUT_SECS
         while self.clock() < deadline:
             view = self.gh.view(pr)
