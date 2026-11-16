@@ -52,6 +52,8 @@ class FakeGh:
     def update_branch(self, pr):
         self.calls.append(("update-branch", pr))
         p = self.prs[pr]
+        if p.get("update_error"):
+            raise mt.ToolError(p["update_error"])
         p["head"] = "f" * 32 + f"{pr:08d}"
 
     def merge(self, pr, head_sha):
@@ -62,6 +64,17 @@ class FakeGh:
 
     def disable_auto(self, pr):
         self.calls.append(("disable-auto", pr))
+
+    def retarget_after_views(self, pr, views):
+        """After this many view() calls of `pr`, its base becomes dev (GitHub retargeting)."""
+        real, seen = self.view, [0]
+
+        def view(number):
+            if number == pr:
+                seen[0] += 1
+                self.prs[pr]["base"] = "dev" if seen[0] > views else self.prs[pr]["base"]
+            return real(number)
+        self.view = view
 
 
 class FakeClock:
@@ -196,6 +209,38 @@ class TrainTests(unittest.TestCase):
         gh, result, _ = run_train(prs, [1])
         self.assertEqual(result.merged, [1])
         self.assertEqual([c[0] for c in gh.calls], ["update-branch", "merge"])
+
+    def test_a_stacked_pr_is_merged_once_github_retargets_it_to_dev(self):
+        gh = FakeGh({1: pr([(GREEN, "")]), 2: pr([(GREEN, "")], base="feat/one")})
+        gh.retarget_after_views(2, 3)
+        clock = FakeClock()
+        lines = []
+        result = mt.Train(gh, mt.Options(interval_secs=30, timeout_secs=600), clock=clock,
+                          sleep=clock.sleep, out=lines.append).run([1, 2])
+        self.assertEqual(result.merged, [1, 2])
+        self.assertTrue(any("waiting for GitHub to retarget" in line for line in lines))
+
+    def test_a_pr_never_retargeted_stops_after_the_wait(self):
+        gh, result, _ = run_train({1: pr([(GREEN, "")], base="feat/one")}, [1])
+        self.assertEqual(result.stopped_at, 1)
+        self.assertIn("targets feat/one, not dev", result.reason)
+        self.assertEqual(gh.calls, [])
+
+    def test_a_pr_into_main_stops_at_once_without_waiting(self):
+        clock = FakeClock()
+        gh = FakeGh({1: pr([(GREEN, "")], base="main")})
+        mt.Train(gh, mt.Options(), clock=clock, sleep=clock.sleep, out=lambda _l: None).run([1])
+        self.assertEqual(clock.now, 0)
+
+    def test_update_branch_conflict_says_to_resolve_and_rerun(self):
+        err = "gh pr update-branch 1 failed (1): merge conflict between base and head"
+        gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error=err)}, [1])
+        self.assertEqual(result.stopped_at, 1)
+        self.assertEqual(result.reason, "has conflicts with dev: resolve and rerun")
+
+    def test_other_update_branch_failures_keep_gh_text(self):
+        gh, result, _ = run_train({1: pr([(GREEN, "")], behind=[2], update_error="HTTP 502")}, [1])
+        self.assertIn("HTTP 502", result.reason)
 
     def test_dry_run_changes_nothing(self):
         prs = {1: pr([(GREEN, "")], behind=[3]), 2: pr([(GREEN, "")])}

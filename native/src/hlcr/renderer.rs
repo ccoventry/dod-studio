@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
+use crate::shared::lock::lock_or_recover;
 
 mod ffmpeg_args;
 mod ffmpeg_run;
@@ -268,7 +269,7 @@ struct ReservationGuard {
 
 impl Drop for ReservationGuard {
     fn drop(&mut self) {
-        let mut ledger = self.ledger.lock().unwrap_or_else(|p| p.into_inner());
+        let mut ledger = lock_or_recover(&self.ledger);
         if let Some(reserved) = ledger.get_mut(&self.dir) {
             *reserved = reserved.saturating_sub(self.amount);
         }
@@ -573,7 +574,7 @@ fn reserve_export_dir(
             .copied()
             .unwrap_or(EXPORT_SAFETY_MARGIN_BYTES)
     };
-    let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
+    let mut ledger = lock_or_recover(reservations);
     let reserved = try_reserve(
         &mut ledger,
         &config.export_directories,
