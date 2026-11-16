@@ -40,9 +40,9 @@ export function makeDemos(count) {
       streaks: Array.from({ length: 6 }, (__, i) => ({ ...makeStreak(i, path), ...(n === 1 && i === 0 ? { curation: 'keep' } : {}) })),
       // Demo 1 carries every badge the queue can show beside a name: missing,
       // multi-map (Split now), damaged and tracked.
-      ...(n === 1 ? { missing: true, damage: { read_up_to_secs: 600 }, peak_packet_entities: 5000 } : {}),
+      ...(n === 1 ? { missing: true, damage: { read_up_to_secs: 600 } } : {}),
       file_key: `k${n}`, map_name: n % 2 ? 'dod_anzio' : 'dod_lennon_beta_special_edition_final',
-      modified_unix_secs: 1760000000 + n * 86400, peak_packet_entities: 100, no_camera_data: false,
+      modified_unix_secs: 1760000000 + n * 86400, peak_packet_entities: n === 1 ? 5000 : 100, no_camera_data: false,
       recorder_id: '76561198000000001', recorder_name: PLAYERS[n % PLAYERS.length],
       teams: [], signon_maps: n === 1 ? ['dod_anzio', 'dod_lennon'] : ['dod_anzio'], highlights_version: 99,
     };

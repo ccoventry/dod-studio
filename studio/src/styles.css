@@ -3626,8 +3626,9 @@ input[type="checkbox"].hd-box-pattern {
 
 /* Narrow panes stack Player, Time and Dur. into one column (#46): the separate
    columns need about 1200 px with a long HLTV player name (1100 at 1920's
-   default split scrolled sideways). The wide layout keeps them. Switched on the table wrapper's own width, not the
-   window's, since the queue/details split moves it. */
+   default split scrolled sideways). The wide layout keeps them. Switched on
+   the table wrapper's own width, not the window's, since the queue/details
+   split moves it. */
 #detail-pane .table-wrapper {
   container: detail-table / inline-size;
 }
@@ -3669,7 +3670,7 @@ input[type="checkbox"].hd-box-pattern {
 
   /* The stacked player line is cut to this; its tooltip has the full name. */
   #detail-streaks-table .streak-stack-player {
-    max-width: 6em;
+    max-width: 14em;
   }
 
   /* Measured in the real window at 1280 with flag chips beside the kill
@@ -3697,6 +3698,11 @@ input[type="checkbox"].hd-box-pattern {
    also on the stacked cell's tooltip). Lower than the stacking threshold, so a
    1920 window's default split still shows it. */
 @container detail-table (max-width: 800px) {
+  /* Tighter again where the Details column is gone too (measured at 699 px). */
+  #detail-streaks-table .streak-stack-player {
+    max-width: 6em;
+  }
+
   #detail-streaks-table .col-details {
     display: none;
   }

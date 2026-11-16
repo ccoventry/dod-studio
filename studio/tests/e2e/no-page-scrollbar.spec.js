@@ -99,9 +99,16 @@ for (const size of WIDE_SIZES) {
         const next = tr.querySelector('td:nth-child(3)');
         const c = cell.getBoundingClientRect();
         const kids = [...cell.children].map((k) => ({ cls: k.className, right: k.getBoundingClientRect().right, w: k.getBoundingClientRect().width }));
-        return { cellRight: c.right, nextLeft: next.getBoundingClientRect().left, nameWidth: kids[0].w, kids, count: cell.children.length };
+        return {
+          cellRight: c.right, nextLeft: next.getBoundingClientRect().left, nameWidth: kids[0].w, kids, count: cell.children.length,
+          overflow: getComputedStyle(cell).overflow,
+        };
       });
-      expect(result.count, 'name plus badges').toBeGreaterThan(2);
+      expect(result.count, 'name plus badges').toBeGreaterThan(3);
+      // Hidden overflow is what makes a paint-over of the count columns impossible;
+      // the name itself must end inside the cell.
+      expect(result.overflow).toBe('hidden');
+      expect(result.kids[0].right).toBeLessThanOrEqual(result.cellRight + 1);
       expect(result.cellRight).toBeLessThanOrEqual(result.nextLeft + 1);
       expect(result.nameWidth).toBeGreaterThanOrEqual(40);
     });
