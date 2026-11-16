@@ -1858,7 +1858,7 @@ pub fn room_plan(one_at_a_time: usize, waits: usize, takes_counted: usize) -> St
         )
     } else {
         format!(
-            "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch holds before each of those until they have"
+            "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch may hold before those until they have"
         )
     };
     format!(

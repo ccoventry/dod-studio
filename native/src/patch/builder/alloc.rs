@@ -624,6 +624,28 @@ mod one_at_a_time_tests {
         assert_eq!(headroom[0].free_bytes, 20 * GB);
     }
 
+    /// The figure the pre-launch check gets is the lower of the two phases:
+    /// what fitting at once left (a demo that fit) against what the plan one
+    /// at a time left (a later demo that did not).
+    #[test]
+    fn the_pre_launch_figure_is_the_lower_of_fitting_at_once_and_one_at_a_time() {
+        let dirs = [std::path::PathBuf::from("takes_a")];
+        let mut budget = DriveBudget::snapshot(&dirs, |_| Some(300 * GB));
+        let config = crate::patch::types::PatcherConfig {
+            render_while_capturing: true,
+            ..Default::default()
+        };
+        // Fits at once: 40 GB left.
+        budget.allocate(&[260 * GB], &config).unwrap();
+        assert_eq!(budget.one_at_a_time.blocks, 0);
+        // Does not fit at once, so planned one at a time, leaving more
+        // (100 GB beside the last clip) than the first demo did.
+        budget.allocate(&[100 * GB, 100 * GB], &config).unwrap();
+        assert_eq!(budget.one_at_a_time.blocks, 2);
+        let headroom = budget.headroom([0], &dirs);
+        assert_eq!(headroom[0].free_bytes, 40 * GB);
+    }
+
     /// One drive that holds a clip at a time still plans every clip (the
     /// batch holds between them), and says how many will wait.
     #[test]
