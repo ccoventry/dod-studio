@@ -36,6 +36,7 @@ describe('Resumable renders (#1451)', () => {
     expect(STRINGS.RENDER.RESUMABLE_HINT).toContain('picks up where it left off');
     expect(STRINGS.RENDER.RESUMABLE_HINT).toContain('twice the clip');
     expect(STRINGS.RENDER.RESUMABLE_HINT).toContain('Only when space is needed');
+    expect(STRINGS.RENDER.RESUMABLE_HINT).toContain('saved pieces are deleted');
   });
 
   it('shows the loaded value and saves what is ticked', () => {

@@ -811,7 +811,7 @@
                 <!-- #1451: resumable_renders_setting.js. -->
                 <div class="control-group">
                   <label><input type="checkbox" id="render-resumable-checkbox" checked /> <span data-str="RENDER.RESUMABLE_LABEL">Resumable renders (split long renders into pieces)</span></label>
-                  <p class="setting-hint" data-str="RENDER.RESUMABLE_HINT">A stopped render picks up where it left off. While rendering it needs up to about twice the clip's size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room.</p>
+                  <p class="setting-hint" data-str="RENDER.RESUMABLE_HINT">A stopped render picks up where it left off. While rendering it needs up to about twice the clip's size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room. When off, renders run in one piece, and a stopped render's saved pieces are deleted the next time that take renders.</p>
                 </div>
               </div>
 
