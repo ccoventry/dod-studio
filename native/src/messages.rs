@@ -1331,7 +1331,7 @@ pub fn obs_take_state_not_recorded(path: impl Display, err: impl Display) -> Str
     )
 }
 
-// ── decals/decal_strip/flush_job.rs: activity log (#237) ───────────────────
+// ── game_config/cfg_warn.rs: activity log (#237) ───────────────────
 
 pub fn decal_flush_game_cfgs_set_values(found: impl Display) -> String {
     format!(

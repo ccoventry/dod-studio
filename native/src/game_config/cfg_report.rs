@@ -507,7 +507,7 @@ fn unseen_settings(
         .collect();
     // mirv_fov/default_fov are read directly from an executed config
     // whenever neither is stated in Initial Commands
-    // (decal_strip::capture_fov_resolved) — no pin ever names them in
+    // (game_config::capture_fov_resolved) — no pin ever names them in
     // effective_commands, so `named` alone would never catch that they
     // are seen, and reporting them here too would tell the user to do
     // something the pipeline is already doing. Scoped to exactly that
