@@ -22,6 +22,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, how Studio repairs damaged ones (`analysis::repair`) and the R&D behind it, and the engine's entity-packet flush rule (#15).
+- [goldsrc_demo_editing.md](goldsrc_demo_editing.md) — rewriting what happens in a demo: moving a player, filling seconds the demo never had, moving the recorder's view, and edit-the-file versus fake-it-in-the-hook (#1469).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.
