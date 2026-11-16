@@ -33,10 +33,11 @@ use native::hlcr::take_delete::{
     TakeDeletion, delete_take_permanently, plan_take_deletion, recycle_take,
 };
 use native::log_markdown;
+use native::shared::lock::{read_or_recover, write_or_recover};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -275,17 +276,14 @@ struct Deleting(String);
 impl Deleting {
     fn start(take_folder: &Path) -> Self {
         let key = folder_key(&take_folder.to_string_lossy());
-        DELETING
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(key.clone());
+        write_or_recover(&DELETING).push(key.clone());
         Deleting(key)
     }
 }
 
 impl Drop for Deleting {
     fn drop(&mut self) {
-        let mut list = DELETING.write().unwrap_or_else(PoisonError::into_inner);
+        let mut list = write_or_recover(&DELETING);
         if let Some(i) = list.iter().position(|k| *k == self.0) {
             list.swap_remove(i);
         }
@@ -297,9 +295,7 @@ impl Drop for Deleting {
 pub(crate) fn deleting_under(folder: &Path) -> bool {
     let key = folder_key(&folder.to_string_lossy());
     let inside = format!("{key}\\");
-    DELETING
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
+    read_or_recover(&DELETING)
         .iter()
         .any(|k| *k == key || k.starts_with(&inside))
 }
