@@ -1,4 +1,4 @@
-// patch/map_fetch.rs
+// maps/map_fetch.rs
 // Fetch a map the local library is missing, and refuse to install one that is
 // not the build the demo asked for.
 //

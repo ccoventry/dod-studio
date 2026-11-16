@@ -1,4 +1,4 @@
-// patch/map_check.rs
+// maps/map_check.rs
 // Does the map this demo was recorded on exist here, and is it the same build?
 //
 // A demo names its map in the header and stamps the map's checksum beside it.

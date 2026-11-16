@@ -1,4 +1,4 @@
-// patch/bsp_entities.rs
+// maps/bsp_entities.rs
 // Read and rewrite a GoldSrc BSP's entity lump.
 //
 // ── Why a map file gets edited at all ────────────────────────────────────────
@@ -132,13 +132,13 @@ mod tests {
     #[test]
     fn rewriting_entities_leaves_the_map_checksum_alone() {
         let original = synthetic_bsp(SAMPLE);
-        let before = crate::patch::bsp::map_checksum(&original).unwrap();
+        let before = crate::maps::bsp::map_checksum(&original).unwrap();
 
         let mut ents = parse_entities(&original).unwrap();
         ents.retain(|e| e.classname() != "func_button");
         let trimmed = rewrite_entity_lump(&original, &serialize_entities(&ents)).unwrap();
 
-        assert_eq!(crate::patch::bsp::map_checksum(&trimmed).unwrap(), before);
+        assert_eq!(crate::maps::bsp::map_checksum(&trimmed).unwrap(), before);
         assert_eq!(parse_entities(&trimmed).unwrap().len(), 2);
         assert!(trimmed.len() < original.len());
     }
