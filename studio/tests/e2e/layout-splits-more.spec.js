@@ -81,7 +81,27 @@ test('an Overviews side panel stops short of the other panel and the map', async
   expect(await size(page, '#ov-maps-panel', 'width')).toBeGreaterThanOrEqual(179);
 });
 
-test('a table never drags below its minimum height', async ({ page }) => {
+// The panels default to 250 px; a drag narrower than that must show, and the
+// saved size must be what is on screen (a panel stuck at its default while
+// saving the dragged number would reopen at a different width).
+for (const [panel, handle, field, dx] of [
+  ['#ov-maps-panel', '#ov-maps-resize-handle', 'overviews_maps_width_px', -60],
+  ['#ov-edit-panel', '#ov-edit-resize-handle', 'overviews_edit_width_px', 60],
+]) {
+  test(`${panel} drags narrower than its default and saves what is shown`, async ({ page }) => {
+    await boot(page);
+    await open(page, SPLITS[0]);
+    await drag(page, handle, dx, 0);
+    const shown = Math.round(await size(page, panel, 'width'));
+    expect(shown).toBeLessThan(240);
+    expect(await page.locator(panel).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await expect.poll(async () => (await lastSavedSettings(page))?.[field]).toBe(shown);
+    await drag(page, handle, dx * 50, 0);
+    expect(Math.round(await size(page, panel, 'width'))).toBe(180);
+  });
+}
+
+test('a table never drags below its minimum height',async ({ page }) => {
   await boot(page);
   await open(page, SPLITS[3]);
   await drag(page, '#audit-results-resize-handle', 0, -2000);
