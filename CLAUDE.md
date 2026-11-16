@@ -17,7 +17,10 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
 - **`dem-patch/`** — Vendored fork of the `dem` crate (`[patch.crates-io]`). Low-level demo bit/byte reading/writing (`bit.rs`, `byte_writer.rs`, `demo_parser.rs`, `demo_writer.rs`, `delta.rs`).
 - **`native/`** — Core engine crate containing almost all non-UI logic:
   - `capture_engine.rs` — Orchestrates capture batches: spawns HLAE/`hl.exe`, drives playback, injects console commands at scheduled ticks.
-  - `patch/` — Demo-file binary patcher (`engine.rs`, `builder.rs`, `scanner.rs`, `highlevel.rs`, `types.rs`). Scans, injects (bookmarks, director commands, `DRC_CMD_INEYE`), and rewrites GoldSrc frames.
+  - `patch/` — Demo-file binary patcher (`engine.rs`, `builder/`, `scanner.rs`, `highlevel.rs`, `types.rs`). Scans, injects (bookmarks, director commands, `DRC_CMD_INEYE`), and rewrites GoldSrc frames.
+  - `game_config/` — The game's own `.cfg` scan and report (read-only), command tiers, and the capture init commands (`cfg_scan.rs`, `cfg_report.rs`, `init_commands.rs`).
+  - `maps/` — BSP reading, a demo's map reference, map checks and missing-map downloads (`bsp.rs`, `map_check.rs`, `map_fetch.rs`).
+  - `decals/` — The decal flush (`decal_strip/`) and the decal probes.
   - `hlcr/` — Take management & FFmpeg transcoding (`renderer.rs`, `scanner.rs`, `config.rs`, `autosave.rs`).
   - `shared/`, `sys/`, `utils/` — Path resolution, disk-space queries, demo hashing.
   - `src/bin/preview_cli/main.rs` → `preview_cli` binary: Headless entry point with drag-and-drop support. (`src/bin/cli.rs` is a different binary, `dod-studio-cli`.) `autobins = false`: every binary is listed in `native/Cargo.toml`, and one-off R&D probes live in `native/examples/`.
