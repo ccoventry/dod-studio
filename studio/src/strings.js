@@ -1395,6 +1395,15 @@ export const STRINGS = {
       ambiguous: 'the same player and kills fit more than one highlight',
       taken: "another highlight's work went to the same highlight",
     },
+    // The game's damaged-demo notice (#1373, damaged_demo_toast.js).
+    gameDamaged: (name, clock) => (clock
+      ? `${name} is damaged at ${clock}: the game stops playing it there.`
+      : `${name} is damaged: the game stops playing it partway.`),
+    GAME_DAMAGED_ACTION: 'Repair',
+    gameDamagedLog: (path, clock, reason) => `[repair] the game says ${path} is damaged${clock ? ` at ${clock}` : ''} (${reason})`,
+    gameRepairStartLog: (name) => `[repair] from the game's notice: repairing ${name}`,
+    gameRepairEndLog: (name, verdict, elapsed) => `[repair] from the game's notice: ${name}: ${verdict} in ${elapsed}`,
+    gameRepairing: (name) => `Repairing ${name}…`,
     queueStartLog: (name) => `[repair] queue: repairing ${name}`,
     queueEndLog: (name, elapsed) => `[repair] queue: ${name} swapped for its repair in ${elapsed}`,
     // The Demo Analyzer's damaged-demo notice (analyzer_damage.js).

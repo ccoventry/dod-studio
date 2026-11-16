@@ -1555,6 +1555,27 @@ pub fn analysis_server_request(path: impl std::fmt::Display) -> String {
     format!("Analysis server: the game asked for {path}")
 }
 
+// ── sys/game_damage_notices.rs: activity log (#1373) ──────────────────────
+
+pub fn game_damage_notice(
+    path: impl std::fmt::Display,
+    seconds: Option<f64>,
+    reason: &str,
+) -> String {
+    let at = seconds.map_or_else(|| "an unknown time".to_string(), |s| format!("{s:.2} s"));
+    format!("Damaged demo: the game says {path} is damaged at {at} ({reason})")
+}
+
+pub fn game_damage_bad_notice(why: &str) -> String {
+    format!("Damaged demo: the game's notice could not be read: {why}")
+}
+
+pub fn game_damage_not_handed_on(why: &str) -> String {
+    format!("Damaged demo: the notice could not be passed to the window: {why}")
+}
+
+pub const GAME_DAMAGE_STUDIO_STARTING: &str = "DoD Studio is still starting";
+
 // ── patch/engine.rs: activity log (#237) ──────────────────────────────────
 
 pub fn demo_buffer_eof(

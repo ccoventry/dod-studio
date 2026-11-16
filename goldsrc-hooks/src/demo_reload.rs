@@ -163,10 +163,16 @@ unsafe extern "C" fn wrapped_viewdemo() {
         crate::studio_panel::bare_viewdemo();
         return;
     }
-    if let Some(name) = remember("viewdemo") {
-        crate::map_cfgs::before_demo(&name);
+    let name = remember("viewdemo");
+    if let Some(name) = &name {
+        crate::map_cfgs::before_demo(name);
     }
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // The loader stops at a damaged frame without saying so to the engine:
+    // watch the load (#1373).
+    if let Some(name) = &name {
+        crate::demo_damage::viewdemo_started(name);
+    }
     // The command has just loaded DemoPlayer.dll: patch it before the
     // demo's first events are read (#1392).
     crate::demoplayer_dict_cache::keep_installed();

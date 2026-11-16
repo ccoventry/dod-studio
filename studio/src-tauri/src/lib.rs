@@ -14,6 +14,7 @@ mod clip_verdicts;
 mod combine_manager;
 mod config_checks_cmd;
 mod crash_maps_manager;
+mod damaged_demo_notices;
 mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_preview;
@@ -990,6 +991,9 @@ pub fn run() {
             }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
+            // ...and to say a demo it plays is damaged, for a toast with
+            // Repair (#1373).
+            damaged_demo_notices::serve_damage_notices(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]

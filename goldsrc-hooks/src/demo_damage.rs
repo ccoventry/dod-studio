@@ -27,11 +27,21 @@
 //! fine, so it gets its own line and its own event, `DEMO_ENTITY_LIMIT`, with
 //! no offer to repair it.
 //!
+//! ## `viewdemo`
+//!
+//! `DemoPlayer`'s loader (`Core.dll`) reads the whole file at load, prints
+//! `WARNING! DemoFile::ReadDemoPacket: ...` there, and plays the part before
+//! the damage; neither function is called. [`viewdemo`] catches it instead,
+//! once the player has loaded, by holding what it holds against the file.
+//!
+//! ## Where the notice goes
+//!
+//! The console line, the hook log and the event below, plus [`tell`]'s: a
+//! line in the in-game DoD Studio window, a request to Studio (which shows a
+//! toast with Repair), and a centre print when nothing is being captured.
+//!
 //! ## What it does not catch yet
 //!
-//! - `viewdemo`: `DemoPlayer`'s loader (`Core.dll`) reads the whole file at
-//!   load, prints `WARNING! DemoFile::ReadDemoPacket: ...` there, and plays
-//!   the part before the damage; neither function is called.
 //! - A file cut short: it has lost its directory, so `playdemo` refuses it at
 //!   the start (`Error: Corrupt demo file.`) and nothing plays.
 //! - `timedemo`'s demo name: it goes through the same reader and is caught,
@@ -71,6 +81,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use crate::detour;
 use crate::scan;
+
+/// The window line, the Studio request and the centre print.
+pub mod tell;
+/// The `viewdemo` catch.
+mod viewdemo;
 
 /// Which of the two functions the stub is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +192,9 @@ const LIMITS: [(Which, &str, &str); 1] = [(
 enum Cause {
     /// One of [`REASONS`].
     Damaged,
+    /// `viewdemo` loaded only up to the damage ([`viewdemo::verdict`]): the
+    /// demo plays to there and ends there.
+    DamagedAtLoad,
     /// One of [`LIMITS`].
     EntityLimit,
 }
@@ -185,6 +203,10 @@ enum Cause {
 /// demo time.
 const NOTICE: &str = "This demo is damaged at {at} and stopped playing. \
                       DoD Studio can repair it (Demo Auditor, Repair).";
+
+/// The console line for [`Cause::DamagedAtLoad`]. `{at}` is the demo time.
+const NOTICE_AT_LOAD: &str = "This demo is damaged at {at}: it plays only up to there. \
+                              DoD Studio can repair it (Demo Auditor, Repair).";
 
 /// The console line for [`Cause::EntityLimit`]. `{at}` is the demo time.
 const ENTITY_NOTICE: &str = "This demo stopped playing at {at}: it shows more \
@@ -479,12 +501,31 @@ unsafe extern "C" fn on_host_end(which: u32, fmt: *const c_char, args: *const us
 /// Reports a damaged demo's end, once, on the frame after it. Runs every
 /// frame from `commands::poll`; one atomic load when nothing happened.
 pub fn poll() {
+    if let Some(damage) = viewdemo::poll() {
+        report(damage);
+    }
     if !WAITING.swap(false, Ordering::AcqRel) {
         return;
     }
     let Some(damage) = PENDING.try_lock().ok().and_then(|mut p| p.take()) else {
         return;
     };
+    report(damage);
+}
+
+/// Starts watching a named `viewdemo` that has just run (`demo_reload`'s
+/// wrapper): its file is read on a thread of its own.
+pub fn viewdemo_started(name: &str) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let path = std::path::PathBuf::from(demo_file_path(name));
+    viewdemo::started(name.to_string(), path);
+}
+
+/// Says a demo is damaged (or hit the entity limit) everywhere it is said:
+/// the console, the hook log, the events pipe and [`tell`]'s.
+fn report(damage: Damage) {
     NOTICED.fetch_add(1, Ordering::Relaxed);
     let at_text = damage
         .at
@@ -503,6 +544,14 @@ pub fn poll() {
         ))
     };
     crate::events::send(&event_label(&damage, path.as_deref()));
+    if damage.cause == Cause::EntityLimit {
+        return;
+    }
+    if let Some(demo) = &damage.demo {
+        tell::remember_for_window(demo, &at_text);
+    }
+    tell::on_screen(&at_text);
+    tell::tell_studio(damage.at, damage.reason, path);
 }
 
 /// The console line for `cause`, at `at_text`; `pre` is the pre-Anniversary
@@ -510,6 +559,7 @@ pub fn poll() {
 fn notice(cause: Cause, pre: bool, at_text: &str) -> String {
     match cause {
         Cause::Damaged => NOTICE.replace("{at}", at_text),
+        Cause::DamagedAtLoad => NOTICE_AT_LOAD.replace("{at}", at_text),
         Cause::EntityLimit => {
             let hint = if pre { ENTITY_HINT_PRE } else { "" };
             format!("{}{hint}", ENTITY_NOTICE.replace("{at}", at_text))
@@ -524,7 +574,7 @@ fn notice(cause: Cause, pre: bool, at_text: &str) -> String {
 /// empty field would not arrive anyway. Seconds are empty when unknown.
 fn event_label(damage: &Damage, path: Option<&str>) -> String {
     let name = match damage.cause {
-        Cause::Damaged => "DEMO_DAMAGED",
+        Cause::Damaged | Cause::DamagedAtLoad => "DEMO_DAMAGED",
         Cause::EntityLimit => "DEMO_ENTITY_LIMIT",
     };
     let at = damage.at.map(|t| format!("{t:.2}")).unwrap_or_default();
