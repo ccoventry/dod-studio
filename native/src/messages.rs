@@ -1846,6 +1846,23 @@ pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Displa
     )
 }
 
+/// The Render While Capturing plan (#861, #1438), when the batch's clips
+/// don't all fit the capture drives at once: how many were routed one at a
+/// time, and how many of those have room only once the takes before them on
+/// their drive have rendered.
+pub fn room_plan(one_at_a_time: usize, waits: usize) -> String {
+    let wait_note = if waits == 0 {
+        "each has room beside the two takes recorded before it, so the batch only holds if renders fall further behind".to_string()
+    } else {
+        format!(
+            "{waits} of them have room only once the takes recorded before them on their drive have rendered, so the batch holds before each of those until they have"
+        )
+    };
+    format!(
+        "[render-while-capturing] Plan: the clips don't all fit the capture drives at once, so {one_at_a_time} clip(s) go to drives with room for them one at a time; {wait_note}"
+    )
+}
+
 pub fn agr_capture(fps: impl Display) -> String {
     format!(
         "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file \

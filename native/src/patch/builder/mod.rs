@@ -415,6 +415,10 @@ pub(super) fn build_batch_queue_with(
     make_agr_take_folders(config, &jobs)?;
     write_helper_cfg(&dod_dir, &helper_cfg)?;
 
+    let planned = drives.one_at_a_time;
+    if planned.blocks > 0 {
+        crate::log_markdown(&crate::messages::room_plan(planned.blocks, planned.waits));
+    }
     let drive_headroom = drives.headroom(utilized_drives, &config.capture_directories);
     Ok((jobs, drive_headroom))
 }
