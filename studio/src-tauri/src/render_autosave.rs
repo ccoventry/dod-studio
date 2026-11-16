@@ -166,6 +166,7 @@ pub(super) fn recovered_config(
         // The Render tab's own range for this field.
         max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
         clip_tag: None,
+        resumable_renders: true,
     })
 }
 

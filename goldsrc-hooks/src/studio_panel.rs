@@ -925,14 +925,23 @@ fn load_strip_bounds(page_wide: i32) -> (i32, i32, i32, i32) {
 }
 
 /// What the loading strip says: how far the demo player has read the demo
-/// and how far the highlights analysis has got, each while it runs; `None`
-/// once both are done, and the strip goes.
-fn load_strip_text(demo: Option<u32>, highlights: Option<u32>) -> Option<String> {
+/// and how far the highlights analysis has got, each while it runs, and the
+/// damaged-demo line (`demo_damage::tell::strip_line`, #1373) while that
+/// demo plays; `None` once there is nothing to say, and the strip goes.
+fn load_strip_text(
+    demo: Option<u32>,
+    highlights: Option<u32>,
+    damaged: Option<String>,
+) -> Option<String> {
     let parts: Vec<String> = [("Demo", demo), ("Highlights", highlights)]
         .into_iter()
         .filter_map(|(what, percent)| Some(format!("{what} {}%", percent?)))
         .collect();
-    (!parts.is_empty()).then(|| format!("Loading: {}", parts.join("   ")))
+    let loading = (!parts.is_empty()).then(|| format!("Loading: {}", parts.join("   ")));
+    match (loading, damaged) {
+        (Some(loading), Some(damaged)) => Some(format!("{damaged}   {loading}")),
+        (loading, damaged) => loading.or(damaged),
+    }
 }
 
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
@@ -3654,18 +3663,31 @@ mod tests {
     #[test]
     fn the_loading_strip_names_each_load_still_running() {
         assert_eq!(
-            load_strip_text(Some(45), Some(60)).as_deref(),
+            load_strip_text(Some(45), Some(60), None).as_deref(),
             Some("Loading: Demo 45%   Highlights 60%")
         );
         assert_eq!(
-            load_strip_text(Some(0), None).as_deref(),
+            load_strip_text(Some(0), None, None).as_deref(),
             Some("Loading: Demo 0%")
         );
         assert_eq!(
-            load_strip_text(None, Some(100)).as_deref(),
+            load_strip_text(None, Some(100), None).as_deref(),
             Some("Loading: Highlights 100%")
         );
-        assert_eq!(load_strip_text(None, None), None);
+        assert_eq!(load_strip_text(None, None, None), None);
+    }
+
+    #[test]
+    fn the_loading_strip_keeps_a_damaged_demos_line() {
+        let damaged = || Some("This demo is damaged at 8:27.75.".to_string());
+        assert_eq!(
+            load_strip_text(None, None, damaged()).as_deref(),
+            Some("This demo is damaged at 8:27.75.")
+        );
+        assert_eq!(
+            load_strip_text(None, Some(40), damaged()).as_deref(),
+            Some("This demo is damaged at 8:27.75.   Loading: Highlights 40%")
+        );
     }
 
     #[test]

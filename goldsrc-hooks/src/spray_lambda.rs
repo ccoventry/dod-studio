@@ -38,7 +38,7 @@
 
 mod plan;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -120,13 +120,14 @@ static DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
 /// Lambdas replaced or removed this session.
 static HANDLED: AtomicU32 = AtomicU32::new(0);
 
-/// The demo a read was asked for last. Looked at once a second.
-static REQUESTED: Mutex<Option<String>> = Mutex::new(None);
+/// The demo file a read was asked for last. Looked at once a second. By
+/// path, so a same-name replay from another folder is read again (#1474).
+static REQUESTED: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// The newest read asked for: an older read stops, as `lookahead`'s does.
 static LATEST_READ: AtomicU64 = AtomicU64::new(0);
-/// The newest plan and the demo it is for. Written by the reading thread,
-/// read by the engine thread with `try_read` only.
-static PLAN: RwLock<Option<(String, Arc<Plan>)>> = RwLock::new(None);
+/// The newest plan and the demo file it is for. Written by the reading
+/// thread, read by the engine thread with `try_read` only.
+static PLAN: RwLock<Option<(PathBuf, Arc<Plan>)>> = RwLock::new(None);
 
 /// The `CL_ParseTEnt` stub, at the site.
 ///
@@ -262,21 +263,21 @@ pub fn poll() {
     let Some(name) = demo_reload::current_demo() else {
         return;
     };
+    let path = crate::demo_locate::playing(&name);
     let Ok(mut requested) = REQUESTED.try_lock() else {
         return;
     };
-    if requested.as_ref() != Some(&name) {
-        *requested = Some(name.clone());
-        start_read(name);
+    if requested.as_ref() != Some(&path) {
+        *requested = Some(path.clone());
+        start_read(path);
     }
 }
 
-/// Reads `name` (as `viewdemo` was given it) on a thread of its own, about a
-/// second for a 40 MB demo, and publishes its plan unless another demo was
-/// asked for meanwhile. A lambda that arrives first is treated as nobody's.
-fn start_read(name: String) {
+/// Reads the demo file `path` on a thread of its own, about a second for a
+/// 40 MB demo, and publishes its plan unless another demo was asked for
+/// meanwhile. A lambda that arrives first is treated as nobody's.
+fn start_read(path: PathBuf) {
     let ticket = LATEST_READ.fetch_add(1, Ordering::AcqRel) + 1;
-    let path = crate::streaks::demo_path(&crate::texture_hires::game_dir(), &name);
     let spawned = std::thread::Builder::new()
         .name("ds_spray_lambda".into())
         .spawn(move || {
@@ -292,7 +293,7 @@ fn start_read(name: String) {
                     ));
                     let mut plan = PLAN.write().unwrap_or_else(|e| e.into_inner());
                     if LATEST_READ.load(Ordering::Acquire) == ticket {
-                        *plan = Some((name, Arc::new(found)));
+                        *plan = Some((path, Arc::new(found)));
                     }
                 }
                 Err(ReadError::Superseded) => {}
@@ -316,10 +317,10 @@ fn read_plan(path: &Path, ticket: u64) -> Result<Plan, ReadError> {
 
 /// The plan for the demo playing, if its read has finished.
 fn current_plan() -> Option<Arc<Plan>> {
-    let name = demo_reload::current_demo()?;
+    let path = crate::demo_locate::playing(&demo_reload::current_demo()?);
     let plan = PLAN.try_read().ok()?;
     let (demo, found) = plan.as_ref()?;
-    (*demo == name).then(|| found.clone())
+    (*demo == path).then(|| found.clone())
 }
 
 /// What is known of a lambda at `spot` while `playing` plays: the recorder's

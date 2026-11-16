@@ -64,6 +64,19 @@ pub struct RenderConfig {
     /// batch gets a new tag when its job starts again.
     #[serde(skip)]
     pub clip_tag: Option<String>,
+    /// Configuration > Render's "Resumable renders" (#1451): a long take
+    /// renders in segments a stopped render resumes from. Off, every render
+    /// runs in one piece and reserves and makes room for the clip alone; a
+    /// take's stopped segments are removed as it renders. Studio sets it per
+    /// job from Settings as the job starts, so a change reaches a running
+    /// batch; on unless a saved config says otherwise.
+    #[serde(default = "resumable_by_default")]
+    pub resumable_renders: bool,
+}
+
+/// `RenderConfig::resumable_renders` for a config saved before it existed.
+fn resumable_by_default() -> bool {
+    true
 }
 
 impl RenderCodec {
@@ -151,6 +164,7 @@ impl Default for RenderConfig {
             custom_codec_args: String::new(),
             max_concurrent_renders: 2,
             clip_tag: None,
+            resumable_renders: true,
         }
     }
 }
