@@ -824,6 +824,7 @@ export function initOverviewsPane() {
       row.dataset.map = entry.name;
       const name = document.createElement('span');
       name.textContent = entry.name;
+      row.title = entry.name; // the badges take room, so a long name is cut
       row.appendChild(name);
       const badge = (text, tip, kind) => {
         const b = document.createElement('span');

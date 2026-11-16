@@ -110,11 +110,9 @@ pub fn dismiss(_dialog: &ErrorDialog) {}
 #[cfg(windows)]
 mod win {
     use super::ErrorDialog;
-
-    type Hwnd = isize;
-    type Lparam = isize;
-    type Bool = i32;
-    type EnumProc = unsafe extern "system" fn(Hwnd, Lparam) -> Bool;
+    use crate::sys::window_list::{
+        Bool, EnumProc, Hwnd, Lparam, collect, is_visible, owner, top_level_windows,
+    };
 
     const WM_GETTEXT: u32 = 0x000D;
     const SMTO_ABORTIFHUNG: u32 = 0x0002;
@@ -123,10 +121,7 @@ mod win {
 
     #[link(name = "user32")]
     unsafe extern "system" {
-        fn EnumWindows(callback: EnumProc, param: Lparam) -> Bool;
         fn EnumChildWindows(parent: Hwnd, callback: EnumProc, param: Lparam) -> Bool;
-        fn GetWindowThreadProcessId(window: Hwnd, pid: *mut u32) -> u32;
-        fn IsWindowVisible(window: Hwnd) -> Bool;
         fn GetClassNameW(window: Hwnd, name: *mut u16, max: i32) -> i32;
         fn PostMessageW(window: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
         fn SendMessageTimeoutW(
@@ -140,24 +135,9 @@ mod win {
         ) -> isize;
     }
 
-    unsafe extern "system" fn collect(window: Hwnd, param: Lparam) -> Bool {
-        // SAFETY: `param` is the `&mut Vec<Hwnd>` passed by `windows_of`,
-        // alive for the whole enumeration.
-        let found = unsafe { &mut *(param as *mut Vec<Hwnd>) };
-        found.push(window);
-        1
-    }
-
-    fn top_level_windows() -> Vec<Hwnd> {
-        let mut found: Vec<Hwnd> = Vec::new();
-        // SAFETY: `collect` only pushes into `found`, which outlives the call.
-        unsafe { EnumWindows(collect, &mut found as *mut Vec<Hwnd> as Lparam) };
-        found
-    }
-
     fn children(window: Hwnd) -> Vec<Hwnd> {
         let mut found: Vec<Hwnd> = Vec::new();
-        // SAFETY: as above.
+        // SAFETY: `collect` only pushes into `found`, which outlives the call.
         unsafe { EnumChildWindows(window, collect, &mut found as *mut Vec<Hwnd> as Lparam) };
         found
     }
@@ -195,13 +175,6 @@ mod win {
             .to_string()
     }
 
-    fn owner(window: Hwnd) -> u32 {
-        let mut pid = 0u32;
-        // SAFETY: `pid` is a valid out pointer.
-        unsafe { GetWindowThreadProcessId(window, &mut pid) };
-        pid
-    }
-
     pub(super) fn dismiss(window: Hwnd) {
         const WM_COMMAND: u32 = 0x0111;
         const WM_CLOSE: u32 = 0x0010;
@@ -222,8 +195,7 @@ mod win {
                 if !is_launcher && !pids.contains(&pid) {
                     return None;
                 }
-                // SAFETY: plain query on a window handle; a stale one returns 0.
-                if unsafe { IsWindowVisible(window) } == 0 {
+                if !is_visible(window) {
                     return None;
                 }
                 if !is_launcher && class_name(window) != DIALOG_CLASS {

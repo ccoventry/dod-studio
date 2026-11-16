@@ -329,6 +329,13 @@ export const STRINGS = {
     playerFilterOption: (name, n) => `${name} (${n})`,
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
+    // The narrow layout stacks Time and Dur. (and Player, in an HLTV demo) in one column (#46).
+    COL_STACK: 'Time · Dur.',
+    COL_STACK_PLAYER: 'Player / Time · Dur.',
+    // The stacked cell's second line, and its player line's tooltip (the name
+    // is cut to fit, so the tooltip carries the name and the weapon chain).
+    stackedWhen: (time, dur) => `${time} · ${dur}`,
+    stackedPlayerTitle: (player, chain) => (chain ? `${player} — ${chain}` : player),
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
     COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
@@ -1592,6 +1599,11 @@ export const STRINGS = {
     ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
     CAPTURE_SPLIT_LABEL: 'Capture Studio split',
     ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    OVERVIEWS_MAPS_LABEL: 'Overviews Maps panel',
+    OVERVIEWS_EDIT_LABEL: 'Overviews Edit panel',
+    RENDER_TABLE_LABEL: 'Render queue table',
+    AUDITOR_TABLE_LABEL: 'Demo Auditor results table',
+    splitResetLog: (label) => `${label} size reset to the default`,
     splitNotSaved: (label, err) => `${label} not saved: ${err}`,
   },
 
