@@ -3669,15 +3669,21 @@ input[type="checkbox"].hd-box-pattern {
 
   /* The stacked player line is cut to this; its tooltip has the full name. */
   #detail-streaks-table .streak-stack-player {
-    max-width: 7em;
+    max-width: 6em;
   }
 
+  /* Measured in the real window at 1280 with flag chips beside the kill
+     counts: these minimums are what lets the table fit a 699 px pane. */
   #detail-streaks-table .streak-notes-input {
-    min-width: 70px;
+    min-width: 50px;
   }
 
   #detail-streaks-table .streak-clip-name-input {
-    min-width: 7em;
+    min-width: 5em;
+  }
+
+  #detail-streaks-table .streak-status-select {
+    max-width: 80px;
   }
 
   #detail-streaks-table th,
