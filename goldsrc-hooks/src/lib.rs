@@ -140,6 +140,10 @@
 //! - `demo_damage`: when a demo stops because its file is damaged, says so in
 //!   the console and tells Studio over the events pipe (#1373).
 //!   `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
+//! - `demoplayer_dict_cache`: stop `DemoPlayer.dll` reading a freed array
+//!   through its event dictionary's lookup cache, the 25th Anniversary crash
+//!   on a second `viewdemo` of an HLTV demo (#1392). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX=0` turns it off.
 //! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
 //!   models around them, which the engine culled from the map's origin
 //!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
@@ -178,6 +182,11 @@
 //!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
 //!   One pointer write at start-up, both builds. On by default;
 //!   `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
+//! - `env_models`: a POV demo played as HLTV (`dem_forcehltv 1`) draws the
+//!   map's own models (sandbags, banisters) again: the game's
+//!   `CClientEnvModel::Think`, which that session never calls, is called once
+//!   the models are loaded. On by default; `GOLDSRC_HOOKS_ENV_MODELS=0` turns
+//!   it off.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -197,6 +206,10 @@
 //!   every printable key, as it never does in an HLTV demo (#894). One byte in
 //!   `Key_Event`, both builds. On by default;
 //!   `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
+//! - `pov_map_keys`: `+map` and `+mapzoom` do nothing while a POV demo
+//!   plays, so the recorder's presses can't leave `_cl_minimap` on the full
+//!   map, which hides the crosshair and the flag row and never draws there
+//!   (#1441). On by default; `GOLDSRC_HOOKS_POV_MAP_KEYS=0` turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -211,6 +224,8 @@
 //! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
 //!   or none, by pointing the weather updater's type read at our own value
 //!   (#1129).
+//! - `map_wind`: the `ds_map_wind` cvar -- the wind that blows rain, snow
+//!   and smoke, by pointing the particles' wind reads at our own vector.
 //! - `map_cfgs`: the `ds_map_run_cfgs` cvar -- run
 //!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
 //!   demo's map loads, for per-map brightness and gamma, which a server's map
@@ -291,16 +306,19 @@ mod demo_console_keys;
 mod demo_damage;
 mod demo_file;
 mod demo_list_folders;
+mod demo_locate;
 mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
 mod demo_seek;
+mod demoplayer_dict_cache;
 mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
 mod engine_center_print;
+mod env_models;
 mod events;
 mod ex_interp;
 mod fast_load;
@@ -314,6 +332,7 @@ mod game_folder;
 mod gl_zoom;
 mod gun_log;
 mod hand_signals;
+mod hang;
 mod headshot_sound;
 mod hide_asset;
 mod hint_panel;
@@ -336,6 +355,7 @@ mod map_light;
 mod map_sounds;
 mod map_text;
 mod map_weather;
+mod map_wind;
 mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
@@ -363,13 +383,16 @@ mod pmove_guard;
 mod position;
 mod pov_crosshair_gap;
 mod pov_live_bob;
+mod pov_map_keys;
 mod pov_recorder_shots;
 mod remote;
 mod review;
 mod review_ask;
 mod review_form;
+mod review_header;
 mod review_keys;
 mod review_lock;
+mod review_speed;
 mod run_in_background;
 mod scan;
 mod schedule;
@@ -394,6 +417,7 @@ mod spectator_target;
 mod spectator_text;
 mod spray;
 mod spray_hltv;
+mod spray_lambda;
 mod sprite_blend;
 mod steam_id;
 mod strafe_twitch;
@@ -494,6 +518,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_DEMO_DAMAGE", true),
         Ordering::Relaxed,
     );
+    // Only empties a cache the demo player rebuilds, so on unless asked not to.
+    demoplayer_dict_cache::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMOPLAYER_CACHE_FIX", true),
+        Ordering::Relaxed,
+    );
     // Only restores what a chase camera can see, so on unless asked not to.
     spectator_chase_pvs::ENABLED
         .store(env_flag("GOLDSRC_HOOKS_CHASE_PVS", true), Ordering::Relaxed);
@@ -504,6 +533,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     engine_buttons::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
+    // Only makes the call the game makes in every other session, so on unless
+    // asked not to.
+    env_models::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENV_MODELS", true),
         Ordering::Relaxed,
     );
     // A crash fix, so on unless asked not to.
@@ -521,6 +556,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // unless asked not to.
     demo_console_keys::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS", true),
+        Ordering::Relaxed,
+    );
+    // The map can't draw in POV playback, so its keys there only break the
+    // HUD (#1441): on unless asked not to.
+    pov_map_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_POV_MAP_KEYS", true),
         Ordering::Relaxed,
     );
     // Only this user's own processes can reach the pipe, and only a game

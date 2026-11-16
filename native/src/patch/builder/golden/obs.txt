@@ -1,0 +1,505 @@
+== batch file
+dodstudio-batch 1
+demo	D:/demos/charlie_pov.dem
+init	mirv_fov 90
+init	cl_righthand 1
+init	sys_autodir
+init	mirv_movie_fps 120
+init	ds_capture_run_in_background 1
+init	ds_capture_stay_behind 1
+init	fps_override 1
+init	fps_max 240
+init	gl_vsync 0
+init	r_decals 256
+seek	0.000	94.000
+at	94.000	sys_fast_forward
+at	124.000	ds_map_clear_decals
+at	0.000	echo "[dod-studio] DEMO_START 1 4 1"
+at	0.000	echo "[dod-studio] NEXT_CLIP 1 4 1 1"
+at	124.000	sys_normal_speed
+at	124.000	echo "[dod-studio] SPEED_FLUSH - Tick 400"
+at	124.010	sys_normal_speed
+at	124.020	sys_normal_speed
+at	128.000	sys_sound
+at	128.000	echo "[dod-studio] AUDIO_SYNC - Tick 800"
+at	128.000	ds_capture_batch wait_for_recording
+at	128.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 801"
+at	128.010	r_drawviewmodel 0
+at	129.000	dodstudio_chain_01_route_0
+at	129.000	sys_record_start
+at	129.000	echo "[dod-studio] START_RECORD - Tick 900"
+at	132.000	sys_record_stop
+at	132.000	echo "[dod-studio] STOP_RECORD - Tick 1200"
+at	132.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 1201"
+at	132.010	r_drawviewmodel 1
+at	133.000	echo "[dod-studio] FAST_FORWARD - Tick 1300"
+next	133.000
+demo	D:/demos/alpha_pov.dem
+init	mirv_fov 90
+init	cl_righthand 1
+init	sys_autodir
+init	mirv_movie_fps 120
+init	ds_capture_run_in_background 1
+init	ds_capture_stay_behind 1
+init	fps_override 1
+init	fps_max 240
+init	gl_vsync 0
+init	r_decals 256
+seek	0.000	114.000
+at	114.000	sys_fast_forward
+at	144.000	ds_map_clear_decals
+at	0.000	echo "[dod-studio] DEMO_START 2 4 3"
+at	0.000	echo "[dod-studio] NEXT_CLIP 2 4 1 3"
+at	144.000	sys_normal_speed
+at	144.000	echo "[dod-studio] SPEED_FLUSH - Tick 2400"
+at	144.010	sys_normal_speed
+at	144.020	sys_normal_speed
+at	148.000	sys_sound
+at	148.000	echo "[dod-studio] AUDIO_SYNC - Tick 2800"
+at	148.000	ds_capture_batch wait_for_recording
+at	148.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 2801"
+at	148.010	r_drawviewmodel 0
+at	149.000	dodstudio_chain_02_route_0
+at	149.000	sys_record_start
+at	149.000	echo "[dod-studio] START_RECORD - Tick 2900"
+at	156.000	sys_record_stop
+at	156.000	echo "[dod-studio] STOP_RECORD - Tick 3600"
+at	156.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 3601"
+at	156.010	r_drawviewmodel 1
+at	158.000	echo "[dod-studio] AUDIO_SYNC - Tick 3800"
+at	158.000	ds_capture_batch wait_for_recording
+at	158.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 3801"
+at	158.010	r_drawviewmodel 0
+at	159.000	dodstudio_chain_02_route_1
+at	159.000	sys_record_start
+at	159.000	echo "[dod-studio] START_RECORD - Tick 3900"
+at	162.000	sys_record_stop
+at	162.000	echo "[dod-studio] STOP_RECORD - Tick 4200"
+at	162.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 4201"
+at	162.010	r_drawviewmodel 1
+seek	163.000	284.000
+at	284.000	sys_fast_forward
+at	314.000	ds_map_clear_decals
+at	163.000	echo "[dod-studio] FAST_FORWARD - Tick 4300"
+at	163.000	echo "[dod-studio] NEXT_CLIP 2 4 3 3"
+at	314.000	sys_normal_speed
+at	314.000	echo "[dod-studio] SPEED_FLUSH - Tick 19400"
+at	314.010	sys_normal_speed
+at	314.020	sys_normal_speed
+at	318.000	sys_sound
+at	318.000	echo "[dod-studio] AUDIO_SYNC - Tick 19800"
+at	318.000	ds_capture_batch wait_for_recording
+at	318.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 19801"
+at	318.010	r_drawviewmodel 0
+at	319.000	dodstudio_chain_02_route_2
+at	319.000	sys_record_start
+at	319.000	echo "[dod-studio] START_RECORD - Tick 19900"
+at	322.000	sys_ramp_on
+at	331.000	sys_ramp_off
+at	337.000	sys_record_stop
+at	337.000	echo "[dod-studio] STOP_RECORD - Tick 21700"
+at	337.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 21701"
+at	337.010	r_drawviewmodel 1
+at	338.000	echo "[dod-studio] FAST_FORWARD - Tick 21800"
+next	338.000
+demo	D:/demos/bravo_hltv.dem
+init	mirv_fov 90
+init	cl_righthand 1
+init	sys_autodir
+init	mirv_movie_fps 120
+init	ds_capture_run_in_background 1
+init	ds_capture_stay_behind 1
+init	fps_override 1
+init	fps_max 240
+init	gl_vsync 0
+init	r_decals 256
+init	ds_spec_lock 1
+seek	0.000	174.000
+at	174.000	sys_fast_forward
+at	204.000	ds_map_clear_decals
+at	0.000	spec_mode 4
+at	0.000	ds_spec_target 6
+at	0.000	echo "[dod-studio] DEMO_START 3 4 2"
+at	0.000	echo "[dod-studio] NEXT_CLIP 3 4 1 2"
+at	204.000	spec_mode 4
+at	204.000	ds_spec_target 6
+at	204.000	sys_normal_speed
+at	204.000	echo "[dod-studio] SPEED_FLUSH - Tick 8400"
+at	204.010	sys_normal_speed
+at	204.020	sys_normal_speed
+at	208.000	sys_sound
+at	208.000	echo "[dod-studio] AUDIO_SYNC - Tick 8800"
+at	208.000	ds_capture_batch wait_for_recording
+at	208.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 8801"
+at	208.010	r_drawviewmodel 0
+at	209.000	dodstudio_chain_03_route_0
+at	209.000	sys_record_start
+at	209.000	echo "[dod-studio] START_RECORD - Tick 8900"
+at	213.000	sys_record_stop
+at	213.000	echo "[dod-studio] STOP_RECORD - Tick 9300"
+at	213.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 9301"
+at	213.010	r_drawviewmodel 1
+seek	214.000	384.000
+at	384.000	sys_fast_forward
+at	414.000	ds_map_clear_decals
+at	214.000	echo "[dod-studio] FAST_FORWARD - Tick 9400"
+at	214.000	echo "[dod-studio] NEXT_CLIP 3 4 2 2"
+at	414.000	spec_mode 4
+at	414.000	ds_spec_target 6
+at	414.000	sys_normal_speed
+at	414.000	echo "[dod-studio] SPEED_FLUSH - Tick 29400"
+at	414.010	sys_normal_speed
+at	414.020	sys_normal_speed
+at	418.000	sys_sound
+at	418.000	echo "[dod-studio] AUDIO_SYNC - Tick 29800"
+at	418.000	ds_capture_batch wait_for_recording
+at	418.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 29801"
+at	418.010	r_drawviewmodel 0
+at	419.000	dodstudio_chain_03_route_1
+at	419.000	sys_record_start
+at	419.000	echo "[dod-studio] START_RECORD - Tick 29900"
+at	422.500	sys_record_stop
+at	422.500	echo "[dod-studio] STOP_RECORD - Tick 30250"
+at	422.510	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 30251"
+at	422.510	r_drawviewmodel 1
+at	423.500	echo "[dod-studio] FAST_FORWARD - Tick 30350"
+next	423.500
+demo	D:/demos/bravo_hltv.dem
+init	mirv_fov 90
+init	cl_righthand 1
+init	sys_autodir
+init	mirv_movie_fps 120
+init	ds_capture_run_in_background 1
+init	ds_capture_stay_behind 1
+init	fps_override 1
+init	fps_max 240
+init	gl_vsync 0
+init	r_decals 256
+init	ds_spec_lock 1
+seek	0.000	174.000
+at	174.000	sys_fast_forward
+at	204.000	ds_map_clear_decals
+at	0.000	spec_mode 4
+at	0.000	ds_spec_target 8
+at	0.000	echo "[dod-studio] DEMO_START 4 4 1"
+at	0.000	echo "[dod-studio] NEXT_CLIP 4 4 1 1"
+at	204.000	spec_mode 4
+at	204.000	ds_spec_target 8
+at	204.000	sys_normal_speed
+at	204.000	echo "[dod-studio] SPEED_FLUSH - Tick 8400"
+at	204.010	sys_normal_speed
+at	204.020	sys_normal_speed
+at	208.000	sys_sound
+at	208.000	echo "[dod-studio] AUDIO_SYNC - Tick 8800"
+at	208.000	ds_capture_batch wait_for_recording
+at	208.010	echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 8801"
+at	208.010	r_drawviewmodel 0
+at	209.000	dodstudio_chain_04_route_0
+at	209.000	sys_record_start
+at	209.000	echo "[dod-studio] START_RECORD - Tick 8900"
+at	214.000	sys_record_stop
+at	214.000	echo "[dod-studio] STOP_RECORD - Tick 9400"
+at	214.010	echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 9401"
+at	214.010	r_drawviewmodel 1
+at	215.000	echo "[dod-studio] FAST_FORWARD - Tick 9500"
+at	215.000	echo "[dod-studio] BATCH_COMPLETE"
+next	215.010
+end	sys_capture_done_path
+== helper cfg
+# dodstudio_helper.cfg
+
+echo dodstudio_helper.cfg exec'd here
+
+# Global aliases
+alias sys_autodir "spec_autodirector 1"
+alias sys_normal_speed "sys_autodir; clear; r_norefresh 0; host_framerate 0; fps_override 1; fps_max 240; gl_vsync 0"
+alias sys_fast_forward "host_framerate 0.05; fps_override 1; fps_max 1000; gl_vsync 0; r_norefresh 1"
+alias sys_ramp_on "dem_speed 4"
+alias sys_ramp_off "dem_speed 1"
+alias sys_sound "stopsound"
+alias sys_record_start "echo [dod-studio] OBS_MODE_NO_HLAE_START"
+alias sys_record_stop "echo [dod-studio] OBS_MODE_NO_HLAE_STOP"
+alias sys_capture_done_path "mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop"
+
+# HLAE's FFmpeg pipe off, whatever an earlier batch set
+mirv_movie_ffmpeg all enabled 0
+# Demo specific next demos
+alias dodstudio_chain_01_route_0 "mirv_movie_filename _route_0/dodstudio_chain_01_b0"
+alias dodstudio_chain_01_next "playdemo dodstudio_chain_02"
+alias dodstudio_chain_02_route_2 "mirv_movie_filename _route_0/dodstudio_chain_02_b2"
+alias dodstudio_chain_02_route_0 "mirv_movie_filename _route_0/dodstudio_chain_02_b0"
+alias dodstudio_chain_02_route_1 "mirv_movie_filename _route_0/dodstudio_chain_02_b1"
+alias dodstudio_chain_02_next "playdemo dodstudio_chain_03"
+alias dodstudio_chain_03_route_0 "mirv_movie_filename _route_0/dodstudio_chain_03_b0"
+alias dodstudio_chain_03_route_1 "mirv_movie_filename _route_0/dodstudio_chain_03_b1"
+alias dodstudio_chain_03_next "playdemo dodstudio_chain_04"
+alias dodstudio_chain_04_route_0 "mirv_movie_filename _route_0/dodstudio_chain_04_b0"
+alias dodstudio_chain_04_next "sys_capture_done_path"
+== jobs
+job 0: D:/demos/charlie_pov.dem -> <root>\game\dod\dodstudio_chain_01.dem (Some("k4b00m"))
+  init mirv_fov 90
+  init cl_righthand 1
+  init sys_autodir
+  init mirv_movie_fps 120
+  init ds_capture_run_in_background 1
+  init ds_capture_stay_behind 1
+  init fps_override 1
+  init fps_max 240
+  init gl_vsync 0
+  init r_decals 256
+  at 0 echo "[dod-studio] BREADCRUMB - Tick 0"
+  at 300 sys_fast_forward
+  at 300 echo "[dod-studio] DEMO_START 1 4 1"
+  at 300 echo "[dod-studio] NEXT_CLIP 1 4 1 1"
+  at 400 sys_normal_speed
+  at 400 echo "[dod-studio] SPEED_FLUSH - Tick 400"
+  at 401 sys_normal_speed
+  at 402 sys_normal_speed
+  at 800 sys_sound
+  at 800 echo "[dod-studio] AUDIO_SYNC - Tick 800"
+  at 801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 801"
+  at 801 r_drawviewmodel 0
+  at 900 dodstudio_chain_01_route_0
+  at 900 sys_record_start
+  at 900 echo "[dod-studio] START_RECORD - Tick 900"
+  at 1200 sys_record_stop
+  at 1200 echo "[dod-studio] STOP_RECORD - Tick 1200"
+  at 1201 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 1201"
+  at 1201 r_drawviewmodel 1
+  at 1300 sys_fast_forward
+  at 1300 echo "[dod-studio] FAST_FORWARD - Tick 1300"
+  at 1300 dodstudio_chain_01_next
+  at 5000 echo "[dod-studio] BREADCRUMB - Tick 5000"
+  at 10000 echo "[dod-studio] BREADCRUMB - Tick 10000"
+  at 15000 echo "[dod-studio] BREADCRUMB - Tick 15000"
+  at 20000 echo "[dod-studio] BREADCRUMB - Tick 20000"
+  at 25000 echo "[dod-studio] BREADCRUMB - Tick 25000"
+  at 30000 echo "[dod-studio] BREADCRUMB - Tick 30000"
+  at 35000 echo "[dod-studio] BREADCRUMB - Tick 35000"
+  at 40000 echo "[dod-studio] BREADCRUMB - Tick 40000"
+  at 45000 echo "[dod-studio] BREADCRUMB - Tick 45000"
+  at 50000 echo "[dod-studio] BREADCRUMB - Tick 50000"
+  at 55000 echo "[dod-studio] BREADCRUMB - Tick 55000"
+  director 0 echo [dod-studio] MATCH_START
+  director 1000 #1: 2 kills: 2 kills
+  director 60000 echo [dod-studio] DEMO_END
+  route (1000, 1100, 0)
+  block {"demo_name":"dodstudio_chain_01","block_index":0,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_01_b0","take_key":"session_golden/dodstudio_chain_01_b0","source_streak_indices":[7],"start_tick":1000,"end_tick":1100,"record_start_tick":900,"record_stop_tick":1200,"ramped_gaps":0,"plan":{"length_secs":3.0,"kill_offsets_secs":[1.0,2.0]}}
+job 1: D:/demos/alpha_pov.dem -> <root>\game\dod\dodstudio_chain_02.dem (Some("m00cat"))
+  init mirv_fov 90
+  init cl_righthand 1
+  init sys_autodir
+  init mirv_movie_fps 120
+  init ds_capture_run_in_background 1
+  init ds_capture_stay_behind 1
+  init fps_override 1
+  init fps_max 240
+  init gl_vsync 0
+  init r_decals 256
+  at 0 echo "[dod-studio] BREADCRUMB - Tick 0"
+  at 300 sys_fast_forward
+  at 300 echo "[dod-studio] DEMO_START 2 4 3"
+  at 300 echo "[dod-studio] NEXT_CLIP 2 4 1 3"
+  at 2400 sys_normal_speed
+  at 2400 echo "[dod-studio] SPEED_FLUSH - Tick 2400"
+  at 2401 sys_normal_speed
+  at 2402 sys_normal_speed
+  at 2800 sys_sound
+  at 2800 echo "[dod-studio] AUDIO_SYNC - Tick 2800"
+  at 2801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 2801"
+  at 2801 r_drawviewmodel 0
+  at 2900 dodstudio_chain_02_route_0
+  at 2900 sys_record_start
+  at 2900 echo "[dod-studio] START_RECORD - Tick 2900"
+  at 3600 sys_record_stop
+  at 3600 echo "[dod-studio] STOP_RECORD - Tick 3600"
+  at 3601 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 3601"
+  at 3601 r_drawviewmodel 1
+  at 3800 echo "[dod-studio] AUDIO_SYNC - Tick 3800"
+  at 3801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 3801"
+  at 3801 r_drawviewmodel 0
+  at 3900 dodstudio_chain_02_route_1
+  at 3900 sys_record_start
+  at 3900 echo "[dod-studio] START_RECORD - Tick 3900"
+  at 4200 sys_record_stop
+  at 4200 echo "[dod-studio] STOP_RECORD - Tick 4200"
+  at 4201 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 4201"
+  at 4201 r_drawviewmodel 1
+  at 4300 sys_fast_forward
+  at 4300 echo "[dod-studio] FAST_FORWARD - Tick 4300"
+  at 4300 echo "[dod-studio] NEXT_CLIP 2 4 3 3"
+  at 5000 echo "[dod-studio] BREADCRUMB - Tick 5000"
+  at 10000 echo "[dod-studio] BREADCRUMB - Tick 10000"
+  at 15000 echo "[dod-studio] BREADCRUMB - Tick 15000"
+  at 19400 sys_normal_speed
+  at 19400 echo "[dod-studio] SPEED_FLUSH - Tick 19400"
+  at 19401 sys_normal_speed
+  at 19402 sys_normal_speed
+  at 19800 sys_sound
+  at 19800 echo "[dod-studio] AUDIO_SYNC - Tick 19800"
+  at 19801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 19801"
+  at 19801 r_drawviewmodel 0
+  at 19900 dodstudio_chain_02_route_2
+  at 19900 sys_record_start
+  at 19900 echo "[dod-studio] START_RECORD - Tick 19900"
+  at 20000 echo "[dod-studio] BREADCRUMB - Tick 20000"
+  at 20200 sys_ramp_on
+  at 21100 sys_ramp_off
+  at 21700 sys_record_stop
+  at 21700 echo "[dod-studio] STOP_RECORD - Tick 21700"
+  at 21701 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 21701"
+  at 21701 r_drawviewmodel 1
+  at 21800 sys_fast_forward
+  at 21800 echo "[dod-studio] FAST_FORWARD - Tick 21800"
+  at 21800 dodstudio_chain_02_next
+  at 25000 echo "[dod-studio] BREADCRUMB - Tick 25000"
+  at 30000 echo "[dod-studio] BREADCRUMB - Tick 30000"
+  at 35000 echo "[dod-studio] BREADCRUMB - Tick 35000"
+  at 40000 echo "[dod-studio] BREADCRUMB - Tick 40000"
+  at 45000 echo "[dod-studio] BREADCRUMB - Tick 45000"
+  at 50000 echo "[dod-studio] BREADCRUMB - Tick 50000"
+  at 55000 echo "[dod-studio] BREADCRUMB - Tick 55000"
+  director 0 echo [dod-studio] MATCH_START
+  director 3000 #1: 3 kills: 3 kills
+  director 3400 #2: 2 kills: 2 kills
+  director 4000 #3: 2 kills: 2 kills
+  director 20000 #4: 3 kills: 3 kills
+  director 60000 echo [dod-studio] DEMO_END
+  route (20000, 21600, 0)
+  route (3000, 3500, 0)
+  route (4000, 4100, 0)
+  block {"demo_name":"dodstudio_chain_02","block_index":0,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_02_b0","take_key":"session_golden/dodstudio_chain_02_b0","source_streak_indices":[3,5],"start_tick":3000,"end_tick":3500,"record_start_tick":2900,"record_stop_tick":3600,"ramped_gaps":0,"plan":{"length_secs":7.0,"kill_offsets_secs":[1.0,2.0,3.5,5.0,6.0]}}
+  block {"demo_name":"dodstudio_chain_02","block_index":1,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_02_b1","take_key":"session_golden/dodstudio_chain_02_b1","source_streak_indices":[6],"start_tick":4000,"end_tick":4100,"record_start_tick":3900,"record_stop_tick":4200,"ramped_gaps":0,"plan":{"length_secs":3.0,"kill_offsets_secs":[1.0,2.0]}}
+  block {"demo_name":"dodstudio_chain_02","block_index":2,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_02_b2","take_key":"session_golden/dodstudio_chain_02_b2","source_streak_indices":[4],"start_tick":20000,"end_tick":21600,"record_start_tick":19900,"record_stop_tick":21700,"ramped_gaps":1,"plan":{"length_secs":18.0,"kill_offsets_secs":[1.0,16.0,17.0],"sped_up":[{"from_secs":3.0,"to_secs":12.0,"speed":4.0}]}}
+job 2: D:/demos/bravo_hltv.dem -> <root>\game\dod\dodstudio_chain_03.dem (Some("Nifty"))
+  init mirv_fov 90
+  init cl_righthand 1
+  init sys_autodir
+  init mirv_movie_fps 120
+  init ds_capture_run_in_background 1
+  init ds_capture_stay_behind 1
+  init fps_override 1
+  init fps_max 240
+  init gl_vsync 0
+  init r_decals 256
+  init ds_spec_lock 1
+  at 0 echo "[dod-studio] BREADCRUMB - Tick 0"
+  at 300 sys_fast_forward
+  at 300 spec_mode 4
+  at 300 ds_spec_target 6
+  at 300 echo "[dod-studio] DEMO_START 3 4 2"
+  at 300 echo "[dod-studio] NEXT_CLIP 3 4 1 2"
+  at 5000 echo "[dod-studio] BREADCRUMB - Tick 5000"
+  at 8400 spec_mode 4
+  at 8400 ds_spec_target 6
+  at 8400 sys_normal_speed
+  at 8400 echo "[dod-studio] SPEED_FLUSH - Tick 8400"
+  at 8401 sys_normal_speed
+  at 8402 sys_normal_speed
+  at 8800 sys_sound
+  at 8800 echo "[dod-studio] AUDIO_SYNC - Tick 8800"
+  at 8801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 8801"
+  at 8801 r_drawviewmodel 0
+  at 8900 dodstudio_chain_03_route_0
+  at 8900 sys_record_start
+  at 8900 echo "[dod-studio] START_RECORD - Tick 8900"
+  at 9300 sys_record_stop
+  at 9300 echo "[dod-studio] STOP_RECORD - Tick 9300"
+  at 9301 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 9301"
+  at 9301 r_drawviewmodel 1
+  at 9400 sys_fast_forward
+  at 9400 echo "[dod-studio] FAST_FORWARD - Tick 9400"
+  at 9400 echo "[dod-studio] NEXT_CLIP 3 4 2 2"
+  at 10000 echo "[dod-studio] BREADCRUMB - Tick 10000"
+  at 15000 echo "[dod-studio] BREADCRUMB - Tick 15000"
+  at 20000 echo "[dod-studio] BREADCRUMB - Tick 20000"
+  at 25000 echo "[dod-studio] BREADCRUMB - Tick 25000"
+  at 29400 spec_mode 4
+  at 29400 ds_spec_target 6
+  at 29400 sys_normal_speed
+  at 29400 echo "[dod-studio] SPEED_FLUSH - Tick 29400"
+  at 29401 sys_normal_speed
+  at 29402 sys_normal_speed
+  at 29800 sys_sound
+  at 29800 echo "[dod-studio] AUDIO_SYNC - Tick 29800"
+  at 29801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 29801"
+  at 29801 r_drawviewmodel 0
+  at 29900 dodstudio_chain_03_route_1
+  at 29900 sys_record_start
+  at 29900 echo "[dod-studio] START_RECORD - Tick 29900"
+  at 30000 echo "[dod-studio] BREADCRUMB - Tick 30000"
+  at 30250 sys_record_stop
+  at 30250 echo "[dod-studio] STOP_RECORD - Tick 30250"
+  at 30251 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 30251"
+  at 30251 r_drawviewmodel 1
+  at 30350 sys_fast_forward
+  at 30350 echo "[dod-studio] FAST_FORWARD - Tick 30350"
+  at 30350 dodstudio_chain_03_next
+  at 35000 echo "[dod-studio] BREADCRUMB - Tick 35000"
+  at 40000 echo "[dod-studio] BREADCRUMB - Tick 40000"
+  at 45000 echo "[dod-studio] BREADCRUMB - Tick 45000"
+  at 50000 echo "[dod-studio] BREADCRUMB - Tick 50000"
+  at 55000 echo "[dod-studio] BREADCRUMB - Tick 55000"
+  director 0 echo [dod-studio] MATCH_START
+  director 9000 #1: 2 kills: 2 kills
+  director 30000 #2: 2 kills: 2 kills
+  director 60000 echo [dod-studio] DEMO_END
+  route (9000, 9200, 0)
+  route (30000, 30150, 0)
+  block {"demo_name":"dodstudio_chain_03","block_index":0,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_03_b0","take_key":"session_golden/dodstudio_chain_03_b0","source_streak_indices":[1],"start_tick":9000,"end_tick":9200,"record_start_tick":8900,"record_stop_tick":9300,"ramped_gaps":0,"plan":{"length_secs":4.0,"kill_offsets_secs":[1.0,3.0]}}
+  block {"demo_name":"dodstudio_chain_03","block_index":1,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_03_b1","take_key":"session_golden/dodstudio_chain_03_b1","source_streak_indices":[2],"start_tick":30000,"end_tick":30150,"record_start_tick":29900,"record_stop_tick":30250,"ramped_gaps":0,"plan":{"length_secs":3.5,"kill_offsets_secs":[1.0,2.5]}}
+job 3: D:/demos/bravo_hltv.dem -> <root>\game\dod\dodstudio_chain_04.dem (Some("stealthlol"))
+  init mirv_fov 90
+  init cl_righthand 1
+  init sys_autodir
+  init mirv_movie_fps 120
+  init ds_capture_run_in_background 1
+  init ds_capture_stay_behind 1
+  init fps_override 1
+  init fps_max 240
+  init gl_vsync 0
+  init r_decals 256
+  init ds_spec_lock 1
+  at 0 echo "[dod-studio] BREADCRUMB - Tick 0"
+  at 300 sys_fast_forward
+  at 300 spec_mode 4
+  at 300 ds_spec_target 8
+  at 300 echo "[dod-studio] DEMO_START 4 4 1"
+  at 300 echo "[dod-studio] NEXT_CLIP 4 4 1 1"
+  at 5000 echo "[dod-studio] BREADCRUMB - Tick 5000"
+  at 8400 spec_mode 4
+  at 8400 ds_spec_target 8
+  at 8400 sys_normal_speed
+  at 8400 echo "[dod-studio] SPEED_FLUSH - Tick 8400"
+  at 8401 sys_normal_speed
+  at 8402 sys_normal_speed
+  at 8800 sys_sound
+  at 8800 echo "[dod-studio] AUDIO_SYNC - Tick 8800"
+  at 8801 echo "[dod-studio] CUSTOM_CMD1_BEFORE - Tick 8801"
+  at 8801 r_drawviewmodel 0
+  at 8900 dodstudio_chain_04_route_0
+  at 8900 sys_record_start
+  at 8900 echo "[dod-studio] START_RECORD - Tick 8900"
+  at 9400 sys_record_stop
+  at 9400 echo "[dod-studio] STOP_RECORD - Tick 9400"
+  at 9401 echo "[dod-studio] CUSTOM_CMD2_AFTER - Tick 9401"
+  at 9401 r_drawviewmodel 1
+  at 9500 sys_fast_forward
+  at 9500 echo "[dod-studio] FAST_FORWARD - Tick 9500"
+  at 9500 echo "[dod-studio] BATCH_COMPLETE"
+  at 9501 dodstudio_chain_04_next
+  at 10000 echo "[dod-studio] BREADCRUMB - Tick 10000"
+  at 15000 echo "[dod-studio] BREADCRUMB - Tick 15000"
+  at 20000 echo "[dod-studio] BREADCRUMB - Tick 20000"
+  at 25000 echo "[dod-studio] BREADCRUMB - Tick 25000"
+  at 30000 echo "[dod-studio] BREADCRUMB - Tick 30000"
+  at 35000 echo "[dod-studio] BREADCRUMB - Tick 35000"
+  at 40000 echo "[dod-studio] BREADCRUMB - Tick 40000"
+  at 45000 echo "[dod-studio] BREADCRUMB - Tick 45000"
+  at 50000 echo "[dod-studio] BREADCRUMB - Tick 50000"
+  at 55000 echo "[dod-studio] BREADCRUMB - Tick 55000"
+  director 0 echo [dod-studio] MATCH_START
+  director 9000 #1: 2 kills: 2 kills
+  director 60000 echo [dod-studio] DEMO_END
+  route (9000, 9300, 0)
+  block {"demo_name":"dodstudio_chain_04","block_index":0,"drive_index":0,"take_folder":"<root>\\takes\\session_golden\\dodstudio_chain_04_b0","take_key":"session_golden/dodstudio_chain_04_b0","source_streak_indices":[0],"start_tick":9000,"end_tick":9300,"record_start_tick":8900,"record_stop_tick":9400,"ramped_gaps":0,"plan":{"length_secs":5.0,"kill_offsets_secs":[1.0,4.0]}}

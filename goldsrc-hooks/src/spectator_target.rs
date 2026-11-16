@@ -14,7 +14,7 @@
 //! all read and write.
 //!
 //! A from-scratch static pass (chasing #206 after #269's survey
-//! found the mode global's real writer, `CHudSpectator::SetMode`)
+//! found the mode global's real writer, `CHudSpectator::SetModes`)
 //! exhaustively found **every** site in `client.dll` that writes
 //! `g_iUser2` -- a whole-image byte search, not a guess -- and every one of
 //! the seven is either gated on the auto-director cvar (`DRC_CMD_EVENT`,
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn offsets_are_four_bytes_apart() {
         // g_iUser1 and g_iUser2 are adjacent dwords -- confirmed independently
-        // across CHudSpectator::Reset, ::SetMode and the DRC_CMD_EVENT
+        // across CHudSpectator::Reset, ::SetModes and the DRC_CMD_EVENT
         // handler, not just asserted once.
         assert_eq!(TARGET_RVA - MODE_RVA, 4);
     }

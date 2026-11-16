@@ -8,6 +8,7 @@
 //! `capture_takes_verified`, so they never mark a highlight captured, never
 //! fill the Last Batch panel and never start Finish clips.
 
+use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -156,7 +157,7 @@ pub fn obs_test_watch_start(
         let _ = std::fs::remove_file(file);
     }
     let watch = StatsWatch::start(format!("ws://{host}:{port}"), password);
-    *state.watch.lock().unwrap_or_else(|p| p.into_inner()) = Some(watch);
+    *lock_or_recover(&state.watch) = Some(watch);
 }
 
 /// One test clip's whole result.
@@ -186,7 +187,7 @@ pub async fn obs_test_analyze(
     ffmpeg_path: Option<String>,
     obs_fps: i32,
 ) -> Result<ObsTestResult, String> {
-    let watch = state.watch.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let watch = lock_or_recover(&state.watch).take();
     let recording = match watch {
         Some(w) => tokio::task::spawn_blocking(move || w.finish())
             .await
@@ -230,7 +231,7 @@ pub async fn obs_test_analyze(
 #[tauri::command(async)]
 pub fn obs_test_cancel(state: tauri::State<'_, ObsTestManager>) {
     state.cancel.store(true, Ordering::Relaxed);
-    state.watch.lock().unwrap_or_else(|p| p.into_inner()).take();
+    lock_or_recover(&state.watch).take();
 }
 
 /// The test session folder `take_folder` is in: the nearest folder above it

@@ -76,18 +76,20 @@ pub struct PlayerRow {
     pub nameplate: String,
 }
 
-/// What a player not in the table gets for their spray.
+/// What a player not in the table gets for their spray, and what "From the
+/// demo" uses when the demo saved none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SprayFallback {
-    /// The game's own: the spray the demo saved (POV), the bullet hole the
-    /// engine draws when it has no image (HLTV with no PNG picked).
+    /// The one PNG in `*_fallback_png`. With none picked, the game's own.
     #[default]
-    Own,
-    /// The one PNG in `*_fallback_png`.
     Png,
     /// No spray at all.
     None,
+    /// "Their own spray", which only a settings file from before #1322
+    /// holds: [`PlayerTable::retire_own_fallback`] turns it into one of the
+    /// others. It stays a variant so that such a file still loads.
+    Own,
 }
 
 /// What a player not in the table gets for their crosshair.
@@ -108,15 +110,13 @@ pub struct PlayerTable {
     pub use_in_game: bool,
     #[serde(default)]
     pub players: Vec<PlayerRow>,
-    /// POV demos' spray fallback: `own` by default.
+    /// POV demos' fallback spray.
     #[serde(default)]
     pub pov_fallback: SprayFallback,
     #[serde(default)]
     pub pov_fallback_png: String,
-    /// HLTV demos': `png` by default. `own` is never offered (an HLTV demo
-    /// records that a player sprayed, never the image) and reads as the
-    /// game's bullet hole, like `png` with no PNG picked.
-    #[serde(default = "default_hltv_fallback")]
+    /// HLTV demos' fallback spray.
+    #[serde(default)]
     pub hltv_fallback: SprayFallback,
     #[serde(default)]
     pub hltv_fallback_png: String,
@@ -151,10 +151,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_hltv_fallback() -> SprayFallback {
-    SprayFallback::Png
-}
-
 fn default_crosshair_sprite() -> String {
     DEFAULT_CROSSHAIR_SPRITE.to_string()
 }
@@ -168,15 +164,40 @@ impl Default for PlayerTable {
         Self {
             use_in_game: true,
             players: Vec::new(),
-            pov_fallback: SprayFallback::Own,
+            pov_fallback: SprayFallback::Png,
             pov_fallback_png: String::new(),
-            hltv_fallback: default_hltv_fallback(),
+            hltv_fallback: SprayFallback::Png,
             hltv_fallback_png: String::new(),
             crosshair_fallback: CrosshairFallback::Game,
             crosshair_fallback_sprite: default_crosshair_sprite(),
             crosshair_fallback_tile: default_tile(),
             spray_size: DEFAULT_SPRAY_SIZE,
         }
+    }
+}
+
+impl PlayerTable {
+    /// Takes "Their own spray" out of a table saved before #1322, once
+    /// (settings migration 3). A table somebody used gets "No spray", as the
+    /// fallbacks are one picture or no spray now. One nobody touched, with no
+    /// row and no POV picture, gets the default: with no picture picked that
+    /// plays as it always has, and "No spray" would blank every spray for a
+    /// user who has never seen this page. True when the table was used, so
+    /// the change is worth saying.
+    pub fn retire_own_fallback(&mut self) -> bool {
+        if self.hltv_fallback == SprayFallback::Own {
+            self.hltv_fallback = SprayFallback::Png;
+        }
+        if self.pov_fallback != SprayFallback::Own {
+            return false;
+        }
+        let used = !self.players.is_empty() || !self.pov_fallback_png.is_empty();
+        self.pov_fallback = if used {
+            SprayFallback::None
+        } else {
+            SprayFallback::Png
+        };
+        used
     }
 }
 
@@ -579,6 +600,72 @@ mod tests {
             ..PlayerTable::default()
         };
         assert!(table_text(&odd).contains("spray_size\t64\n"));
+    }
+
+    #[test]
+    fn a_settings_file_from_before_1322_still_loads_their_own_spray() {
+        let table: PlayerTable = serde_json::from_str(r#"{"pov_fallback":"own"}"#).unwrap();
+        assert_eq!(table.pov_fallback, SprayFallback::Own);
+    }
+
+    #[test]
+    fn a_used_table_with_their_own_spray_becomes_no_spray_and_says_so() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            players: vec![PlayerRow {
+                name: "x".into(),
+                ..PlayerRow::default()
+            }],
+            ..PlayerTable::default()
+        };
+        assert!(table.retire_own_fallback());
+        assert_eq!(table.pov_fallback, SprayFallback::None);
+        assert!(!table.retire_own_fallback(), "said once");
+    }
+
+    #[test]
+    fn a_picked_pov_picture_counts_as_a_used_table() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            pov_fallback_png: "a.png".into(),
+            ..PlayerTable::default()
+        };
+        assert!(table.retire_own_fallback());
+        assert_eq!(table.pov_fallback, SprayFallback::None);
+    }
+
+    #[test]
+    fn a_table_nobody_touched_keeps_playing_as_it_did() {
+        let mut table = PlayerTable {
+            pov_fallback: SprayFallback::Own,
+            ..PlayerTable::default()
+        };
+        let before = table_text(&table);
+        assert!(!table.retire_own_fallback());
+        assert_eq!(table, PlayerTable::default());
+        assert_eq!(table_text(&table), before);
+    }
+
+    #[test]
+    fn a_chosen_fallback_is_left_alone() {
+        for kept in [SprayFallback::Png, SprayFallback::None] {
+            let mut table = PlayerTable {
+                pov_fallback: kept,
+                ..PlayerTable::default()
+            };
+            assert!(!table.retire_own_fallback());
+            assert_eq!(table.pov_fallback, kept);
+        }
+    }
+
+    #[test]
+    fn a_hand_edited_hltv_own_becomes_the_default() {
+        let mut table = PlayerTable {
+            hltv_fallback: SprayFallback::Own,
+            ..PlayerTable::default()
+        };
+        assert!(!table.retire_own_fallback());
+        assert_eq!(table.hltv_fallback, SprayFallback::Png);
     }
 
     #[test]

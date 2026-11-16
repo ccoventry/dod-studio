@@ -49,8 +49,8 @@ Usage:
     python goldsrc-hooks/tools/verify_ex_interp_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_ex_interp_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one. Requires `pefile` and
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install. Requires `pefile` and
 `capstone` (`pip install pefile capstone`); both are analysis-only and are not
 build dependencies of anything in the workspace.
 """
@@ -70,7 +70,7 @@ DEFAULT_HW = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_HW = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
+ANNIVERSARY_HW = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll")
 SRC = Path(__file__).resolve().parent.parent / "src" / "ex_interp.rs"
 
 # `mov eax, [flag]; test eax, eax; je +5; mov ebx, imm32` -- the branch that

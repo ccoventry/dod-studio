@@ -12,6 +12,7 @@
 //! 6. The teardown here: late markers, OBS's stop, the batch's files, the
 //!    last event.
 
+pub mod clip_verdict;
 mod game;
 mod launch;
 mod leftovers;
@@ -22,6 +23,7 @@ mod processes;
 mod watch;
 mod workspace;
 
+pub use markers::ClipSummary;
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -80,6 +82,10 @@ pub enum EngineEvent {
     /// Process) or crashed. Sent just before the `Error` that ends the batch,
     /// so the clip it cut short says the game closed.
     GameClosed,
+    /// The hook's summary of one clip it recorded (#1221): whether its start
+    /// and stop markers came and how many frames it wrote, for judging its
+    /// take (#1401, `clip_verdict`).
+    ClipReported(ClipSummary),
 }
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.

@@ -1,3 +1,5 @@
+// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 mod british;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,12 +33,15 @@ mod pause_replay;
 mod player;
 mod position;
 mod pov_stats;
+pub mod repair;
 mod round;
 mod scoreboard;
 mod segment;
 mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
+#[cfg(test)]
+mod tests_old_server_build;
 #[cfg(test)]
 mod tests_sounds;
 mod time;
@@ -973,6 +978,7 @@ mod tests {
             map_file_name: format!("maps/{}.bsp\0", map).into_bytes(),
             map_cycle: Vec::new(),
             unknown: 0,
+            legacy_trailer: None,
         })
     }
 

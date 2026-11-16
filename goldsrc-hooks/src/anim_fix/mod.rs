@@ -276,6 +276,25 @@ static ANIMATIONS_PLAYED: AtomicI32 = AtomicI32::new(0);
 /// Reassurance that a long session is still working.
 const ANIMATION_SUMMARY_EVERY: i32 = 100;
 
+/// The body to play an animation with: the one the view model already has.
+///
+/// `pfnWeaponAnim`'s second argument is stored into the view model's
+/// `curstate.body` (`cl.viewent + 0x314`; hw.dll pre-Anniversary +0xc990,
+/// Anniversary +0x1963e0), and on DoD's view models the body picks the sleeve
+/// bodygroup (US / British / Axis), so a fixed 0 dressed every Axis and British
+/// player in US sleeves, or none (#1467). The game sets the right body itself
+/// on every weapon change while spectating (`V_CalcRefdef` calls
+/// `pfnWeaponAnim(0, EV_GetWeaponBody())`, client.dll +0x511f6: Allies get
+/// the map's `m_bBritish`, Axis 2); its fire events pass that same body, and
+/// the only other writer in hw.dll is `svc_weaponanim`, which carries the
+/// server's. Keeping it keeps the sleeves the game chose.
+fn sleeve_body(viewmodel_entity: *const ClEntityS) -> i32 {
+    if viewmodel_entity.is_null() {
+        return 0;
+    }
+    unsafe { (*viewmodel_entity).curstate.body }
+}
+
 fn play_viewmodel_animation(
     sequence: i32,
     reason: &str,
@@ -317,7 +336,8 @@ fn play_viewmodel_animation(
         };
     }
 
-    unsafe { (engfuncs.pfn_weapon_anim)(sequence, 0) };
+    let body = sleeve_body(unsafe { (engfuncs.get_view_model)() });
+    unsafe { (engfuncs.pfn_weapon_anim)(sequence, body) };
 }
 
 // What `apply()` last saw, published for `on_weapon_fired`, which runs from
@@ -939,6 +959,20 @@ pub fn apply() {
 pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// A corrected animation keeps the sleeves the game put on the view
+    /// model: US 0, British 1, Axis 2 (`EV_GetWeaponBody`), never a fixed 0
+    /// (#1467).
+    #[test]
+    fn a_corrected_animation_keeps_the_view_models_sleeves() {
+        for body in [0, 1, 2] {
+            // SAFETY: `cl_entity_s` is plain data; all zeroes is a valid value.
+            let mut viewmodel: Box<ClEntityS> = Box::new(unsafe { std::mem::zeroed() });
+            viewmodel.curstate.body = body;
+            assert_eq!(sleeve_body(&*viewmodel), body);
+        }
+        assert_eq!(sleeve_body(std::ptr::null()), 0);
+    }
 
     /// Only the three grenades wind up and throw; every other weapon fires
     /// on the spot.

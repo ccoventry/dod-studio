@@ -314,6 +314,7 @@ mod tests {
             missing_shots::NAME,
             crate::own_blood::NAME,
             crate::map_weather::NAME,
+            crate::map_wind::NAME,
             crate::nameplates::NAME,
         ];
         let mut all: Vec<String> = Vec::new();

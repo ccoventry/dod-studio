@@ -37,8 +37,8 @@ Usage:
     python goldsrc-hooks/tools/verify_hltv_spray_offsets.py [path-to-hw.dll]
     python goldsrc-hooks/tools/verify_hltv_spray_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
-25th Anniversary one. Needs `pip install pefile capstone`.
+Defaults to the pre-Anniversary movies install; `--anniversary` is the POST-Anniversary
+movies install. Needs `pip install pefile capstone`.
 """
 
 import re
@@ -57,7 +57,7 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - POST-Anniversary for Movies\hw.dll")
 RUST = Path(__file__).resolve().parent.parent / "src" / "spray_hltv.rs"
 TE_PLAYERDECAL = 112
 SCRATCH = {"eax", "ecx", "edx"}
@@ -90,6 +90,7 @@ def rust_builds(src):
             "playernum_disp": num("playernum_disp"),
             "custom_at": num("custom_at"),
             "else_at": num("else_at"),
+            "shoot_call_at": num("shoot_call_at"),
             "decal_texture": text("decal_texture"),
             "customdata_at": num("customdata_at"),
             "miptex_texture": text("miptex_texture"),
@@ -157,8 +158,8 @@ def prologue_before(image, rva, limit=0x6000):
     return None
 
 
-def case_target(image, base, fn, site):
-    """The address the switch in the function at `fn` jumps to for 112."""
+def case_target(image, base, fn, site, te=TE_PLAYERDECAL):
+    """The address the switch in the function at `fn` jumps to for `te`."""
     at = fn
     while True:
         # jmp [reg*4 + table]: the SIB names any index register.
@@ -176,7 +177,7 @@ def case_target(image, base, fn, site):
                 index = struct.unpack_from("<I", blob, i + 2)[0] - base
             if blob[i:i + 2] == b"\x0f\xb6" and (blob[i + 2] & 0xC0) == 0x80 and (blob[i + 2] & 7) != 4:
                 index = struct.unpack_from("<I", blob, i + 3)[0] - base
-        case = image[index + TE_PLAYERDECAL] if index is not None else TE_PLAYERDECAL
+        case = image[index + te] if index is not None else te
         target = struct.unpack_from("<I", image, table + case * 4)[0] - base
         if target <= site < target + 0x200:
             return target
@@ -297,6 +298,7 @@ def main():
     reads_pn = any(f"[{pn}]" in text_of(i) for i in branch[:-1])
     check(shoot is not None and reads_tex and reads_pn,
           f"the custom branch passes the player number and the texture ({tex_place}) to +{shoot or 0:#x}")
+    check(call.address - base == site + b["shoot_call_at"], f"that call is at shoot_call_at (+{b['shoot_call_at']:#x})")
     if shoot is not None:
         body = dis(shoot, 0x40)
         flips = any(i.mnemonic == "not" for i in body) or any(

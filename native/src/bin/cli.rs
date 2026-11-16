@@ -1,27 +1,16 @@
 //! Demo analyzer that runs in a terminal and produces text output.
 
-#[cfg(not(target_arch = "wasm32"))]
 use analysis::{Analysis, Mortality, MortalityState, Round, SteamId, Team};
-#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand, ValueEnum};
-#[cfg(not(target_arch = "wasm32"))]
 use humantime::{format_duration, format_rfc3339_seconds};
-#[cfg(not(target_arch = "wasm32"))]
 use native::patch::{PatchOptions, patch_demo_highlights};
-#[cfg(not(target_arch = "wasm32"))]
 use native::{FileInfo, messages, run_analyzer};
-#[cfg(not(target_arch = "wasm32"))]
 use serde_json::{Value, json};
-#[cfg(not(target_arch = "wasm32"))]
 use std::fmt::{Display, Formatter};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime};
-#[cfg(not(target_arch = "wasm32"))]
 use tabled::{builder::Builder, settings::Style};
 
-#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args = Args::parse();
 
@@ -76,7 +65,6 @@ fn main() {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat) {
     let mut analyses = vec![];
     for p in &demo_paths {
@@ -100,7 +88,6 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
 /// One read-only stats document per demo, as JSON (#192): the columns a
 /// league scoreboard can take from a demo, keyed by the player's global id
 /// (a SteamID64 when the demo carries one).
-#[cfg(not(target_arch = "wasm32"))]
 fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
     let mut rows = vec![];
     for p in &demo_paths {
@@ -114,7 +101,6 @@ fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
 
 /// `1` or `2` from a `_h1`/`_h2` part of a demo's file name, the league's
 /// naming convention. Nothing in the recording itself is checked.
-#[cfg(not(target_arch = "wasm32"))]
 fn half_from_file_name(name: &str) -> Option<u8> {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     stem.to_lowercase()
@@ -126,7 +112,6 @@ fn half_from_file_name(name: &str) -> Option<u8> {
         })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
     let state = &analysis.state;
     let team_name = |team: &Team| format!("{team:?}").to_lowercase();
@@ -200,7 +185,6 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 // The CLI entry point: one flag per argument, each independent.
 #[allow(clippy::too_many_arguments)]
 fn run_patch_streak_subcommand(
@@ -336,7 +320,6 @@ fn run_patch_streak_subcommand(
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Args {
@@ -352,7 +335,6 @@ struct Args {
     output_format: OutputFormat,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Analyze one or more demos
@@ -423,7 +405,6 @@ enum Commands {
     },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, ValueEnum)]
 enum OutputFormat {
     /// Markdown document best used in combination with a Markdown renderer
@@ -433,13 +414,10 @@ enum OutputFormat {
     Json,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 type AnalyzerOutput = (FileInfo, Analysis);
 
-#[cfg(not(target_arch = "wasm32"))]
 struct Json(Value);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl FromIterator<AnalyzerOutput> for Json {
     fn from_iter<T: IntoIterator<Item = AnalyzerOutput>>(iter: T) -> Self {
         let analyses = iter.into_iter();
@@ -493,14 +471,12 @@ impl FromIterator<AnalyzerOutput> for Json {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<Value> for Json {
     fn from(value: Value) -> Self {
         Self(value)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Display for Json {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = serde_json::to_string_pretty(&self.0).map_err(|_| std::fmt::Error)?;
@@ -509,17 +485,14 @@ impl Display for Json {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct Markdown(FileInfo, Analysis);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<AnalyzerOutput> for Markdown {
     fn from(value: AnalyzerOutput) -> Self {
         Self(value.0, value.1)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Markdown {
     fn md_escape(str: &str) -> String {
         str.replace("|", r"\|")
@@ -530,7 +503,6 @@ impl Markdown {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Display for Markdown {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Header section
@@ -830,7 +802,7 @@ impl Display for Markdown {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::half_from_file_name;
 
@@ -852,6 +824,3 @@ mod tests {
         assert_eq!(half_from_file_name("solifotw-greetz1.dem"), None);
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-fn main() {}

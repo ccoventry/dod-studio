@@ -827,18 +827,29 @@ fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
 }
 
 #[test]
-fn agr_fps_follows_the_capture_fps_until_it_is_set() {
+fn agr_fps_is_30_until_it_is_set_whatever_the_capture_fps() {
     let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
     config.capture_fps = 300;
     config.agr_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 300);
-    assert_eq!(agr_host_framerate(&config), 1.0 / 300.0);
+    assert_eq!(crate::patch::DEFAULT_AGR_FPS, 30);
+    assert_eq!(config.effective_agr_fps(), 30);
+    assert_eq!(agr_host_framerate(&config), 1.0 / 30.0);
     config.agr_fps = 120;
     assert_eq!(config.effective_agr_fps(), 120);
     // Never a division by zero, whatever the settings say.
     config.agr_fps = -5;
     config.capture_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 1);
+    assert_eq!(config.effective_agr_fps(), 30);
+}
+
+#[test]
+fn agr_fps_absent_from_saved_settings_reads_as_30() {
+    let mut value = serde_json::to_value(config_in_mode(crate::patch::CaptureMode::Agr)).unwrap();
+    value.as_object_mut().unwrap().remove("agr_fps");
+    value["capture_fps"] = serde_json::json!(300);
+    let config: crate::patch::PatcherConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(config.agr_fps, 0);
+    assert_eq!(config.effective_agr_fps(), 30);
 }
 
 #[test]
@@ -2203,8 +2214,11 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
         estimate_batch_capture_blocks(&streaks, &config),
         vec![2 * one]
     );
+    // Another player is another job: `build_batch_queue` groups by the
+    // player's name, and the estimate now asks the same planner.
     let mut other_player = streak(1000, 1200);
     other_player.player_index = 1;
+    other_player.target_player = Some("Nifty".to_string());
     let spread = vec![
         streak(2500, 2700),
         streak(1000, 1200),
@@ -2220,10 +2234,26 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
 #[test]
 fn a_batch_with_no_room_is_refused_in_plain_words() {
     let gib = 1_073_741_824;
-    let message = no_room_message(31 * gib, 22 * gib);
+    let message = no_room_message(31 * gib, 22 * gib, None);
     assert_eq!(
         message,
         "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
+    );
+}
+
+/// #1430: when a capture folder is on the Windows drive, the refusal says the
+/// drive counts only above "Keep free on the Windows drive".
+#[test]
+fn a_refusal_with_a_capture_folder_on_the_windows_drive_names_the_setting() {
+    let gib = 1_073_741_824;
+    let message = no_room_message(31 * gib, 22 * gib, Some(50 * gib));
+    assert!(
+        message.starts_with("Not enough free space on any capture drive"),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(&crate::messages::windows_drive::kept_free_note(50 * gib)),
+        "{message}"
     );
 }
 

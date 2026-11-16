@@ -46,6 +46,44 @@ function settingsText(record) {
   return [mode, fps].filter(Boolean).join(' · ') || STRINGS.CAPTURE_HISTORY.NO_SETTINGS;
 }
 
+/** A recorded number as the line shows it ('' when it isn't one). */
+const shown = (value) => (Number.isFinite(value) ? String(Math.round(value * 100) / 100) : '');
+
+/** The Scheduled Command `c` as one tooltip line. */
+function scheduledText(c) {
+  return STRINGS.CAPTURE_HISTORY.scheduledCommand(c.relation === 'After', shown(c.offset_seconds), c.command);
+}
+
+/**
+ * The "Captured with" line under a take, `{ text, title }`: the full settings
+ * the capture used (part of #1085), short on the line, every command in its
+ * tooltip. A record from before they existed says "not recorded" and nothing
+ * else: it is never read as a difference.
+ */
+export function capturedWithText(record) {
+  const s = record?.settings;
+  const H = STRINGS.CAPTURE_HISTORY;
+  if (!s || typeof s !== 'object') return { text: H.capturedWith(H.NOT_RECORDED), title: H.NOT_RECORDED_TITLE };
+  const lines = Array.isArray(s.lines) ? s.lines : [];
+  const commands = Array.isArray(s.commands) ? s.commands : [];
+  const fastForward = s.kill_gaps?.mode === 'fast_forward';
+  const parts = [
+    s.width > 0 && s.height > 0 ? H.size(s.width, s.height) : '',
+    shown(s.fov) ? H.fov(shown(s.fov)) : '',
+    s.install || '',
+    s.hook ? H.hook(s.hook) : H.NO_HOOK,
+    H.clipLength(shown(s.before), shown(s.after)),
+    fastForward ? H.gapsFastForward(shown(s.kill_gaps.speed), shown(s.kill_gaps.over_seconds)) : '',
+    H.commandCounts(lines.length, commands.length),
+  ];
+  const title = [
+    H.INITIAL_HEADING, ...(lines.length ? lines.map(H.initialLine) : [H.NONE]),
+    H.SCHEDULED_HEADING, ...(commands.length ? commands.map(scheduledText) : [H.NONE]),
+    H.hash(s.hash || '', s.app_version || ''),
+  ].join('\n');
+  return { text: H.capturedWith(parts.filter(Boolean).join(' · ')), title };
+}
+
 /**
  * Where the take stands: `unknown` (no folder recorded), `checking` (disk
  * answer not in yet: `state` undefined), `unchecked` (the check failed: null),
@@ -122,6 +160,7 @@ export function describeCapture(capture, uid, state, { labelOfUid, formatSize, l
     takeKey,
     when: record.captured_at ? formatWhen(record.captured_at) : STRINGS.CAPTURE_HISTORY.NO_DATE,
     settings: settingsText(record),
+    capturedWith: capturedWithText(record),
     takeName: takeKey.split('/').pop(),
     folder: record.take_folder || null,
     status: takeStatus(record, state),

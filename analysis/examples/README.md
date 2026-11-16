@@ -72,7 +72,6 @@ that panics the parser cannot take down the run:
 | `bridge_best` | Finds the best bridge and cuts in the right place. |
 | `bridge_skip_probe` | Bridges damage by resuming a little after the resync point. |
 | `bridge_ceiling` | Why a bridged demo parses far fewer frames than its bytes contain. |
-| `multi_bridge` | Bridges every hole in a damaged demo, not just the first. |
 | `graft_signon` | Repairs a damaged signon using another demo of the same match. |
 | `same_recording_check` | Cross-checks whether two demo files are the same recording. |
 | `stitch_probe` | Can two distant slices of a healthy demo be stitched into one file? |
@@ -85,9 +84,7 @@ that panics the parser cannot take down the run:
 
 | Probe | What it does |
 | --- | --- |
-| `snapshot_inject` | Rebuilds the client's entity table at a join with a synthetic full snapshot. |
 | `snapshot_check` | Does an injected snapshot hold as many entities as the stream expects? |
-| `entity_count_fix` | Restates each packet's `entity_count` as the set the engine really builds (#15's crash at a join). |
 | `entset_probe` | How many entities does a snapshot describe, and how does the set evolve? |
 | `entity0_encoding` | How a real `svc_packetentities` encodes entity 0 (world). |
 | `index_encoding_survey` | Every entity-index encoding used across a demo's packets. |
@@ -101,8 +98,10 @@ that panics the parser cannot take down the run:
 | `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
 | `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). The R&D probe; Studio's own trim is `native::patch::entity_trim`. |
 
-`shared/entity_carry.rs` is not a probe: it carries each snapshot's entity set
-forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.
+The repair itself (bridging every hole, the join snapshots, the entity counts)
+is `analysis::repair`, run by `hl-demo-auditor --repair` and Studio (#15);
+`multi_bridge`, `snapshot_inject` and `entity_count_fix` were its probes.
+`repair_compare` compares two repaired builds of one demo.
 
 ### HLTV, spectating and weapons
 
@@ -114,6 +113,9 @@ forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.
 | `sprint_viewmodel_probe` | What DoD does to the first-person viewmodel while a player sprints. |
 | `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
 | `crouch_eye_probe` | Camera and origin heights through a crouch: the POV recorder's per frame, every player's `usehull` and gait per snapshot (#1144). |
+| `forcehltv_pov_probe` | What a POV demo loses under `dem_forcehltv 1`, and when it holds another player (`FH_TRACK`) (#1452). |
+| `entity_edit_probe` | Rewrite what a player does: swerve another player or the recorder, or give a player data for seconds before he first appears (`docs/goldsrc_demo_editing.md`, #1469). |
+| `sandbag_probe` | A demo's model precache, spawn baselines and the entities around a window of the viewdemo clock, with model names, origins and render fields; `SB_VIEW=1` prints the recorder's view every 0.5 s. Showed a map's `env_model`s are never networked (the forcehltv sandbag case). |
 | `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |

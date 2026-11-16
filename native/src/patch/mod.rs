@@ -123,52 +123,31 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 pub mod types;
 
 /// A Seek Between Clips batch in the game that is already open (#725).
-#[cfg(not(target_arch = "wasm32"))]
 pub mod batch_reuse;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bsp_entities;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod builder;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_report;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
 pub mod console_prefix;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod decal_atlas;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod decal_probe;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod decal_strip;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod entity_trim;
 pub mod game_dir;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
 pub mod launch_settings;
 pub mod map_check;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod map_fetch;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod map_text;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod runtime_batch;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod scanner;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod sound_mute;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod source_copies;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod trimmed_copies;
 pub mod viewdemo_clock;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod viewdemo_refresh;
 
 // ── Re-export wall ────────────────────────────────────────────────────────────
@@ -177,17 +156,14 @@ pub mod viewdemo_refresh;
 
 pub use types::{
     CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
-    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
+    DEFAULT_AGR_FPS, DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
     ObsRecordingQuality, PatchJob, PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use types::{CaptureWorker, PatchEvent};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use highlevel::patch_demo_highlights;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{
     CleanedSource, DECALS_PER_POSITION, DEFAULT_LEAD_SECONDS, DecalCleanError, DecalCleanOptions,
     DecalCleanStats, FlushSource, MAX_OVERLAP_DECALS, VisibilityBasis, capture_fov,
@@ -195,41 +171,31 @@ pub use decal_strip::{
     ring_limit, ring_limit_from_game_config, ring_limit_from_init, strip_decals_outside_windows,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use decal_probe::{
     CameraView, GridStats, Probe, ProbeOptions, ProbeRow, ProbeStats, Sighting, best_view_for,
     camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use cfg_scan::{CfgScan, CvarSetting, WATCHED_CVARS, scan as scan_game_cfgs};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{capture_fov_from_init, capture_fov_resolved};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use map_check::{MapReference, MapStatus, check_demo, map_reference};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use sound_mute::{MapSounds, MuteSelection, MuteStats, map_sounds, mute_sounds};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use map_text::{MapText, TextSelection, TextStats, hide_map_text, map_text};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use map_fetch::{DEFAULT_MIRROR, FetchOutcome, fetch_map, map_url};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use engine::{PatchStage, StreamPatcher};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use builder::{
     WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
     build_preview_patch_jobs, estimate_batch_capture_blocks, estimate_batch_capture_bytes,
     final_init_commands, playdemo_safe_stem, spawn_patch_batch,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use scanner::{
     check_sources_unchanged, is_hltv_demo, is_hltv_head, scan_demo_for_highlights,
     scan_demo_for_highlights_with_analysis,
@@ -242,7 +208,6 @@ pub use scanner::{
 /// `entry_idx`/`frame_idx` index `demo.directory.entries[..].frames[..]`; an
 /// out-of-range pair is simply not injectable rather than a panic, so callers
 /// can hand this raw indices straight out of a frame-ordinal walk.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn is_injectable_frame(demo: &dem::types::Demo, entry_idx: usize, frame_idx: usize) -> bool {
     use dem::types::{FrameData, MessageData};
 

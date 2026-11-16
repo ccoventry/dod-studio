@@ -57,7 +57,8 @@
       names.map((n) => demos.find((d) => d.name === n)), null, (demo, idx) => { window.__selected = `${demo.name}@${idx}`; });
     // For the Split Maps tests: a queue of one demo that recorded two maps.
     const twoMaps = { name: 'two.dem', path: 'C:\demos\two.dem', streaks: [], signon_maps: ['dod_harrington', 'dod_anzio'] };
-    window.__renderTwoMaps = () => renderMasterList([twoMaps], null, () => {});
+    // `extra` adds fields, such as a damaged demo's `damage` (#15).
+    window.__renderTwoMaps = (extra = {}) => renderMasterList([{ ...twoMaps, ...extra }], null, () => {});
     window.__harnessReady = true;
   </script>
 </body>

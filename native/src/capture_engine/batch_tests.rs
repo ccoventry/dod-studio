@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers: clippy only recognises `cfg(test)`, not `cfg(all(test, windows))`
 //! `spawn_capture_engine` from the outside, up to the launch: the events a
 //! batch sends and what it leaves on disk when it stops before the game
 //! starts. Windows only, since the batch links its folders with `mklink /J`.
