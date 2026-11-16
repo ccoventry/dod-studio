@@ -470,6 +470,12 @@ struct Batch {
 
 static BATCH: Mutex<Option<Batch>> = Mutex::new(None);
 
+/// Whether a batch runs now. `try_lock`, for callers on a game frame: a lock
+/// held elsewhere means the batch is being worked on, so it runs.
+pub(crate) fn running() -> bool {
+    BATCH.try_lock().map_or(true, |batch| batch.is_some())
+}
+
 fn lock() -> std::sync::MutexGuard<'static, Option<Batch>> {
     BATCH.lock().unwrap_or_else(|e| e.into_inner())
 }

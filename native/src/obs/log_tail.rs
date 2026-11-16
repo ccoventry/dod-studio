@@ -389,6 +389,34 @@ mod tests {
         assert_eq!(m.tick, Some(41947));
     }
 
+    /// The hook's damaged-demo events (goldsrc-hooks `demo_damage.rs`, #1394)
+    /// arrive with 4 tab fields, or 3 when the demo's name is unknown, and
+    /// are kept whole as `Other` until Studio reads them.
+    #[test]
+    fn a_demo_damaged_event_is_other_with_its_fields_kept() {
+        let line =
+            "[dod-studio] DEMO_DAMAGED\t507.66\tmessage_too_big\tC:\\Games\\a b\\dod\\x-1.dem";
+        let m = parse_marker(line).unwrap();
+        assert_eq!(m.kind, MarkerKind::Other);
+        assert_eq!(
+            m.label.split('\t').collect::<Vec<_>>(),
+            [
+                "DEMO_DAMAGED",
+                "507.66",
+                "message_too_big",
+                "C:\\Games\\a b\\dod\\x-1.dem"
+            ]
+        );
+        let m = parse_marker("[dod-studio] DEMO_DAMAGED\t\tmessage_too_big").unwrap();
+        assert_eq!(m.kind, MarkerKind::Other);
+        assert_eq!(
+            m.label.split('\t').collect::<Vec<_>>(),
+            ["DEMO_DAMAGED", "", "message_too_big"]
+        );
+        let m = parse_marker("[dod-studio] DEMO_ENTITY_LIMIT\t12.00\tentity_limit").unwrap();
+        assert_eq!(m.kind, MarkerKind::Other);
+    }
+
     /// Starting mid-file is the whole point: an existing log is history, and
     /// replaying it would fire a record on a batch that finished days ago.
     #[test]

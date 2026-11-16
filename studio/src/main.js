@@ -68,6 +68,7 @@ import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refres
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { startReviewFromGame } from './review_from_game.js';
+import { startDamagedDemoToasts } from './damaged_demo_toast.js';
 import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
@@ -394,6 +395,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The in-game Review tab's From the start / From here (#1142).
   startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
     scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
+  startDamagedDemoToasts({ getDemos: queue.getDemos, repairQueuedDemo, isHeld: batchGuard.isHeld }); // the game's damaged-demo notice (#1373)
 
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
