@@ -24,7 +24,9 @@ import { RENDER_STRINGS } from './strings/render.js';
 import { REPAIR_STRINGS } from './strings/repair.js';
 import { AUDITOR_STRINGS } from './strings/auditor.js';
 import { ANALYZER_STRINGS } from './strings/analyzer.js';
-import { PAGES_STRINGS } from './strings/pages.js';
+import { BLENDER_STRINGS } from './strings/blender.js';
+import { HD_STRINGS } from './strings/hd.js';
+import { OVERVIEWS_STRINGS } from './strings/overviews.js';
 import { SETUP_STRINGS } from './strings/setup.js';
 
 // One area per file under strings/, so a feature PR edits its own area's file and
@@ -41,6 +43,8 @@ export const STRINGS = {
   ...REPAIR_STRINGS,
   ...AUDITOR_STRINGS,
   ...ANALYZER_STRINGS,
-  ...PAGES_STRINGS,
+  ...BLENDER_STRINGS,
+  ...HD_STRINGS,
+  ...OVERVIEWS_STRINGS,
   ...SETUP_STRINGS,
 };
