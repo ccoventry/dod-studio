@@ -6,6 +6,13 @@ use walkdir::WalkDir;
 mod media_probe;
 use media_probe::{avi_dimensions, avi_frame_count, read_bmp_dimensions, video_has_audio};
 
+/// An AVI's frame rate from its header, `(rate, scale)`: see
+/// `media_probe::avi_frame_rate`. For the renderer's segmented renders
+/// (#1451).
+pub(crate) fn avi_frame_rate(path: &Path) -> Option<(u32, u32)> {
+    media_probe::avi_frame_rate(path)
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ClipData {
     pub take_folder: String,
@@ -845,6 +852,39 @@ mod tests {
         let path = dir.join(VIDEO_FILE);
         std::fs::write(&path, &avi).unwrap();
         assert_eq!(avi_frame_count(&path), Some(1218));
+    }
+
+    /// `build_avi`'s file with the video `strh`'s scale, rate and start set.
+    fn avi_with_rate(scale: u32, rate: u32, start: u32) -> Vec<u8> {
+        let mut avi = build_avi(10, Some(10));
+        let strh = avi.windows(4).position(|w| w == b"vids").unwrap();
+        avi[strh + 20..strh + 24].copy_from_slice(&scale.to_le_bytes());
+        avi[strh + 24..strh + 28].copy_from_slice(&rate.to_le_bytes());
+        avi[strh + 28..strh + 32].copy_from_slice(&start.to_le_bytes());
+        avi
+    }
+
+    #[test]
+    fn an_avi_frame_rate_is_read_from_its_video_stream_header() {
+        let dir = scratch_dir("avi_rate");
+        let path = dir.join(VIDEO_FILE);
+        std::fs::write(&path, avi_with_rate(1, 300, 0)).unwrap();
+        assert_eq!(avi_frame_rate(&path), Some((300, 1)));
+        std::fs::write(&path, avi_with_rate(1001, 60000, 0)).unwrap();
+        assert_eq!(avi_frame_rate(&path), Some((60000, 1001)));
+    }
+
+    #[test]
+    fn an_avi_with_no_usable_rate_has_none() {
+        let dir = scratch_dir("avi_no_rate");
+        let path = dir.join(VIDEO_FILE);
+        std::fs::write(&path, avi_with_rate(0, 300, 0)).unwrap();
+        assert_eq!(avi_frame_rate(&path), None);
+        // A stream that starts later than 0 can't be seeked by frame number.
+        std::fs::write(&path, avi_with_rate(1, 300, 5)).unwrap();
+        assert_eq!(avi_frame_rate(&path), None);
+        std::fs::write(&path, build_avi(10, None)).unwrap();
+        assert_eq!(avi_frame_rate(&path), None);
     }
 
     #[test]

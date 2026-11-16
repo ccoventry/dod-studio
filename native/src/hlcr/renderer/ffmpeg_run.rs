@@ -20,23 +20,96 @@ use super::{RenderJob, RenderUpdate, is_exiting, record_output_size, remove_part
 /// Studio is closing, the job sends nothing and renames nothing, and Studio's
 /// way out removes its file (#1439).
 pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Reserved<'_>) {
-    let partial = output.partial.as_path();
-    let mut cmd = ffmpeg_command(job, args);
-
     job.send(RenderUpdate::Status(
         job.job_id.clone(),
         "Rendering".to_string(),
     ));
+    let whole_take = ProgressScale {
+        frames_before: 0,
+        total_frames: job.clip.frame_count,
+    };
+    match run_to_end(job, args, Some(whole_take)).await {
+        RunEnd::Succeeded => finish_render(job, output),
+        RunEnd::Exiting => {}
+        RunEnd::NotStarted(reason) => job.refuse(reason),
+        RunEnd::Cancelled => {
+            remove_partial_output(&output.partial).await;
+            job.finish_cancelled();
+        }
+        RunEnd::Failed(message) => {
+            remove_partial_output(&output.partial).await;
+            job.finish_error(message);
+        }
+        RunEnd::Lost(message) => job.finish_error(message),
+    }
+}
 
+/// Ends a render whose FFmpeg wrote `output.partial` successfully: learns
+/// its size for later reservations, gives it its real name, and sends the
+/// job's last updates.
+pub(super) fn finish_render(job: &RenderJob, output: &Reserved<'_>) {
+    let partial = output.partial.as_path();
+    if let Ok(meta) = std::fs::metadata(partial) {
+        record_output_size(
+            &job.clip,
+            job.config.target_codec,
+            &job.config.custom_codec_args,
+            meta.len(),
+        );
+    }
+    match partial_output::in_flight().finish(output) {
+        Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
+        // The render itself is good: it stays under its partial name
+        // for the user to rename, and the error says where.
+        Err(e) => job.finish_error(crate::messages::render::rename_failed(
+            partial.display(),
+            output.out_file.display(),
+            e,
+        )),
+    }
+}
+
+/// How one FFmpeg run's `frame=` lines become the job's percentage: the
+/// frames rendered before it (by earlier segments, #1451) plus its own, over
+/// the take's.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProgressScale {
+    pub(super) frames_before: usize,
+    pub(super) total_frames: usize,
+}
+
+/// How one FFmpeg run ended.
+#[derive(Debug)]
+pub(super) enum RunEnd {
+    /// It exited with success.
+    Succeeded,
+    /// Cancel was seen; FFmpeg was ended.
+    Cancelled,
+    /// Studio is closing (#1439): send nothing, rename nothing.
+    Exiting,
+    /// It could not be started: why, for the job's refusal.
+    NotStarted(String),
+    /// It exited with an error: the message with its exit code and log.
+    Failed(String),
+    /// Waiting for it failed; whatever it wrote is left as it is.
+    Lost(String),
+}
+
+/// Runs FFmpeg with `args` for `job` until it exits or Cancel ends it,
+/// sending progress (scaled by `progress`, none when `None`) and speed
+/// updates on the way, and says how it ended. Sends no status of its own.
+pub(super) async fn run_to_end(
+    job: &RenderJob,
+    args: Vec<String>,
+    progress: Option<ProgressScale>,
+) -> RunEnd {
+    let mut cmd = ffmpeg_command(job, args);
     if is_exiting() {
-        return;
+        return RunEnd::Exiting;
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => {
-            job.refuse(spawn_error_text(&e));
-            return;
-        }
+        Err(e) => return RunEnd::NotStarted(spawn_error_text(&e)),
     };
     if let Err(e) = crate::sys::child_job::end_with_studio(&child) {
         crate::log_markdown(&crate::messages::render::not_tied_to_studio(&job.job_id, e));
@@ -60,7 +133,7 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Rese
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
 
-    let exit_status = match read_progress(job, &mut reader, &mut interval).await {
+    let exit_status = match read_progress(job, &mut reader, &mut interval, progress).await {
         Polled::Cancelled => None,
         Polled::Done(()) => match wait_for_exit(job, &mut child, &mut interval).await {
             Polled::Cancelled => None,
@@ -68,55 +141,31 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, output: &Rese
         },
     };
     if is_exiting() {
-        return;
+        return RunEnd::Exiting;
     }
     let Some(exit_status) = exit_status else {
+        // Cancelled: the child is ended here, its exit says nothing more.
         let _ = child.kill().await;
         let _ = child.wait().await;
-        remove_partial_output(partial).await;
-        job.finish_cancelled();
-        return;
+        return RunEnd::Cancelled;
     };
 
     let err_log = finished_stderr(stderr_log).await;
 
     match exit_status {
-        Ok(status) if status.success() => {
-            if let Ok(meta) = std::fs::metadata(partial) {
-                record_output_size(
-                    &job.clip,
-                    job.config.target_codec,
-                    &job.config.custom_codec_args,
-                    meta.len(),
-                );
-            }
-            match partial_output::in_flight().finish(output) {
-                Ok(done) => job.finish_ok(done.to_string_lossy().into_owned()),
-                // The render itself is good: it stays under its partial name
-                // for the user to rename, and the error says where.
-                Err(e) => job.finish_error(crate::messages::render::rename_failed(
-                    partial.display(),
-                    output.out_file.display(),
-                    e,
-                )),
-            }
-        }
+        Ok(status) if status.success() => RunEnd::Succeeded,
         Ok(status) => {
             let exit_code = status
                 .code()
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
-            let error_msg = format!(
+            RunEnd::Failed(format!(
                 "FFmpeg failed with exit code: {}. Log: {}",
                 exit_code,
                 err_log.as_deref().unwrap_or("")
-            );
-            remove_partial_output(partial).await;
-            job.finish_error(error_msg);
+            ))
         }
-        Err(e) => {
-            job.finish_error(format!("Failed to wait for FFmpeg: {}", e));
-        }
+        Err(e) => RunEnd::Lost(format!("Failed to wait for FFmpeg: {}", e)),
     }
 }
 
@@ -209,12 +258,14 @@ enum Polled<T> {
     Cancelled,
 }
 
-/// Sends progress and speed updates from FFmpeg's `-progress` output until
-/// it closes, checking the cancel flag on every tick of `interval`.
+/// Sends progress (scaled by `scale`) and speed updates from FFmpeg's
+/// `-progress` output until it closes, checking the cancel flag on every
+/// tick of `interval`.
 async fn read_progress(
     job: &RenderJob,
     reader: &mut BufReader<ChildStdout>,
     interval: &mut Interval,
+    scale: Option<ProgressScale>,
 ) -> Polled<()> {
     let mut line = String::new();
     let mut progress = ProgressLines::default();
@@ -230,7 +281,7 @@ async fn read_progress(
                 match read_res {
                     Ok(0) => break, // EOF
                     Ok(_) => {
-                        if let Some(update) = progress.update_for(&job.job_id, &line, job.clip.frame_count) {
+                        if let Some(update) = progress.update_for(&job.job_id, &line, scale) {
                             job.send(update);
                         }
                     }
@@ -264,8 +315,9 @@ async fn wait_for_exit(
 }
 
 /// Reads FFmpeg's `-progress` lines (`key=value`): `frame` becomes a
-/// percentage of the take's frames, `fps` and `speed` one speed line that
-/// shows the latest of both.
+/// percentage of the take's frames (with the frames earlier segments
+/// rendered), `fps` and `speed` one speed line that shows the latest of
+/// both.
 struct ProgressLines {
     fps: String,
     speed: String,
@@ -281,9 +333,14 @@ impl Default for ProgressLines {
 }
 
 impl ProgressLines {
-    /// The update one line makes, if any. A take with no frame count gets
-    /// no percentage.
-    fn update_for(&mut self, job_id: &str, line: &str, frame_count: usize) -> Option<RenderUpdate> {
+    /// The update one line makes, if any. A take with no frame count, or a
+    /// run with no `scale` (the join of segments), gets no percentage.
+    fn update_for(
+        &mut self,
+        job_id: &str,
+        line: &str,
+        scale: Option<ProgressScale>,
+    ) -> Option<RenderUpdate> {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             return None;
@@ -293,8 +350,9 @@ impl ProgressLines {
         let val = trimmed[pos + 1..].trim();
         match key {
             "frame" => {
-                let current_frame = val.parse::<usize>().ok()?;
-                let ratio = (current_frame * 100).checked_div(frame_count)?;
+                let scale = scale?;
+                let current_frame = val.parse::<usize>().ok()? + scale.frames_before;
+                let ratio = (current_frame * 100).checked_div(scale.total_frames)?;
                 let percent = std::cmp::min(100, ratio) as u32;
                 Some(RenderUpdate::Progress(job_id.to_string(), percent))
             }
@@ -323,10 +381,20 @@ mod tests {
     use super::*;
 
     fn read(lines: &[&str], frame_count: usize) -> Vec<String> {
+        read_scaled(
+            lines,
+            Some(ProgressScale {
+                frames_before: 0,
+                total_frames: frame_count,
+            }),
+        )
+    }
+
+    fn read_scaled(lines: &[&str], scale: Option<ProgressScale>) -> Vec<String> {
         let mut progress = ProgressLines::default();
         lines
             .iter()
-            .filter_map(|l| progress.update_for("3", l, frame_count))
+            .filter_map(|l| progress.update_for("3", l, scale))
             .map(|u| match u {
                 RenderUpdate::Progress(id, p) => format!("{id} progress {p}"),
                 RenderUpdate::Speed(id, s) => format!("{id} speed {s}"),
@@ -351,6 +419,22 @@ mod tests {
         );
         // 2 of 3 frames rounds down.
         assert_eq!(read(&["frame=2"], 3), ["3 progress 66"]);
+    }
+
+    /// A later segment (#1451) counts on from the frames before it, so the
+    /// bar runs once across the whole take.
+    #[test]
+    fn a_segments_frames_count_on_from_the_frames_before_it() {
+        let second_of_four = Some(ProgressScale {
+            frames_before: 250,
+            total_frames: 1000,
+        });
+        assert_eq!(
+            read_scaled(&["frame=0", "frame=125", "frame=250"], second_of_four),
+            ["3 progress 25", "3 progress 37", "3 progress 50"]
+        );
+        // The join has no frames of its own to show.
+        assert!(read_scaled(&["frame=500"], None).is_empty());
     }
 
     #[test]

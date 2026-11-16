@@ -9,6 +9,8 @@ use super::scanner::ClipData;
 mod ffmpeg_args;
 mod ffmpeg_run;
 mod partial_output;
+mod segment_plan;
+mod segmented;
 /// What marks a render's unfinished file name (#1439): a folder walk for
 /// finished clips skips names with it.
 pub use partial_output::PARTIAL_MARK;
@@ -313,16 +315,22 @@ pub async fn run_render_job(
         return;
     }
     log_render_fps(&job, fps_used, fps_from_take);
+    // A long take renders in segments that a stopped render resumes from
+    // (#1451); the segments and the clip they join into are both on the
+    // drive for a moment, so it reserves twice the clip.
+    let segment_plan = segment_plan::plan(&segmented::take_facts(&job, fps_used));
+    let peak_copies = if segment_plan.is_some() { 2 } else { 1 };
 
     // Releases this job's reservation on every exit path below — see
     // `ReservationGuard`'s own doc comment.
-    let (output_folder, _reservation_guard) = match reserve_export_dir(&job, &reservations) {
-        Ok(reserved) => reserved,
-        Err(reason) => {
-            job.refuse(reason);
-            return;
-        }
-    };
+    let (output_folder, _reservation_guard) =
+        match reserve_export_dir(&job, &reservations, peak_copies) {
+            Ok(reserved) => reserved,
+            Err(reason) => {
+                job.refuse(reason);
+                return;
+            }
+        };
     if let Err(e) = std::fs::create_dir_all(&output_folder) {
         job.refuse(format!("Failed to create output folder: {}", e));
         return;
@@ -346,6 +354,19 @@ pub async fn run_render_job(
         std::thread::available_parallelism().ok().map(|n| n.get()),
         job.config.max_concurrent_renders,
     );
+    if let Some(plan) = &segment_plan
+        && let Some(folder) = segmented::claim_folder(&job, plan, &encode, &output_folder)
+    {
+        let render = segmented::SegmentedRender {
+            plan,
+            folder,
+            encode: &encode,
+            threads,
+            output: &output,
+        };
+        segmented::run_segmented(&job, render).await;
+        return;
+    }
     let args = ffmpeg_args::FfmpegArgs {
         clip: &job.clip,
         fps: fps_used,
@@ -544,13 +565,19 @@ fn log_render_fps(job: &RenderJob, fps_used: u32, fps_from_take: bool) {
 /// pick the same drive before any of them has written a byte — the flat
 /// 20 GiB threshold this replaced was only ever sized to be safe for one
 /// job at a time.
+///
+/// `peak_copies` is how many copies of the clip are on the drive at once:
+/// 2 for a segmented render (#1451), whose segments and joined clip are
+/// both there until the segments are removed.
 fn reserve_export_dir(
     job: &RenderJob,
     reservations: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    peak_copies: u64,
 ) -> Result<(PathBuf, ReservationGuard), String> {
     let config = &job.config;
     let reservation_estimate =
-        job_reservation_estimate(&job.clip, config.target_codec, &config.custom_codec_args);
+        job_reservation_estimate(&job.clip, config.target_codec, &config.custom_codec_args)
+            .saturating_mul(peak_copies);
 
     // No export folder: refused, never written into the working directory
     // (for an installed app, its install folder), where nobody would look.

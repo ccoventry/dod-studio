@@ -99,6 +99,20 @@ impl InFlight {
         }
     }
 
+    /// Lists `out_file`'s unfinished file as one this Studio is writing,
+    /// without looking for a free name: for a render segment (#1451), whose
+    /// name its folder already makes its own. Studio's way out removes it
+    /// like any other; the finished segments beside it stay for the resume.
+    pub fn hold(&self, out_file: PathBuf) -> Reserved<'_> {
+        let partial = partial_path(&out_file);
+        self.lock().insert(partial.clone());
+        Reserved {
+            list: self,
+            out_file,
+            partial,
+        }
+    }
+
     /// Gives a finished render its real name and returns where it is. When a
     /// file took the reserved name meanwhile (something outside Studio), the
     /// render gets the next free name instead: a finished clip is never
@@ -294,5 +308,20 @@ mod tests {
         );
         assert!(!running.partial.exists());
         assert!(dir.join("b.mov").exists());
+    }
+
+    /// A render segment (#1451): the one being written goes on Studio's way
+    /// out, the finished one beside it stays for the resume.
+    #[test]
+    fn a_held_segment_is_removed_on_the_way_out_and_its_finished_neighbour_kept() {
+        let dir = Scratch::new("partial_hold");
+        let list = InFlight::default();
+        std::fs::write(dir.join("0000.seg"), b"done").unwrap();
+        let writing = list.hold(dir.join("0001.seg"));
+        assert_eq!(writing.partial, dir.join("0001.partial.seg"));
+        std::fs::write(&writing.partial, b"half").unwrap();
+        assert_eq!(list.remove_all().removed, 1);
+        assert!(!writing.partial.exists());
+        assert!(dir.join("0000.seg").exists());
     }
 }

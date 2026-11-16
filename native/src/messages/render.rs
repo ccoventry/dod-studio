@@ -1,7 +1,7 @@
 // messages/render.rs
 // Activity-log lines of the render pipeline's export-drive reservations,
-// frame-rate choice and stopping on Studio's way out (`hlcr/renderer.rs`)
-// (#237, #1439).
+// frame-rate choice, stopping on Studio's way out and segmented renders
+// (`hlcr/renderer.rs`) (#237, #1439, #1451).
 
 use std::fmt::{Debug, Display};
 
@@ -103,6 +103,78 @@ pub fn leftover_partial_replaced(partial: impl Display) -> String {
 /// An unfinished render file Studio's way out could not remove.
 pub fn exit_partial_left(path: impl Display, err: impl Display) -> String {
     format!("[render] DoD Studio is closing: could not remove the unfinished render {path}: {err}")
+}
+
+/// A render cut into segments (#1451) started: how many, how long each, where
+/// they are kept until joined, and `reused` ([`segments_reused`], or
+/// nothing).
+pub fn segments_started(
+    job_id: impl Display,
+    segments: usize,
+    segment_frames: usize,
+    dir: impl Display,
+    reused: impl Display,
+) -> String {
+    format!(
+        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames, kept in {dir} until they are joined{reused}"
+    )
+}
+
+/// The segments a stopped render finished, which this one keeps.
+pub fn segments_reused(ranges: &str, count: usize, total: usize) -> String {
+    format!(
+        "; reusing segment(s) {ranges} ({count} of {total}) finished by a render that was stopped"
+    )
+}
+
+/// A segmented render's segments were joined into its clip.
+pub fn segments_joined(job_id: impl Display, segments: usize, took: std::time::Duration) -> String {
+    format!(
+        "[render] job {job_id}: joined {segments} segments into the clip in {} ms",
+        took.as_millis()
+    )
+}
+
+/// Why a segmented render's finished segments were removed without a clip.
+pub const SEGMENTS_CANCELLED: &str = "the render was cancelled";
+pub const SEGMENTS_FAILED: &str = "the render failed";
+
+/// A segmented render that ended without its clip removed its segments.
+pub fn segments_removed(job_id: impl Display, removed: usize, why: &str) -> String {
+    format!("[render] job {job_id}: removed {removed} finished segment(s): {why}")
+}
+
+/// Segments of the same take rendered with other settings, thrown away.
+pub fn stale_segments_removed(dir: impl Display) -> String {
+    format!("[render] removed segments of a render of this take with other settings: {dir}")
+}
+
+/// Segments that could not be removed.
+pub fn segments_left(dir: impl Display, err: impl Display) -> String {
+    format!("[render] could not remove the render segments in {dir}: {err}")
+}
+
+/// Another render is using this take's segments, so this one runs whole.
+pub fn segments_busy(job_id: impl Display) -> String {
+    format!(
+        "[render] job {job_id}: another render is using this take's segments; rendering it in one piece"
+    )
+}
+
+/// The segment folder could not be made, so the render runs whole.
+pub fn segments_folder_failed(
+    job_id: impl Display,
+    dir: impl Display,
+    err: impl Display,
+) -> String {
+    format!(
+        "[render] job {job_id}: could not make the segment folder {dir} ({err}); rendering it in one piece"
+    )
+}
+
+/// Why a segmented render failed before its join.
+pub fn join_list_failed(list: impl Display, err: impl Display) -> String {
+    format!("Rendered every segment, but could not write the list to join them, {list}: {err}")
 }
 
 #[cfg(test)]
