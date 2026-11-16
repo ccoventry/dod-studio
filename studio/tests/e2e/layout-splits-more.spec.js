@@ -1,14 +1,14 @@
 // Draggable splits beyond Capture Studio and the Analyzer (#46): the Overviews
 // side panels and the Render / Auditor table heights. Drives the real app shell
 // against mocked IPC, like layout-splits.spec.js.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.use({ viewport: { width: 1600, height: 900 } });
 
 async function boot(page, savedSettings = {}) {
   await page.addInitScript((saved) => {
     window.__mockInvokeHandlers = {
-      get_settings: () => ({ pinned_folders: [], ...saved }),
+      get_settings: () => ({ setup_dismissed: true, pinned_folders: [], ...saved }),
       scan_demo_folders: () => [],
     };
   }, savedSettings);
