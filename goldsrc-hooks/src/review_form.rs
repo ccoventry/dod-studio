@@ -5,7 +5,7 @@
 //! boxes, Enter saves, Esc cancels (and the menu the engine brings up on that
 //! same Esc goes away again). The keyboard is enough: the form takes
 //! the keys while it shows, so typing a Y or an N in it never answers.
-//! Clicking it works where the build passes the mouse on (pre-Anniversary).
+//! Its boxes and buttons take clicks too, on both builds (#1311).
 //!
 //! This file holds what the form shows, what it saved and the rules for the
 //! typed range; `studio_panel`'s `review_form` builds and drives the vgui2
@@ -195,9 +195,12 @@ pub(crate) fn kill_count_text(kills: usize) -> String {
     }
 }
 
-/// The screen height the layout file's sizes are drawn for: the height at
-/// which a GameUI that scales its font with the screen draws it as the
-/// pre-Anniversary one does (22 px list rows there, 44 px at 1440, #781).
+/// The screen height the layout file's sizes are drawn for, at and below which
+/// a GameUI that scales its font with the screen leaves the layout as it is:
+/// its list rows are 22 px there, as on the pre-Anniversary build, and 44 px at
+/// 1440 (#781). Its text box font is taller than the pre-Anniversary one even
+/// there (24 px against 16 px, measured for #1311), which [`fit_boxes`] makes
+/// room for.
 const LAYOUT_SCREEN_TALL: i32 = 720;
 
 /// How much bigger to make the form than its layout file says, as a
@@ -212,18 +215,321 @@ pub(crate) fn layout_scale(screen_tall: i32, font_scales: bool) -> (i32, i32) {
     }
 }
 
-/// A panel's place and size, `(x, y, wide, tall)`, at `scale`.
-pub(crate) fn scaled_rect(
-    rect: (i32, i32, i32, i32),
-    (num, den): (i32, i32),
-) -> (i32, i32, i32, i32) {
+/// A panel's place and size, `(x, y, wide, tall)`.
+pub(crate) type Rect = (i32, i32, i32, i32);
+
+/// A panel's place and size at `scale`.
+pub(crate) fn scaled_rect((x, y, wide, tall): Rect, (num, den): (i32, i32)) -> Rect {
     let s = |v: i32| v.saturating_mul(num) / den.max(1);
-    (s(rect.0), s(rect.1), s(rect.2), s(rect.3))
+    (s(x), s(y), s(wide), s(tall))
+}
+
+/// How much taller than its font a text box is made. A vgui2 `TextEntry`
+/// shows `tall / (font tall + 1)` lines, and one that shows none reads past
+/// its line-break list on a click: on the Anniversary build, whose font is as
+/// tall as the layout file's boxes (24 px at 720 lines), that put up GameUI's
+/// "Assertion failed" dialogs (#1311). A few pixels more than the one needed
+/// keeps the text off the box's edges.
+pub(crate) const BOX_SPARE_PX: i32 = 4;
+
+/// One control of the form as laid out: its place and size and, for a text
+/// box whose font is known, the font's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LaidOutControl {
+    pub rect: Rect,
+    pub font_tall: Option<i32>,
+}
+
+/// Where [`fit_boxes`] puts the form's controls.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Fit {
+    /// Each control's new place and size, in the order they were given.
+    pub placed: Vec<Rect>,
+    /// How much taller the form gets.
+    pub form_grow: i32,
+}
+
+/// A row of the form that grows to fit a box's font.
+struct GrowingRow {
+    top: i32,
+    /// Its bottom before growing: controls starting at or below it move down.
+    bottom: i32,
+    grow: i32,
+}
+
+/// The form's controls placed so each text box is [`BOX_SPARE_PX`] taller
+/// than its font (#1311). A row holding a box too short for its font grows by
+/// what that box lacks, every control starting on that row with it, and
+/// everything below the row moves down as much. Controls with no known font
+/// are moved, never grown for themselves; once every box fits, nothing
+/// changes.
+pub(crate) fn fit_boxes(controls: &[LaidOutControl]) -> Fit {
+    let mut rows: Vec<GrowingRow> = Vec::new();
+    for control in controls {
+        let (_, top, _, tall) = control.rect;
+        let Some(font_tall) = control.font_tall.filter(|f| *f > 0) else {
+            continue;
+        };
+        let grow = font_tall + BOX_SPARE_PX - tall;
+        if grow <= 0 {
+            continue;
+        }
+        match rows.iter_mut().find(|row| row.top == top) {
+            Some(row) => {
+                row.bottom = row.bottom.max(top + tall);
+                row.grow = row.grow.max(grow);
+            }
+            None => rows.push(GrowingRow {
+                top,
+                bottom: top + tall,
+                grow,
+            }),
+        }
+    }
+    let placed = controls
+        .iter()
+        .map(|control| {
+            let (x, y, wide, tall) = control.rect;
+            let grow: i32 = rows.iter().filter(|r| r.top == y).map(|r| r.grow).sum();
+            let down: i32 = rows.iter().filter(|r| y >= r.bottom).map(|r| r.grow).sum();
+            (x, y + down, wide, tall + grow)
+        })
+        .collect();
+    Fit {
+        placed,
+        form_grow: rows.iter().map(|r| r.grow).sum(),
+    }
+}
+
+/// What the hook found where the layout names a text box.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BoxFont {
+    /// No control by that name (a user's own layout).
+    Missing,
+    /// A control that isn't a plain vgui2 `TextEntry`, whose font the hook
+    /// can't read.
+    NotTextEntry,
+    /// A `TextEntry` whose first layout hasn't given it a font yet.
+    NotKnownYet,
+    /// A `TextEntry`'s font height.
+    Tall(i32),
+}
+
+impl BoxFont {
+    /// The font's height, when known.
+    pub(crate) fn tall(self) -> Option<i32> {
+        match self {
+            BoxFont::Tall(tall) => Some(tall),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the form's boxes can be fitted now, from what each named box is.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum BoxCheck {
+    /// A box's font comes with its first layout: look again next frame.
+    Wait,
+    /// Fit the boxes whose font is known.
+    Ready {
+        /// The boxes left out of the fit and why, for the hook log; `None`
+        /// when all of them are in it.
+        left_out: Option<String>,
+        /// Whether the form may take clicks after the fit: not while a box
+        /// the hook can't read the font of may be too short for it, since a
+        /// click on such a box trips GameUI's asserts.
+        takes_clicks: bool,
+    },
+}
+
+/// Whether to fit the boxes now, given each named box (`(name, what it is)`).
+/// A missing box is left out, as nothing can be clicked there; a control
+/// that isn't a plain `TextEntry` is left out too and keeps the form
+/// keyboard-only; a box still waiting for its font makes the hook wait.
+pub(crate) fn check_boxes(boxes: &[(&str, BoxFont)]) -> BoxCheck {
+    if boxes.iter().any(|&(_, font)| font == BoxFont::NotKnownYet) {
+        return BoxCheck::Wait;
+    }
+    let left_out: Vec<String> = boxes
+        .iter()
+        .filter_map(|&(name, font)| match font {
+            BoxFont::Missing => Some(format!("{name} (missing)")),
+            BoxFont::NotTextEntry => Some(format!("{name} (not a plain TextEntry)")),
+            _ => None,
+        })
+        .collect();
+    BoxCheck::Ready {
+        left_out: (!left_out.is_empty()).then(|| left_out.join(", ")),
+        takes_clicks: !boxes.iter().any(|&(_, font)| font == BoxFont::NotTextEntry),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ReviewForm.res`'s rows: title, Kills / from / to / count, Note / box,
+    /// hint and buttons. The boxes are 24 px tall; the Kills boxes' font is
+    /// `kills_font`, the Note box's `note_font`.
+    fn form_with(kills_font: Option<i32>, note_font: Option<i32>) -> Vec<LaidOutControl> {
+        let control = |rect: Rect, font_tall: Option<i32>| LaidOutControl { rect, font_tall };
+        vec![
+            control((10, 8, 500, 20), None),
+            control((10, 34, 44, 24), None),
+            control((58, 34, 36, 24), kills_font),
+            control((122, 34, 36, 24), kills_font),
+            control((164, 34, 120, 24), None),
+            control((10, 64, 44, 24), None),
+            control((58, 64, 452, 24), note_font),
+            control((10, 96, 340, 24), None),
+            control((440, 96, 70, 24), None),
+        ]
+    }
+
+    /// The form with the same font in every box.
+    fn form(font: Option<i32>) -> Vec<LaidOutControl> {
+        form_with(font, font)
+    }
+
+    fn rects(controls: &[LaidOutControl]) -> Vec<Rect> {
+        controls.iter().map(|c| c.rect).collect()
+    }
+
+    /// The fit that leaves `controls` where they are.
+    fn unchanged(controls: &[LaidOutControl]) -> Fit {
+        Fit {
+            placed: rects(controls),
+            form_grow: 0,
+        }
+    }
+
+    #[test]
+    fn boxes_as_tall_as_their_font_grow_and_the_rows_below_move_down() {
+        // The Anniversary build at 720 lines: a 24 px font in 24 px boxes.
+        let Fit { placed, form_grow } = fit_boxes(&form(Some(24)));
+        assert_eq!(form_grow, 8);
+        assert_eq!(placed[0], (10, 8, 500, 20));
+        assert_eq!(placed[1], (10, 34, 44, 28));
+        assert_eq!(placed[2], (58, 34, 36, 28));
+        assert_eq!(placed[4], (164, 34, 120, 28));
+        assert_eq!(placed[5], (10, 68, 44, 28));
+        assert_eq!(placed[6], (58, 68, 452, 28));
+        assert_eq!(placed[7], (10, 104, 340, 24));
+        assert_eq!(placed[8], (440, 104, 70, 24));
+        // Every box now shows a line: tall / (font + 1) >= 1.
+        assert!(placed[2].3 / 25 >= 1 && placed[6].3 / 25 >= 1);
+    }
+
+    #[test]
+    fn boxes_that_fit_their_font_stay_as_laid_out() {
+        // The pre-Anniversary build's 16 px font.
+        assert_eq!(fit_boxes(&form(Some(16))), unchanged(&form(None)));
+    }
+
+    #[test]
+    fn a_font_not_known_yet_moves_nothing() {
+        // 0 before the box's first layout.
+        assert_eq!(fit_boxes(&form(Some(0))), unchanged(&form(None)));
+    }
+
+    #[test]
+    fn controls_without_a_font_stay_as_laid_out() {
+        assert_eq!(fit_boxes(&form(None)), unchanged(&form(None)));
+    }
+
+    #[test]
+    fn one_row_growing_alone_moves_only_the_rows_below_it() {
+        // Only the Note box is too short for its font.
+        let Fit { placed, form_grow } = fit_boxes(&form_with(Some(16), Some(24)));
+        assert_eq!(form_grow, 4);
+        assert_eq!(&placed[..5], &rects(&form(None))[..5]);
+        assert_eq!(placed[5], (10, 64, 44, 28));
+        assert_eq!(placed[6], (58, 64, 452, 28));
+        assert_eq!(placed[7], (10, 100, 340, 24));
+        assert_eq!(placed[8], (440, 100, 70, 24));
+    }
+
+    #[test]
+    fn a_layout_scaled_for_1080_lines_grows_by_the_spare_pixels() {
+        // The Anniversary build at 1080 lines: the layout scaled by 1080/720,
+        // so the boxes are 36 px, as tall as the font.
+        let scale = layout_scale(1080, true);
+        let scaled: Vec<_> = form(Some(36))
+            .into_iter()
+            .map(|c| LaidOutControl {
+                rect: scaled_rect(c.rect, scale),
+                ..c
+            })
+            .collect();
+        assert_eq!(scaled[2].rect, (87, 51, 54, 36));
+        let Fit { placed, form_grow } = fit_boxes(&scaled);
+        assert_eq!(form_grow, 8);
+        assert_eq!(placed[2], (87, 51, 54, 40));
+        assert_eq!(placed[6], (87, 100, 678, 40));
+        assert_eq!(placed[7], (15, 152, 510, 36));
+        assert!(placed[2].3 / 37 >= 1 && placed[6].3 / 37 >= 1);
+    }
+
+    #[test]
+    fn fitting_twice_changes_nothing_more() {
+        let once = fit_boxes(&form(Some(48)));
+        let again: Vec<_> = once
+            .placed
+            .iter()
+            .zip(form(Some(48)))
+            .map(|(&rect, c)| LaidOutControl { rect, ..c })
+            .collect();
+        assert_eq!(fit_boxes(&again), unchanged(&again));
+    }
+
+    #[test]
+    fn boxes_with_known_fonts_are_ready_to_fit_and_click() {
+        let boxes = [
+            ("FormFrom", BoxFont::Tall(24)),
+            ("FormNote", BoxFont::Tall(24)),
+        ];
+        let ready = BoxCheck::Ready {
+            left_out: None,
+            takes_clicks: true,
+        };
+        assert_eq!(check_boxes(&boxes), ready);
+    }
+
+    #[test]
+    fn a_box_waiting_for_its_font_makes_the_fit_wait() {
+        let boxes = [
+            ("FormFrom", BoxFont::Tall(24)),
+            ("FormNote", BoxFont::NotKnownYet),
+        ];
+        assert_eq!(check_boxes(&boxes), BoxCheck::Wait);
+    }
+
+    #[test]
+    fn a_missing_box_is_left_out_and_the_form_still_takes_clicks() {
+        let boxes = [
+            ("FormFrom", BoxFont::Tall(24)),
+            ("FormNote", BoxFont::Missing),
+        ];
+        let ready = BoxCheck::Ready {
+            left_out: Some("FormNote (missing)".to_string()),
+            takes_clicks: true,
+        };
+        assert_eq!(check_boxes(&boxes), ready);
+    }
+
+    #[test]
+    fn a_box_that_is_not_a_text_entry_is_left_out_and_keeps_the_form_keyboard_only() {
+        let boxes = [
+            ("FormFrom", BoxFont::NotTextEntry),
+            ("FormTo", BoxFont::Missing),
+            ("FormNote", BoxFont::Tall(16)),
+        ];
+        let ready = BoxCheck::Ready {
+            left_out: Some("FormFrom (not a plain TextEntry), FormTo (missing)".to_string()),
+            takes_clicks: false,
+        };
+        assert_eq!(check_boxes(&boxes), ready);
+    }
 
     #[test]
     fn empty_boxes_keep_the_range() {
