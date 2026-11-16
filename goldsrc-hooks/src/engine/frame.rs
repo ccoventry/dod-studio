@@ -152,8 +152,6 @@ unsafe extern "system" fn per_frame_timer_thread(_lp_param: *mut c_void) -> u32 
     }
 }
 
-/// Real per-frame tick. Runs `client.dll`'s own `HUD_Frame` first so our
-/// callback observes the state the engine just finished producing.
 /// Seconds of playback elapsed, as raw f64 bits, summed from the per-frame
 /// deltas `HUD_Frame` is passed.
 ///
@@ -190,6 +188,8 @@ pub fn client_time() -> f64 {
     f64::from_bits(DEMO_ELAPSED.load(Ordering::Relaxed))
 }
 
+/// Real per-frame tick. Runs `client.dll`'s own `HUD_Frame` first so our
+/// callback observes the state the engine just finished producing.
 pub(super) unsafe extern "C" fn tramp_hud_frame(time: f64) {
     // Only ever called from the engine thread, so a plain load/store pair needs
     // no stronger ordering than this.

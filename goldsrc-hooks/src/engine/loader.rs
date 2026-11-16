@@ -107,7 +107,7 @@ unsafe extern "system" fn hook_load_library_a(lp_lib_file_name: *const u8) -> HM
 }
 
 /// Intercepts every export `hw.dll` resolves out of `client.dll`, and swaps in
-/// our own entry points for the ones we need. See the module docs for why this
+/// our own entry points for the ones we need. See `engine.rs`'s module docs for why this
 /// -- rather than patching `client.dll`'s export table -- is the hook point
 /// that actually works.
 unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8) -> *mut c_void {
@@ -138,7 +138,7 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     };
 
     // "F" is the secured single-callback export, and is what DoD 1.3 actually
-    // uses; the five named entries below are the classic convention, kept so
+    // uses; the ten named entries below are the classic convention, kept so
     // this works unchanged on a non-secured client.dll too.
     match requested {
         "F" => {

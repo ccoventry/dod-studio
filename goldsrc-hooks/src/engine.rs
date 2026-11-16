@@ -81,22 +81,23 @@ pub use sdk::*;
 static ENGFUNCS: AtomicPtr<ClEngineFuncsPartial> = AtomicPtr::new(std::ptr::null_mut());
 static ENGINE_STUDIO: AtomicPtr<EngineStudioApiPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Returns the captured engine function table, once `client.dll` has loaded
-/// and been successfully signature-scanned. `None` before that.
+/// Returns the captured engine function table, once the engine has called
+/// `client.dll`'s `Initialize` through our trampoline. `None` before that.
 pub fn engfuncs() -> Option<&'static ClEngineFuncsPartial> {
     let ptr = ENGFUNCS.load(Ordering::Acquire);
     if ptr.is_null() {
         None
     } else {
-        // Safety: only ever set once, from `capture_via_scan`, to a pointer
-        // the engine itself owns for the life of the client.dll instance.
+        // Safety: set only by `tramp_initialize` (client_exports.rs), to the
+        // pointer the engine passes `Initialize`, which the engine owns for the
+        // life of the client.dll instance.
         Some(unsafe { &*ptr })
     }
 }
 
-/// Returns the captured studio-model engine interface, once `client.dll` has
-/// loaded and been successfully signature-scanned. `None` before that (or if
-/// the scan found `pEngfuncs` but not `pstudio`).
+/// Returns the captured studio-model engine interface, once the engine has
+/// called `client.dll`'s `HUD_GetStudioModelInterface` through our trampoline.
+/// `None` before that.
 pub fn engine_studio() -> Option<&'static EngineStudioApiPartial> {
     let ptr = ENGINE_STUDIO.load(Ordering::Acquire);
     if ptr.is_null() {
