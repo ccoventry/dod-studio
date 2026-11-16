@@ -81,12 +81,14 @@ improvise one anyway, add a "Tooling ideas" section to your results saying what 
      running during your shutdown/cleanup code unless you stop them.
   3. Every input class: empty, one, many, duplicates (same name/path twice), stale leftovers from a crash, old
      records made before your change, the file open in another program, network/cloud/FAT drives, both installs.
-  4. Every claim in your PR body has a test that would FAIL without your change. Run it on the old code once to
-     see it fail (stash your fix), and say so.
-  5. Other open PRs touching the same files (`gh pr list` + `gh pr diff`): note interactions in the PR body.
+  4. Every claim in your PR body has a test that would FAIL without your change. Run it once on the parent
+     commit, or with the fix reverted in the working tree, to see it fail, and say so. Where only an in-game or
+     live test can show it, say that instead.
+  5. Other open PRs touching the same files (`python -I tools/agent-kit/pr_files.py <N>`, or `gh pr list` +
+     `gh pr diff`): note interactions in the PR body.
   Fix what you find before opening the PR, not after review.
-- Every PR then gets an independent review before it merges (the main session runs it), so expect findings and
-  keep your worktree notes until the review is back.
+- Every PR then gets an independent review before it merges (the main session runs it), so expect findings:
+  put anything a reviewer will need in your results file. The worktree still gets removed when you're done.
 
 ## Live Studio tests (no mouse/keyboard; never touch the user's own Studio)
 - `tools/agent-kit/studio_live/`: `studio_live.py patch|build|seed|start|stop` (own ports from your prompt,
