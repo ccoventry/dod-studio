@@ -90,3 +90,107 @@ pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
     }
     config.capture_fov
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::fake_game;
+
+    #[test]
+    fn a_fov_the_game_config_sets_is_found_rather_than_assumed() {
+        // The real shape, and the reason this exists: config.cfg ends with
+        // `exec movie.cfg`, movie.cfg carries `mirv_fov 105`, and the app was
+        // never told. Sizing the cone for the default 90 makes it ~7 degrees
+        // too narrow and calls in-shot positions hidden.
+        let (_root, exe) = fake_game("found", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(
+            capture_fov(&config),
+            config.capture_fov,
+            "init commands say nothing"
+        );
+        assert_eq!(capture_fov_resolved(&config), 105.0, "the config does");
+    }
+
+    #[test]
+    fn an_init_command_stating_the_default_value_still_outranks_the_config() {
+        // The trap: `mirv_fov 90` is what the app seeds into a new install's
+        // init commands, and 90 is also the configured default. Deciding
+        // "was one stated?" by comparing against the default would read that as
+        // silence and hand every defaulted install to its movie.cfg — here,
+        // rendering the cone for 105 when the user asked for 90.
+        let (_root, exe) = fake_game(
+            "states_default",
+            "exec movie.cfg\n",
+            Some("mirv_fov \"105\"\n"),
+        );
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            init_commands: vec!["mirv_fov 90".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(
+            config.capture_fov, 90.0,
+            "the default this could be confused with"
+        );
+        assert_eq!(capture_fov_from_init(&config.init_commands), Some(90.0));
+        assert_eq!(capture_fov_resolved(&config), 90.0, "the user asked for 90");
+    }
+
+    #[test]
+    fn an_init_command_outranks_the_game_config() {
+        let (_root, exe) = fake_game("outrank", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            init_commands: vec!["mirv_fov 120".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(capture_fov_resolved(&config), 120.0);
+    }
+
+    #[test]
+    fn a_quoted_mirv_fov_in_init_commands_is_still_recognised() {
+        let config = PatcherConfig {
+            capture_fov: 90.0,
+            init_commands: vec!["mirv_fov \"105\"".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(capture_fov_from_init(&config.init_commands), Some(105.0));
+        assert_eq!(capture_fov(&config), 105.0);
+    }
+
+    #[test]
+    fn mirv_fov_in_the_init_commands_wins() {
+        // The capture runs at whatever the console was last told, so reading it
+        // from there is the only way the two cannot disagree.
+        let mut config = PatcherConfig {
+            capture_fov: 90.0,
+            ..PatcherConfig::default()
+        };
+        assert_eq!(capture_fov(&config), 90.0);
+
+        config.init_commands = vec!["exec autoexec".to_string(), "mirv_fov 105".to_string()];
+        assert_eq!(capture_fov(&config), 105.0);
+
+        // Last one wins, as at the console.
+        config.init_commands.push("mirv_fov 100".to_string());
+        assert_eq!(capture_fov(&config), 100.0);
+    }
+
+    #[test]
+    fn a_command_that_merely_starts_the_same_is_not_mistaken_for_it() {
+        let config = PatcherConfig {
+            capture_fov: 90.0,
+            init_commands: vec!["mirv_fov_something_else 12".to_string()],
+            ..PatcherConfig::default()
+        };
+        assert_eq!(capture_fov(&config), 90.0);
+    }
+}

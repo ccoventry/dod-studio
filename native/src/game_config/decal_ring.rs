@@ -20,7 +20,7 @@ pub fn ring_limit_from_init(init_commands: &[String]) -> Option<u32> {
         if !rest.starts_with(char::is_whitespace) {
             continue;
         }
-        // Quoted, same as capture_fov_from_init above and for the same
+        // Quoted, same as `capture_fov::capture_fov_from_init` and for the same
         // reason: real .cfg syntax quotes every value, and a raw parse on
         // `"512"` fails silently, reading a stated line as unstated.
         if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<u32>() {
@@ -61,4 +61,134 @@ pub fn ring_limit_from_game_config(config: &PatcherConfig) -> Option<u32> {
         .parse::<u32>()
         .ok()
         .map(|v| v.min(MAX_RENDER_DECALS))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::fake_game;
+
+    #[test]
+    fn a_config_that_switches_decals_off_is_now_adopted_like_fov_is() {
+        // Regression: this used to assert the opposite — that a config's
+        // `r_decals 0` was ignored in favor of the app's own default, on the
+        // reasoning that adopting it would silently stand the flush down.
+        // Now that stand-down is its own loud, reported fact
+        // (decal_flush_is_noop) rather than something to hide by disagreeing
+        // with the config, so r_decals follows mirv_fov's precedence exactly:
+        // init commands, then an executed config, then the app's default.
+        let (_root, exe) = fake_game("decals_off", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(
+            ring_limit(&config),
+            0,
+            "the config's own value now wins, same as mirv_fov's would"
+        );
+    }
+
+    #[test]
+    fn a_nonzero_r_decals_the_game_config_sets_is_adopted() {
+        let (_root, exe) = fake_game(
+            "decals_from_config",
+            "exec movie.cfg\n",
+            Some("r_decals \"512\"\n"),
+        );
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            decal_ring_limit: 128,
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(
+            ring_limit(&config),
+            512,
+            "the config's value, not the app's own default"
+        );
+    }
+
+    #[test]
+    fn an_init_command_still_outranks_a_game_config_for_r_decals() {
+        let (_root, exe) = fake_game(
+            "decals_init_outranks",
+            "exec movie.cfg\n",
+            Some("r_decals \"0\"\n"),
+        );
+        let config = PatcherConfig {
+            game_path: exe.to_string_lossy().to_string(),
+            init_commands: vec!["r_decals 512".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(
+            ring_limit(&config),
+            512,
+            "stated in Initial Commands, so it wins outright"
+        );
+    }
+
+    #[test]
+    fn the_last_r_decals_wins_like_the_console_does() {
+        let config = PatcherConfig {
+            init_commands: vec!["r_decals 512".to_string(), "r_decals 64".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(ring_limit(&config), 64);
+    }
+
+    #[test]
+    fn a_quoted_r_decals_in_init_commands_is_still_recognised() {
+        // Real .cfg syntax quotes every value, and "Load from .cfg file…"
+        // carries that straight into Initial Commands — a raw, unquoted
+        // parse would silently read `r_decals "512"` as unstated and fall
+        // through to the app's own default instead of the user's value.
+        let config = PatcherConfig {
+            decal_ring_limit: 128,
+            init_commands: vec!["r_decals \"512\"".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(ring_limit_from_init(&config.init_commands), Some(512));
+        assert_eq!(ring_limit(&config), 512);
+    }
+
+    #[test]
+    fn the_configured_default_fills_in_when_nothing_states_it() {
+        let config = PatcherConfig {
+            decal_ring_limit: 128,
+            init_commands: vec!["mirv_fov 105".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(ring_limit_from_init(&config.init_commands), None);
+        assert_eq!(ring_limit(&config), 128);
+    }
+
+    #[test]
+    fn a_ring_past_the_engine_ceiling_is_clamped_to_it() {
+        // The engine clamps r_decals to MAX_RENDER_DECALS, so positions beyond
+        // that would be spent turning a ring that had already come round.
+        let config = PatcherConfig {
+            init_commands: vec!["r_decals 99999".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(ring_limit(&config), crate::decals::MAX_RENDER_DECALS);
+    }
+
+    #[test]
+    fn a_longer_command_that_merely_starts_the_same_is_not_the_ring() {
+        let config = PatcherConfig {
+            decal_ring_limit: 256,
+            init_commands: vec!["r_decals_enabled 1".to_string()],
+            ..PatcherConfig::default()
+        };
+
+        assert_eq!(ring_limit_from_init(&config.init_commands), None);
+        assert_eq!(ring_limit(&config), 256);
+    }
 }
