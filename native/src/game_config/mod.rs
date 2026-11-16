@@ -22,7 +22,7 @@ pub use decal_ring::{ring_limit, ring_limit_from_game_config, ring_limit_from_in
 pub use init_commands::{final_init_commands, too_long_commands};
 
 /// The mod folder holding the game's configs, for a configured `hl.exe`.
-pub(crate) fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
+pub(super) fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
     let dir = crate::shared::paths::mod_dir_for_exe(std::path::Path::new(&config.game_path))?;
     dir.is_dir().then_some(dir)
 }

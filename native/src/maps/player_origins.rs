@@ -1,4 +1,4 @@
-// decals/player_origins.rs
+// maps/player_origins.rs
 // Where players have actually been, harvested from real demos, as a signal
 // for which map entities are safe background scenery rather than something
 // a player could ever get near (#207).
@@ -204,7 +204,7 @@ pub fn harvest_directory(
             Ok(cells) => merged.extend(cells),
             // One unusable demo (wrong map, wrong build, corrupt file) should
             // not sink the whole harvest -- report and move on.
-            Err(e) => eprintln!("reachability: skipping {}: {e}", path.display()),
+            Err(e) => eprintln!("player_origins: skipping {}: {e}", path.display()),
         }
     }
     Ok(merged)

@@ -5,6 +5,7 @@ pub mod bsp;
 pub mod bsp_entities;
 pub mod map_check;
 pub mod map_fetch;
+pub mod player_origins;
 
 pub use map_check::{MapReference, MapStatus, check_demo, map_reference};
 

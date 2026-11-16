@@ -63,7 +63,6 @@ pub const MAX_RENDER_DECALS: u32 = 4096;
 pub mod decal_atlas;
 pub mod decal_probe;
 pub mod decal_strip;
-pub mod player_origins;
 
 pub use decal_strip::{
     CleanedSource, DECALS_PER_POSITION, DEFAULT_LEAD_SECONDS, DecalCleanError, DecalCleanOptions,

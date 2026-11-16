@@ -200,7 +200,7 @@ fn main() {
         .unwrap_or_else(|| fail("map path has no usable file name"))
         .to_string();
     let reach = demos_dir.as_deref().map(|dir| {
-        native::decals::player_origins::harvest_directory(
+        native::maps::player_origins::harvest_directory(
             std::path::Path::new(dir),
             checksum,
             &map_name,
@@ -209,7 +209,7 @@ fn main() {
     });
     if let Some(cloud) = &reach {
         eprintln!(
-            "reachability: {} proven player positions harvested from {}",
+            "player_origins: {} proven player positions harvested from {}",
             cloud.len(),
             demos_dir.as_deref().unwrap_or("")
         );
@@ -339,11 +339,10 @@ fn illusionary_rows(
             let texture = dominant_texture(bsp, s);
             let (distance, background) = match (reach, submodel_bounds(bsp, s)) {
                 (Some(cloud), Some((lo, hi))) => {
-                    let d =
-                        native::decals::player_origins::distance_to_nearest_player(cloud, lo, hi);
+                    let d = native::maps::player_origins::distance_to_nearest_player(cloud, lo, hi);
                     (
                         Some(d),
-                        native::decals::player_origins::reads_as_background(d, lo, hi),
+                        native::maps::player_origins::reads_as_background(d, lo, hi),
                     )
                 }
                 _ => (None, false),
