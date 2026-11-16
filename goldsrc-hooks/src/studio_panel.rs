@@ -446,9 +446,6 @@ const IPANEL_GET_MODULE_NAME: usize = 59;
 /// `ISurface` (`VGUI_Surface026`) slots.
 const SURFACE_GET_POPUP_COUNT: usize = 69;
 const SURFACE_GET_POPUP: usize = 70;
-/// `ISurface::GetFontTall(HFont)`, the slot `TextEntry::GetStartDrawIndex`
-/// calls (`call [vftable+0xf8]`).
-const SURFACE_GET_FONT_TALL: usize = 62;
 
 const IPANEL_SET_MINIMUM_SIZE: usize = 6;
 const IPANEL_GET_ABS_POS: usize = 10;

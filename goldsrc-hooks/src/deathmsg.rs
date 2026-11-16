@@ -80,7 +80,7 @@ mod butt;
 mod clear;
 mod colour;
 mod even;
-mod font;
+pub(crate) mod font;
 mod layout_report;
 mod name_cap;
 mod replace;

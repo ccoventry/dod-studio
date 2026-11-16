@@ -420,8 +420,8 @@ its own with the menu closed (`ReviewForm.res`); Tab moves between its boxes,
 Enter saves (a `[dod-studio] REVIEW_EDIT` line: Studio sets the row's kill
 range and note and leaves its mark), Esc cancels, and it closes by itself when
 the review moves on, a demo load ends its clip (without saving) or the menu
-comes up. Clicking its buttons works on the
-pre-Anniversary build; the keyboard does everything on both. Bare prints where the review is.
+comes up. Its boxes and buttons take clicks on both builds, and the keyboard
+does everything too. Bare prints where the review is.
 With no review running, `ask start` and `ask here` (the Review tab's **From
 the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
 review the demo playing: every highlight, from the first or from the first
