@@ -221,6 +221,11 @@ pub struct AppSettings {
     pub render_fps: i32,
     #[serde(default = "default_render_max_concurrent")]
     pub render_max_concurrent: i32,
+    /// Configuration > Render's "Resumable renders" (#1451), read as each
+    /// render batch starts (`RenderConfig::resumable_renders`). On for a
+    /// settings file from before it, as `resumable_renders_setting.js`.
+    #[serde(default = "default_true")]
+    pub render_resumable: bool,
     /// Named render setups (#108), applied from Configuration > Render
     /// Output. Each carries a codec, its custom args, source FPS and
     /// concurrency; the frontend owns the shape (`render_presets.js`).
@@ -607,6 +612,7 @@ impl Default for AppSettings {
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
             render_max_concurrent: default_render_max_concurrent(),
+            render_resumable: true,
             render_presets: Vec::new(),
             scan_workers: default_scan_workers(),
             render_export_dirs: Vec::new(),

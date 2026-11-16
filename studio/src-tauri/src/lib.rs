@@ -46,6 +46,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_export_dirs;
+mod render_live_resumable;
 mod render_manager;
 mod review_library;
 mod review_manager;
@@ -131,6 +132,9 @@ async fn save_settings(
     // starts next (#1430). Handed over under the settings lock, so two saves
     // close together can't leave it the older list.
     let export_dirs = render.export_dirs();
+    // "Resumable renders" reaches a running batch's next renders the same way
+    // (#1451).
+    let resumable = render.resumable();
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
@@ -147,6 +151,11 @@ async fn save_settings(
         settings_manager::apply_game_folder(&settings);
         settings_manager::apply_windows_drive_keep_free(&settings);
         export_dirs.saved(&settings.render_export_dirs);
+        if resumable.saved(settings.render_resumable) {
+            native::log_markdown(&messages::render::resumable_turned(
+                settings.render_resumable,
+            ));
+        }
         players_tab::mirror_table(&settings);
         *guard = settings;
         native::log_markdown("[settings] saved");
@@ -929,9 +938,14 @@ pub fn run() {
     // them by a running batch (#1430).
     let settings_manager = SettingsManager::new();
     let render_manager = RenderManager::new();
-    render_manager
-        .export_dirs()
-        .saved(&native::shared::lock::lock_or_recover(&settings_manager.inner).render_export_dirs);
+    {
+        let loaded = native::shared::lock::lock_or_recover(&settings_manager.inner);
+        render_manager
+            .export_dirs()
+            .saved(&loaded.render_export_dirs);
+        // As loaded, not a change: nothing to log.
+        render_manager.resumable().saved(loaded.render_resumable);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

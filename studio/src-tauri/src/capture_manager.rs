@@ -1416,6 +1416,7 @@ pub async fn start_capture_batch_impl(
             let need = native::hlcr::take_cleanup::SpaceNeed {
                 targets: patcher_config.capture_directories.clone(),
                 pieces: native::patch::estimate_batch_capture_blocks(&raw_streaks, &patcher_config),
+                fallback_pieces: None,
                 headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
             };
             crate::take_cleanup_manager::make_room(
