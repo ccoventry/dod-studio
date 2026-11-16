@@ -248,6 +248,10 @@ impl StreamPatcher {
         // header here and in each svc_serverinfo below, or a copy of DoD
         // refuses to play it (#402; see game_dir.rs).
         let game_folder = crate::shared::paths::game_folder();
+        // A protocol-47 demo's copy says 48, in the header here and in each
+        // svc_serverinfo below, or the game refuses to play it (#239; see
+        // protocol47.rs). The game-folder rewrite then looks for 48.
+        let converting_47 = crate::patch::protocol47::convert_header_in_place(&mut header);
         let network_protocol = crate::patch::game_dir::header_network_protocol(&header);
         crate::patch::game_dir::set_header_game_dir(&mut header, &game_folder);
         writer.write_all(&header)?;
@@ -515,6 +519,9 @@ impl StreamPatcher {
                     let mut net_buf = vec![0u8; msg_len];
                     read_exact(&mut reader, &mut net_buf, "NetworkMessage Body")?;
 
+                    if converting_47 {
+                        crate::patch::protocol47::convert_messages_in_place(&mut net_buf);
+                    }
                     if let Some(renamed) = network_protocol.and_then(|p| {
                         crate::patch::game_dir::rewrite_server_info_game_dir(
                             &net_buf,
@@ -1106,5 +1113,58 @@ mod directory_tests {
             );
         }
         assert_eq!(directory + 4 + 2 * DIR_ENTRY_SIZE, patched.len());
+    }
+
+    /// A protocol-47 demo's patched copy says 48 in its header and its
+    /// `svc_serverinfo`, or the game refuses to play it (#239).
+    #[test]
+    fn a_protocol_47_demo_s_patched_copy_says_48() {
+        let scratch = Scratch::new("patch_protocol47");
+        let input = scratch.path().join("in.dem");
+        let output = scratch.path().join("out.dem");
+        let mut d = vec![0u8; DEMO_HEADER_SIZE];
+        d[0..8].copy_from_slice(b"HLDEMO\0\0");
+        d[12..16].copy_from_slice(&47i32.to_le_bytes());
+        let mut sign_on = vec![11u8];
+        sign_on.extend_from_slice(&47i32.to_le_bytes());
+        sign_on.extend_from_slice(&[0u8; 4 + 4 + 16 + 3]);
+        sign_on.extend_from_slice(b"dod\0an HLTV\0maps/dod_donner.bsp\0\0\0");
+        frame(&mut d, 0, 0);
+        d.extend_from_slice(&[0u8; NETMSG_INFO_SIZE]);
+        d.extend_from_slice(&(sign_on.len() as u32).to_le_bytes());
+        d.extend_from_slice(&sign_on);
+        frame(&mut d, 5, 0);
+        frame(&mut d, 2, 0);
+        for tick in 1..=3 {
+            network(&mut d, tick);
+        }
+        frame(&mut d, 5, 3);
+        d[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].copy_from_slice(&0i32.to_le_bytes());
+        std::fs::write(&input, &d).unwrap();
+        assert_eq!(crate::demo_split::quick_maps(&d, 47), ["dod_donner"]);
+
+        let job = PatchJob {
+            source_demo: input.to_string_lossy().to_string(),
+            output_demo: output.clone(),
+            streaks: Vec::new(),
+            target_player: None,
+            init_commands: Vec::new(),
+            scheduled_commands: Vec::new(),
+            director_events: Vec::new(),
+            block_routes: Vec::new(),
+            blocks: Vec::new(),
+        };
+        let config = PatcherConfig {
+            decal_flush: false,
+            ..PatcherConfig::default()
+        };
+        StreamPatcher::new(&input, &output)
+            .patch(&job, &config, &Arc::new(AtomicBool::new(false)))
+            .unwrap();
+
+        let patched = std::fs::read(&output).unwrap();
+        assert_eq!(crate::demo_split::header_protocol(&patched), Some(48));
+        assert_eq!(crate::demo_split::quick_maps(&patched, 48), ["dod_donner"]);
+        assert!(crate::demo_split::quick_maps(&patched, 47).is_empty());
     }
 }

@@ -46,6 +46,7 @@ pub mod demo_writer;
 pub mod netmsg_doer;
 pub mod prelude;
 pub mod progress;
+pub mod protocol;
 pub mod types;
 
 pub use utils::bitslice_to_string;
