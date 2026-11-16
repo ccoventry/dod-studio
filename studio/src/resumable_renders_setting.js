@@ -1,10 +1,10 @@
 // resumable_renders_setting.js
 // Configuration > Render's "Resumable renders" (#1451): long renders split
 // into pieces, so a stopped render resumes instead of starting from 0. The
-// backend reads the saved setting as each render batch starts
-// (render_manager.rs) and native's renderer does the splitting; this is the
-// checkbox, saved with the rest of the settings. Kept out of main.js, which
-// only wires (#683).
+// backend reads the saved setting as each render starts, so a change reaches
+// a running batch (render_live_resumable.rs), and native's renderer does the
+// splitting; this is the checkbox, saved with the rest of the settings. Kept
+// out of main.js, which only wires (#683).
 
 /** The setting before settings load, as the backend's `default_true`. */
 export const DEFAULT_RESUMABLE_RENDERS = true;
