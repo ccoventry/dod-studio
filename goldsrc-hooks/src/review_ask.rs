@@ -63,6 +63,24 @@ pub(crate) fn demo_path(opened: &Path) -> PathBuf {
     out
 }
 
+/// The file an ask names for the demo `name`, from where the game opened
+/// it (`opened`), or why it isn't asked: with no file found, Studio would
+/// be asked to review one that isn't there (#1474).
+pub(crate) fn ask_target(
+    opened: Option<std::path::PathBuf>,
+    name: &str,
+) -> Result<std::path::PathBuf, String> {
+    match opened {
+        Some(opened) => Ok(demo_path(&opened)),
+        None => Err(not_found(name)),
+    }
+}
+
+/// What an ask says when [`ask_target`] finds no file.
+fn not_found(name: &str) -> String {
+    format!("can't find {name} in the game's folders, so DoD Studio isn't asked")
+}
+
 /// What the last request is doing, for the Review tab.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Status {
@@ -352,6 +370,18 @@ mod tests {
             request_line(demo, Start::At(356.25)),
             "review at 356.250 C:\\Steam\\dod\\a b.dem\n"
         );
+    }
+
+    #[test]
+    fn an_ask_names_the_file_the_game_opened_or_says_it_is_missing() {
+        use std::path::PathBuf;
+        let opened = PathBuf::from("C:/Games/Half-Life/dod_addon/../dod_addon/match1.dem");
+        assert_eq!(
+            ask_target(Some(opened), "match1"),
+            Ok(PathBuf::from("C:/Games/Half-Life/dod_addon/match1.dem"))
+        );
+        let missing = ask_target(None, "match1").unwrap_err();
+        assert!(missing.starts_with("can't find match1"), "{missing}");
     }
 
     #[test]
