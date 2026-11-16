@@ -179,6 +179,11 @@
 //!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
 //!   One pointer write at start-up, both builds. On by default;
 //!   `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
+//! - `env_models`: a POV demo played as HLTV (`dem_forcehltv 1`) draws the
+//!   map's own models (sandbags, banisters) again: the game's
+//!   `CClientEnvModel::Think`, which that session never calls, is called once
+//!   the models are loaded. On by default; `GOLDSRC_HOOKS_ENV_MODELS=0` turns
+//!   it off.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -297,6 +302,7 @@ mod demo_bar_progress;
 mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
+mod demo_locate;
 mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
@@ -308,6 +314,7 @@ mod detour;
 mod engine;
 mod engine_buttons;
 mod engine_center_print;
+mod env_models;
 mod events;
 mod ex_interp;
 mod fast_load;
@@ -516,6 +523,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     engine_buttons::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
+    // Only makes the call the game makes in every other session, so on unless
+    // asked not to.
+    env_models::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENV_MODELS", true),
         Ordering::Relaxed,
     );
     // A crash fix, so on unless asked not to.
