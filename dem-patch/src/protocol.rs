@@ -54,8 +54,8 @@ mod tests {
 
     #[test]
     fn protocols_47_and_48_are_read() {
-        assert_eq!(check_network_protocol(47), Ok(()));
-        assert_eq!(check_network_protocol(48), Ok(()));
+        assert_eq!(check_network_protocol(NETWORK_PROTOCOL_47), Ok(()));
+        assert_eq!(check_network_protocol(NETWORK_PROTOCOL_48), Ok(()));
     }
 
     #[test]
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn a_protocol_47_header_parses_as_48_s_does() {
-        for protocol in [47, 48] {
+        for protocol in [NETWORK_PROTOCOL_47, NETWORK_PROTOCOL_48] {
             let bytes = header(protocol);
             let (rest, parsed) = crate::demo_parser::parse_header(&bytes).unwrap();
             assert!(rest.is_empty());

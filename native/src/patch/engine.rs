@@ -546,16 +546,16 @@ impl StreamPatcher {
         }
 
         // A protocol-47 copy with no server info converted would say 48 in
-        // its header and 47 where it loads the map, a mix no recording has:
-        // fail as the standalone conversion does rather than hand the game
-        // that copy.
-        if converting_47 {
-            if server_infos_converted == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    crate::patch::protocol47::ConvertError::NoServerInfo.to_string(),
-                ));
-            }
+        // its header and 47 where it loads the map, a mix no recording has.
+        // An unconverted copy plays under Studio's launch, with the game's
+        // warning, so the header goes back to 47 below (4g) instead of
+        // failing the batch.
+        let left_at_47 = converting_47 && server_infos_converted == 0;
+        if left_at_47 {
+            crate::log_markdown(&crate::messages::protocol47::patched_copy_left_at_47(
+                &job.source_demo,
+            ));
+        } else if converting_47 {
             crate::log_markdown(&crate::messages::protocol47::patched_copy_converted(
                 &job.source_demo,
                 server_infos_converted,
@@ -632,6 +632,11 @@ impl StreamPatcher {
 
         // 4f: Write the new_offset (as Little Endian bytes).
         out_file.write_all(&new_offset.to_le_bytes())?;
+
+        // 4g: A protocol-47 copy no server info was converted in stays 47.
+        if left_at_47 {
+            crate::patch::protocol47::restore_header_protocol_47(&mut out_file)?;
+        }
 
         out_file.sync_all().unwrap_or_default();
         drop(out_file);
@@ -992,6 +997,7 @@ mod directory_tests {
     use crate::patch::types::{CaptureStreak, PatchJob, PatcherConfig};
     use crate::patch::{DEMO_HEADER_SIZE, DIR_ENTRY_SIZE, DIRECTORY_OFFSET_POS, NETMSG_INFO_SIZE};
     use crate::test_support::Scratch;
+    use dem::protocol::{NETWORK_PROTOCOL_47, NETWORK_PROTOCOL_48};
 
     fn frame(out: &mut Vec<u8>, kind: u8, tick: i32) {
         out.push(kind);
@@ -1140,7 +1146,7 @@ mod directory_tests {
     fn protocol_47_demo(sign_on: &[u8]) -> Vec<u8> {
         let mut d = vec![0u8; DEMO_HEADER_SIZE];
         d[0..8].copy_from_slice(b"HLDEMO\0\0");
-        d[12..16].copy_from_slice(&47i32.to_le_bytes());
+        d[12..16].copy_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
         frame(&mut d, 0, 0);
         d.extend_from_slice(&[0u8; NETMSG_INFO_SIZE]);
         d.extend_from_slice(&(sign_on.len() as u32).to_le_bytes());
@@ -1183,33 +1189,45 @@ mod directory_tests {
         let input = scratch.path().join("in.dem");
         let output = scratch.path().join("out.dem");
         let mut sign_on = vec![11u8];
-        sign_on.extend_from_slice(&47i32.to_le_bytes());
+        sign_on.extend_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
         sign_on.extend_from_slice(&[0u8; 4 + 4 + 16 + 3]);
         sign_on.extend_from_slice(b"dod\0an HLTV\0maps/dod_donner.bsp\0\0\0");
         let d = protocol_47_demo(&sign_on);
         std::fs::write(&input, &d).unwrap();
-        assert_eq!(crate::demo_split::quick_maps(&d, 47), ["dod_donner"]);
+        assert_eq!(
+            crate::demo_split::quick_maps(&d, NETWORK_PROTOCOL_47),
+            ["dod_donner"]
+        );
 
         patch_plain(&input, &output).unwrap();
 
         let patched = std::fs::read(&output).unwrap();
-        assert_eq!(crate::demo_split::header_protocol(&patched), Some(48));
-        assert_eq!(crate::demo_split::quick_maps(&patched, 48), ["dod_donner"]);
-        assert!(crate::demo_split::quick_maps(&patched, 47).is_empty());
+        assert_eq!(
+            crate::demo_split::header_protocol(&patched),
+            Some(NETWORK_PROTOCOL_48)
+        );
+        assert_eq!(
+            crate::demo_split::quick_maps(&patched, NETWORK_PROTOCOL_48),
+            ["dod_donner"]
+        );
+        assert!(crate::demo_split::quick_maps(&patched, NETWORK_PROTOCOL_47).is_empty());
     }
 
-    /// A protocol-47 demo with no server info to convert is refused, as the
-    /// standalone conversion refuses it: its copy would say 48 in the header
-    /// and 47 where it loads the map.
+    /// A protocol-47 demo with no server info to convert is patched all the
+    /// same, and its copy stays a whole protocol-47 demo, header included:
+    /// the game plays that with its warning under Studio's launch.
     #[test]
-    fn a_protocol_47_demo_with_no_server_info_is_not_patched() {
+    fn a_protocol_47_demo_with_no_server_info_is_patched_and_left_at_47() {
         let scratch = Scratch::new("patch_protocol47_none");
         let input = scratch.path().join("in.dem");
         let output = scratch.path().join("out.dem");
         std::fs::write(&input, protocol_47_demo(&[1, 1, 1])).unwrap();
 
-        let err = patch_plain(&input, &output).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("no server info"), "{err}");
+        patch_plain(&input, &output).unwrap();
+        let patched = std::fs::read(&output).unwrap();
+        assert_eq!(
+            crate::demo_split::header_protocol(&patched),
+            Some(NETWORK_PROTOCOL_47)
+        );
     }
 }

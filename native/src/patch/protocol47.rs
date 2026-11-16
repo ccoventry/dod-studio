@@ -56,18 +56,12 @@ use dem::protocol::{NETWORK_PROTOCOL_47, NETWORK_PROTOCOL_48};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::demo_split::header_protocol;
+use crate::patch::game_dir::{HEADER_NETWORK_PROTOCOL, SVC_SERVERINFO, TO_GAME_DIR};
 use crate::patch::{
     DEMO_HEADER_SIZE, DIRECTORY_OFFSET_POS, FRAME_HEADER_SIZE, NETMSG_INFO_SIZE,
     NETWORK_HEADER_ALIGNMENT,
 };
-
-/// The header's network protocol field.
-const HEADER_NETWORK_PROTOCOL: std::ops::Range<usize> = 12..16;
-const SVC_SERVERINFO: u8 = 11;
-/// From `svc_serverinfo`'s id to its game folder string: protocol, spawn
-/// count, map checksum (4 each), client.dll hash (16), max players, player
-/// index, deathmatch (1 each). As `demo_split::TO_GAME_DIR`.
-const TO_GAME_DIR: usize = 1 + 4 + 4 + 4 + 16 + 3;
 /// The suffix a converted copy gets beside its source: `<stem>_p48.dem`.
 pub const CONVERTED_SUFFIX: &str = "_p48";
 
@@ -120,8 +114,6 @@ pub struct Converted {
     /// `svc_serverinfo` messages rewritten: one per map load. A restart
     /// loads the same map again, so two can name one map.
     pub server_infos: usize,
-    /// Frames walked to find them.
-    pub frames: usize,
     /// Where the frame walk stopped short of the frames' end, in a damaged
     /// or cut copy. Server infos past it were found by searching the bytes
     /// that are left, so a later map load is converted too.
@@ -133,17 +125,6 @@ pub struct Converted {
 /// run.
 pub fn is_protocol_47(bytes: &[u8]) -> bool {
     header_protocol(bytes) == Some(NETWORK_PROTOCOL_47)
-}
-
-/// The network protocol a demo header names, or `None` for bytes that are
-/// not a demo.
-fn header_protocol(bytes: &[u8]) -> Option<i32> {
-    if bytes.get(..8)? != b"HLDEMO\0\0" {
-        return None;
-    }
-    Some(i32::from_le_bytes(
-        bytes.get(HEADER_NETWORK_PROTOCOL)?.try_into().ok()?,
-    ))
 }
 
 /// Rewrites a protocol-47 demo's `bytes` to protocol 48, in place: the
@@ -169,7 +150,6 @@ pub fn convert_in_place(bytes: &mut [u8]) -> Result<Converted, ConvertError> {
     bytes[HEADER_NETWORK_PROTOCOL].copy_from_slice(&to);
     Ok(Converted {
         server_infos: found.spots.len(),
-        frames: found.frames,
         stopped_at: found.stopped_at,
     })
 }
@@ -177,13 +157,27 @@ pub fn convert_in_place(bytes: &mut [u8]) -> Result<Converted, ConvertError> {
 /// For a patcher that copies a demo frame by frame (`engine::StreamPatcher`):
 /// sets a protocol-47 `header`'s protocol to 48 and returns `true`, or
 /// returns `false` and leaves any other header alone. When `true`, every
-/// network frame's messages then go through [`convert_messages_in_place`].
+/// network frame's messages then go through [`convert_messages_in_place`],
+/// and when none of them held a server info the written copy's header goes
+/// back to 47 ([`restore_header_protocol_47`]).
 pub fn convert_header_in_place(header: &mut [u8]) -> bool {
     if !is_protocol_47(header) {
         return false;
     }
     header[HEADER_NETWORK_PROTOCOL].copy_from_slice(&NETWORK_PROTOCOL_48.to_le_bytes());
     true
+}
+
+/// Writes protocol 47 back into the header of the demo `file` holds: for a
+/// patched copy [`convert_header_in_place`] set to 48 before any server info
+/// turned up, when none did. The copy then stays a whole protocol-47 demo,
+/// which the game plays with its warning, rather than a mix of the two.
+/// Leaves the file's position just past the field.
+pub fn restore_header_protocol_47(
+    file: &mut (impl std::io::Write + std::io::Seek),
+) -> std::io::Result<()> {
+    file.seek(std::io::SeekFrom::Start(HEADER_NETWORK_PROTOCOL.start as u64))?;
+    file.write_all(&NETWORK_PROTOCOL_47.to_le_bytes())
 }
 
 /// Sets every `svc_serverinfo` saying protocol 47 in one network frame's
@@ -200,7 +194,6 @@ pub fn convert_messages_in_place(messages: &mut [u8]) -> usize {
 struct Found {
     /// Where each server info keeps its protocol (the byte after its id).
     spots: Vec<usize>,
-    frames: usize,
     stopped_at: Option<usize>,
 }
 
@@ -218,10 +211,8 @@ struct Found {
 /// length and says where it stopped short, for the caller to report.
 fn server_info_protocols(bytes: &[u8]) -> Found {
     let end = frames_end(bytes);
-    let mut frames = 0;
     let mut at = DEMO_HEADER_SIZE;
     while let Some(next) = next_frame(bytes, at, end) {
-        frames += 1;
         at = next;
     }
     let from = DEMO_HEADER_SIZE.min(end);
@@ -231,7 +222,6 @@ fn server_info_protocols(bytes: &[u8]) -> Found {
         .collect();
     Found {
         spots,
-        frames,
         stopped_at: (at < end).then_some(at),
     }
 }
@@ -427,6 +417,12 @@ fn new_part_file(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
 mod tests {
     use super::*;
 
+    const P47: i32 = NETWORK_PROTOCOL_47;
+    const P48: i32 = NETWORK_PROTOCOL_48;
+    /// The low byte of each protocol: where the little-endian field differs.
+    const P47_BYTE: u8 = NETWORK_PROTOCOL_47.to_le_bytes()[0];
+    const P48_BYTE: u8 = NETWORK_PROTOCOL_48.to_le_bytes()[0];
+
     /// `svc_serverinfo` as an HLTV proxy of 2004 sent it, saying `protocol`.
     fn server_info(protocol: i32) -> Vec<u8> {
         let mut m = vec![SVC_SERVERINFO];
@@ -480,7 +476,7 @@ mod tests {
             frame_header(&mut d, 3, 2);
             // A console command holding the needle is not a network frame.
             let mut command = [0u8; 64];
-            command[..5].copy_from_slice(&[SVC_SERVERINFO, 47, 0, 0, 0]);
+            command[..5].copy_from_slice(&[SVC_SERVERINFO, P47_BYTE, 0, 0, 0]);
             d.extend_from_slice(&command);
             frame_header(&mut d, 4, 3);
             d.extend_from_slice(&[0u8; 32]);
@@ -529,7 +525,7 @@ mod tests {
 
     #[test]
     fn the_header_and_the_server_info_say_48_and_nothing_else_changes() {
-        let source = demo(47, &[sign_on(47)]);
+        let source = demo(P47, &[sign_on(P47)]);
         let mut bytes = source.clone();
         let converted = convert_in_place(&mut bytes).unwrap();
         assert_eq!(converted.server_infos, 1);
@@ -538,24 +534,24 @@ mod tests {
             // The low byte of each little-endian 47 -> 48.
             vec![(12, 1), (first_server_info_protocol(), 1)]
         );
-        assert_eq!(header_protocol(&bytes), Some(48));
-        assert_eq!(bytes[first_server_info_protocol()], 48);
+        assert_eq!(header_protocol(&bytes), Some(P48));
+        assert_eq!(bytes[first_server_info_protocol()], P48_BYTE);
     }
 
     #[test]
     fn a_converted_demo_is_the_demo_recorded_at_48() {
-        let mut bytes = demo(47, &[sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47)]);
         convert_in_place(&mut bytes).unwrap();
-        assert_eq!(bytes, demo(48, &[sign_on(48)]));
+        assert_eq!(bytes, demo(P48, &[sign_on(P48)]));
     }
 
     #[test]
     fn every_segment_s_server_info_is_converted() {
-        let mut bytes = demo(47, &[sign_on(47), sign_on(47), sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47), sign_on(P47), sign_on(P47)]);
         let converted = convert_in_place(&mut bytes).unwrap();
         assert_eq!(converted.server_infos, 3);
-        // Ten frames a segment, and the first's second next-section frame.
-        assert_eq!(converted.frames, 3 * 10 + 1);
+        // The walk reaches the directory: every frame type fits.
+        assert_eq!(converted.stopped_at, None);
         assert!(server_info_protocols(&bytes).spots.is_empty(), "no 47 left");
     }
 
@@ -563,10 +559,10 @@ mod tests {
     fn the_needle_outside_a_network_frame_or_without_server_info_fields_is_left() {
         // The console command frame holds 0B 2F 00 00 00 too (see `demo`), and
         // the network frame below holds it followed by junk.
-        let mut stray = sign_on(47);
-        stray.extend_from_slice(&[SVC_SERVERINFO, 47, 0, 0, 0]);
+        let mut stray = sign_on(P47);
+        stray.extend_from_slice(&[SVC_SERVERINFO, P47_BYTE, 0, 0, 0]);
         stray.extend_from_slice(&[0xFF; 40]);
-        let source = demo(47, &[stray]);
+        let source = demo(P47, &[stray]);
         let mut bytes = source.clone();
         assert_eq!(convert_in_place(&mut bytes).unwrap().server_infos, 1);
         assert_eq!(differences(&source, &bytes).len(), 2);
@@ -574,28 +570,28 @@ mod tests {
 
     #[test]
     fn a_frame_by_frame_copy_converts_as_the_whole_file_does() {
-        let mut header = demo(47, &[sign_on(47)])[..DEMO_HEADER_SIZE].to_vec();
+        let mut header = demo(P47, &[sign_on(P47)])[..DEMO_HEADER_SIZE].to_vec();
         assert!(convert_header_in_place(&mut header));
-        assert_eq!(header_protocol(&header), Some(48));
+        assert_eq!(header_protocol(&header), Some(P48));
         assert!(!convert_header_in_place(&mut header), "48 is left alone");
-        let mut messages = sign_on(47);
-        messages.extend_from_slice(&sign_on(47));
+        let mut messages = sign_on(P47);
+        messages.extend_from_slice(&sign_on(P47));
         assert_eq!(convert_messages_in_place(&mut messages), 2);
-        let mut want = sign_on(48);
-        want.extend_from_slice(&sign_on(48));
+        let mut want = sign_on(P48);
+        want.extend_from_slice(&sign_on(P48));
         assert_eq!(messages, want);
         assert_eq!(convert_messages_in_place(&mut messages), 0);
     }
 
     #[test]
     fn a_protocol_48_demo_is_refused_unchanged() {
-        let source = demo(48, &[sign_on(48)]);
+        let source = demo(P48, &[sign_on(P48)]);
         let mut bytes = source.clone();
         let err = convert_in_place(&mut bytes).unwrap_err();
         assert!(matches!(
             err,
             ConvertError::NotProtocol47 {
-                network_protocol: 48
+                network_protocol: P48
             }
         ));
         assert_eq!(bytes, source);
@@ -618,7 +614,7 @@ mod tests {
 
     #[test]
     fn a_protocol_47_demo_without_a_server_info_is_refused_unchanged() {
-        let source = demo(47, &[vec![1, 1, 1]]);
+        let source = demo(P47, &[vec![1, 1, 1]]);
         let mut bytes = source.clone();
         assert!(matches!(
             convert_in_place(&mut bytes),
@@ -629,7 +625,7 @@ mod tests {
 
     #[test]
     fn a_copy_cut_short_converts_up_to_the_cut() {
-        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47), sign_on(P47)]);
         // The directory is gone and the second segment cut mid-frame: the
         // header's offset now points past the end, as in a copy that stopped
         // early.
@@ -641,18 +637,17 @@ mod tests {
     /// reported, but not the search: the server info inside it converts.
     #[test]
     fn a_frame_length_past_the_end_stops_the_walk_there() {
-        let mut bytes = demo(47, &[sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47)]);
         let len_at = DEMO_HEADER_SIZE + FRAME_HEADER_SIZE + NETMSG_INFO_SIZE;
         bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         let converted = convert_in_place(&mut bytes).unwrap();
         assert_eq!(converted.server_infos, 1);
-        assert_eq!(converted.frames, 0);
         assert_eq!(converted.stopped_at, Some(DEMO_HEADER_SIZE));
     }
 
     #[test]
     fn a_demo_cut_inside_its_header_has_no_server_info() {
-        let mut header_only = demo(47, &[sign_on(47)]);
+        let mut header_only = demo(P47, &[sign_on(P47)]);
         header_only.truncate(DEMO_HEADER_SIZE + 3);
         assert!(matches!(
             convert_in_place(&mut header_only),
@@ -676,7 +671,7 @@ mod tests {
     /// and converted, or the copy would still say 47 at the restart.
     #[test]
     fn damage_before_a_restart_s_server_info_still_converts_it() {
-        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47), sign_on(P47)]);
         let len_at = buffer_length_at(&bytes, 0);
         bytes[len_at..len_at + 4].copy_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
 
@@ -693,7 +688,7 @@ mod tests {
     /// second server info without stopping it; the search still finds it.
     #[test]
     fn a_damaged_length_that_jumps_past_a_server_info_still_converts_it() {
-        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47), sign_on(P47)]);
         let len_at = buffer_length_at(&bytes, 0);
         let second_frame = buffer_length_at(&bytes, 1) - FRAME_HEADER_SIZE;
         let jump = u32::try_from(second_frame - (len_at + 4)).unwrap();
@@ -710,7 +705,7 @@ mod tests {
 
     #[test]
     fn a_whole_demo_s_walk_does_not_stop_early() {
-        let mut bytes = demo(47, &[sign_on(47), sign_on(47)]);
+        let mut bytes = demo(P47, &[sign_on(P47), sign_on(P47)]);
         assert_eq!(convert_in_place(&mut bytes).unwrap().stopped_at, None);
     }
 
@@ -726,14 +721,14 @@ mod tests {
     fn convert_file_writes_the_copy_and_leaves_the_demo() {
         let dir = crate::test_support::Scratch::new("protocol47_file");
         let input = dir.path().join("old match.dem");
-        let source = demo(47, &[sign_on(47)]);
+        let source = demo(P47, &[sign_on(P47)]);
         std::fs::write(&input, &source).unwrap();
 
         let (written, converted) = convert_file(&input, None).unwrap();
         assert_eq!(written, dir.path().join("old match_p48.dem"));
         assert_eq!(converted.server_infos, 1);
         assert_eq!(std::fs::read(&input).unwrap(), source);
-        assert_eq!(header_protocol(&std::fs::read(&written).unwrap()), Some(48));
+        assert_eq!(header_protocol(&std::fs::read(&written).unwrap()), Some(P48));
 
         // Again: the earlier copy is replaced, and no part file stays.
         convert_file(&input, None).unwrap();
@@ -748,7 +743,7 @@ mod tests {
     fn convert_file_never_writes_over_its_input() {
         let dir = crate::test_support::Scratch::new("protocol47_same");
         let input = dir.path().join("a.dem");
-        let source = demo(47, &[sign_on(47)]);
+        let source = demo(P47, &[sign_on(P47)]);
         std::fs::write(&input, &source).unwrap();
         let same = dir.path().join(".").join("a.dem");
         assert!(matches!(
@@ -768,12 +763,12 @@ mod tests {
         let input = dir
             .path()
             .join(format!("x.dem.{}-0.part", std::process::id()));
-        let source = demo(47, &[sign_on(47)]);
+        let source = demo(P47, &[sign_on(P47)]);
         std::fs::write(&input, &source).unwrap();
 
         convert_file(&input, Some(&output)).unwrap();
         assert_eq!(std::fs::read(&input).unwrap(), source);
-        assert_eq!(header_protocol(&std::fs::read(&output).unwrap()), Some(48));
+        assert_eq!(header_protocol(&std::fs::read(&output).unwrap()), Some(P48));
         let names: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -807,12 +802,12 @@ mod tests {
         ));
 
         let mut old = fixture.clone();
-        old[12] = 47;
+        old[HEADER_NETWORK_PROTOCOL.start] = P47_BYTE;
         let mut flipped = 0;
-        let needle = [SVC_SERVERINFO, 48, 0, 0, 0];
+        let needle = [SVC_SERVERINFO, P48_BYTE, 0, 0, 0];
         for at in 0..old.len() - needle.len() {
             if old[at..at + 5] == needle && is_server_info_at(&old, at) {
-                old[at + 1] = 47;
+                old[at + 1] = P47_BYTE;
                 flipped += 1;
             }
         }
@@ -835,7 +830,7 @@ mod tests {
             .collect();
         if changed.len() != 1 + converted.server_infos
             || changed[0] != 12
-            || changed.iter().any(|&i| (source[i], bytes[i]) != (47, 48))
+            || changed.iter().any(|&i| (source[i], bytes[i]) != (P47_BYTE, P48_BYTE))
         {
             return Err(format!("unexpected bytes changed: {changed:?}"));
         }
@@ -856,7 +851,7 @@ mod tests {
         };
         let before = analysis::Analysis::try_from_bytes(source)?;
         let after = analysis::Analysis::try_from_bytes(&bytes)?;
-        if after.demo_info.network_protocol != 48 {
+        if after.demo_info.network_protocol != P48 {
             return Err("the analyzer still reads protocol 47".into());
         }
         if summary(&after) != summary(&before) || after.state.players.is_empty() {

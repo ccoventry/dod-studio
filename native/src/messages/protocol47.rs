@@ -1,12 +1,14 @@
 //! Text for converting protocol-47 demos to protocol 48 (#239): the
-//! conversion's errors (`patch::protocol47`) and the CLI's lines.
+//! conversion's errors (`patch::protocol47`), the patcher's activity-log
+//! lines (`patch::engine::StreamPatcher`), and `dod-studio-cli`'s lines for
+//! `convert-47` and `patch-streak`.
 
 use std::fmt::Display;
 
 pub const NOT_A_DEMO: &str = "not a demo: the file has no HLDEMO header";
 
 pub fn not_protocol_47(network_protocol: i32) -> String {
-    if network_protocol == 48 {
+    if network_protocol == dem::protocol::NETWORK_PROTOCOL_48 {
         "already a protocol 48 demo: nothing to convert".to_string()
     } else {
         format!("a protocol {network_protocol} demo: only protocol 47 demos are converted")
@@ -59,6 +61,29 @@ pub fn patched_copy_converted(input: impl Display, server_infos: usize) -> Strin
         "[convert-47] {input} is a protocol 47 demo: its patched copy says protocol 48 ({})",
         map_loads(server_infos)
     )
+}
+
+/// A patched copy of a protocol-47 demo with no server info found stays 47.
+pub fn patched_copy_left_at_47(input: impl Display) -> String {
+    format!(
+        "[convert-47] {input} is a protocol 47 demo with no server info found: its patched copy \
+         stays protocol 47, which the game plays with an outdated-protocol warning"
+    )
+}
+
+// ── bin/cli.rs (dod-studio-cli patch-streak) ───────────────────────────────
+
+/// patch-streak's copy of a protocol-47 demo was written as protocol 48.
+pub fn cli_patch_converted(input: impl Display, server_infos: usize) -> String {
+    format!(
+        "{input} is a protocol 47 demo: the patched copy says protocol 48 ({})",
+        map_loads(server_infos)
+    )
+}
+
+/// patch-streak's copy of a protocol-47 demo stays 47: `reason` says why.
+pub fn cli_patch_left_at_47(input: impl Display, reason: impl Display) -> String {
+    format!("{input} is a protocol 47 demo, left at protocol 47 in the patched copy: {reason}")
 }
 
 // ── bin/cli.rs (dod-studio-cli convert-47) ─────────────────────────────────

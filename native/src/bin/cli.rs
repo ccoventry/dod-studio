@@ -327,11 +327,18 @@ fn run_patch_streak_subcommand(
     let mut demo_bytes =
         std::fs::read(&input).map_err(|e| messages::cli_failed_to_read(input.display(), e))?;
     // The patched copy of a protocol-47 demo says 48, so the game plays it
-    // without an outdated-protocol warning (#239). The input file is not
-    // touched.
+    // without an outdated-protocol warning (#239). One with no server info
+    // to convert stays 47 throughout, as StreamPatcher leaves it, since the
+    // game plays that too. The input file is not touched.
     if native::patch::protocol47::is_protocol_47(&demo_bytes) {
-        native::patch::protocol47::convert_in_place(&mut demo_bytes)
-            .map_err(|e| messages::labeled(input.display(), e))?;
+        use messages::protocol47 as m;
+        match native::patch::protocol47::convert_in_place(&mut demo_bytes) {
+            Ok(converted) => println!(
+                "{}",
+                m::cli_patch_converted(input.display(), converted.server_infos)
+            ),
+            Err(e) => println!("{}", m::cli_patch_left_at_47(input.display(), e)),
+        }
     }
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
