@@ -637,7 +637,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       useBtn.className = 'use-found-copy-btn';
       useBtn.textContent = STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON;
       useBtn.title = STRINGS.WORKSPACE.useFoundCopyTitle(demo.foundAt);
-      useBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      useBtn.style.cssText = 'font-size:0.8em;padding:1px 6px;';
       useBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // do not select the row
         currentOnUseFoundCopy(demo);
@@ -650,7 +650,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       locateBtn.className = 'locate-demo-btn';
       locateBtn.textContent = STRINGS.WORKSPACE.LOCATE_DEMO_BUTTON;
       locateBtn.title = STRINGS.WORKSPACE.LOCATE_DEMO_TITLE;
-      locateBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      locateBtn.style.cssText = 'font-size:0.8em;padding:1px 6px;';
       locateBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // do not select the row
         currentOnLocateDemo(demo);
