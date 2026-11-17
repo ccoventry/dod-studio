@@ -1,13 +1,18 @@
 //! A file saved through a tool that read its UTF-8 as Windows-1252 and wrote it
-//! back as UTF-8 turns every non-ASCII character into two or three others:
-//! `—` becomes `â€”`, `▸` becomes `â–¸`. Nothing fails to build, so it slips
-//! through: a merge in #1376 did it to `styles.css` (What's New's ▸/▾ drew as
+//! back as UTF-8 turns every non-ASCII character into two or three others: an
+//! em dash becomes a-circumflex, euro sign and right quote (in words here:
+//! the garbled form itself would trip this check). Nothing fails to build, so
+//! it slips through: a merge in #1376 did it to `styles.css` (What's New's ▸/▾ drew as
 //! junk) and `scan_manager.rs`, and only a review caught it. This scans every
 //! tracked text file for that pattern and fails with `file:line` for each.
 //!
 //! The pattern: a run of characters that Windows-1252 maps to bytes 0x80-0xFF
 //! and that, as those bytes, spell a whole multi-byte UTF-8 character. Real
 //! text almost never does that (`é` alone, or `·` after a space, is fine).
+//! The real text that can: `×` or `ß` (or an uppercase accented letter) right
+//! before a curly quote, `…` or a dash, and decorative player names in
+//! fixtures. Such a hit is not garbled: put its file in `ALLOWED`, don't
+//! "repair" it.
 //!
 //! Skipped: binary files, `local/` (gitignored), lockfiles. A deliberate hit
 //! (a test of this very thing) goes in `ALLOWED` with the reason.
@@ -38,6 +43,9 @@ const CP1252_80_9F: [char; 32] = [
 /// the C1 controls (U+0080-U+009F), which a lenient decoder passes through for
 /// the five bytes the code page leaves undefined.
 fn cp1252_high_byte(c: char) -> Option<u8> {
+    if c.is_ascii() {
+        return None;
+    }
     let u = c as u32;
     if (0xA0..=0xFF).contains(&u) || (0x80..=0x9F).contains(&u) {
         return u8::try_from(u).ok();
