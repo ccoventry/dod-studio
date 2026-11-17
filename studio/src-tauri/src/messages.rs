@@ -83,6 +83,14 @@ pub fn background_task_crashed(err: impl Display) -> String {
     format!("Background task crashed: {}", err)
 }
 
+// ── lib.rs ───────────────────────────────────────────────────────────────
+
+/// Activity-log line when Tauri cannot build Studio's window (a missing or
+/// broken WebView2, say), just before Studio exits.
+pub fn studio_start_failed(err: impl Display) -> String {
+    format!("❌ **Studio** — could not start its window: {err}")
+}
+
 // ── project_session_cmd.rs ───────────────────────────────────────────────
 
 /// `default_projects_dir` when Windows reports no Documents folder.

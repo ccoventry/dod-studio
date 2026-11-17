@@ -160,7 +160,7 @@ pub fn run() {
         render_manager.resumable().saved(loaded.render_resumable);
     }
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -426,13 +426,21 @@ pub fn run() {
             project_convert::project_convert_offer,
             project_convert::convert_project_file,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|_app, event| {
-            // Render FFmpegs end with Studio's process anyway (their job
-            // object); this also removes the clips they were writing (#1439).
-            if let tauri::RunEvent::Exit = event {
-                native::hlcr::renderer::stop_renders_for_exit();
-            }
-        });
+        .build(tauri::generate_context!());
+    // A release build has no console, so a panic here would leave no trace:
+    // the activity log is the one place a user can see why Studio closed.
+    let app = match app {
+        Ok(app) => app,
+        Err(err) => {
+            native::log_markdown(&messages::studio_start_failed(&err));
+            std::process::exit(1);
+        }
+    };
+    app.run(|_app, event| {
+        // Render FFmpegs end with Studio's process anyway (their job
+        // object); this also removes the clips they were writing (#1439).
+        if let tauri::RunEvent::Exit = event {
+            native::hlcr::renderer::stop_renders_for_exit();
+        }
+    });
 }
