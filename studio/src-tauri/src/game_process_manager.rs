@@ -147,6 +147,7 @@ pub async fn launch_standalone_game(
 
         let patcher_config = launch_config(&settings, &request);
         let mut cmd = patcher_config.build_hlae_process("");
+        native::tool_versions::log_hlae_launch(&patcher_config);
         let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae)?;
         watch_for_error_dialogs(app, launcher);

@@ -45,6 +45,7 @@ fn config_for(export_dirs: &[&Path], codec: RenderCodec, ffmpeg: &str) -> Render
         max_concurrent_renders: 1,
         clip_tag: Some("v1/s/take0000/1/all".to_string()),
         resumable_renders: true,
+        live_thread_share: Default::default(),
     }
 }
 
@@ -972,6 +973,73 @@ async fn an_export_folder_with_a_hash_in_its_name_joins() {
     assert!(clip_file.starts_with(&export));
     assert_eq!(frame_hashes(&ffmpeg, &clip_file).len(), FRAMES);
     assert!(!export.join(SEGMENTS_DIR).exists());
+}
+
+/// After the join the row's Speed cell shows the whole render's speed, as a
+/// one-piece row keeps FFmpeg's last one, instead of going blank (#1512).
+#[tokio::test]
+#[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+async fn a_segmented_renders_speed_cell_ends_with_its_whole_speed() {
+    let ffmpeg = real_ffmpeg();
+    let root = Scratch::new("segmented_speed");
+    let take = make_take(&ffmpeg, &root, false, false);
+    let export = root.join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    let clip = clip_for(&take, None, false);
+    let config = config_for(&[&export], RenderCodec::ProRes422, &ffmpeg);
+    let updates = render(clip, config).await;
+    finished_clip(&updates);
+    let speeds: Vec<&String> = updates
+        .iter()
+        .filter_map(|u| match u {
+            RenderUpdate::Speed(_, s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    let joining = speeds
+        .iter()
+        .position(|s| s.starts_with("Joining"))
+        .expect("it was segmented");
+    let last = speeds.last().unwrap();
+    assert_eq!(
+        speeds.len(),
+        joining + 2,
+        "one speed after the join: {speeds:?}"
+    );
+    assert!(
+        last.ends_with("x)") && last.contains(" fps ("),
+        "the whole render's speed: {last:?}"
+    );
+}
+
+#[test]
+fn the_whole_render_speed_is_frames_over_time_against_the_takes_rate() {
+    let rate = FrameRate { num: 300, den: 1 };
+    let took = std::time::Duration::from_secs(100);
+    // 9,000 frames (30 s of take) in 100 s: 90 fps, 0.3x real time.
+    assert_eq!(whole_render_speed(9000, took, rate), "90.00 fps (0.3x)");
+    assert_eq!(
+        whole_render_speed(10_500, std::time::Duration::from_secs(219), rate),
+        "47.95 fps (0.16x)"
+    );
+    let ntsc = FrameRate {
+        num: 30000,
+        den: 1001,
+    };
+    assert_eq!(
+        whole_render_speed(2997, std::time::Duration::from_secs(10), ntsc),
+        "299.70 fps (10x)"
+    );
+}
+
+#[test]
+fn a_render_that_rendered_nothing_itself_shows_no_speed() {
+    let rate = FrameRate { num: 300, den: 1 };
+    assert_eq!(
+        whole_render_speed(0, std::time::Duration::from_secs(5), rate),
+        ""
+    );
+    assert_eq!(whole_render_speed(300, std::time::Duration::ZERO, rate), "");
 }
 
 /// A take whose last BMP can't be read (#1451 review): one piece renders

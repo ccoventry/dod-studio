@@ -1,6 +1,10 @@
 // strings/workspace.js: the app's text for the workspace: sessions, the demo queue, teams and the project file.
 // Part of the STRINGS catalog that ../strings.js assembles (#604).
 
+// The search for a moved demo ran out of time (or entries) before it had
+// looked everywhere (#1376): said wherever the search's answer is.
+const SEARCH_STOPPED_NOTE = 'The search for it stopped early, so a copy may be in a folder it did not reach. Use Locate… to pick the file.';
+
 export const WORKSPACE_STRINGS = {
   WORKSPACE: {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
@@ -236,17 +240,37 @@ export const WORKSPACE_STRINGS = {
       `${picked} isn't the ${name} that was scanned (its size or start is different), so this row's highlights won't line up with it.\n\nReplace the row with ${picked}? It's scanned fresh with its own highlights, and this row's statuses and notes are dropped.`,
     LOCATE_MISMATCH_CONFIRM: 'Replace with this demo',
     locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
-    missingDemosToast: (names) => {
+    missingDemosToast: (names, searchStopped = false) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
-      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
+      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
     },
+    // Appended to a missing-demo toast when the search for a copy stopped early.
+    SEARCH_STOPPED_NOTE,
     leftMissingToast: (names) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
       return `Left ${names.length} moved demo(s) as missing: ${shown}${more}. Each row has a Use found copy button.`;
     },
     USE_ALL_FOUND_COPIES: 'Use all found copies',
+    // Queued demos whose files went while Studio was open (demo_file_recheck.js);
+    // `found` of them have the same file found under another name or folder.
+    demoFilesGoneToast: (names, found, searchStopped = false) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      const rows = names.length === 1 ? 'Its row has' : 'Each row has';
+      const copy = found === 0 ? '' : ', or Use found copy where DoD Studio found the same file under another name';
+      return `No longer where the queue says: ${shown}${more}. ${rows} Locate… to point at it again${copy}.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
+    },
+    // Launch Preview, Review, Open in Demo Analyzer or Open Folder on a demo
+    // whose file isn't there.
+    demoFilesMissing: (names, found, searchStopped = false) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      const one = names.length === 1;
+      return `Not found: ${shown}${more}. ${one ? 'It was' : 'They were'} renamed, moved or deleted. `
+        + `Use Locate… on ${one ? 'its row' : 'their rows'} in the Master Demo Queue${found > 0 ? ', or Use found copy,' : ''} first.${searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''}`;
+    },
     foundCopiesGoneToast: (names) =>
       `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
     // #21: a scanned demo that is an identical copy of one already queued.

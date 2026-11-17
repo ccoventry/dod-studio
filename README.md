@@ -231,6 +231,14 @@ library's built-in initial delta table where one exists and returns a graceful
 parse failure otherwise. As of upstream v0.3.0 all 29 of those call sites are
 still present, so the patch is still required.
 
+The write path is hardened the same way (#1510): re-encoding a frame whose
+deltas do not fit the demo's own delta tables (a field the table lacks or
+describes twice, a value narrower than its type, an unwritable width) returns a
+`dem::write_error::WriteError` naming the frame, table and field, where upstream
+unwrapped. `Demo::write_to_bytes` and the cancellable writers return a `Result`
+for it, and a field whose name is not UTF-8 is written back by its parse-time
+key.
+
 ## Licensing
 
 This project is MIT (see `LICENSE`), which carries two copyright lines.

@@ -68,7 +68,7 @@ fn main() {
         "injected {n} breadcrumbs every {interval:.1}s across {first_time:.1}s..{last_time:.1}s"
     );
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
 

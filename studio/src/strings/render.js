@@ -435,13 +435,26 @@ export const RENDER_STRINGS = {
     RECOVER_BUTTON: '🔄 Recover Render Batch',
     DISCARD_BUTTON: '🗑 Discard',
   },
-  // ── Closing while renders run (render_close_prompt.js, #1439) ──
+  // ── Closing while renders or a combine run (render_close_prompt.js, #1439, #1496) ──
   RENDER_CLOSE_MODAL: {
-    TITLE: 'Renders running',
-    message: (running) => `${running === 1 ? 'A render is' : `${running} renders are`} running. Closing DoD Studio stops ${running === 1 ? 'it' : 'them'} and removes the unfinished clip${running === 1 ? '' : 's'}.`,
-    CLOSE_BUTTON: 'Stop renders and close',
+    title: (running, combining) => (running === 0 && combining ? 'Combine running' : 'Renders running'),
+    message: (running, combining = false) => {
+      if (running === 0) {
+        return 'A combine is running. Closing DoD Studio stops it and removes the unfinished video; a file already under its name stays as it was.';
+      }
+      const renders = `${running === 1 ? 'A render is' : `${running} renders are`} running`;
+      if (combining) {
+        return `${renders}, and a combine. Closing DoD Studio stops them and removes the unfinished files.`;
+      }
+      return `${renders}. Closing DoD Studio stops ${running === 1 ? 'it' : 'them'} and removes the unfinished clip${running === 1 ? '' : 's'}.`;
+    },
+    closeButton: (running, combining) => {
+      if (running === 0) return 'Stop combine and close';
+      return combining ? 'Stop all and close' : 'Stop renders and close';
+    },
     KEEP_OPEN_BUTTON: 'Keep Studio open',
-    logLine: (running, closed) => `Close asked while ${running} render(s) ran: ${closed ? 'closed, stopping them' : 'kept Studio open'}`,
+    logLine: (running, closed, combining = false) =>
+      `Close asked while ${running} render(s)${combining ? ' and a combine' : ''} ran: ${closed ? 'closed, stopping them' : 'kept Studio open'}`,
   },
   // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
   COMBINE: {

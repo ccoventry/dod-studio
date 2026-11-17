@@ -20,7 +20,7 @@
   <div id="result"></div>
 
   <script type="module">
-    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+    import { initMasterPane, renderMasterList, removeQueuedDemo, getCheckedDemoPaths } from '/src/master_pane.js';
 
     const runtime = { writable: true, configurable: true, enumerable: false };
     const missing = (demo, foundAt) => {
@@ -52,6 +52,9 @@
     // A redraw, as the queue does after a change (the multi-map row asks
     // demo_split_status again then).
     window.__rerender = render;
+    // Review's missing-demo Remove (#1376) and the ticked rows it must keep.
+    window.__removeQueued = (name) => removeQueuedDemo(demos.find((d) => d.name === name));
+    window.__checked = () => [...getCheckedDemoPaths()];
     window.__harnessReady = true;
   </script>
 </body>

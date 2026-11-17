@@ -770,8 +770,11 @@ pub fn clean_demo_decals(
     // straight from `demo_bytes`; only the frames `parsed_messages_mut` opened
     // are re-encoded. See that function for why it is the only way in.
     match demo.write_to_bytes_reusing_source_cancellable(demo_bytes, &|| cancel.requested()) {
-        Some(bytes) => Ok((bytes, stats)),
-        None => Err(DecalCleanError::Cancelled),
+        Ok(Some(bytes)) => Ok((bytes, stats)),
+        Ok(None) => Err(DecalCleanError::Cancelled),
+        Err(e) => Err(DecalCleanError::Failed(
+            crate::messages::demo_could_not_be_rewritten(e),
+        )),
     }
 }
 

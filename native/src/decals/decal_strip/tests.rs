@@ -98,6 +98,7 @@ fn demo_bytes() -> Vec<u8> {
         _aux: Some(Aux::new2()),
     }
     .write_to_bytes()
+    .unwrap()
 }
 
 /// Every world-decal payload in the demo, by frame ordinal.
@@ -193,6 +194,7 @@ fn a_real_demo_survives_the_verbatim_write() {
     // writes the engine's own frame counts.
     let reused = demo
         .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+        .unwrap()
         .unwrap();
     assert!(reused == bytes, "an untouched real demo did not round-trip");
 
@@ -203,9 +205,25 @@ fn a_real_demo_survives_the_verbatim_write() {
     assert!(wall + spray > 0, "the demo has no decals to strip");
     let reused = demo
         .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+        .unwrap()
         .unwrap();
     assert!(
-        reused == demo.write_to_bytes(),
+        reused == demo.write_to_bytes().unwrap(),
         "the verbatim write disagrees with a full re-encode after stripping"
     );
+}
+
+/// A demo whose frames the strip re-encodes but its own delta tables can't
+/// (one changed mid-file) fails the clean with the reason, where the write
+/// used to abort the app. #1510.
+#[test]
+fn a_demo_its_tables_cannot_re_encode_fails_the_clean_with_the_reason() {
+    let bytes = crate::test_support::ci_fixture_with_a_table_changed_at_the_end();
+    let opts = DecalCleanOptions::default();
+    let err = clean_demo_decals(&bytes, &[], &opts, crate::decals::Cancel::never())
+        .expect_err("the stripped frames can't be re-encoded");
+    let why = err.to_string();
+    assert!(matches!(err, DecalCleanError::Failed(_)), "{why}");
+    assert!(why.contains("could not be written"), "{why}");
+    assert!(why.contains("`entity_state_t`"), "{why}");
 }

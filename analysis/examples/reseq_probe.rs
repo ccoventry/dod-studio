@@ -104,7 +104,7 @@ fn main() {
     }
     println!("rewrote {rewritten} delta_sequence values");
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
     match open_demo_from_bytes(&out) {

@@ -75,6 +75,9 @@ pub mod blender;
 /// Installing the VEGAS Pro nameplate script into its script menu (#429).
 pub mod vegas;
 
+/// Which HLAE and game build a launch used, for the activity log (#1492).
+pub mod tool_versions;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 pub mod obs;
 

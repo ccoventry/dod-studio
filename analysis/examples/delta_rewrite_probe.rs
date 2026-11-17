@@ -104,7 +104,7 @@ fn main() {
     }
     println!("rewrote {edited} origin[0] fields (+{SHIFT})");
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!("bytes {} -> {}", bytes.len(), out.len());
 
