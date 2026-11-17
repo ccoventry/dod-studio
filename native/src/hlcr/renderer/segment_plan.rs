@@ -638,6 +638,7 @@ mod tests {
             max_concurrent_renders: 1,
             clip_tag: None,
             resumable_renders: true,
+            live_thread_share: Default::default(),
         }
     }
 

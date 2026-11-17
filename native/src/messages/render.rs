@@ -193,6 +193,41 @@ pub fn joining_segments(count: usize) -> String {
     format!("Joining {count} segments")
 }
 
+/// One change in a segmented render's FFmpeg threads (#1512): the count
+/// from segment `segment` (counted from 1) on.
+pub fn thread_change_step(threads: usize, segment: usize) -> String {
+    format!("→ {threads} at segment {segment}")
+}
+
+/// A segmented render's FFmpeg threads changed between its segments as
+/// other renders started or finished (#1512): `changes` is how
+/// (`5 → 16 at segment 11`), over `segments` segments.
+pub fn segment_threads_changed(job_id: impl Display, changes: &str, segments: usize) -> String {
+    format!("[render] job {job_id}: FFmpeg threads went {changes} of {segments}")
+}
+
+/// The Render tab row's speed cell once a segmented render is done (#1512):
+/// the whole render's frames a second and its speed against the take's
+/// rate, in the form FFmpeg's own `fps` and `speed` take while it runs.
+pub fn whole_render_speed(fps: f64, speed: f64) -> String {
+    format!("{fps:.2} fps ({}x)", three_significant(speed))
+}
+
+/// `speed` to three significant figures without trailing zeros, as
+/// FFmpeg's `%.3g` prints its `speed=` for the range a render reaches.
+fn three_significant(speed: f64) -> String {
+    if !speed.is_finite() || speed <= 0.0 {
+        return "0".to_string();
+    }
+    let decimals = (2 - speed.log10().floor() as i32).max(0) as usize;
+    let text = format!("{speed:.decimals$}");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        text
+    }
+}
+
 /// Why a join that FFmpeg finished without an error is no clip: it holds
 /// fewer frames than the segments did when each was counted, so one was
 /// damaged on the disk since. The segments are removed with it, so the next

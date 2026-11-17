@@ -183,6 +183,7 @@ fn a_job_started_after_the_setting_changes_gets_the_new_value() {
         thread_share: 1,
         clip_tag: None,
         resumable: handles.resumable.is_on(),
+        live_thread_share: Default::default(),
     };
     let config = RenderConfig::default();
     assert!(job_config(&config, &jobs[0], per_job(&handles)).resumable_renders);
@@ -192,6 +193,35 @@ fn a_job_started_after_the_setting_changes_gets_the_new_value() {
         config.resumable_renders,
         "the batch's own config is not what decides"
     );
+}
+
+/// A running job reads the share the scheduler sets after it started, so
+/// its next segment recounts its threads (#1512).
+#[test]
+fn a_started_job_follows_the_schedulers_thread_share() {
+    let jobs = recovered_jobs(&session(vec![autosave_job(
+        "a",
+        AutosaveJobStatus::Pending,
+        true,
+    )]));
+    let live = native::hlcr::renderer::thread_share::LiveThreadShare::new(3);
+    let config = job_config(
+        &RenderConfig::default(),
+        &jobs[0],
+        PerJob {
+            export_directories: Vec::new(),
+            thread_share: 3,
+            clip_tag: None,
+            resumable: true,
+            live_thread_share: live.clone(),
+        },
+    );
+    live.set(1);
+    assert_eq!(
+        config.max_concurrent_renders, 3,
+        "the share it started with"
+    );
+    assert_eq!(config.live_thread_share.current(), Some(1));
 }
 
 #[test]
