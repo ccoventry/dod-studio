@@ -15,6 +15,7 @@ use lock_recover::{lock_or_recover, read_or_recover, write_or_recover};
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
 use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
+use native::hlcr::renderer::thread_share::{Game, LiveThreadShare, ShareCount, thread_share};
 use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_peak_reservation_estimate,
     job_reservation_estimate, run_render_job,
@@ -409,6 +410,23 @@ fn start_order(queued: impl IntoIterator<Item = (usize, bool)>) -> Vec<usize> {
     first.into_iter().chain(rest).map(|(i, _)| i).collect()
 }
 
+/// The thread share for the jobs as they stand plus `starting` about to
+/// start: the Rendering ones and those, or while a capture records, the
+/// batch's own `batch_renders` (`thread_share`, #1512).
+fn share_for(
+    jobs: &[RenderJobRuntime],
+    starting: usize,
+    batch_renders: usize,
+    game: Game,
+) -> usize {
+    let rendering = jobs.iter().filter(|j| j.status == "Rendering").count();
+    thread_share(ShareCount {
+        running: rendering + starting,
+        batch_renders,
+        game,
+    })
+}
+
 /// One render job of a take, for Render While Capturing's space check (#861).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TakeRender {
@@ -435,12 +453,14 @@ struct SchedulerHandles {
 
 /// What one job's config takes from the moment it starts rather than from
 /// the batch's: the export folders (#1430) and "Resumable renders" (#1451)
-/// as Settings has them now, its share of the threads, and its clip tag.
+/// as Settings has them now, its share of the threads (and the live one its
+/// segments recount from, #1512), and its clip tag.
 struct PerJob {
     export_directories: Vec<PathBuf>,
     thread_share: usize,
     clip_tag: Option<String>,
     resumable: bool,
+    live_thread_share: LiveThreadShare,
 }
 
 /// The config `job` renders with: codec and fps from the job itself, not
@@ -455,6 +475,7 @@ fn job_config(config: &RenderConfig, job: &RenderJobRuntime, per_job: PerJob) ->
         max_concurrent_renders: per_job.thread_share,
         clip_tag: per_job.clip_tag,
         resumable_renders: per_job.resumable,
+        live_thread_share: per_job.live_thread_share,
         ..config.clone()
     }
 }
@@ -947,9 +968,10 @@ fn apply_render_update(
 
 /// Concurrent job scheduler — ports dev's `HlcrState::update_channels`
 /// per-frame scheduling loop (`hlcr/ui.rs`, deleted at HEAD) to a periodic
-/// async poll: starts queued jobs up to `max_concurrent_renders`, giving a
-/// lone job all available CPU threads via the same `effective_concurrent`
-/// calculation dev used, and tears down (wake lock, autosave lockfile) once
+/// async poll: starts queued jobs up to `max_concurrent_renders`, sharing
+/// the CPU threads between the renders running (`share_for`, so a lone job
+/// gets them all) and keeping that share current for running segmented
+/// renders (#1512), and tears down (wake lock, autosave lockfile) once
 /// nothing is Rendering or Queued.
 fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConfig) {
     tokio::spawn(async move {
@@ -964,6 +986,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         // start order reads it under the jobs lock every pass while a capture
         // holds (#1438).
         let mut take_volumes: HashMap<String, String> = HashMap::new();
+        // The thread share every job of this run follows (#1512), set at the
+        // end of each pass.
+        let live_thread_share = LiveThreadShare::new(config.max_concurrent_renders.max(1));
 
         loop {
             // Studio is closing (#1439): its way out has stopped the renders
@@ -995,6 +1020,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 config.max_concurrent_renders,
                 game_busy.then(|| handles.renders_while_capturing.load(Ordering::SeqCst)),
             );
+            let game = Game::recording_if(game_busy);
             let mut dirty = false;
             let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
@@ -1039,18 +1065,14 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     let limit = max_concurrent - active_count;
                     let queued_count = guard.iter().filter(|j| j.status == "Queued").count();
                     let jobs_starting = queued_count.min(limit);
-                    // Real concurrent count (already-running + newly starting), capped —
-                    // gives a lone job all available threads instead of only 1/max of them.
-                    let effective_concurrent =
-                        (active_count + jobs_starting).min(max_concurrent).max(1);
-                    // While a capture runs (#861) each render takes the
-                    // threads one of the batch's usual renders would, not
-                    // every core: the game needs the rest.
-                    let thread_share = if game_busy {
-                        config.max_concurrent_renders.max(1)
-                    } else {
-                        effective_concurrent
-                    };
+                    // The renders running once these start, so a lone job
+                    // gets every thread instead of only 1/max of them; while
+                    // a capture runs (#861), one usual render's share.
+                    let starting_share =
+                        share_for(&guard, jobs_starting, config.max_concurrent_renders, game);
+                    // Before any job starts: one spawned in this pass must
+                    // not read the share of the pass before (#1512).
+                    live_thread_share.set(starting_share);
 
                     let room_volume = read_or_recover(&handles.room_volume).clone();
                     let order = start_order(
@@ -1119,9 +1141,10 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                                 job,
                                 PerJob {
                                     export_directories: exports_now.to_vec(),
-                                    thread_share,
+                                    thread_share: starting_share,
                                     clip_tag,
                                     resumable: handles.resumable.is_on(),
+                                    live_thread_share: live_thread_share.clone(),
                                 },
                             );
                             let tx2 = tx.clone();
@@ -1141,6 +1164,11 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         }
                     }
                 }
+                // Every pass, not only when a job starts: a segmented
+                // render's next segment takes the threads the renders that
+                // finished left (#1512), or keeps the batch's share while a
+                // capture runs.
+                live_thread_share.set(share_for(&guard, 0, config.max_concurrent_renders, game));
                 started > 0
             };
             for (take_folder, attempt) in attempts_started {
@@ -1378,6 +1406,7 @@ async fn scan_and_merge(
         max_concurrent_renders: payload.max_concurrent_renders.max(1),
         clip_tag: None,
         resumable_renders: true,
+        live_thread_share: Default::default(),
     };
     let new_job_settings = NewJobSettings {
         codec: config.target_codec,

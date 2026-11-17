@@ -141,6 +141,7 @@ handshake tests live — don't treat the copy here as authoritative.
 | --- | --- |
 | `scan_mem_probe` | What does parsing demos N-at-a-time cost in peak memory? |
 | `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
+| `render_threads_probe` | How much sooner does a long segmented render finish beside two short ones when each segment recounts its FFmpeg threads (#1512)? Synthetic 2560x1440 300 fps BMP takes of hard links; needs ~12 GB free for the long render and its segments. |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
 `scan_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,

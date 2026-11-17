@@ -105,6 +105,19 @@ pub fn scan_failed_to_read_file(err: impl Display) -> String {
     format!("Failed to read file: {}", err)
 }
 
+// ── demo writes (decal flush, entity trim, split, highlight patch) ───────
+
+/// An edited demo whose frames do not fit its own delta tables, so it can't
+/// be written back out (`dem::write_error::WriteError`, #1510).
+pub fn demo_could_not_be_rewritten(err: impl Display) -> String {
+    format!("the edited demo could not be written: {err}")
+}
+
+/// One map of a split that could not be written ([`demo_could_not_be_rewritten`]).
+pub fn split_part_not_written(part: usize, map: &str, err: impl Display) -> String {
+    format!("map {part} ({map}) could not be written: {err}")
+}
+
 // ── shared/hlae_ffmpeg.rs ────────────────────────────────────────────────
 
 pub fn not_a_file(path: impl Display) -> String {
