@@ -94,6 +94,16 @@ neg_cmp_op_on_partial_ord = "allow"
 # One site, in the vendored dem-patch parser. Correct as written, and that
 # crate's bit-level code is not somewhere to make cosmetic edits.
 unnecessary_unwrap = "allow"
+# No `unwrap()` / `expect()` outside tests (#1179). Release builds abort on a
+# panic, and in the hook DLL a panic takes hl.exe down with it, so bad input
+# from a demo, a file, the OS or the user returns an error instead. A call
+# that truly cannot fail carries `#[expect(clippy::unwrap_used, reason = "...")]`
+# on the smallest item, saying why (docs/coding_standards.md). `clippy.toml`
+# allows both in tests; dem-patch (vendored), the dev-only examples and probe
+# bins, build scripts and integration-test helpers allow them at their crate or
+# file root.
+unwrap_used = "warn"
+expect_used = "warn"
 
 [patch.crates-io]
 dem = { path = "./dem-patch" }
