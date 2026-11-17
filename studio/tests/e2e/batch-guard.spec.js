@@ -17,7 +17,9 @@ test.beforeEach(async ({ page }) => {
   }, GIB);
   await page.goto('/index.html');
   await expect(page.locator('#load-project-btn')).toBeAttached();
-  await page.waitForFunction(() => (window.__mockEventListeners.capture_status || []).length >= 2);
+  // main.js's boot awaits the settings and more after the page loads; its
+  // listeners, menus and buttons exist only once it reports started (#1511).
+  await page.waitForFunction(() => window.dodStudioBoot?.state() === 'started');
 });
 
 const batch = (page, running) => page.evaluate((r) => window.__mockEmit('capture_status', { running: r }), running);
