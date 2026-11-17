@@ -177,7 +177,14 @@ fn roundtrip_dir(dir: &str) {
     for p in &paths {
         match dem::open_demo(p) {
             Ok(demo) => {
-                let bytes = demo.write_to_bytes();
+                let bytes = match demo.write_to_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        println!("WRITE-ERR {} -- {e}", p.display());
+                        refused += 1;
+                        continue;
+                    }
+                };
                 println!("{:016x} {:>12} {}", fnv1a(&bytes), bytes.len(), p.display());
                 total_bytes += bytes.len() as u64;
                 done += 1;

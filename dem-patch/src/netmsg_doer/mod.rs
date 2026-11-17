@@ -19,7 +19,8 @@ use crate::nom_helper::{Result, null_string};
 use crate::bit::{BitReader, BitSliceCast};
 use crate::byte_writer::ByteWriter;
 
-use crate::types::{AuxRefCell, NetMessage, UserMessage};
+use crate::types::{Aux, AuxRefCell, Delta, NetMessage, UserMessage};
+use crate::write_error::WriteErrorKind;
 use crate::{
     bit::BitWriter,
     delta::{parse_delta, write_delta},
@@ -155,11 +156,42 @@ impl NetMessage {
         Ok((i, Some(message)))
     }
 
+    /// Prefer [`NetMessage::try_write`]: a message the demo's delta tables
+    /// cannot encode comes out of this half-written, with the reason left in
+    /// `aux.write_error`.
     pub fn write(&self, aux: AuxRefCell) -> ByteVec {
         match self {
             NetMessage::UserMessage(what) => what.write(aux),
             NetMessage::EngineMessage(what) => what.write(aux),
         }
+    }
+
+    /// [`NetMessage::write`], failing where a delta does not fit its table
+    /// rather than writing a message the game would misread. #1510.
+    pub fn try_write(&self, aux: AuxRefCell) -> std::result::Result<ByteVec, WriteErrorKind> {
+        aux.borrow().write_error.take();
+        let bytes = self.write(aux.clone());
+        match aux.borrow().write_error.take() {
+            Some(kind) => Err(kind),
+            None => Ok(bytes),
+        }
+    }
+}
+
+/// `write_delta` with the decoder table named `table`, for a doer's `write`.
+/// A failure is kept in `aux.write_error` for [`NetMessage::try_write`],
+/// since `Doer::write` cannot return one; the first failure is the one kept.
+/// Was `write_delta(.., aux.delta_decoders.get(table).unwrap(), ..)`. #1510.
+fn write_delta_with(aux: &Aux, table: &str, delta: &Delta, bw: &mut BitWriter) {
+    let written = match aux.delta_decoders.get(table) {
+        Some(decoder) => write_delta(delta, decoder, bw).map_err(|error| WriteErrorKind::Delta {
+            table: table.to_string(),
+            error,
+        }),
+        None => Err(WriteErrorKind::MissingDeltaTable(table.to_string())),
+    };
+    if let Err(kind) = written {
+        aux.write_error.borrow_mut().get_or_insert(kind);
     }
 }
 

@@ -28,7 +28,7 @@ fn main() {
         .expect("usage: writer_fidelity <healthy.dem>");
     let original = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&original).expect("parse");
-    let rewritten = demo.write_to_bytes();
+    let rewritten = demo.write_to_bytes().expect("re-encode");
 
     println!("{path}");
     println!("  original:  {} bytes", original.len());

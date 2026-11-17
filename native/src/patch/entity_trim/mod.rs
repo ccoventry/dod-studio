@@ -206,6 +206,7 @@ pub fn trim_demo(bytes: &[u8], request: TrimRequest<'_>) -> Result<Outcome, Trim
     progress(Step::Writing);
     let out = demo
         .write_to_bytes_reusing_source_cancellable(bytes, cancel)
+        .map_err(|e| TrimError::CheckFailed(crate::messages::demo_could_not_be_rewritten(e)))?
         .ok_or(TrimError::Cancelled)?;
     // The parsed original goes before the copy is parsed, so the two (about
     // 12 times the file's size each) are never in memory together.
@@ -386,6 +387,7 @@ mod tests {
         assert!(applied.entries_dropped > 0);
         let out = demo
             .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+            .unwrap()
             .unwrap();
         check(
             &out,
@@ -511,6 +513,7 @@ mod tests {
         rewrite::apply(&mut demo, &dropping);
         let out = demo
             .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+            .unwrap()
             .unwrap();
         let after = check(
             &out,
