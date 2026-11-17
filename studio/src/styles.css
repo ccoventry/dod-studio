@@ -1097,6 +1097,18 @@ button.danger-btn {
   min-width: 4em !important;
 }
 
+/* Badges drop under a long name instead of squeezing it to nothing, and the
+   Actions cell may wrap so Locate, Use found copy and Remove drop to a second
+   line when the pane is too narrow for all three side by side (#1376). */
+#master-demo-table td.queue-name-cell {
+  flex-wrap: wrap;
+}
+
+#master-demo-table .locate-demo-btn,
+#master-demo-table .use-found-copy-btn {
+  white-space: nowrap;
+}
+
 #master-demo-table tr:hover {
   background: var(--wash-04);
 }

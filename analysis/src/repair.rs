@@ -185,6 +185,9 @@ pub enum RepairError {
     NothingParses,
     /// The spliced recording does not parse; the reason in words.
     DoesNotParse(String),
+    /// The joined recording does not fit its own delta tables, so it cannot
+    /// be written back out (#1510); the reason in words.
+    DoesNotWrite(String),
     Cancelled,
 }
 
@@ -197,6 +200,9 @@ impl std::fmt::Display for RepairError {
             }
             RepairError::DoesNotParse(why) => {
                 write!(f, "the joined recording does not read: {why}")
+            }
+            RepairError::DoesNotWrite(why) => {
+                write!(f, "the joined recording could not be written: {why}")
             }
             RepairError::Cancelled => f.write_str("cancelled"),
         }
@@ -295,6 +301,7 @@ pub fn repair_demo(bytes: &[u8], hooks: RepairHooks) -> Result<RepairOutcome, Re
     let ramp_frames: usize = report.joins.iter().map(|j| j.ramp_frames).sum();
     let repaired = demo
         .write_to_bytes_reusing_source_cancellable(&bridged.bytes, is_cancelled)
+        .map_err(|e| RepairError::DoesNotWrite(e.to_string()))?
         .ok_or(RepairError::Cancelled)?;
     drop(demo);
     drop(bridged);

@@ -98,11 +98,7 @@ impl Doer for SvcEvent {
                 bw.append_bit(event.has_delta.unwrap());
 
                 if event.has_delta.unwrap() {
-                    write_delta(
-                        event.delta.as_ref().unwrap(),
-                        aux.delta_decoders.get("event_t\0").unwrap(),
-                        &mut bw,
-                    );
+                    write_delta_with(&aux, "event_t\0", event.delta.as_ref().unwrap(), &mut bw);
                 }
             }
 

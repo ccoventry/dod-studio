@@ -51,9 +51,9 @@ describe('confirmCloseDuringRenders', () => {
     expect(ok).toBe(true);
     expect(dialog.calls).toHaveLength(1);
     const { message, opts } = dialog.calls[0];
-    expect(message).toBe(s.message(2));
-    expect(opts).toMatchObject({ title: s.TITLE, confirmLabel: s.CLOSE_BUTTON, cancelLabel: s.KEEP_OPEN_BUTTON, destructive: true });
-    expect(log).toHaveBeenCalledWith(s.logLine(2, true));
+    expect(message).toBe(s.message(2, false));
+    expect(opts).toMatchObject({ title: 'Renders running', confirmLabel: 'Stop renders and close', cancelLabel: s.KEEP_OPEN_BUTTON, destructive: true });
+    expect(log).toHaveBeenCalledWith(s.logLine(2, true, false));
   });
 
   it('keeps Studio open when the user says so', async () => {
@@ -61,7 +61,27 @@ describe('confirmCloseDuringRenders', () => {
     const log = vi.fn();
     const ok = await confirmCloseDuringRenders({ fetchJobs: async () => rows('Rendering'), log });
     expect(ok).toBe(false);
-    expect(log).toHaveBeenCalledWith(s.logLine(1, false));
+    expect(log).toHaveBeenCalledWith(s.logLine(1, false, false));
+  });
+
+  // #1496: closing stops a combine too, so it asks for one.
+  it('asks when only a combine is running, naming the combine', async () => {
+    const log = vi.fn();
+    const ok = await confirmCloseDuringRenders({ fetchJobs: async () => rows('Queued'), log, isCombining: () => true });
+    expect(ok).toBe(true);
+    expect(dialog.calls).toHaveLength(1);
+    const { message, opts } = dialog.calls[0];
+    expect(message).toBe(s.message(0, true));
+    expect(message).toMatch(/^A combine is running\./);
+    expect(opts).toMatchObject({ title: 'Combine running', confirmLabel: 'Stop combine and close', destructive: true });
+    expect(log).toHaveBeenCalledWith(s.logLine(0, true, true));
+  });
+
+  it('names both when renders and a combine run', async () => {
+    await confirmCloseDuringRenders({ fetchJobs: async () => rows('Rendering'), log: vi.fn(), isCombining: () => true });
+    const { message, opts } = dialog.calls[0];
+    expect(message).toMatch(/^A render is running, and a combine\./);
+    expect(opts.confirmLabel).toBe('Stop all and close');
   });
 
   it('says one render or several in plain words', () => {

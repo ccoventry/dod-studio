@@ -149,23 +149,11 @@ impl Doer for SvcPacketEntities {
 
             let between = entity.entity_index > 0 && entity.entity_index <= aux.max_client as u16;
             if between {
-                write_delta(
-                    &entity.delta,
-                    aux.delta_decoders.get("entity_state_player_t\0").unwrap(),
-                    &mut bw,
-                )
+                write_delta_with(&aux, "entity_state_player_t\0", &entity.delta, &mut bw)
             } else if entity.has_custom_delta {
-                write_delta(
-                    &entity.delta,
-                    aux.delta_decoders.get("custom_entity_state_t\0").unwrap(),
-                    &mut bw,
-                )
+                write_delta_with(&aux, "custom_entity_state_t\0", &entity.delta, &mut bw)
             } else {
-                write_delta(
-                    &entity.delta,
-                    aux.delta_decoders.get("entity_state_t\0").unwrap(),
-                    &mut bw,
-                )
+                write_delta_with(&aux, "entity_state_t\0", &entity.delta, &mut bw)
             }
         }
 

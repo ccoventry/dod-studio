@@ -129,12 +129,19 @@ frames. Meanwhile eight of them are HLTV by the `analysis` crate's own
 implementation is `native/src/obs/client.rs`, which is where the pinned
 handshake tests live — don't treat the copy here as authoritative.
 
+### Child processes
+
+| Probe | Question it answers |
+| --- | --- |
+| `combine_exit_probe` | Does a combine's FFmpeg end when the process that started it is killed (`taskkill /F`)? Runs one combine, as Studio's Combine does (#1496) |
+
 ### Performance
 
 | Probe | Question it answers |
 | --- | --- |
 | `scan_mem_probe` | What does parsing demos N-at-a-time cost in peak memory? |
 | `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
+| `render_threads_probe` | How much sooner does a long segmented render finish beside two short ones when each segment recounts its FFmpeg threads (#1512)? Synthetic 2560x1440 300 fps BMP takes of hard links; needs ~12 GB free for the long render and its segments. |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
 `scan_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,

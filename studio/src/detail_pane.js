@@ -45,13 +45,17 @@ let currentOnDirty = null;
 let currentGetProjectTeams = () => null;
 // Each row's capture history (#439), made once the project's take index is known.
 let captureHistory = null;
+// demo_file_recheck.js's ensurePresent: Launch Preview and the analyzer button
+// look at the demo's file first, so one renamed away says so (#21).
+let currentEnsureDemoFiles = async () => true;
 
 // The first argument (every demo) names the highlights a take is shared with
 // (capture_history.js).
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex } = {}) {
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex, ensureDemoFiles } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
+  if (ensureDemoFiles) currentEnsureDemoFiles = ensureDemoFiles;
   captureHistory = getTakeIndex
     ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, locateVideos: locateRenderedVideos, reveal: revealInExplorer })
     : null;
@@ -235,6 +239,11 @@ window.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (!currentDemo || !currentDemo.streaks) return;
+      // Disabled while it looks: a file on a sleeping drive can take a while.
+      btnLaunchPreview.disabled = true;
+      const present = await currentEnsureDemoFiles([currentDemo]);
+      updatePreviewButtonStates();
+      if (!present) return;
       const highlights = allPreviewableStreaks(currentDemo);
       // A demo with no camera data plays as a frozen view (#920).
       if (!(await confirmNoCameraData([currentDemo], { preview: true }))) return;
@@ -360,7 +369,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
       telemetryBtn.onclick = null;
     } else {
       telemetryBtn.disabled = false;
-      telemetryBtn.onclick = () => {
+      telemetryBtn.onclick = async () => {
+        if (!(await currentEnsureDemoFiles([demo]))) return;
         switchNavTab('demo-analyzer');
         openAnalyzerDemo(demo.path);
       };

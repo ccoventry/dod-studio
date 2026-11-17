@@ -978,8 +978,13 @@ pub fn split_file_report(
             );
         };
         match part.write_to_bytes_reusing_source_cancellable(&bytes, cancel) {
-            Some(out) => Job::Check(k, i, out),
-            None => Job::Settled(k, i, MapOutcome::Cancelled),
+            Ok(Some(out)) => Job::Check(k, i, out),
+            Ok(None) => Job::Settled(k, i, MapOutcome::Cancelled),
+            Err(e) => Job::Settled(
+                k,
+                i,
+                MapOutcome::Failed(crate::messages::split_part_not_written(i + 1, &seg.map, e)),
+            ),
         }
     });
     let check = |k: usize, i: usize, out: Vec<u8>| -> MapOutcome {
