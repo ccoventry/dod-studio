@@ -2,7 +2,7 @@
 // OBS from Configuration: Test OBS Connection, stopping a recording a crashed
 // batch left running, and Launch OBS.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::Path;
 
 use serde::Serialize;

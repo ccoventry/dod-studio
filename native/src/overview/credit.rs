@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use crate::patch::bsp_entities::MapEntity;
+use crate::maps::bsp_entities::MapEntity;
 
 /// The longest credit kept, in characters.
 const MAX_CHARS: usize = 60;

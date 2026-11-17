@@ -83,6 +83,14 @@ pub fn queue_batch_found(
     )
 }
 
+/// Configuration › Render's "Resumable renders" was turned on or off (#1451).
+pub fn resumable_turned(on: bool) -> String {
+    format!(
+        "[settings] Resumable renders turned {}",
+        if on { "on" } else { "off" }
+    )
+}
+
 pub const START_REJECTED: &str =
     "[render] start_queued_render rejected: a batch is already in progress";
 

@@ -133,7 +133,7 @@ fn advance(window: [f32; 3], now: f32, new: Option<(f32, f32)>) -> [f32; 3] {
     }
 }
 
-/// Called by `engine.rs` after every live `V_CalcRefdef`.
+/// Called by `engine/client_exports.rs` after every live `V_CalcRefdef`.
 pub fn after_calc_refdef() {
     CALCS.fetch_add(1, Ordering::Relaxed);
 }

@@ -28,7 +28,7 @@
 //! `FCVAR_ARCHIVE` would make the engine write these into the user's
 //! `config.cfg` when it quits. It is not set. The pipeline's standing rule is
 //! that the game's own `.cfg` files belong to the user and are detected and
-//! warned about, never written (`native/src/patch/cfg_scan.rs`, and the rule in
+//! warned about, never written (`native/src/game_config/cfg_scan.rs`, and the rule in
 //! `CLAUDE.md`), and a capture-time DLL quietly adding lines to `config.cfg`
 //! is exactly that. Setting from a `.cfg` or the launch line still works
 //! without archiving, which is the part that retires the environment

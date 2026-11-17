@@ -7,6 +7,11 @@
 //! rejected by the engine.
 //!
 //!     cargo run --release -p analysis --example delta_seq_probe -- <demo> [around-time]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};

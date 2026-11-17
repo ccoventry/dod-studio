@@ -3,7 +3,7 @@
 //! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,7 +89,8 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         // Read fresh, not scan_cached: the user may have just edited movie.cfg.
         if let Some(game) = exe.parent() {
-            let configs = native::patch::cfg_scan::scan(&native::shared::paths::mod_dir(game));
+            let configs =
+                native::game_config::cfg_scan::scan(&native::shared::paths::mod_dir(game));
             status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
         }
         status

@@ -18,11 +18,13 @@ use source_tree::{non_test_lines, read, relative, workspace_root};
 const CEILINGS: &[(&str, usize)] = &[
     // The Tauri managers: each wraps `native` for the UI; decisions belong in
     // `native` (docs/coding_standards.md, section 1).
-    ("studio/src-tauri/src/capture_manager.rs", 2250),
+    ("studio/src-tauri/src/capture_manager.rs", 2260), // +10: the project's field of view in the payload, the scheduled refusal and the config (#1085); the rules live in game_config::picture_fov
     ("studio/src-tauri/src/render_manager.rs", 2100),
     ("studio/src-tauri/src/scan_manager.rs", 1300),
     ("studio/src-tauri/src/audit_manager.rs", 850),
-    ("studio/src-tauri/src/settings_manager.rs", 820),
+    // Raised from 820 by #1293: four saved panel sizes, fields of the
+    // settings struct this file holds, so still its one job.
+    ("studio/src-tauri/src/settings_manager.rs", 850),
     // The hook DLL's biggest areas.
     ("goldsrc-hooks/src/studio_panel.rs", 3500),
     ("goldsrc-hooks/src/texture_hires.rs", 4050),
@@ -31,7 +33,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("goldsrc-hooks/src/review.rs", 1500),
     ("goldsrc-hooks/src/demo_seek.rs", 1350),
     // `native`.
-    ("native/src/patch/cfg_scan.rs", 1300),
+    ("native/src/game_config/cfg_scan.rs", 1300),
 ];
 
 #[test]

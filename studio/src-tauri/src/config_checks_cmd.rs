@@ -1,11 +1,11 @@
 // config_checks_cmd.rs
 // The Capture tab's advice on its settings: the config-file warnings
-// (`native::patch::cfg_report`) and how long the pre-roll and post-roll need
+// (`native::game_config::cfg_report`) and how long the pre-roll and post-roll need
 // to be. Both only convert the frontend's arguments and call `native`.
 
 use crate::capture_manager::CustomCommandPayload;
+use native::game_config::cfg_report::{CfgReport, CfgReportRequest, cfg_report};
 use native::patch::CustomCommand;
-use native::patch::cfg_report::{CfgReport, CfgReportRequest, cfg_report};
 use serde::{Deserialize, Serialize};
 
 /// What the game's own config files set, and what the app's init commands will
@@ -37,7 +37,7 @@ pub async fn scan_game_configs(
         .map_err(crate::messages::config_scan_failed)
 }
 
-/// One value stated for `mirv_fov` (`native::patch::picture_fov::StatedFov`):
+/// One value stated for `mirv_fov` (`native::game_config::picture_fov::StatedFov`):
 /// `file` the config's name, `None` for a line of Initial Commands itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,8 +47,8 @@ pub struct StatedFovRow {
     pub line: usize,
 }
 
-impl From<&native::patch::picture_fov::StatedFov> for StatedFovRow {
-    fn from(s: &native::patch::picture_fov::StatedFov) -> Self {
+impl From<&native::game_config::picture_fov::StatedFov> for StatedFovRow {
+    fn from(s: &native::game_config::picture_fov::StatedFov) -> Self {
         StatedFovRow {
             value: s.value,
             file: s.file.as_ref().map(|f| {
@@ -62,7 +62,7 @@ impl From<&native::patch::picture_fov::StatedFov> for StatedFovRow {
 }
 
 /// What sets the field of view around a project's Initial Commands
-/// (`native::patch::picture_fov::FovSources`).
+/// (`native::game_config::picture_fov::FovSources`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FovSourcesReport {
@@ -81,7 +81,8 @@ pub async fn project_fov_sources(
     tokio::task::spawn_blocking(move || {
         let game_dir = native::shared::paths::mod_dir_for_exe(std::path::Path::new(&game_path))
             .filter(|d| d.is_dir());
-        let sources = native::patch::picture_fov::fov_sources(game_dir.as_deref(), &init_commands);
+        let sources =
+            native::game_config::picture_fov::fov_sources(game_dir.as_deref(), &init_commands);
         FovSourcesReport {
             from_lines: sources.from_lines.as_ref().map(StatedFovRow::from),
             configs: sources.configs.iter().map(StatedFovRow::from).collect(),

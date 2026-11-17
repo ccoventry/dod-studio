@@ -2,6 +2,7 @@
 //! folders it never enters (system folders, `.git`, `node_modules`, Windows),
 //! and path forms for comparing and showing.
 
+use lock_recover::lock_or_recover;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -295,7 +296,7 @@ fn walk_pool(
                 let mut zips = Vec::new();
                 loop {
                     let next = {
-                        let mut w = work.lock().unwrap_or_else(PoisonError::into_inner);
+                        let mut w = lock_or_recover(&work);
                         loop {
                             if cancel.load(Ordering::Relaxed) {
                                 break None;
@@ -328,14 +329,14 @@ fn walk_pool(
                         &mut demos,
                         want_zips.then_some(&mut zips),
                     );
-                    let mut w = work.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut w = lock_or_recover(&work);
                     w.pending.extend(subdirs.into_iter().rev());
                     w.busy -= 1;
                     drop(w);
                     ready.notify_all();
                 }
                 ready.notify_all();
-                let mut found = found.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut found = lock_or_recover(&found);
                 found.0.extend(demos);
                 found.1.extend(zips);
             });

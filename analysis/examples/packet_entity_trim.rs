@@ -34,6 +34,11 @@
 //! declared count against the carried-forward set and the target.
 //!
 //!     cargo run --release -p analysis --example packet_entity_trim -- <in.dem> <out.dem> [target] [map.bsp]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

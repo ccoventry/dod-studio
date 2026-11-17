@@ -14,7 +14,7 @@ import { stockMovieHint } from './stock_movie_cvars.js';
 /** At most this many suggestions show at once. */
 export const MAX_SUGGESTIONS = 12;
 
-// Copies of native::patch::cfg_scan's tiers (command_suggest.test.js checks
+// Copies of native::game_config::cfg_scan's tiers (command_suggest.test.js checks
 // them against cfg_scan.rs). Banned for two reasons, so two lists.
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
   'r_norefresh', 'ds_capture_batch', 'ds_capture_schedule', 'ds_player_spray'];

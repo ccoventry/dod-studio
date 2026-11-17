@@ -16,7 +16,7 @@
 //! ## How
 //!
 //! Five pointers in `client.dll`'s own `gEngfuncs` copy are redirected here
-//! (the pattern `engine::watch_client_commands` uses for `pfnClientCmd`: a
+//! (the pattern `engine::client_cmd::watch_client_commands` uses for `pfnClientCmd`: a
 //! struct client.dll owns, not the engine's table). `SPR_Load` records which
 //! handle is which path; `SPR_Set` remembers the handle the HUD picked and
 //! whether its sheet is hidden; the three draws return early when the sheet
@@ -29,7 +29,7 @@
 //! (#428): `SPR_Set` also notes whether the sheet is one of the crosshair's,
 //! and a draw of it goes through `player_crosshair::swap`.
 //!
-//! Installed from `engine.rs` as soon as client.dll's `Initialize` has run,
+//! Installed from `engine/client_exports.rs` as soon as client.dll's `Initialize` has run,
 //! before the HUD's first `VidInit` loads its sheets (a hook put in on the
 //! first `add` would never see those loads and could not name a handle).
 //! The slot numbers are checked against the binary by
@@ -45,7 +45,7 @@ use std::sync::atomic::{
 use crate::hide_asset::DrawnAs;
 
 /// `cl_enginefunc_t` slots, in declaration order from the SDK's
-/// `cdll_int.h` (`engine.rs` holds the same table from
+/// `cdll_int.h` (`engine/sdk.rs` holds the same table from
 /// `pfnRegisterVariable` on).
 pub const ENGFUNCS_SLOT_SPR_LOAD: usize = 0;
 pub const ENGFUNCS_SLOT_SPR_SET: usize = 4;

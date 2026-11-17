@@ -95,6 +95,26 @@ impl AsRef<Path> for Scratch {
     }
 }
 
+/// A game folder laid out as the engine expects: `hl.exe` with `dod/`
+/// beside it. Returns the path to the exe, and the guard the caller must
+/// hold -- dropping it here would delete the folder before it was read.
+pub(crate) fn fake_game(
+    tag: &str,
+    config_cfg: &str,
+    movie_cfg: Option<&str>,
+) -> (Scratch, std::path::PathBuf) {
+    let root = Scratch::new(format_args!("fov_cfg_{tag}"));
+    let dod = root.join("dod");
+    std::fs::create_dir_all(&dod).unwrap();
+    std::fs::write(dod.join("config.cfg"), config_cfg).unwrap();
+    if let Some(movie) = movie_cfg {
+        std::fs::write(dod.join("movie.cfg"), movie).unwrap();
+    }
+    let exe = root.join("hl.exe");
+    std::fs::write(&exe, b"").unwrap();
+    (root, exe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

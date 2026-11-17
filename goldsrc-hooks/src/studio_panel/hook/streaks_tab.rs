@@ -12,6 +12,7 @@
 //! The hint line under the list says when there is nothing to list, and why;
 //! how far the analysis has got is the loading strip's and the progress bar's.
 
+use lock_recover::lock_or_recover;
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -84,12 +85,9 @@ pub(super) unsafe fn build(
             Ordering::Release,
         );
         DIALOG.store(dialog as usize, Ordering::Release);
-        SHOWN_STATUS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
-        SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        lock_or_recover(&SHOWN_STATUS).clear();
+        lock_or_recover(&SHOWN_ROWS).clear();
+        lock_or_recover(&BOXED_FOR).clear();
 
         let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
         if list.is_null() {
@@ -150,8 +148,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             show_filters(vgui, page, None);
             return;
         };
-        let game_dir = dod_dir();
-        let path = streaks::demo_path(&game_dir, &name);
+        let path = crate::demo_locate::playing(&name);
         streaks::request(&path);
         let Some((generation, status, percent)) = streaks::status() else {
             return;
@@ -181,7 +178,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 show(vgui, page, build, (&text, &text), None);
                 let demo_key = format!("{generation}:ready");
                 {
-                    let mut boxed = BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut boxed = lock_or_recover(&BOXED_FOR);
                     if *boxed != demo_key {
                         fill_player_box(vgui, page, &found);
                         *boxed = demo_key.clone();
@@ -288,7 +285,7 @@ unsafe fn show(
     percent: Option<u32>,
 ) {
     unsafe {
-        let mut shown = SHOWN_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN_STATUS);
         if *shown == key {
             return;
         }
@@ -326,7 +323,7 @@ unsafe fn fill(
     player: &str,
 ) {
     unsafe {
-        let mut shown = SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN_ROWS);
         if *shown == key {
             return;
         }

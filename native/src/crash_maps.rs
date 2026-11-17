@@ -59,6 +59,10 @@ pub const KNOWN_CRASHES: &[(&str, &str)] = &[
         "The engine's movement trace ran on the previous map's collision data (#384, 25th Anniversary build). The hook guards this; its hull_trace_guard log line says why it didn't.",
     ),
     (
+        "client.dll+0x2c59b",
+        "DoD's client read through a bad pointer in a message handler after `End of demo.` of some demos under playdemo (#1394). Not caused by the hook DLL; the demo is fine.",
+    ),
+    (
         "demoplayer.dll+0x48e0",
         "The demo player's event list read a freed array on a second viewdemo (#1392, 25th Anniversary build). The hook guards this; its demoplayer_dict_cache log line says why it didn't.",
     ),

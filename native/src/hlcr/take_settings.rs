@@ -111,11 +111,11 @@ impl CaptureSettings {
             },
             width: config.resolution_width,
             height: config.resolution_height,
-            fov: crate::patch::capture_fov_resolved(config),
+            fov: crate::game_config::capture_fov_resolved(config),
             install: install_name(&config.game_path),
             hook: hook_label(config),
             // As sent: with the project's field of view after the user's own.
-            lines: crate::patch::user_init_commands(config)
+            lines: crate::game_config::user_init_commands(config)
                 .iter()
                 .map(|line| line.trim().to_string())
                 .filter(|line| !line.is_empty())

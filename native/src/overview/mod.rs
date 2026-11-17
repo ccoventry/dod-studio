@@ -56,7 +56,7 @@ pub fn scene_for_until(
             .join("dod_english.txt"),
     );
     let mut scene = scene::build_until(&level, &strings, progress)?;
-    scene.checksum = crate::patch::bsp::map_checksum_of_file(&bsp).unwrap_or(0);
+    scene.checksum = crate::maps::bsp::map_checksum_of_file(&bsp).unwrap_or(0);
     scene.credit = credit::map_credit(install, map, &level.entities);
     Ok(scene)
 }

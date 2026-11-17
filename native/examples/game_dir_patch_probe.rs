@@ -3,6 +3,11 @@
 //! in-game check that a copy of DoD plays it.
 //!
 //!     cargo run -p native --example game_dir_patch_probe -- <folder> <in.dem> <out.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

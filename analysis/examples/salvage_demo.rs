@@ -13,6 +13,11 @@
 //! directory describing it.
 //!
 //!     cargo run --release -p analysis --example salvage_demo -- <in.dem> <out.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 const DEMO_HEADER_SIZE: usize = 544;
 const DIRECTORY_OFFSET_POS: usize = 540;

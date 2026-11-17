@@ -27,6 +27,7 @@
 //! window's help line spells out every name of the entry under the mouse
 //! (#781).
 
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -180,12 +181,9 @@ fn entry_for<'a>(choices: &'a [Choice], picked: &[String], row: &str) -> Option<
 /// While the list is open with the mouse over an entry: every name of that
 /// player, cut to fit a line `wide` pixels wide. For the window's help line.
 pub(super) fn hovered_help(wide: i32) -> Option<String> {
-    let row = HOVERED.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
-    let picked = PICKED_PLAYERS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let row = lock_or_recover(&HOVERED).clone()?;
+    let picked = lock_or_recover(&PICKED_PLAYERS).clone();
+    let names = lock_or_recover(&NAMES);
     let (_, all) = names.as_ref()?;
     let choice = entry_for(all, &picked, &row)?;
     let room = help_room(wide, ROW_TALL.load(Ordering::Acquire));
@@ -299,9 +297,7 @@ fn shown_name(choices: &[Choice], term: &str) -> String {
 /// The picked-players line beside the box, cut to fit its width.
 unsafe fn show_picked(vgui: &Vgui, page: Vpanel, choices: &[Choice]) {
     unsafe {
-        let picked: Vec<String> = PICKED_PLAYERS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        let picked: Vec<String> = lock_or_recover(&PICKED_PLAYERS)
             .iter()
             .map(|t| shown_name(choices, t))
             .collect();
@@ -311,7 +307,7 @@ unsafe fn show_picked(vgui: &Vgui, page: Vpanel, choices: &[Choice]) {
         let (_, _, wide, _) = vgui.rect(vp);
         let room = ((wide - 8) / CHAR_WIDE).max(8) as usize;
         let line = fit_names(&picked, room);
-        let mut shown = CHOSEN_SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&CHOSEN_SHOWN);
         if shown.as_deref() == Some(line.as_str()) {
             return;
         }
@@ -460,7 +456,7 @@ fn matching<'a>(choices: &'a [Choice], typed: &str, picked: &[String]) -> Vec<&'
 /// Runs every frame while the window shows.
 pub(super) unsafe fn update(vgui: &Vgui) {
     unsafe {
-        *HOVERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *lock_or_recover(&HOVERED) = None;
         let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
         if page == 0 || !vgui.visible(page) {
             return;
@@ -487,7 +483,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             crate::demo_rosters::generation(),
             DEMO_LIST_STAMPS.load(Ordering::Acquire),
         );
-        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let mut names = lock_or_recover(&NAMES);
         let fresh = names.as_ref().is_none_or(|(k, _)| *k != key);
         if fresh {
             crate::demo_rosters::ensure_filled();
@@ -508,8 +504,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         if open {
             let item_vftable = base + build.menu_item_vftable;
             widen(vgui, page, combo, menu, item_vftable, all);
-            *HOVERED.lock().unwrap_or_else(|e| e.into_inner()) =
-                row_under_mouse(vgui, menu, item_vftable);
+            *lock_or_recover(&HOVERED) = row_under_mouse(vgui, menu, item_vftable);
         }
         // A name clicked in the list: the list closed itself and the box holds
         // that name. It joins the picked players and the box empties for the
@@ -518,9 +513,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             && !open
             && let Some(name) = typed.trim().strip_prefix(REMOVE.trim_end())
         {
-            PICKED_PLAYERS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            lock_or_recover(&PICKED_PLAYERS)
                 .retain(|p| !shown_name(all, p).eq_ignore_ascii_case(name.trim()));
             let set_text: SetTextFn = slot(combo, TEXT_ENTRY_SLOT_SET_TEXT);
             set_text(combo, c"".as_ptr());
@@ -532,7 +525,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 .iter()
                 .find(|c| c.label.eq_ignore_ascii_case(typed.trim()))
         {
-            let mut picked = PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner());
+            let mut picked = lock_or_recover(&PICKED_PLAYERS);
             if !picked.iter().any(|p| p.eq_ignore_ascii_case(&choice.term)) {
                 picked.push(choice.term.clone());
             }
@@ -543,12 +536,9 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         }
         // Built again for new text, and when the picked players change: a
         // picked name leaves the list, and Clear puts them all back.
-        let picked = PICKED_PLAYERS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let picked = lock_or_recover(&PICKED_PLAYERS).clone();
         let build_key = format!("{typed}\u{1}{}", picked.join("\u{1}"));
-        let mut built = BUILT_FOR.lock().unwrap_or_else(|e| e.into_inner());
+        let mut built = lock_or_recover(&BUILT_FOR);
         if !fresh && built.as_deref() == Some(build_key.as_str()) {
             return;
         }

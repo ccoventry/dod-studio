@@ -25,6 +25,10 @@ GameUI builds its own Load Demo window (`CDemoPlayerFileDialog`):
      order and the `Dragger`'s stored position `renumber_draggers` rewrites,
      read off `AddColumnHeader`, `OnColumnResized` and the Dragger's
      "ColumnResized" message (see `verify_column_draggers`).
+  27. The review form's boxes (#1311): `TextEntry@vgui2`'s vftable is
+     `text_entry_vftable`, and its `GetStartDrawIndex` (slot 190) divides the
+     box's height by `GetFontTall` (`SURFACE_GET_FONT_TALL`, from
+     `deathmsg/font.rs`) of the font at `text_entry_font`, plus one.
 
 Usage:
     python goldsrc-hooks/tools/verify_studio_panel.py [game-folder ...]
@@ -42,6 +46,15 @@ import verify_window_layout as vwl  # noqa: E402  (shares the PE helpers)
 
 RUST = Path(__file__).resolve().parent.parent / "src" / "studio_panel.rs"
 SORT_ARROWS = RUST.parent / "studio_panel" / "hook" / "sort_arrows.rs"
+# The kill feed's ISurface slots, SURFACE_GET_FONT_TALL among them, which the
+# review form shares (#1311).
+FONT_RS = RUST.parent / "deathmsg" / "font.rs"
+
+# TextEntry::GetStartDrawIndex, its vftable slot on both builds (#1311), and
+# how much of it to read: its division by the font's height comes well
+# within its first 0x70 bytes on both.
+TEXT_ENTRY_SLOT_GET_START_DRAW_INDEX = 190
+GET_START_DRAW_INDEX_BYTES = 0x70
 
 
 def rust_builds(src):
@@ -486,6 +499,23 @@ def verify(game, src):
     get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
     got = ui.last_ret(ui.u32(text_vt + 4 * get_text) - ui.base)
     check(got == "ret 8", f"TextEntry's slot {get_text} (GetText(buf, len)) returns with {got!r}")
+
+    # 27: the review form sizes its boxes from their font (#1311).
+    # GetStartDrawIndex shows GetTall() / (GetFontTall(font) + 1) lines,
+    # reading the font at text_entry_font.
+    check(text_vt == build["text_entry_vftable"],
+          f"TextEntry's vftable is text_entry_vftable +{(text_vt or 0):#x}")
+    font = build["text_entry_font"]
+    font_tall = 4 * vwl.rust_usize(FONT_RS.read_text(encoding="utf-8"), "SURFACE_GET_FONT_TALL")
+    draw_fn = ui.u32(text_vt + 4 * TEXT_ENTRY_SLOT_GET_START_DRAW_INDEX) - ui.base
+    draw = ui.body(draw_fn, GET_START_DRAW_INDEX_BYTES)
+    reads = any(re.fullmatch(rf"mov e\w\w, dword ptr \[esi \+ {hex(font)}\]", x) for x in draw)
+    asks = any(re.fullmatch(rf"call dword ptr \[e\w\w \+ {hex(font_tall)}\]", x) for x in draw)
+    divides = "idiv edi" in draw and ("inc edi" in draw or "lea edi, [eax + 1]" in draw)
+    check(reads and asks and divides,
+          f"TextEntry slot {TEXT_ENTRY_SLOT_GET_START_DRAW_INDEX} divides its height by the font's "
+          f"tall + 1: font at +{font:#x} (text_entry_font), ISurface slot {font_tall // 4} "
+          f"(SURFACE_GET_FONT_TALL)")
 
     # 17: the help line's Label::SetText.
     label_vt = ui.vftable("Label@vgui2")

@@ -23,6 +23,11 @@
 //! demo.write_to_file("./src/tests/demo2test.dem").unwrap();
 //! ```
 #![allow(mismatched_lifetime_syntaxes)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "vendored fork of the `dem` crate (LGPL): its diff from upstream stays small (#1179)"
+)]
 
 use nom::{
     Parser,
@@ -46,6 +51,7 @@ pub mod demo_writer;
 pub mod netmsg_doer;
 pub mod prelude;
 pub mod progress;
+pub mod protocol;
 pub mod types;
 
 pub use utils::bitslice_to_string;
