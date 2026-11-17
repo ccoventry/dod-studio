@@ -121,6 +121,10 @@ pub async fn blender_run(
             .exe
             .map(PathBuf::from)
             .ok_or_else(|| crate::messages::BLENDER_NOT_FOUND.to_string())?;
+        native::log_markdown(&crate::messages::blender::version_used(
+            exe.display(),
+            status.version.as_deref(),
+        ));
         // Throttled to ~30fps per CLAUDE.md's telemetry-throttling guardrail:
         // the import step prints thousands of lines.
         let mut last_emit = Instant::now() - Duration::from_secs(1);

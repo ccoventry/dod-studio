@@ -12,6 +12,8 @@ pub mod cloud_file;
 pub mod cursor_clip;
 pub mod dialogs;
 pub mod disk;
+/// A file's version resource, read without loading it (#1492).
+pub mod file_version;
 /// Every folder scan goes through this walker: it skips junctions and
 /// symlinks and stops at a depth cap (#376).
 pub mod folder_walk;

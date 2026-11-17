@@ -80,16 +80,23 @@ pub fn rename_failed(partial: impl Display, out_file: impl Display, err: impl Di
     format!("Rendered, but could not rename {partial} to {out_file}: {err}")
 }
 
-/// Studio's way out could not end its render FFmpegs.
+/// Studio's way out could not end the FFmpegs in its job (renders, combines,
+/// take checks, the OBS benchmark: #1496).
 pub fn exit_stop_failed(err: impl Display) -> String {
-    format!("[render] DoD Studio is closing: could not stop its running renders: {err}")
+    format!("[exit] DoD Studio is closing: could not stop the FFmpegs it started: {err}")
 }
 
-/// Studio's way out stopped `stopped` renders and removed `removed` of their
-/// unfinished files (one not written yet has none to remove).
-pub fn exit_renders_stopped(stopped: usize, removed: usize, took: std::time::Duration) -> String {
+/// Studio's way out stopped `renders` renders and `combines` combines and
+/// removed `removed` of their unfinished files (one not written yet has none
+/// to remove).
+pub fn exit_renders_stopped(
+    renders: usize,
+    combines: usize,
+    removed: usize,
+    took: std::time::Duration,
+) -> String {
     format!(
-        "[render] DoD Studio is closing: stopped {stopped} running render(s) and removed {removed} unfinished file(s) in {} ms",
+        "[exit] DoD Studio is closing: stopped {renders} running render(s) and {combines} combine(s) and removed {removed} unfinished file(s) in {} ms",
         took.as_millis()
     )
 }
@@ -100,23 +107,25 @@ pub fn leftover_partial_replaced(partial: impl Display) -> String {
     format!("[render] {partial} was left by a render that never finished: writing over it")
 }
 
-/// An unfinished render file Studio's way out could not remove.
+/// An unfinished render or combine file Studio's way out could not remove.
 pub fn exit_partial_left(path: impl Display, err: impl Display) -> String {
-    format!("[render] DoD Studio is closing: could not remove the unfinished render {path}: {err}")
+    format!("[exit] DoD Studio is closing: could not remove the unfinished file {path}: {err}")
 }
 
-/// A render cut into segments (#1451) started: how many, how long each, where
-/// they are kept until joined, and `reused` ([`segments_reused`], or
-/// nothing).
+/// A render cut into segments (#1451) started: how many, how long each, the
+/// FFmpeg threads its first segment takes (each segment recounts them,
+/// #1512), where they are kept until joined, and `reused`
+/// ([`segments_reused`], or nothing).
 pub fn segments_started(
     job_id: impl Display,
     segments: usize,
     segment_frames: usize,
+    threads: usize,
     dir: impl Display,
     reused: impl Display,
 ) -> String {
     format!(
-        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames, kept in {dir} until they are joined{reused}"
+        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames with {threads} FFmpeg threads (recounted as each segment starts), kept in {dir} until they are joined{reused}"
     )
 }
 
@@ -191,6 +200,48 @@ pub fn segments_path_too_long(job_id: impl Display, max_units: usize) -> String 
 /// The Render tab row's speed cell while the segments are joined.
 pub fn joining_segments(count: usize) -> String {
     format!("Joining {count} segments")
+}
+
+/// A segmented render's FFmpeg threads changed between its segments as
+/// other renders started or finished (#1512): the first segment's `first`
+/// threads, then each change as (segment counted from 1, threads), over
+/// `segments` segments: `5 → 8 at segment 2, → 16 at segment 4 of 30`.
+pub fn segment_threads_changed(
+    job_id: impl Display,
+    first: usize,
+    changes: &[(usize, usize)],
+    segments: usize,
+) -> String {
+    let steps: Vec<String> = changes
+        .iter()
+        .map(|(segment, threads)| format!("→ {threads} at segment {segment}"))
+        .collect();
+    format!(
+        "[render] job {job_id}: FFmpeg threads went {first} {} of {segments}",
+        steps.join(", ")
+    )
+}
+
+/// The Render tab row's speed cell once a segmented render is done (#1512):
+/// the whole render's frames a second and its speed against the take's
+/// rate, in the form FFmpeg's own `fps` and `speed` take while it runs.
+pub fn whole_render_speed(fps: f64, speed: f64) -> String {
+    format!("{fps:.2} fps ({}x)", three_significant(speed))
+}
+
+/// `speed` to three significant figures without trailing zeros, as
+/// FFmpeg's `%.3g` prints its `speed=` for the range a render reaches.
+fn three_significant(speed: f64) -> String {
+    if !speed.is_finite() || speed <= 0.0 {
+        return "0".to_string();
+    }
+    let decimals = (2 - speed.log10().floor() as i32).max(0) as usize;
+    let text = format!("{speed:.decimals$}");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        text
+    }
 }
 
 /// Why a join that FFmpeg finished without an error is no clip: it holds

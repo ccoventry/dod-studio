@@ -168,6 +168,7 @@ pub(super) fn recovered_config(
         max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
         clip_tag: None,
         resumable_renders: true,
+        live_thread_share: Default::default(),
     })
 }
 

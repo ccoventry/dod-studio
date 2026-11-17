@@ -28,6 +28,7 @@ pub mod render;
 pub mod repair;
 pub mod schedule;
 pub mod take_delete;
+pub mod tool_versions;
 pub mod windows_drive;
 
 use std::fmt::Display;
@@ -412,15 +413,67 @@ pub fn crash_explained(what: &str, site: &str, map: Option<&str>, cause: Option<
     }
 }
 
+// ── sys/child_job.rs (#1496) ──────────────────────────────────────────────
+
+// What each child in Studio's job is, by the area that started it: in the
+// activity log when one can't be tied to Studio, and in the exit's count of
+// what it stopped.
+pub const FFMPEG_RENDER: &str = "[render] FFmpeg";
+pub const FFMPEG_COMBINE: &str = "[combine] FFmpeg";
+/// `combine::probe`'s `ffmpeg -i`, for a combine's plan and the OBS benchmark.
+pub const FFMPEG_CLIP_PROBE: &str = "[clip probe] FFmpeg";
+/// `take_frames::run_ffmpeg_watched`: take checks, frame sheets, video probes.
+pub const FFMPEG_TAKE_FRAMES: &str = "[take frames] FFmpeg";
+pub const FFMPEG_OBS_BENCH: &str = "[obs bench] FFmpeg";
+
+/// A child Studio started could not be tied to Studio's job object: it would
+/// outlive a Studio that exits while it runs. `what` is one of the names
+/// above. A render's FFmpeg has its own, naming the job:
+/// `render::not_tied_to_studio`.
+pub fn not_tied_to_studio(what: &str, err: impl Display) -> String {
+    format!(
+        "{what} could not be set to end with DoD Studio ({err}); closing DoD Studio while it runs may leave it running"
+    )
+}
+
+/// Windows would not make Studio's job object: logged once, at the first
+/// child that would have joined it.
+pub fn no_studio_job(err: impl Display) -> String {
+    format!(
+        "[child processes] Windows would not make the job that ends Studio's FFmpegs with it ({err}); closing DoD Studio while one runs may leave it running"
+    )
+}
+
+/// Studio's way out stopped the children still running in its job, counted
+/// by what they are.
+pub fn exit_children_stopped(counts: &[(&str, usize)]) -> String {
+    let list: Vec<String> = counts
+        .iter()
+        .map(|(what, n)| format!("{n} {what}"))
+        .collect();
+    format!(
+        "[exit] DoD Studio is closing: stopped the processes it started: {}",
+        list.join(", ")
+    )
+}
+
 // ── hlcr/combine.rs (#107) ────────────────────────────────────────────────
 
 pub const COMBINE_NEEDS_TWO: &str = "pick at least two clips to combine";
 pub const COMBINE_OUTPUT_IS_INPUT: &str =
     "the combined video can't be saved over one of the clips going into it";
 pub const COMBINE_CANCELLED: &str = "cancelled";
+/// The chosen name is one a render or another combine is writing now (#1496).
+pub const COMBINE_NAME_BEING_WRITTEN: &str =
+    "a render or another combine is writing a video with that name right now: pick another name";
 
 pub fn combine_unreadable_clip(path: &str) -> String {
     format!("FFmpeg can't read {path} as a video")
+}
+
+/// A finished combine could not take its real name (#1496).
+pub fn combine_rename_failed(partial: impl Display, err: impl Display) -> String {
+    format!("Combined, but could not give {partial} its name: {err}")
 }
 
 pub fn combine_failed(log: &str) -> String {

@@ -183,6 +183,7 @@ fn a_job_started_after_the_setting_changes_gets_the_new_value() {
         thread_share: 1,
         clip_tag: None,
         resumable: handles.resumable.is_on(),
+        live_thread_share: Default::default(),
     };
     let config = RenderConfig::default();
     assert!(job_config(&config, &jobs[0], per_job(&handles)).resumable_renders);
@@ -192,6 +193,76 @@ fn a_job_started_after_the_setting_changes_gets_the_new_value() {
         config.resumable_renders,
         "the batch's own config is not what decides"
     );
+}
+
+/// Three jobs with the given statuses, for the thread-share count.
+fn jobs_with(statuses: [&str; 3]) -> Vec<RenderJobRuntime> {
+    let mut jobs = recovered_jobs(&session(vec![
+        autosave_job("a", AutosaveJobStatus::Pending, true),
+        autosave_job("b", AutosaveJobStatus::Pending, true),
+        autosave_job("c", AutosaveJobStatus::Pending, true),
+    ]));
+    for (job, status) in jobs.iter_mut().zip(statuses) {
+        job.status = status.to_string();
+    }
+    jobs
+}
+
+/// The scheduler's end-of-pass count (#1512): once the other two have
+/// finished, the one still rendering shares with no one, so its next
+/// segment takes every thread.
+#[test]
+fn the_share_counts_only_the_renders_still_running() {
+    let all_three = jobs_with(["Rendering", "Rendering", "Rendering"]);
+    assert_eq!(share_for(&all_three, 0, 3, Game::Idle), 3);
+    let one_left = jobs_with(["Finished", "Rendering", "Failed"]);
+    assert_eq!(share_for(&one_left, 0, 3, Game::Idle), 1);
+    let none = jobs_with(["Finished", "Queued", "Cancelled"]);
+    assert_eq!(share_for(&none, 0, 3, Game::Idle), 1);
+}
+
+/// Jobs about to start in the pass count as running.
+#[test]
+fn the_share_counts_the_jobs_starting_this_pass() {
+    let one_running = jobs_with(["Rendering", "Queued", "Queued"]);
+    assert_eq!(share_for(&one_running, 2, 3, Game::Idle), 3);
+}
+
+/// #861: while a capture records, the share stays the batch's however many
+/// renders are left.
+#[test]
+fn while_capturing_the_share_stays_the_batchs() {
+    let one_left = jobs_with(["Finished", "Rendering", "Finished"]);
+    assert_eq!(share_for(&one_left, 0, 3, Game::Capturing), 3);
+}
+
+/// A running job reads the share the scheduler sets after it started, so
+/// its next segment recounts its threads (#1512).
+#[test]
+fn a_started_job_follows_the_schedulers_thread_share() {
+    let jobs = recovered_jobs(&session(vec![autosave_job(
+        "a",
+        AutosaveJobStatus::Pending,
+        true,
+    )]));
+    let live = native::hlcr::renderer::thread_share::LiveThreadShare::new(3);
+    let config = job_config(
+        &RenderConfig::default(),
+        &jobs[0],
+        PerJob {
+            export_directories: Vec::new(),
+            thread_share: 3,
+            clip_tag: None,
+            resumable: true,
+            live_thread_share: live.clone(),
+        },
+    );
+    live.set(1);
+    assert_eq!(
+        config.max_concurrent_renders, 3,
+        "the share it started with"
+    );
+    assert_eq!(config.live_thread_share.current(), Some(1));
 }
 
 #[test]
