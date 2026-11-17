@@ -299,7 +299,7 @@ pub fn refuse_from_studio(line: &str) -> bool {
 static OWN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 fn own() -> std::sync::MutexGuard<'static, Vec<String>> {
-    OWN.lock().unwrap_or_else(|e| e.into_inner())
+    crate::lock::lock_or_recover(&OWN)
 }
 
 /// Called with a console line the hook itself is about to queue (the

@@ -8,6 +8,7 @@
 //! the file's own directory ([`crate::demo_file::length`]), less the stretch
 //! the LOADING segment adds in front (#810).
 
+use crate::lock::lock_or_recover;
 use std::ffi::{CString, c_void};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -34,7 +35,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             return;
         }
         let percent = demo_percent();
-        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN);
         if *shown == percent {
             return;
         }
@@ -106,7 +107,7 @@ fn loaded_span_of_current_demo() -> Option<f32> {
     drop(known);
     std::thread::spawn(move || {
         let span = crate::demo_file::loaded_span(&path);
-        let mut known = SPAN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut known = lock_or_recover(&SPAN);
         if let Some((demo, slot)) = known.as_mut()
             && *demo == path
         {
@@ -119,7 +120,7 @@ fn loaded_span_of_current_demo() -> Option<f32> {
 /// The playing demo's playback length, read once per demo.
 fn length_of_current_demo() -> Option<crate::demo_file::DemoLength> {
     let path = crate::demo_locate::playing(&crate::demo_reload::current_demo()?);
-    let mut known = LENGTH.lock().unwrap_or_else(|e| e.into_inner());
+    let mut known = lock_or_recover(&LENGTH);
     if let Some((demo, length)) = known.as_ref()
         && *demo == path
     {

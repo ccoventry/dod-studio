@@ -52,6 +52,7 @@
 //! form cancels with, so a menu that comes up just after the form's Esc, or
 //! while it shows, is put away again: Esc on the form means the form.
 
+use crate::lock::{read_or_recover, write_or_recover};
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -96,11 +97,11 @@ fn trace(line: &str) {
 }
 
 fn showing() -> std::sync::RwLockReadGuard<'static, Option<FormView>> {
-    SHOWING.read().unwrap_or_else(|e| e.into_inner())
+    read_or_recover(&SHOWING)
 }
 
 fn set_showing(view: Option<FormView>) {
-    *SHOWING.write().unwrap_or_else(|e| e.into_inner()) = view;
+    *write_or_recover(&SHOWING) = view;
 }
 
 /// Runs every frame: opens the form when the review asked for it, and

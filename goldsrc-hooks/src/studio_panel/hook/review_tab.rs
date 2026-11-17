@@ -8,6 +8,7 @@
 //! playing (#1142), greyed while that can't happen, and the second line says
 //! why or how the request is going ([`crate::review::IdleFacts`]).
 
+use crate::lock::lock_or_recover;
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -70,7 +71,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 String::new(),
             ],
         };
-        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN);
         if shown.as_ref() != Some(&labels) {
             for (name, text) in [HEADING, DETAIL, KILL_COUNT].iter().zip(&labels) {
                 set(vgui, page, name, LABEL_SLOT_SET_TEXT, text);

@@ -36,6 +36,7 @@
 pub(crate) mod frames;
 pub mod timeline;
 
+use crate::lock::write_or_recover;
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -252,7 +253,7 @@ fn read_demo(path: &Path, ticket: u64) -> Outcome {
 /// read. Checked under the write lock, so a read that finishes late can't
 /// publish over a newer one.
 fn publish(ticket: u64, name: String, found: Timeline) -> bool {
-    let mut published = PUBLISHED.write().unwrap_or_else(|e| e.into_inner());
+    let mut published = write_or_recover(&PUBLISHED);
     if LATEST_READ.load(Ordering::Acquire) != ticket {
         return false;
     }
@@ -263,7 +264,7 @@ fn publish(ticket: u64, name: String, found: Timeline) -> bool {
 
 /// Sets the status line, unless a newer read than `ticket` owns it.
 fn set_status(ticket: u64, line: String) {
-    let mut status = STATUS.write().unwrap_or_else(|e| e.into_inner());
+    let mut status = write_or_recover(&STATUS);
     if LATEST_READ.load(Ordering::Acquire) == ticket {
         *status = line;
     }

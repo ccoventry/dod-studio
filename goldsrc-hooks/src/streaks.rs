@@ -23,6 +23,7 @@
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -224,7 +225,7 @@ static PERCENT: AtomicU32 = AtomicU32::new(0);
 /// Starts finding `path`'s streaks, unless they are being found or were
 /// found already.
 pub fn request(path: &Path) {
-    let mut job = JOB.lock().unwrap_or_else(|e| e.into_inner());
+    let mut job = lock_or_recover(&JOB);
     if job.as_ref().is_some_and(|j| j.path == path) {
         return;
     }
@@ -256,7 +257,7 @@ pub fn request(path: &Path) {
                     Status::Failed(why)
                 }
             };
-            let mut job = JOB.lock().unwrap_or_else(|e| e.into_inner());
+            let mut job = lock_or_recover(&JOB);
             if let Some(job) = job.as_mut().filter(|j| j.generation == generation) {
                 job.status = status;
             }

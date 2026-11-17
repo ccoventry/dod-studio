@@ -13,6 +13,7 @@ use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use native::hlcr::take_delete::{TakeDeletion, plan_take_deletion, recycle_take};
 use native::log_markdown;
+use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -74,10 +75,7 @@ fn unique(take_folders: Vec<String>) -> Vec<String> {
 /// The configured Destinations folders: the only places a take is ever
 /// deleted from.
 pub(crate) fn capture_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
-    settings
-        .inner
-        .lock()
-        .unwrap()
+    lock_or_recover(&settings.inner)
         .target_drives
         .iter()
         .filter(|d| !d.trim().is_empty())

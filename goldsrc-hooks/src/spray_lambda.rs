@@ -38,6 +38,7 @@
 
 mod plan;
 
+use crate::lock::write_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -291,7 +292,7 @@ fn start_read(path: PathBuf) {
                         found.summary(),
                         start.elapsed().as_secs_f64()
                     ));
-                    let mut plan = PLAN.write().unwrap_or_else(|e| e.into_inner());
+                    let mut plan = write_or_recover(&PLAN);
                     if LATEST_READ.load(Ordering::Acquire) == ticket {
                         *plan = Some((path, Arc::new(found)));
                     }

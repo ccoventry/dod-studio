@@ -84,6 +84,7 @@
 //! `tools/verify_map_sounds_offsets.py` checks the call sites in both builds,
 //! `tools/verify_map_entities_offsets.py` the `model_t` offsets.
 
+use crate::lock::write_or_recover;
 use std::collections::BTreeSet;
 use std::ffi::CStr;
 use std::sync::RwLock;
@@ -593,7 +594,7 @@ fn read_map(build: &Build) {
 fn set_state(state: MapState) {
     // A poisoned lock only means a panic elsewhere held it; the state is a
     // plain value, so take it back.
-    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = state;
+    *write_or_recover(&CURRENT) = state;
 }
 
 /// The two kinds of map sound, each with its own list and setting.

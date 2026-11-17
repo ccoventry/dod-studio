@@ -14,6 +14,7 @@
 //! own text, plus the arrow on the sorted one. The headings' own text is read
 //! once per list, before any arrow is added, through `GetColumnHeaderText`.
 
+use crate::lock::lock_or_recover;
 use std::ffi::{c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
@@ -75,7 +76,7 @@ pub(super) unsafe fn update() {
         DEMO_DIALOG.load(Ordering::Acquire),
         super::streaks_tab::dialog(),
     ];
-    let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    let mut shown = lock_or_recover(&SHOWN);
     for (dialog, shown) in dialogs.into_iter().zip(shown.iter_mut()) {
         if dialog == 0 {
             continue;

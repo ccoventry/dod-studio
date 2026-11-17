@@ -1,6 +1,7 @@
 //! What the window keeps between launches: the Settings tab's changes
 //! (`settings.cfg`) and the layout files it writes (`defaults.txt`).
 
+use crate::lock::lock_or_recover;
 use std::ffi::CStr;
 use std::sync::atomic::Ordering;
 
@@ -96,7 +97,7 @@ pub(super) fn apply_saved_settings() {
             ))
         };
     }
-    let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut defaults = lock_or_recover(&DEFAULTS);
     let mut applied = Vec::new();
     for (name, value) in text.lines().filter_map(settings_line) {
         let Ok(c_name) = std::ffi::CString::new(name.as_ref()) else {
@@ -148,7 +149,7 @@ pub(super) fn cvar_text(name: &CStr) -> Option<String> {
 /// the value before DoD Studio first changed it, for Reset.
 pub(super) fn save_setting(name: &str, value: &str, default_before: Option<String>) {
     if let Some(before) = default_before {
-        let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut defaults = lock_or_recover(&DEFAULTS);
         if !defaults.iter().any(|(n, _)| n == name) {
             defaults.push((name.to_string(), before));
         }
@@ -169,7 +170,7 @@ pub(super) fn save_setting(name: &str, value: &str, default_before: Option<Strin
 /// Puts every saved setting back to its value before DoD Studio changed it,
 /// and forgets them.
 pub(super) fn reset_settings() -> String {
-    let defaults = std::mem::take(&mut *DEFAULTS.lock().unwrap_or_else(|e| e.into_inner()));
+    let defaults = std::mem::take(&mut *lock_or_recover(&DEFAULTS));
     for (name, value) in &defaults {
         if let Ok(line) = std::ffi::CString::new(format!("{name} {value}\n")) {
             crate::engine::client_cmd(&line);

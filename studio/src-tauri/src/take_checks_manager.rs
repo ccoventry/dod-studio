@@ -12,6 +12,7 @@ use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use crate::take_preview_manager::{check_listed, ffmpeg_path};
 use native::hlcr::take_checks::{self, TakeChecks};
+use native::shared::lock::lock_or_recover;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,7 +28,7 @@ pub struct TakeChecksManager {
 impl TakeChecksManager {
     fn start(&self) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
-        *self.cancel.lock().unwrap() = flag.clone();
+        *lock_or_recover(&self.cancel) = flag.clone();
         flag
     }
 }
@@ -76,7 +77,7 @@ pub async fn take_checks(
 /// Stops the check running now, if any: its call returns the cancelled error.
 #[tauri::command]
 pub fn cancel_take_checks(checks: tauri::State<'_, TakeChecksManager>) {
-    checks.cancel.lock().unwrap().store(true, Ordering::Relaxed);
+    lock_or_recover(&checks.cancel).store(true, Ordering::Relaxed);
 }
 
 #[cfg(test)]

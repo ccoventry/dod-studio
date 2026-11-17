@@ -1,5 +1,7 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
-//! it poisoned (#1377).
+//! it poisoned (#1377). `analysis`, `goldsrc-hooks` and `hl-demo-auditor`
+//! don't depend on `native`, so each keeps a private copy of these: one of
+//! four copies until the helpers get one shared home.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every

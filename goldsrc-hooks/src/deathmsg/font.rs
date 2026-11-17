@@ -118,6 +118,7 @@
 // tests) keeps the tables and helpers for the unit tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
+use crate::lock::lock_or_recover;
 use std::borrow::Cow;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
@@ -1474,7 +1475,7 @@ pub(crate) mod hook {
         wide: bool,
     ) -> Result<u32, String> {
         let key = HandleKey::new(face, spec, wide);
-        let mut handles = HANDLES.lock().unwrap_or_else(|e| e.into_inner());
+        let mut handles = lock_or_recover(&HANDLES);
         if let Some(handle) = kept_handle(&handles, &key) {
             return Ok(handle);
         }
