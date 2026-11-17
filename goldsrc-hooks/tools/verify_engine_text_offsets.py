@@ -262,8 +262,8 @@ def check_hud_message(image, check):
         f"the indexed table holds the four channel names ({name}): {names}",
     )
     stores = [f"{i.mnemonic} {i.op_str}" for i in image.dis(start, 12)]
-    p_name = rust_offset(SRC / "engine.rs", "p_name")
-    p_message = rust_offset(SRC / "engine.rs", "p_message")
+    p_name = rust_offset(SRC / "engine" / "sdk.rs", "p_name")
+    p_message = rust_offset(SRC / "engine" / "sdk.rs", "p_message")
     check(
         any(re.fullmatch(rf"mov dword ptr \[e\w\w \+ {p_name:#x}\], e\w\w", s) for s in stores)
         and any(re.fullmatch(rf"mov dword ptr \[e\w\w \+ {p_message:#x}\], e\w\w", s) for s in stores),

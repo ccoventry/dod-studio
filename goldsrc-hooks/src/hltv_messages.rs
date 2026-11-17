@@ -18,14 +18,14 @@
 //!
 //! ## What this does
 //!
-//! `engine.rs` swaps slot 38 for a trampoline that asks [`should_drop`]
+//! `engine/client_exports.rs` swaps slot 38 for a trampoline that asks [`should_drop`]
 //! first. With the cvar at 1, a message whose command byte is 6 never reaches
 //! `client.dll`; every other command goes through untouched. That includes
 //! `DRC_CMD_STUFFTEXT` (10), which is what the pipeline's own highlight
 //! labels are, and the camera, mode and event commands.
 //!
 //! Nothing is patched and no address is involved: the slot is found the same
-//! way as the other four `engine.rs` swaps, and `client.dll` is byte-identical
+//! way as the other four `engine/client_exports.rs` swaps, and `client.dll` is byte-identical
 //! in the pre-Anniversary and 25th Anniversary installs, so this works on
 //! both.
 //!
@@ -83,7 +83,7 @@ fn decide(enabled: bool, buf: &[u8]) -> bool {
     enabled && is_text_message(buf)
 }
 
-/// Called by `engine.rs`'s `HUD_DirectorMessage` trampoline for every director
+/// Called by `engine/client_exports.rs`'s `HUD_DirectorMessage` trampoline for every director
 /// message. True means "don't pass this one on".
 pub fn should_drop(buf: &[u8]) -> bool {
     if !decide(enabled(), buf) {

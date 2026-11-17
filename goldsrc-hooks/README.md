@@ -91,7 +91,7 @@ is the complete list):
   crosshair, the capture-area icon) rather than a world-placed entity, and
   those never reach this command regardless of spelling --
   `ds_hud_hide_crosshair` and the HUD's own sprite names (below) reach those instead.
-  Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't previously
+  Hooks `HUD_AddEntity`, a `cldll_func_t` slot `src/engine/client_exports.rs` didn't previously
   use. See the module doc in `src/hide_asset.rs`.
 - **Scoreboard** (`ds_hud_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
@@ -378,7 +378,7 @@ to tell two builds at one path apart before reusing the game (#1143).
 > don't rely on that alone. See [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 The DLL has to be in the game **before `client.dll` starts**: it reaches the
-engine only through `client.dll`'s `Initialize` (`src/engine.rs`). Without
+engine only through `client.dll`'s `Initialize` (`src/engine/client_exports.rs`). Without
 DoD Studio, start the game through HLAE's command-line launcher, the way
 Studio and `tools/game_probe.py` do:
 

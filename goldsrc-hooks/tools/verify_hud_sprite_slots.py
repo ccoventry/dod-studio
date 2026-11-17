@@ -9,7 +9,7 @@ the way the HUD would:
 
   1. `Initialize` copies the engine's table into `gEngfuncs` (`mov edi, imm32;
      push eax; rep movsd` with `mov ecx, 0x87`), the same pattern
-     `engine.rs`'s `find_gengfuncs` reads at runtime.
+     `engine/client_cmd.rs`'s `find_gengfuncs` reads at runtime.
   2. Every one of the five slots has `call dword ptr [gEngfuncs + 4*slot]`
      (`ff 15 imm32`) sites in `.text`; slot 0 (`SPR_Load`) has many (every
      HUD element loads its sheets) and slot 7 (`SPR_DrawAdditive`) is the
