@@ -1,5 +1,3 @@
-// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
-#![warn(clippy::unwrap_used, clippy::expect_used)]
 mod british;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]

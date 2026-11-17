@@ -12,6 +12,11 @@
 //!
 //! Origins here are a naive "latest value per axis" replay: good for rates and
 //! step sizes, not for exact positions (that is `entity_replay`).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use analysis::Analysis;
 use dem::open_demo_from_bytes;

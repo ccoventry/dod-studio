@@ -41,6 +41,23 @@ fn a_batch_file_parses_into_sorted_demo_sections() {
 }
 
 #[test]
+fn every_demo_line_before_the_first_demo_is_an_error_not_a_panic() {
+    for line in [
+        "init\techo",
+        "at\t1\techo",
+        "seek\t5\t1",
+        "back\t5\t1",
+        "next\t1",
+    ] {
+        let e = parse(&file(&[line])).unwrap_err();
+        assert!(
+            e.contains("line 2") && e.contains("before any"),
+            "{line}: {e}"
+        );
+    }
+}
+
+#[test]
 fn a_bad_batch_file_says_which_line() {
     assert!(parse("hello").unwrap_err().contains("not a batch file"));
     assert!(parse(HEADER).unwrap_err().contains("no demos"));

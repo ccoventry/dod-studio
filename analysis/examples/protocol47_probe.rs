@@ -9,6 +9,11 @@
 //!
 //! Columns are tab-separated; compare the two groups with a spreadsheet or
 //! `sort | uniq -c` on a column.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use analysis::Analysis;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};

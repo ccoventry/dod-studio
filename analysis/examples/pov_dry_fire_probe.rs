@@ -10,6 +10,11 @@
 //! - `Dem_WeaponAnim` and `Dem_Sound` frames, and the recorder's `svc_sound`.
 //!
 //!     cargo run --release -p analysis --example pov_dry_fire_probe -- <demo> <from> <to>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

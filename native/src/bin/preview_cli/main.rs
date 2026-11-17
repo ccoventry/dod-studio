@@ -31,7 +31,9 @@ fn main() {
         println!("{}", messages::PREVIEW_DROP_PROMPT);
         println!("{}", messages::PREVIEW_BLANK_TO_EXIT);
         print!("{}", messages::PREVIEW_INPUT_PROMPT);
-        io::stdout().flush().unwrap();
+        // A prompt that can't be shown (stdout closed) changes nothing about
+        // reading the paths typed next.
+        let _ = io::stdout().flush();
 
         let mut input = String::new();
         if io::stdin().read_line(&mut input).is_ok() {

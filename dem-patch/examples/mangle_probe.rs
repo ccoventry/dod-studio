@@ -21,6 +21,11 @@
 //! splice a valid header/signon onto a tail slice taken at an arbitrary byte
 //! offset, truncate mid-frame, and flip bytes in the frame headers (where a
 //! length or a frame type lives) rather than uniformly across the file.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use std::io::Write;
 use std::path::PathBuf;

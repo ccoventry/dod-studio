@@ -4,6 +4,11 @@
 //!
 //! With no indices it only lists the maps (from the quick byte scan and the
 //! full parse, which must agree).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::demo_split::{extract, header_protocol, quick_maps, segments, split_name};
 

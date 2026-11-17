@@ -444,21 +444,18 @@ pub fn scan_folder_background(
                 && folder_names.contains_key("hudcolor")
                 && folder_names.contains_key("hudalpha")
             {
-                #[allow(
+                #[expect(
                     clippy::unwrap_used,
-                    clippy::expect_used,
                     reason = "contains_key was checked for all three names just above"
                 )]
                 let all_folder = folder_names.get("all").unwrap();
-                #[allow(
+                #[expect(
                     clippy::unwrap_used,
-                    clippy::expect_used,
                     reason = "contains_key was checked for all three names just above"
                 )]
                 let hud_color_folder = folder_names.get("hudcolor").unwrap();
-                #[allow(
+                #[expect(
                     clippy::unwrap_used,
-                    clippy::expect_used,
                     reason = "contains_key was checked for all three names just above"
                 )]
                 let hud_alpha_folder = folder_names.get("hudalpha").unwrap();

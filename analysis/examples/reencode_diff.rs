@@ -6,6 +6,11 @@
 //! narrow real-time window, and report which message TYPES actually differ in
 //! byte length (a value change alone wouldn't show here, but a length change
 //! means the encoded bit-width itself moved).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 

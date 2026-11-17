@@ -17,6 +17,11 @@
 //!
 //! Prints one TSV line: label, demo, map, coordinates tested, hit percentage at
 //! 1/2/4/8 units, count landing on nothing, world faces, total faces.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::decals::decal_atlas::MapKey;
 use native::decals::decal_strip::proven_world_coordinates;

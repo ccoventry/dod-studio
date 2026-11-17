@@ -12,6 +12,11 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 `autobins = false` and lists the real binaries explicitly (see
 [`../README.md`](../README.md)), so they are not built by every workspace build.
 
+A probe that unwraps starts with `#![allow(clippy::unwrap_used,
+clippy::expect_used, reason = "...")]`: Clippy refuses both everywhere else
+outside tests (#1179, `docs/coding_standards.md` section 4), and in a probe run
+by hand a panic is its error report.
+
 ## Running one
 
     cargo run --release -p native --example probe_decals -- path/to/demo.dem

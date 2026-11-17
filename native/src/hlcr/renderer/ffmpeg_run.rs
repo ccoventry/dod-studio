@@ -136,16 +136,14 @@ pub(super) async fn run_to_end(
 
     // Both pipes are set to piped by `ffmpeg_command`, so `take()` has them.
     // Stderr is read on its own task so a full pipe can't stall FFmpeg.
-    #[allow(
+    #[expect(
         clippy::unwrap_used,
-        clippy::expect_used,
         reason = "ffmpeg_command pipes stderr and stdout, so take() has them"
     )]
     let stderr_log = collect_stderr(child.stderr.take().unwrap());
     // Held until the job ends: FFmpeg's stdout stays open while it exits.
-    #[allow(
+    #[expect(
         clippy::unwrap_used,
-        clippy::expect_used,
         reason = "ffmpeg_command pipes stderr and stdout, so take() has them"
     )]
     let mut reader = BufReader::new(child.stdout.take().unwrap()).lines();

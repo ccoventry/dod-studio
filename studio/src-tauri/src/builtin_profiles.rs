@@ -198,10 +198,15 @@ fn mine_name(builtin: &str, taken: &[String]) -> String {
     if free(&first) {
         return first;
     }
-    (2..)
-        .map(|n| format!("{builtin} ({MINE_SUFFIX} {n})"))
-        .find(|candidate| free(candidate))
-        .expect("an unbounded range finds a free name")
+    // `taken` is finite, so some number past it is free.
+    let mut n = 2;
+    loop {
+        let candidate = format!("{builtin} ({MINE_SUFFIX} {n})");
+        if free(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// Takes every profile out of `profiles` that has a built-in profile's name

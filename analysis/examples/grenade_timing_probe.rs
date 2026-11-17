@@ -19,6 +19,11 @@
 //!
 //! Add `--list` to print every throw (demo time, thrower's entity index,
 //! wind-up) -- the places to seek to when checking a throw in the game.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
