@@ -12,6 +12,7 @@
 //! The `customxhair-` prefix is the one `goldsrc-hooks`' texture hook already
 //! knows as a crosshair sheet, so the HD path leaves these stock too.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
@@ -239,8 +240,9 @@ fn sprite_from_zip(bytes: &[u8]) -> Result<Vec<u8>, CrosshairError> {
         .map_err(|source| CrosshairError::ZipUnreadable { source })?;
     let sprites: Vec<String> = zip
         .file_names()
+        .filter_map(Result::ok)
         .filter(|n| is_sprite_entry(n))
-        .map(str::to_string)
+        .map(Cow::into_owned)
         .collect();
     let name = pick_entry(&sprites)?.to_string();
     let entry = zip
