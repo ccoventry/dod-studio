@@ -278,9 +278,11 @@ pub async fn run_ffmpeg_watched(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+    let mut child = crate::sys::child_job::spawn_ending_with_studio(
+        &mut cmd,
+        crate::messages::FFMPEG_TAKE_FRAMES,
+    )
+    .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     // Both pipes drain while FFmpeg runs, so a long report (signalstats
     // prints a line per frame) can't fill a pipe and stall it.
     let (line_tx, mut line_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -536,6 +538,42 @@ pub fn frame_data_uri(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame check's FFmpeg ends with Studio (#1496): while it runs, it is
+    /// in Studio's job. `waitfor` stands in for FFmpeg, since what's checked
+    /// is how the child is started, not what it does: one process, so its
+    /// pipes close the moment it is ended (a `cmd` running `ping` left the
+    /// grandchild holding them for the whole ping). No other test puts a
+    /// `waitfor.exe` in that job, so the one found is this test's. Watched
+    /// from beside the run rather than from its output: the pass runs at
+    /// below-normal priority, and `waitfor` prints nothing anyway.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_frame_checks_ffmpeg_is_in_studios_job_while_it_runs() {
+        let cancel = AtomicBool::new(false);
+        let signal = format!("dodstudio_test_{}", std::process::id());
+        let args: Vec<String> = vec!["/t".into(), "30".into(), signal];
+        let run = run_ffmpeg(
+            Path::new("waitfor"),
+            &args,
+            &cancel,
+            Duration::from_secs(60),
+        );
+        let watch = async {
+            for _ in 0..200 {
+                if !crate::sys::child_job::children_in_studio_job("waitfor.exe").is_empty() {
+                    // Seen once is enough: end it rather than wait it out.
+                    cancel.store(true, Ordering::Relaxed);
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            cancel.store(true, Ordering::Relaxed);
+            false
+        };
+        let (_, seen_in_job) = tokio::join!(run, watch);
+        assert!(seen_in_job);
+    }
 
     #[test]
     fn frames_are_spread_across_the_clip_with_the_thumbnail_in_the_middle() {

@@ -439,7 +439,17 @@ fn a_nearby_move_is_found_even_behind_a_big_folder() {
     }];
     // 30 entries: the big tree has 84, the project folder 1, then its
     // subfolder 1. Depth-first from `big` spent them all first.
-    let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30, &mut |_| {});
+    let limits = LocateLimits {
+        max_entries: 30,
+        ..LOCATE_LIMITS
+    };
+    let found = locate_missing_demos_within(
+        &demos,
+        &[project.clone(), big],
+        limits,
+        &mut || std::time::Duration::ZERO,
+        &mut |_| {},
+    );
     assert_eq!(
         found[0].candidate.as_deref(),
         Some(
@@ -450,6 +460,80 @@ fn a_nearby_move_is_found_even_behind_a_big_folder() {
                 .as_ref()
         )
     );
+}
+
+/// A demo `levels` folders below the search folder, searched with the
+/// real limits and a clock that never runs out.
+fn search_levels_down(name: &str, levels: usize) -> MissingDemo {
+    let scratch = Scratch::new(name);
+    let original = scratch.path().join("match.dem");
+    std::fs::write(&original, b"HLDEMO the one that moved").unwrap();
+    let key = demo_file_key(&original).unwrap();
+    let mut dir = scratch.path().to_path_buf();
+    for level in 0..levels {
+        dir = dir.join(format!("level{level}"));
+    }
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::rename(&original, dir.join("match.dem")).unwrap();
+    let demos = vec![KnownDemo {
+        path: original.to_string_lossy().into_owned(),
+        file_key: key,
+    }];
+    let mut found = locate_missing_demos_within(
+        &demos,
+        &[scratch.path().to_path_buf()],
+        LOCATE_LIMITS,
+        &mut || std::time::Duration::ZERO,
+        &mut |_| {},
+    );
+    found.remove(0)
+}
+
+#[test]
+fn a_demo_three_folders_down_is_found() {
+    let found = search_levels_down("locate_depth3", 3);
+    assert!(found.candidate.is_some(), "{found:?}");
+    assert!(!found.search_stopped_early);
+}
+
+#[test]
+fn a_demo_four_folders_down_is_not_found() {
+    let found = search_levels_down("locate_depth4", 4);
+    assert!(found.candidate.is_none(), "{found:?}");
+}
+
+#[test]
+fn the_time_budget_stops_the_search_and_says_so() {
+    let scratch = Scratch::new("locate_time");
+    let original = scratch.path().join("match.dem");
+    std::fs::write(&original, b"HLDEMO the one that moved").unwrap();
+    let key = demo_file_key(&original).unwrap();
+    std::fs::create_dir_all(scratch.path().join("sub")).unwrap();
+    std::fs::rename(&original, scratch.path().join("sub").join("match.dem")).unwrap();
+    let demos = vec![KnownDemo {
+        path: original.to_string_lossy().into_owned(),
+        file_key: key,
+    }];
+    // The clock starts past the budget: nothing is read.
+    let found = locate_missing_demos_within(
+        &demos,
+        &[scratch.path().to_path_buf()],
+        LOCATE_LIMITS,
+        &mut || LOCATE_TIME_BUDGET,
+        &mut |_| {},
+    );
+    assert!(found[0].candidate.is_none());
+    assert!(found[0].search_stopped_early);
+    // With time left, the same search finds it and does not say stopped.
+    let found = locate_missing_demos_within(
+        &demos,
+        &[scratch.path().to_path_buf()],
+        LOCATE_LIMITS,
+        &mut || LOCATE_TIME_BUDGET / 2,
+        &mut |_| {},
+    );
+    assert!(found[0].candidate.is_some());
+    assert!(!found[0].search_stopped_early);
 }
 
 #[test]

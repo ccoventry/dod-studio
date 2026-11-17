@@ -97,6 +97,7 @@ async fn closing_studio_stops_a_render_silently_and_leaves_no_file() {
         max_concurrent_renders: 1,
         clip_tag: None,
         resumable_renders: true,
+        live_thread_share: Default::default(),
     };
     let (tx, rx) = mpsc::channel();
     let reservations = Arc::new(Mutex::new(HashMap::new()));

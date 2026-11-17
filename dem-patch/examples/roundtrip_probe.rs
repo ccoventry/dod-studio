@@ -78,7 +78,14 @@ fn main() {
     for path in demos.into_iter().take(limit) {
         match dem::open_demo(&path) {
             Ok(demo) => {
-                let bytes = demo.write_to_bytes();
+                let bytes = match demo.write_to_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        failed += 1;
+                        println!("WRITE-ERR {e} {}", path.display());
+                        continue;
+                    }
+                };
                 ok += 1;
                 println!(
                     "{:016x} {:>10} {}",

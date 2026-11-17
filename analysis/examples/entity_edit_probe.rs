@@ -1363,7 +1363,10 @@ fn arg<T: std::str::FromStr>(args: &[String], i: usize, what: &str) -> T {
 fn write_checked(demo: &mut Demo, source: &[u8], out: &str, entity: u16, from: f32, to: f32) {
     let fixed = restate_counts(demo);
     println!("entity counts restated: {fixed}");
-    let bytes = demo.write_to_bytes();
+    let bytes = demo.write_to_bytes().unwrap_or_else(|e| {
+        eprintln!("re-encode: {e}");
+        std::process::exit(1);
+    });
     if let Err(e) = std::fs::write(out, &bytes) {
         eprintln!("write {out}: {e}");
         std::process::exit(1);
@@ -1428,7 +1431,10 @@ fn main() {
     };
     match mode {
         "roundtrip" => {
-            let out = demo.write_to_bytes();
+            let out = demo.write_to_bytes().unwrap_or_else(|e| {
+                eprintln!("re-encode: {e}");
+                std::process::exit(1);
+            });
             let first_diff = out.iter().zip(&bytes).position(|(a, b)| a != b);
             let differing = out.iter().zip(&bytes).filter(|(a, b)| a != b).count();
             println!(

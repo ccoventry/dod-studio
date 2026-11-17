@@ -56,11 +56,7 @@ impl Doer for SvcEventReliable {
         writer.append_u8(self.id());
 
         bw.append_vec(&self.event_index);
-        write_delta(
-            &self.event_args,
-            aux.delta_decoders.get("event_t\0").unwrap(),
-            &mut bw,
-        );
+        write_delta_with(&aux, "event_t\0", &self.event_args, &mut bw);
 
         bw.append_bit(self.has_fire_time);
         if self.has_fire_time {

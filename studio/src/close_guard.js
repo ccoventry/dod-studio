@@ -1,6 +1,7 @@
 // close_guard.js
 // What stands between the user and losing work when the window closes or the
-// page reloads: a running batch (#545), running renders (#1439), an unsaved
+// page reloads: a running batch (#545), running renders (#1439) or a combine
+// (#1496), an unsaved
 // project, and a settings edit still in a focused field. Kept out of main.js,
 // which only wires (#683).
 
@@ -9,6 +10,7 @@ import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { isCaptureRunning } from './capture_pane.js';
 import { leaveProjectSettingsPage } from './project_settings.js';
 import { confirmCloseDuringRenders } from './render_close_prompt.js';
+import { isCombineRunning } from './combine_clips.js';
 
 /**
  * @param {object} app  needsSavePrompt() and requestUnsavedChangesConfirmation()
@@ -25,8 +27,9 @@ export function startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirma
     event.preventDefault();
     // A running batch first: closing leaves it unwatched (#545).
     if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning }))) return;
-    // Renders can't go on without Studio: closing stops them (#1439).
-    if (!(await confirmCloseDuringRenders())) return;
+    // Renders and a combine can't go on without Studio: closing stops them
+    // (#1439, #1496).
+    if (!(await confirmCloseDuringRenders({ isCombining: isCombineRunning }))) return;
     // Project settings edits not applied yet: Apply, Discard or Stay (#1085).
     // Before the save prompt, so an Apply there is saved with the rest.
     if (!(await leaveProjectSettingsPage('window closing'))) return;

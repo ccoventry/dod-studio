@@ -1,6 +1,11 @@
 // strings/highlights.js: the app's text for highlights, clip names, players and review.
 // Part of the STRINGS catalog that ../strings.js assembles (#604).
 
+import { WORKSPACE_STRINGS } from './workspace.js';
+
+// One wording for "the search stopped early", defined with the queue's text (#1376).
+const SEARCH_STOPPED_NOTE = WORKSPACE_STRINGS.MAIN.SEARCH_STOPPED_NOTE;
+
 export const HIGHLIGHTS_STRINGS = {
   // ── Highlight Details: every capture of a highlight (#439) ───────────────
   CAPTURE_HISTORY: {
@@ -215,6 +220,17 @@ export const HIGHLIGHTS_STRINGS = {
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     NOT_STARTED: 'The review was not started.',
+    // Review reached a demo whose file is missing (review_missing_demos.js).
+    MISSING_TITLE: 'Demo not found',
+    missingMessage: (name, searchStopped) =>
+      `${name} was renamed, moved or deleted, so it can't be reviewed. What now?`
+      + (searchStopped ? ` ${SEARCH_STOPPED_NOTE}` : ''),
+    MISSING_LOCATE: 'Locate…',
+    MISSING_USE_FOUND: 'Use found copy',
+    MISSING_REMOVE: 'Remove',
+    MISSING_SKIP: 'Skip and keep reviewing',
+    MISSING_CANCEL: 'Cancel review',
+    NOTHING_LEFT_AFTER_SKIP: 'Nothing is left to review without the skipped demo(s).',
     // #1142: the in-game Review tab asked for a review of the demo it has loaded.
     FROM_GAME_SCANNING: 'Scanning the demo in DoD Studio...',
     FROM_GAME_STARTING: 'Starting the review...',
