@@ -65,15 +65,33 @@ enum Kind {
 impl Launcher {
     /// Starts `cmd`, outside Studio's job when that job would end it when
     /// Studio closes. May set `cmd`'s creation flags, so callers set none.
+    ///
+    /// This is the launch that brings the game forward, for a game the user
+    /// opened (Launch Game, Review, Launch Preview): when the launcher was
+    /// started through WMI, the game it starts is brought to the front once
+    /// its window shows, as Studio's own child would come
+    /// (`sys::bring_forward`). [`Launcher::spawn_unless_cancelled`] never
+    /// does.
     pub fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
-        Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))
+        let launch = crate::sys::bring_forward::ThisLaunch::starting_now();
+        let launcher = Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))?;
+        if let Kind::Detached { pid, exe_name } = &launcher.kind {
+            crate::sys::bring_forward::when_shown(launch, *pid, exe_name.clone());
+        }
+        Ok(launcher)
     }
 
     /// [`Launcher::spawn`] for a launch the user can cancel (a capture
     /// batch). A cancel while WMI is starting the launcher ends whatever it
     /// started and fails with [`std::io::ErrorKind::Interrupted`]; it never
     /// falls back to starting another (follows #1198).
+    ///
+    /// Never brings the game forward: it opens wherever Windows puts it, and
+    /// a batch keeps it behind (#434). [`Launcher::spawn`] is the one that
+    /// brings it forward. Ends an older launch's bring-forward watch first,
+    /// so that watch never brings this launch's game forward.
     pub fn spawn_unless_cancelled(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Self> {
+        crate::sys::bring_forward::end_older_watches();
         if !crate::sys::job::kills_children_on_close() {
             return cmd.spawn().map(Self::child);
         }
@@ -173,7 +191,7 @@ fn spawn_breaking_away(_cmd: &mut Command) -> std::io::Result<Option<Child>> {
 
 /// Whether `pid` is still the process named `exe_name`. A pid now held by
 /// another process means the launcher has gone.
-fn is_running_in(sys: &System, pid: u32, exe_name: &str) -> bool {
+pub(crate) fn is_running_in(sys: &System, pid: u32, exe_name: &str) -> bool {
     sys.process(Pid::from_u32(pid))
         .is_some_and(|process| crate::sys::process::is_named(process, &[exe_name]))
 }
@@ -228,5 +246,17 @@ mod tests {
         assert!(renamed.exit_status(&sys).unwrap().is_some());
         // Not this process's name, so it is never ended.
         renamed.kill();
+    }
+
+    /// A batch's launch ends an older launch's bring-forward watch, even when
+    /// the launcher fails to start: a missing program stands in for it.
+    #[test]
+    fn a_batch_launch_ends_an_older_bring_forward_watch() {
+        let before = crate::sys::bring_forward::current_turn();
+        let missing = std::env::temp_dir().join("no-such-launcher-dodstudio.exe");
+        let started =
+            Launcher::spawn_unless_cancelled(&mut Command::new(missing), &AtomicBool::new(false));
+        assert!(started.is_err());
+        assert!(crate::sys::bring_forward::current_turn() > before);
     }
 }

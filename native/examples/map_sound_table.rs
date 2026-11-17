@@ -27,7 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use native::patch::bsp_entities::{MapEntity, parse_entities};
+use native::maps::bsp_entities::{MapEntity, parse_entities};
 use native::patch::map_sounds;
 
 /// Maps listed by name when a sound is used by this many or fewer.

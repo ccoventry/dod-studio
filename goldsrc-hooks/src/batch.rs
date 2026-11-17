@@ -28,17 +28,38 @@
 //! - `init <command>`: run once the demo has loaded, before anything else;
 //! - `at <seconds> <command>`: run on the first frame at or past that time;
 //! - `seek <seconds> <to>`: at that time, jump forward to `to`;
+//! - `back <seconds> <to>`: at that time, go back to `to` and play the demo
+//!   again from there (#1085);
 //! - `next <seconds>`: at that time, the demo is done;
 //! - `end <command>`: after the last demo (outside any section).
 //!
 //! Times are the demo player's clock, the one `ds_demo_seek_to` takes. Lines
 //! starting with `//` and blank lines are skipped.
 //!
+//! ## Going back in one demo (#1085)
+//!
+//! A clip's variant is captured in the same playthrough: after the clip, a
+//! `back` line takes the demo back to before it and the variant's lines
+//! follow. Each `back` ends a pass through the demo: the lines before it, back
+//! to the last `back`, are one pass, sorted by time on their own, so two
+//! passes over the same stretch, with the same times, never mix. The `back`
+//! itself comes last in its pass, so no line of a pass may be later than its
+//! `back`, and a pass after the demo's `next` would never play: both are
+//! refused, as is a `back` whose `to` is not before its own time. The seek back is `demo_seek`'s rewind, which replays the demo
+//! from its first recorded frame so the flags, scores and kill feed are what
+//! playing up to there would leave.
+//!
+//! `seek` stays forward only: a `seek` whose target is behind it plays on,
+//! as it always has, so no batch file that has no `back` line does anything
+//! new. A hook DLL older than `back` refuses the whole file ("unknown line")
+//! rather than playing both passes as one.
+//!
 //! Commands and [`poll`] run on the game's main thread.
 
 // The demo player is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use lock_recover::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -71,6 +92,8 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 pub(crate) enum Action {
     Run(String),
     Seek(f64),
+    /// Go back to this time: the end of a pass.
+    Back(f64),
     Next,
 }
 
@@ -85,7 +108,8 @@ pub(crate) struct Entry {
 pub(crate) struct DemoPlan {
     pub demo: String,
     pub init: Vec<String>,
-    /// Sorted by time; lines at one time keep the file's order.
+    /// Sorted by time within each pass (each ending at a `back`); lines at
+    /// one time keep the file's order.
     pub entries: Vec<Entry>,
 }
 
@@ -112,6 +136,21 @@ fn command_text(raw: &str, number: usize) -> Result<String, String> {
         return Err(format!("line {number}: no command"));
     }
     Ok(command.to_string())
+}
+
+/// The demo the `keyword` line on line `number` belongs to: the last `demo`
+/// line's, or an error when no `demo` line came before it.
+fn current_demo<'p>(
+    plan: &'p mut Plan,
+    keyword: &str,
+    number: usize,
+) -> Result<&'p mut DemoPlan, String> {
+    plan.demos.last_mut().ok_or_else(|| {
+        format!(
+            "line {number}: \"{}\" before any \"demo\" line",
+            keyword.trim()
+        )
+    })
 }
 
 /// Reads a batch file's text.
@@ -141,16 +180,6 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
                 Ok(())
             }
         };
-        let in_demo = |plan: &mut Plan| -> Result<(), String> {
-            if plan.demos.is_empty() {
-                Err(format!(
-                    "line {number}: \"{}\" before any \"demo\" line",
-                    fields[0].trim()
-                ))
-            } else {
-                Ok(())
-            }
-        };
         match fields[0].trim() {
             "demo" => {
                 need(2)?;
@@ -165,36 +194,51 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
             }
             "init" => {
                 need(2)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let line = command_text(&fields[1..].join("\t"), number)?;
-                plan.demos.last_mut().unwrap().init.push(line);
+                demo.init.push(line);
             }
             "at" => {
                 need(3)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
                 let action = Action::Run(command_text(fields[2], number)?);
-                plan.demos
-                    .last_mut()
-                    .unwrap()
-                    .entries
-                    .push(Entry { at, action });
+                demo.entries.push(Entry { at, action });
             }
             "seek" => {
                 need(3)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
                 let to = time(fields[2], number)?;
-                plan.demos.last_mut().unwrap().entries.push(Entry {
+                demo.entries.push(Entry {
                     at,
                     action: Action::Seek(to),
                 });
             }
+            "back" => {
+                need(3)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
+                let at = time(fields[1], number)?;
+                let to = time(fields[2], number)?;
+                // A `back` that lands at or past its own time would step
+                // forward, and the next pass's earlier lines would all run at
+                // once on its landing.
+                if to >= at {
+                    return Err(format!(
+                        "line {number}: a \"back\" at {at} must go back, not to {to}"
+                    ));
+                }
+                end_pass(&demo.entries, at).map_err(|why| format!("line {number}: {why}"))?;
+                demo.entries.push(Entry {
+                    at,
+                    action: Action::Back(to),
+                });
+            }
             "next" => {
                 need(2)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
-                plan.demos.last_mut().unwrap().entries.push(Entry {
+                demo.entries.push(Entry {
                     at,
                     action: Action::Next,
                 });
@@ -211,9 +255,46 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
         return Err("the batch has no demos".to_string());
     }
     for demo in &mut plan.demos {
-        demo.entries.sort_by(|a, b| a.at.total_cmp(&b.at));
+        sort_passes(&mut demo.entries);
     }
     Ok(plan)
+}
+
+/// Where the pass that `entries` is in now began: after its last `back`.
+fn pass_start(entries: &[Entry]) -> usize {
+    entries
+        .iter()
+        .rposition(|e| matches!(e.action, Action::Back(_)))
+        .map_or(0, |i| i + 1)
+}
+
+/// Whether a `back` at `at` can end the pass `entries` is in now: it comes
+/// last in its pass, and a pass after the demo's `next` never plays.
+fn end_pass(entries: &[Entry], at: f64) -> Result<(), String> {
+    let pass = &entries[pass_start(entries)..];
+    if pass.iter().any(|e| e.action == Action::Next) {
+        return Err("a \"back\" after the demo's \"next\" would never run".to_string());
+    }
+    match pass.iter().map(|e| e.at).reduce(f64::max) {
+        Some(latest) if latest > at => Err(format!(
+            "the \"back\" at {at} comes before a line of its pass at {latest}"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Sorts each pass by time on its own: a pass ends at a `back`, which
+/// [`end_pass`] made sure is the latest line of it, so a stable sort leaves
+/// it last.
+fn sort_passes(entries: &mut [Entry]) {
+    let mut from = 0;
+    for i in 0..entries.len() {
+        if matches!(entries[i].action, Action::Back(_)) {
+            entries[from..=i].sort_by(|a, b| a.at.total_cmp(&b.at));
+            from = i + 1;
+        }
+    }
+    entries[from..].sort_by(|a, b| a.at.total_cmp(&b.at));
 }
 
 /// What one frame of a demo's schedule asks for, after its due commands ran.
@@ -221,6 +302,8 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
 pub(crate) enum Then {
     Play,
     Seek(f64),
+    /// A `back` line: rewind to this time for the next pass.
+    Back(f64),
     Next,
 }
 
@@ -232,9 +315,11 @@ pub(crate) struct Cursor {
 
 impl Cursor {
     /// Moves past every entry due at clock `now`. Returns the commands to run,
-    /// in order, and what comes after them: the demo's end, or the furthest
-    /// seek that is still ahead. Only ever forward: a batch never seeks back,
-    /// so a clock that goes back (a seek by hand) re-runs nothing.
+    /// in order, and what comes after them: the demo's end, a `back` (which
+    /// ends the pass, so nothing after it is looked at: every line of the next
+    /// pass is due by the clock it leaves behind), or the furthest seek that
+    /// is still ahead. The cursor only moves on, so a clock that goes back
+    /// any other way (a seek by hand) re-runs nothing.
     pub fn due(&mut self, entries: &[Entry], now: f64) -> (Vec<String>, Then) {
         let mut run = Vec::new();
         let mut then = Then::Play;
@@ -248,6 +333,10 @@ impl Cursor {
                             _ => Then::Seek(*to),
                         };
                     }
+                }
+                Action::Back(to) => {
+                    self.next += 1;
+                    return (run, Then::Back(*to));
                 }
                 Action::Next => {
                     self.next += 1;
@@ -367,7 +456,7 @@ const FAST_FORWARD_LINE: &str = "sys_fast_forward";
 /// at a clip boundary. Two clips close together have no seek between them,
 /// only the fast-forward through the gap, which is a boundary as well.
 pub(crate) fn holds_at(then: &Then, lines: &[String], hold: bool) -> bool {
-    hold && (matches!(then, Then::Seek(_) | Then::Next)
+    hold && (matches!(then, Then::Seek(_) | Then::Back(_) | Then::Next)
         || lines.iter().any(|l| l == FAST_FORWARD_LINE))
 }
 
@@ -382,8 +471,14 @@ struct Batch {
 
 static BATCH: Mutex<Option<Batch>> = Mutex::new(None);
 
+/// Whether a batch runs now. `try_lock`, for callers on a game frame: a lock
+/// held elsewhere means the batch is being worked on, so it runs.
+pub(crate) fn running() -> bool {
+    BATCH.try_lock().map_or(true, |batch| batch.is_some())
+}
+
 fn lock() -> std::sync::MutexGuard<'static, Option<Batch>> {
-    BATCH.lock().unwrap_or_else(|e| e.into_inner())
+    lock_or_recover(&BATCH)
 }
 
 fn say(line: &str) {
@@ -505,15 +600,18 @@ pub fn poll() {
             let ready = frames >= SETTLE_FRAMES
                 && (seen_loading || frames >= UNSEEN_LOAD_FRAMES)
                 && clock.is_some_and(|c| c.active && !c.loading);
-            if !ready {
-                batch.phase = Phase::Loading {
-                    since,
-                    frames,
-                    seen_loading,
-                };
-                return;
-            }
-            let c = clock.expect("ready implies a clock");
+            // `ready` already needs a clock; the match only names it.
+            let c = match clock {
+                Some(c) if ready => c,
+                _ => {
+                    batch.phase = Phase::Loading {
+                        since,
+                        frames,
+                        seen_loading,
+                    };
+                    return;
+                }
+            };
             let plan = &batch.plan.demos[batch.at];
             trace(&format!(
                 "demo {} of {}: loaded in {:.1} s, clock {:.1} ({:.1}..{:.1}); {} init command(s), {} timed",
@@ -780,6 +878,22 @@ fn act(
             }
             batch.phase = Phase::Playing { cursor, beat };
         }
+        Then::Back(to) => {
+            match crate::demo_seek::rewind_to_seconds(to) {
+                Ok(how) => trace(&format!(
+                    "demo {}: going back from {:.1} to {to:.1} for the next pass ({how})",
+                    batch.at + 1,
+                    c.now
+                )),
+                // Playing on would run the next pass's lines at once, on
+                // the wrong stretch of the demo.
+                Err(why) => {
+                    skip(guard, format!("the seek back to {to:.1} failed ({why})"));
+                    return;
+                }
+            }
+            batch.phase = Phase::Playing { cursor, beat };
+        }
         Then::Play => {
             if c.now >= c.end - 0.05 && left > 0 {
                 skip(
@@ -918,184 +1032,5 @@ pub unsafe extern "C" fn command() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn file(lines: &[&str]) -> String {
-        std::iter::once(HEADER)
-            .chain(lines.iter().copied())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    #[test]
-    fn a_batch_file_parses_into_sorted_demo_sections() {
-        let plan = parse(&file(&[
-            "// two demos",
-            "demo\tC:/demos/a b.dem",
-            "init\tmirv_movie_fps 60",
-            "at\t310.5\techo late",
-            "seek\t300\t305",
-            "at\t300\techo first",
-            "next\t320",
-            "",
-            "demo\tC:/demos/c.dem",
-            "at\t10\techo c",
-            "end\tsys_capture_done_path",
-        ]))
-        .unwrap();
-        assert_eq!(plan.demos.len(), 2);
-        let a = &plan.demos[0];
-        assert_eq!(a.demo, "C:/demos/a b.dem");
-        assert_eq!(a.init, ["mirv_movie_fps 60"]);
-        let got: Vec<_> = a.entries.iter().map(|e| (e.at, e.action.clone())).collect();
-        assert_eq!(
-            got,
-            [
-                (300.0, Action::Seek(305.0)),
-                (300.0, Action::Run("echo first".into())),
-                (310.5, Action::Run("echo late".into())),
-                (320.0, Action::Next),
-            ]
-        );
-        assert_eq!(plan.end, ["sys_capture_done_path"]);
-    }
-
-    #[test]
-    fn a_bad_batch_file_says_which_line() {
-        assert!(parse("hello").unwrap_err().contains("not a batch file"));
-        assert!(parse(HEADER).unwrap_err().contains("no demos"));
-        let e = parse(&file(&["at\t1\techo"])).unwrap_err();
-        assert!(e.contains("line 2") && e.contains("before any"), "{e}");
-        let e = parse(&file(&["demo\tx.dem", "at\tsoon\techo"])).unwrap_err();
-        assert!(e.contains("line 3") && e.contains("not a time"), "{e}");
-        let e = parse(&file(&["demo\tx.dem", "at\t1"])).unwrap_err();
-        assert!(e.contains("needs 2"), "{e}");
-        let e = parse(&file(&["demo\tx.dem", "jump\t1"])).unwrap_err();
-        assert!(e.contains("unknown line"), "{e}");
-        let e = parse(&file(&["demo\tx.dem", "seek\t5\t-1"])).unwrap_err();
-        assert!(e.contains("0 or more"), "{e}");
-    }
-
-    fn entries(text: &[&str]) -> Vec<Entry> {
-        let mut lines = vec!["demo\tx.dem"];
-        lines.extend_from_slice(text);
-        parse(&file(&lines)).unwrap().demos.remove(0).entries
-    }
-
-    #[test]
-    fn commands_run_once_in_order_and_a_seek_comes_after_them() {
-        let e = entries(&[
-            "at\t1\ta",
-            "seek\t5\t20",
-            "at\t5\tb",
-            "at\t21\tc",
-            "next\t30",
-        ]);
-        let mut cursor = Cursor { next: 0 };
-        assert_eq!(cursor.due(&e, 0.5), (vec![], Then::Play));
-        assert_eq!(cursor.due(&e, 1.0), (vec!["a".to_string()], Then::Play));
-        assert_eq!(cursor.due(&e, 1.5), (vec![], Then::Play));
-        // The command at the seek's own time still runs, before the seek.
-        assert_eq!(
-            cursor.due(&e, 5.0),
-            (vec!["b".to_string()], Then::Seek(20.0))
-        );
-        assert_eq!(cursor.due(&e, 20.0), (vec![], Then::Play));
-        assert_eq!(cursor.due(&e, 21.0), (vec!["c".to_string()], Then::Play));
-        assert_eq!(cursor.due(&e, 31.0), (vec![], Then::Next));
-    }
-
-    #[test]
-    fn a_seek_that_is_not_ahead_plays_on() {
-        let e = entries(&["seek\t5\t5.2", "seek\t6\t4", "next\t9"]);
-        let mut cursor = Cursor { next: 0 };
-        assert_eq!(cursor.due(&e, 5.0), (vec![], Then::Play));
-        assert_eq!(cursor.due(&e, 6.0), (vec![], Then::Play));
-    }
-
-    #[test]
-    fn a_clock_that_goes_back_reruns_nothing() {
-        let e = entries(&["at\t1\ta", "at\t2\tb", "next\t9"]);
-        let mut cursor = Cursor { next: 0 };
-        assert_eq!(cursor.due(&e, 2.0).0, ["a", "b"]);
-        assert_eq!(cursor.due(&e, 0.5), (vec![], Then::Play));
-        assert_eq!(cursor.due(&e, 2.0), (vec![], Then::Play));
-    }
-
-    #[test]
-    fn a_held_batch_gives_up_on_studio_only_after_it_has_been_gone_a_while() {
-        assert!(!studio_gone(true, None), "Studio is reading");
-        assert!(!studio_gone(true, Some(Duration::from_secs(2))), "a moment");
-        assert!(studio_gone(true, Some(HELD_ALONE)));
-        assert!(
-            !studio_gone(false, Some(Duration::from_secs(600))),
-            "no events pipe: no telling, so the hold stays"
-        );
-    }
-
-    #[test]
-    fn a_hold_stops_only_at_a_clip_boundary() {
-        let none: Vec<String> = vec![];
-        let ff = vec!["sys_fast_forward".to_string()];
-        assert!(holds_at(&Then::Seek(20.0), &none, true));
-        assert!(holds_at(&Then::Next, &none, true));
-        assert!(!holds_at(&Then::Play, &none, true), "mid-clip: plays on");
-        assert!(
-            !holds_at(&Then::Play, &["startmovie x".to_string()], true),
-            "a clip's own lines: plays on"
-        );
-        assert!(!holds_at(&Then::Seek(20.0), &none, false));
-        assert!(!holds_at(&Then::Next, &none, false));
-        assert!(!holds_at(&Then::Play, &ff, false));
-    }
-
-    #[test]
-    fn a_gap_too_short_to_seek_over_is_a_boundary_too() {
-        // Two clips close together: no seek, only the fast-forward between
-        // them, after the first one's recording stopped.
-        let ff = vec!["sys_fast_forward".to_string()];
-        assert!(holds_at(&Then::Play, &ff, true));
-    }
-
-    #[test]
-    fn a_clip_waits_for_its_recording_until_studio_answers_leaves_or_times_out() {
-        let a_moment = Duration::from_millis(80);
-        assert_eq!(recording_wait(false, false, a_moment), RecordingWait::Wait);
-        assert_eq!(recording_wait(true, false, a_moment), RecordingWait::Go);
-        assert_eq!(
-            recording_wait(true, true, RECORDING_WAIT_MAX),
-            RecordingWait::Go,
-            "a go-ahead that made it counts"
-        );
-        assert_eq!(
-            recording_wait(false, true, a_moment),
-            RecordingWait::StudioGone
-        );
-        assert_eq!(
-            recording_wait(false, false, RECORDING_WAIT_MAX),
-            RecordingWait::TimedOut
-        );
-    }
-
-    #[test]
-    fn the_wait_line_is_the_batch_command_studio_writes() {
-        assert_eq!(
-            WAIT_FOR_RECORDING_LINE,
-            "ds_capture_batch wait_for_recording"
-        );
-        let wait = format!("at\t4\t{WAIT_FOR_RECORDING_LINE}");
-        let e = entries(&["at\t4\techo a", wait.as_str()]);
-        let mut cursor = Cursor { next: 0 };
-        let (lines, then) = cursor.due(&e, 4.0);
-        assert_eq!(then, Then::Play);
-        assert_eq!(lines, ["echo a", WAIT_FOR_RECORDING_LINE]);
-    }
-
-    #[test]
-    fn next_stops_the_frame_at_the_demo_end() {
-        let e = entries(&["at\t1\ta", "next\t2", "at\t3\tafter"]);
-        let mut cursor = Cursor { next: 0 };
-        assert_eq!(cursor.due(&e, 5.0), (vec!["a".to_string()], Then::Next));
-    }
-}
+#[path = "batch_tests.rs"]
+mod tests;

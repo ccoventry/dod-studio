@@ -3,7 +3,7 @@
 //! a sprite for the tile picker, and tells running games the "Use in the
 //! game" box (`ds_player_overrides`).
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -85,6 +85,7 @@ pub fn add_crosshair_file(
     let dir = game_dir(&game_path, &game_folder)
         .ok_or_else(|| "set the Half-Life executable and game folder first".to_string())?;
     native::crosshair_import::import_crosshair(&dir, Path::new(&source), &name)
+        .map_err(|e| e.to_string())
 }
 
 /// Sends the box's value to every running game that takes commands, and

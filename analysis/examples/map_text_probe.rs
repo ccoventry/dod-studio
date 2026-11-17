@@ -17,6 +17,11 @@
 //!
 //! Text is reported with its frame range, because that is what separates a
 //! message the map fires at a trigger from one sent once at connect.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage, TempEntity};

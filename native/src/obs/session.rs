@@ -16,7 +16,7 @@
 //! drive and only its name changes. That is also what preserves the per-block
 //! export-pool routing across drives.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

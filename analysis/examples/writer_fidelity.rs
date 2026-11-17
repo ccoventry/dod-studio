@@ -14,6 +14,11 @@
 //! disagreeing with the real GoldSrc server that produced the original bytes.
 //!
 //!     cargo run --release -p analysis --example writer_fidelity -- <healthy.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::open_demo_from_bytes;
 

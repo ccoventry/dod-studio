@@ -118,6 +118,16 @@ fn ramp(span: RampSpan) -> Vec<Frame> {
     };
     let start_time = span.join.time_before;
     let end_time = span.template.time;
+    let server_time_after = match &template.1.messages {
+        MessageData::Parsed(msgs) => msgs.iter().find_map(|m| match m {
+            NetMessage::EngineMessage(em) => match &**em {
+                EngineMessage::SvcTime(t) => Some(t.time),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
+    };
     (1..=steps)
         .map(|i| {
             let fraction = i as f64 / (steps + 1) as f64;
@@ -126,8 +136,15 @@ fn ramp(span: RampSpan) -> Vec<Frame> {
             let delta_sequence = (span.join.delta_sequence_before as i64 + advance) as u32 & 0xff;
             let mut sequence_info = template.1.sequence_info.clone();
             sequence_info.incoming_sequence = (start_sequence as i64 + advance) as i32;
+            let server_time = ramp_server_time(
+                span.join.server_time_before,
+                server_time_after,
+                fraction as f32,
+                time - start_time,
+            )
+            .unwrap_or(time);
             let mut msgs = vec![NetMessage::EngineMessage(Box::new(EngineMessage::SvcTime(
-                SvcTime { time },
+                SvcTime { time: server_time },
             )))];
             let first = i == 1;
             if let Some(cd) = &clientdata_template {
@@ -157,6 +174,8 @@ fn ramp(span: RampSpan) -> Vec<Frame> {
                 frame_data: FrameData::NetworkMessage(Box::new((
                     template.0.clone(),
                     NetworkMessage {
+                        // The view held through the hole. When the damage
+                        // reached the template's, `view_range` restates it.
                         info: template.1.info.clone(),
                         sequence_info,
                         message_length: 0,
@@ -167,6 +186,29 @@ fn ramp(span: RampSpan) -> Vec<Frame> {
             }
         })
         .collect()
+}
+
+/// A ramp frame's `svc_time`: the server clock, which is not the frame time.
+/// It runs ahead of it by however long the server had been up when the
+/// recording started, so a ramp stamped with frame times took the clock back
+/// that far (10.6 s in `m1_h2`) at the hole and forward again at the join.
+/// `viewdemo` plays the world by this clock, and with it stepping back the view
+/// left the map and went black, from seconds into playback, once the world
+/// had read past the hole (#15). Rises from the clock before the hole to the
+/// one after it; with only the one before (or the one after behind it, a
+/// damaged edge), it advances with the frame time from there. `None` with no
+/// clock before the hole.
+fn ramp_server_time(
+    before: Option<f32>,
+    after: Option<f32>,
+    fraction: f32,
+    since_hole: f32,
+) -> Option<f32> {
+    let before = before?;
+    Some(match after {
+        Some(after) if after >= before => before + (after - before) * fraction,
+        _ => before + since_hole.max(0.0),
+    })
 }
 
 /// A ramp frame's `svc_clientdata`. The first carries the player's replayed
@@ -317,6 +359,25 @@ mod tests {
         ];
         assert_eq!(ramp_position(&frames, Some(25.0)), 2);
         assert_eq!(ramp_position(&frames, None), 4);
+    }
+
+    #[test]
+    fn a_ramp_runs_on_the_server_clock_not_the_frame_time() {
+        // m1_h2's first hole: the server clock is 10.6 s ahead of frame time.
+        let (before, after) = (729.49, 750.79);
+        assert_eq!(
+            ramp_server_time(Some(before), Some(after), 0.0, 0.0),
+            Some(before)
+        );
+        let middle = ramp_server_time(Some(before), Some(after), 0.5, 10.6).expect("a clock");
+        assert!((middle - (before + after) / 2.0).abs() < 0.01, "{middle}");
+        // The clock after the hole behind the one before it (a damaged edge):
+        // it runs on with the frame time instead of stepping back.
+        assert_eq!(
+            ramp_server_time(Some(before), Some(700.0), 0.5, 3.0),
+            Some(before + 3.0)
+        );
+        assert_eq!(ramp_server_time(None, Some(after), 0.5, 3.0), None);
     }
 
     #[test]

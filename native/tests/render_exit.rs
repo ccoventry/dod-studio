@@ -1,5 +1,10 @@
 //! Studio's way out while renders run (#1439). Its own test binary, so the
 //! process-wide "Studio is closing" flag it sets reaches no other test.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "integration test: its helpers sit outside a #[test], where clippy.toml's test allowance does not reach (#1179)"
+)]
 
 use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::renderer::{RenderUpdate, run_render_job, stop_renders_for_exit};
@@ -91,6 +96,7 @@ async fn closing_studio_stops_a_render_silently_and_leaves_no_file() {
         custom_codec_args: "-c:v libx264 -preset placebo -crf 0".to_string(),
         max_concurrent_renders: 1,
         clip_tag: None,
+        resumable_renders: true,
     };
     let (tx, rx) = mpsc::channel();
     let reservations = Arc::new(Mutex::new(HashMap::new()));

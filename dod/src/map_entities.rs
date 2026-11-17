@@ -2,7 +2,7 @@
 //! (spawns, control points, sounds, relays), parsed into key/value pairs.
 //!
 //! Pure parsing, no I/O, so both sides read a map the same way: the demo
-//! patcher and the offline tools (`native::patch::bsp_entities`, which adds
+//! patcher and the offline tools (`native::maps::bsp_entities`, which adds
 //! the lump rewrite) parse a `.bsp` read from disk, and the hook DLL parses
 //! the copy the engine keeps in memory (`model_t.entities`,
 //! `goldsrc-hooks/src/map_sounds.rs`).

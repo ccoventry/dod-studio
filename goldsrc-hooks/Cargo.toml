@@ -22,6 +22,7 @@ crate-type = ["cdylib"]
 # The DoD Studio window's Killstreaks tab (#565): analyses the playing demo,
 # through the analyzer cache Studio shares (`analysis::cache`).
 analysis = { path = "../analysis" }
+lock-recover = { workspace = true }
 # The map's entity parser and the victory/capture sound rules (#284), shared
 # with the demo patcher so a map loading in the game is classified the same
 # way as on disk (`map_sounds.rs`).
@@ -53,3 +54,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
 ] }
+
+# The workspace's lint policy, which this crate was outside of: above all its
+# unwrap/expect refusal (#1179), since a panic here takes hl.exe down with it.
+[lints]
+workspace = true

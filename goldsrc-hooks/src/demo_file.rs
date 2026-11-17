@@ -213,21 +213,56 @@ const SVC_TIME: u8 = 7;
 /// it's for a background thread, never a game frame; `None` when the file
 /// isn't a demo or has no `svc_time`.
 pub fn loaded_span(path: &Path) -> Option<f32> {
+    walk(path)?.span
+}
+
+/// What [`walk`] found.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Walk {
+    /// [`loaded_span`]'s figure: the `svc_time` span up to the first turn
+    /// back or the first bad frame.
+    pub span: Option<f32>,
+    /// The first `svc_time`, where the demo player's world starts: the two
+    /// must agree before a span is held against the player's (#1373).
+    pub first: Option<f32>,
+    /// The walk stopped on a frame no reader can make sense of (an unknown
+    /// type, a size past [`MAX_POSSIBLE_MSG`] or below zero, a frame running
+    /// past the end of the file) before the clock turned back: the file is
+    /// damaged there (#1373). `viewdemo`'s loader stops on the same frame.
+    pub bad_frame: bool,
+}
+
+/// Walks every frame header of the demo at `path` (see [`loaded_span`]).
+/// For a background thread; `None` when the file isn't a demo or its
+/// directory doesn't read.
+pub fn walk(path: &Path) -> Option<Walk> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
     let entries = read_directory(&mut reader)?;
     let mut clock = SvcClock::default();
+    let mut bad_frame = false;
     for entry in entries.as_chunks::<ENTRY_SIZE>().0 {
         let offset = u64::try_from(field_i32(entry, OFFSET_AT)).ok()?;
         let length = u64::try_from(field_i32(entry, LENGTH_AT)).ok()?;
-        if walk_svc_times(&mut reader, offset, offset + length, &mut clock).is_none()
-            || clock.turned_back
-        {
+        if walk_svc_times(&mut reader, offset, offset + length, &mut clock).is_none() {
+            bad_frame = !clock.turned_back;
+            break;
+        }
+        if clock.turned_back {
             break;
         }
     }
-    clock.span()
+    Some(Walk {
+        span: clock.span(),
+        first: clock.first,
+        bad_frame,
+    })
 }
+
+/// The longest network message a demo frame may carry: the engine's and the
+/// demo player's readers both refuse a longer one (`Demo message >
+/// MAX_POSSIBLE_MSG`, `docs/goldsrc_hw_dll_survey.md`).
+const MAX_POSSIBLE_MSG: u32 = 65_536;
 
 /// The `svc_time`s seen so far, up to the first that goes back.
 #[derive(Default)]
@@ -273,7 +308,9 @@ fn walk_svc_times(reader: &mut Reader, from: u64, to: u64, clock: &mut SvcClock)
                 // then the message, which nearly always opens with svc_time.
                 let mut info = [0u8; 468];
                 reader.read_exact(&mut info).ok()?;
-                let size = u32::try_from(field_i32(&info, 464)).ok()?;
+                let size = u32::try_from(field_i32(&info, 464))
+                    .ok()
+                    .filter(|&n| n <= MAX_POSSIBLE_MSG)?;
                 let mut opening = [0u8; 5];
                 let peek = size.min(5) as usize;
                 reader.read_exact(&mut opening[..peek]).ok()?;
@@ -513,8 +550,71 @@ mod tests {
         std::fs::write(&path, &bytes).unwrap();
         let span = loaded_span(&path).unwrap();
         assert!((span - (1956.4 - 4.3)).abs() < 0.01, "{span}");
+        assert!(!walk(&path).unwrap().bad_frame);
         std::fs::write(&path, b"not a demo").unwrap();
         assert_eq!(loaded_span(&path), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A demo of one playback segment holding `playback`'s frames.
+    fn one_segment_demo(name: &str, playback: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("demo_file_{name}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("x.dem");
+        let mut bytes = vec![0u8; 544];
+        bytes[..8].copy_from_slice(b"HLDEMO\0\0");
+        let directory_at = 544 + playback.len() as i32;
+        bytes[540..544].copy_from_slice(&directory_at.to_le_bytes());
+        bytes.extend(playback);
+        bytes.extend(1i32.to_le_bytes());
+        let mut e = entry(1, 0.0);
+        e[OFFSET_AT..OFFSET_AT + 4].copy_from_slice(&544i32.to_le_bytes());
+        e[LENGTH_AT..LENGTH_AT + 4].copy_from_slice(&(playback.len() as i32).to_le_bytes());
+        bytes.extend(e);
+        std::fs::write(&path, &bytes).unwrap();
+        path
+    }
+
+    /// A network frame whose size field says `size`, with no message after.
+    fn oversized(size: i32) -> Vec<u8> {
+        let mut f = frame(1, 0.0, 464);
+        f.extend(size.to_le_bytes());
+        f
+    }
+
+    #[test]
+    fn a_frame_no_reader_takes_stops_the_walk_as_damage() {
+        // monday-wsod25_r07_m1_h1's kind: a message past MAX_POSSIBLE_MSG.
+        let frames = [
+            net(10.0),
+            net(507.7),
+            oversized(70_000),
+            net(900.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let path = one_segment_demo("oversized", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(walked.bad_frame);
+        assert!((walked.span.unwrap() - 497.7).abs() < 0.01);
+        assert_eq!(walked.first, Some(10.0));
+        // A negative size and an unknown frame type are the same.
+        for bad in [oversized(-1), vec![42u8; 9]] {
+            let frames = [net(10.0), net(20.0), bad, net(30.0)].concat();
+            let path = one_segment_demo("bad", &frames);
+            assert!(walk(&path).unwrap().bad_frame);
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn rubble_after_the_clock_turns_back_is_not_damage() {
+        // viewdemo stops at the turn back, so nothing after it is read.
+        let frames = [net(10.0), net(600.0), net(4.0), vec![42u8; 9]].concat();
+        let path = one_segment_demo("turned", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(!walked.bad_frame);
+        assert!((walked.span.unwrap() - 590.0).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

@@ -1,11 +1,11 @@
 // config_checks_cmd.rs
 // The Capture tab's advice on its settings: the config-file warnings
-// (`native::patch::cfg_report`) and how long the pre-roll and post-roll need
+// (`native::game_config::cfg_report`) and how long the pre-roll and post-roll need
 // to be. Both only convert the frontend's arguments and call `native`.
 
 use crate::capture_manager::CustomCommandPayload;
+use native::game_config::cfg_report::{CfgReport, CfgReportRequest, cfg_report};
 use native::patch::CustomCommand;
-use native::patch::cfg_report::{CfgReport, CfgReportRequest, cfg_report};
 use serde::{Deserialize, Serialize};
 
 /// What the game's own config files set, and what the app's init commands will

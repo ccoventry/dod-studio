@@ -22,7 +22,7 @@ original "suggested task" wording):
 | Move and size the overview map (§5) | yes | `ds_hud_overview_layout`, `overview_map.rs` | PR #303 |
 | Objective icons / timer position (§6) | yes | `ds_hud_objectives`, `objicons.rs` | #254, PR #263 |
 | The `+0x175c6c` VGUI panel (§6) | no | — | — |
-| `r_drawentities` / `cl_lw` quit check (§8) | handled by refusal, not hooked | `native/src/patch/cfg_scan.rs` | #205 |
+| `r_drawentities` / `cl_lw` quit check (§8) | handled by refusal, not hooked | `native/src/game_config/cfg_scan.rs` | #205 |
 | Spectator bar (§10) | yes | `ds_spec_hide_bars`, `spectator_bars.rs`, `spectator_hud.rs` | #269, #328 |
 | Keep the spectator camera on one player (§10) | yes | `ds_spec_lock` / `ds_spec_target`, `spectator_follow.rs` | #206 |
 
@@ -427,7 +427,7 @@ in issue #205; the complete order of operations is:
    toggle the VGUI scoreboard.
 3. Enforce five cvars, two of which end by **quitting the game**
    (`r_drawentities`, `cl_lw`) and three silently (`cl_pitchdown`, `cl_pitchup`,
-   `crosshair`). Issue #205; `native/src/patch/cfg_scan.rs` refuses the first two
+   `crosshair`). Issue #205; `native/src/game_config/cfg_scan.rs` refuses the first two
    as typed commands.
 4. If `hud_draw` ≠ 0, walk the element list and `Draw` each active element (§1).
 

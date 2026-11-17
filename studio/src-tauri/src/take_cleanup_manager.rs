@@ -25,6 +25,7 @@ use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use crate::take_delete_manager::capture_dirs;
 use crate::take_preview_manager::TakePreviewManager;
+use lock_recover::{lock_or_recover, read_or_recover, write_or_recover};
 use native::hlcr::take_cleanup::{
     AfterFinish, CleanupPolicy, RoomPlan, RoomStep, SpaceNeed, finished_at, folder_key, format_gb,
     plan_room,
@@ -35,14 +36,14 @@ use native::hlcr::take_delete::{
 use native::log_markdown;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The setting as saved.
 fn policy(settings: &SettingsManager) -> CleanupPolicy {
-    let s = settings.inner.lock().unwrap();
+    let s = lock_or_recover(&settings.inner);
     CleanupPolicy {
         after_finish: AfterFinish::from_setting(&s.take_after_finish),
         only_when_space_needed: s.take_delete_only_when_space_needed,
@@ -275,17 +276,14 @@ struct Deleting(String);
 impl Deleting {
     fn start(take_folder: &Path) -> Self {
         let key = folder_key(&take_folder.to_string_lossy());
-        DELETING
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(key.clone());
+        write_or_recover(&DELETING).push(key.clone());
         Deleting(key)
     }
 }
 
 impl Drop for Deleting {
     fn drop(&mut self) {
-        let mut list = DELETING.write().unwrap_or_else(PoisonError::into_inner);
+        let mut list = write_or_recover(&DELETING);
         if let Some(i) = list.iter().position(|k| *k == self.0) {
             list.swap_remove(i);
         }
@@ -297,9 +295,7 @@ impl Drop for Deleting {
 pub(crate) fn deleting_under(folder: &Path) -> bool {
     let key = folder_key(&folder.to_string_lossy());
     let inside = format!("{key}\\");
-    DELETING
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
+    read_or_recover(&DELETING)
         .iter()
         .any(|k| *k == key || k.starts_with(&inside))
 }

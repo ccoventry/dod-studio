@@ -57,6 +57,12 @@ KNOWN = {
     # that build's frame is written at several places before the first push.
     "hw.dll+0x1e2612": "#384 (25th Anniversary build): the engine's hull trace read a garbage plane from a previous "
                        "map's collision data -- hull_trace_guard guards this; check its log line",
+    # #1394: a DoD user-message handler, dispatched by hw.dll+0x285ef, uses an
+    # engine call's result unchecked; reached right after `End of demo.` of
+    # ktps8w11sf-gorilla_gskill_m2_armory_h2 under playdemo, PRE 3 of 3 and POST 1 of 1,
+    # also with the hook's demo_damage module off.
+    "client.dll+0x2c59b": "DoD's client reads through a bad pointer in a message handler at the end of some demos "
+                          "under playdemo (ktps8w11sf-gorilla_gskill_m2_armory_h2, PRE and POST); not caused by the hook DLL",
     # Part of #1392: ObjectDictionary::AddToDictionary's shift loop in the 25th
     # Anniversary DemoPlayer.dll, walking from a garbage insert index that a
     # stale lookup cache gave after the event array grew. Guarded by

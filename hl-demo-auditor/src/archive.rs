@@ -167,7 +167,13 @@ fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
     let mut archive = open(zip)?;
     let mut demos: Vec<ZipDemoEntry> = Vec::new();
     for i in 0..archive.len() {
-        let Some(name) = archive.name_for_index(i).map(str::to_owned) else {
+        // zip 9 decodes any name (UTF-8, else CP437, which can't fail), so a
+        // name error never skips an entry today.
+        let Some(name) = archive
+            .name_for_index(i)
+            .and_then(|n| n.ok())
+            .map(|n| n.into_owned())
+        else {
             continue;
         };
         if !is_demo_name(&name) || demos.iter().any(|d| d.name == name) {

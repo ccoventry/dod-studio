@@ -26,7 +26,7 @@
 //!
 //! The hook DLL's side is `goldsrc-hooks/src/review_ask.rs`.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -137,7 +137,7 @@ pub fn parse_request(line: &str) -> Result<(PathBuf, ReviewStart), String> {
 /// `path` with every `.` dropped and every `..` taken back a folder, as the
 /// game names a demo from its own folder (`dod/../../demos/a.dem`) and the
 /// Master Demo Queue lists it plainly. Lexical: nothing is read from disk.
-fn without_dots(path: &Path) -> PathBuf {
+pub(crate) fn without_dots(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
         match part {

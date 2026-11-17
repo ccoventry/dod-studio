@@ -6,14 +6,7 @@
 use crate::sys::launcher::Launcher;
 use sysinfo::System;
 
-/// One `hl.exe` in the process list. Its start time tells the game apart
-/// from a later process Windows gives the same pid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct GameProcess {
-    pub(super) pid: u32,
-    /// Seconds since the epoch, as Windows reports it; 0 when it can't be read.
-    pub(super) started: u64,
-}
+pub(super) use crate::sys::process::GameProcess;
 
 /// What the poll loop reads from, and does to, the machine's processes.
 pub(super) trait Processes {
@@ -50,15 +43,7 @@ impl Processes for Live {
     }
 
     fn games(&self) -> Vec<GameProcess> {
-        self.sys
-            .processes()
-            .values()
-            .filter(|p| crate::sys::process::is_named(p, &[crate::sys::process::GAME_EXE]))
-            .map(|p| GameProcess {
-                pid: p.pid().as_u32(),
-                started: p.start_time(),
-            })
-            .collect()
+        crate::sys::process::games_in(&self.sys)
     }
 
     fn injectors_of(&self, launcher: u32) -> Vec<u32> {

@@ -3,7 +3,7 @@
 //! maps out as demos of their own. The work is `native::demo_split` and
 //! `native::demo_maps_scan`; this is the IPC around it.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

@@ -41,7 +41,7 @@ use std::collections::BTreeSet;
 use dem::types::{Demo, EngineMessage, FrameData, MessageData, NetMessage};
 use dod::UserMessage;
 
-use super::bsp_entities::MapEntity;
+use crate::maps::bsp_entities::MapEntity;
 
 /// The user message DoD puts map text on. Compared against
 /// `dem::types::UserMessage::name`, which is NUL-padded to 16 bytes.
@@ -180,7 +180,7 @@ pub fn hide_map_text(demo: &mut Demo, strings: &BTreeSet<String>) -> TextStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::bsp_entities::parse_entity_text;
+    use crate::maps::bsp_entities::parse_entity_text;
 
     /// Anzio's text entities, verbatim but trimmed to the keys that matter.
     const ANZIO: &str = r#"

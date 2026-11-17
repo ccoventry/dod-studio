@@ -12,6 +12,7 @@
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use lock_recover::lock_or_recover;
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -68,7 +69,7 @@ pub fn players_for(path: &Path) -> Option<DemoPlayers> {
         .ok()?
         .as_secs();
     let generation = generation();
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = lock_or_recover(&CACHE);
     if let Some((_, _, _, players)) = cache
         .iter()
         .find(|(p, m, g, _)| *p == key && *m == modified && *g == generation)

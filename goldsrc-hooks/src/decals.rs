@@ -7,7 +7,7 @@
 //! That is why the pipeline's decal hygiene has to be baked into the demo: pin
 //! the ring small at load time, then inject a full revolution's worth of
 //! synthetic decals into the gap before each clip so the index walks past every
-//! real one (`native/src/patch/decal_strip.rs`). It works, and it costs a
+//! real one (`native/src/decals/decal_strip.rs`). It works, and it costs a
 //! demo rewrite, a load-time-only constraint on `r_decals`, and a standing rule
 //! that the cvar must never be injected mid-demo because an extra
 //! `ConsoleCommand` frame shifts every later frame ordinal by +1.

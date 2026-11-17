@@ -14,6 +14,11 @@
 //! its start up to a chosen time, and every reference still resolves.
 //!
 //!     cargo run --release -p analysis --example trim_demo -- <in.dem> <seconds> <out.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 
 fn main() {

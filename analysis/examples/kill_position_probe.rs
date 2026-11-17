@@ -16,6 +16,11 @@
 //! a map overview.
 //!
 //!     cargo run --release -p analysis --example kill_position_probe -- <demo.dem> [kills.csv]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use analysis::entity_replay::{ClientDataReplay, EntityReplay};
 use analysis::{Analysis, PlayerPose};

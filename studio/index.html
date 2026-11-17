@@ -808,6 +808,11 @@
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
                   <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
                 </div>
+                <!-- #1451: resumable_renders_setting.js. -->
+                <div class="control-group">
+                  <label><input type="checkbox" id="render-resumable-checkbox" checked /> <span data-str="RENDER.RESUMABLE_LABEL">Resumable renders (split long renders into pieces)</span></label>
+                  <p class="setting-hint" data-str="RENDER.RESUMABLE_HINT">A stopped render picks up where it left off. While rendering it needs up to about twice the clip's size free, and the pieces are joined at the end. With "Only when space is needed" on, finished takes may be deleted to make that room. When off, renders run in one piece, and a stopped render's saved pieces are deleted the next time that take renders.</p>
+                </div>
               </div>
 
               <!-- #108: named render setups. -->
@@ -1091,7 +1096,7 @@
                  status line + progress bar with real per-clip rows. It grows
                  with the window down to just above the footer buttons and the
                  status bar (#818), never shorter than the old 280px. -->
-            <div class="table-wrapper" style="margin-top: 8px; max-height: max(280px, calc(100vh - 360px));">
+            <div id="render-jobs-wrap" class="table-wrapper" style="margin-top: 8px; max-height: max(280px, calc(100vh - 360px));">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
@@ -1115,6 +1120,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="render-jobs-resize-handle" class="split-handle split-handle-row split-handle-inline" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
             <!-- #1069: the background pass that makes each take's picture. -->
             <div id="render-take-preview-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
               <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
@@ -1222,7 +1228,7 @@
             </div>
             <!-- The app's table style; the list grows with the window, like the
                  render list (#818), never shorter than 280px. -->
-            <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+            <div id="audit-results-wrap" class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
               <table id="audit-results-table" class="analyzer-table audit-table">
                 <thead>
                   <tr>
@@ -1240,6 +1246,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="audit-results-resize-handle" class="split-handle split-handle-row split-handle-inline" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
           </div>
           </div>
@@ -1696,7 +1703,7 @@
              here and written for the game. overviews_pane.js drives it. -->
         <section id="pane-overviews" class="content-pane" style="display: none;">
           <div class="ov-layout">
-            <div class="egui-panel ov-side">
+            <div id="ov-maps-panel" class="egui-panel ov-side">
               <div class="panel-header">
                 <h3 data-str="OVERVIEWS.MAPS_TITLE">Maps</h3>
               </div>
@@ -1709,6 +1716,8 @@
                 <div id="ov-map-list" class="ov-map-list"></div>
               </div>
             </div>
+
+            <div id="ov-maps-resize-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
 
             <div class="egui-panel ov-main">
               <div class="panel-header flex-between">
@@ -1735,7 +1744,9 @@
               </div>
             </div>
 
-            <div class="egui-panel ov-side">
+            <div id="ov-edit-resize-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
+
+            <div id="ov-edit-panel" class="egui-panel ov-side">
               <div class="panel-header">
                 <h3 data-str="OVERVIEWS.EDIT_TITLE">Edit</h3>
               </div>

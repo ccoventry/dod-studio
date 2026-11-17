@@ -222,7 +222,7 @@ fn decide(now: f32, set_at: f32, fire_at: f32) -> Decision {
 /// `gHUD.m_flTime`: the clock `flDisplayTime` is stamped in and `Draw`
 /// compares against. `None` unless `MsgFunc_DeathMsg`'s own `fadd` still
 /// reads it at the address this module expects.
-fn hud_time() -> Option<f32> {
+pub(super) fn hud_time() -> Option<f32> {
     let base = engine::client_module_base()?;
     // Safety: both RVAs are inside client.dll's code, which `deathmsg`'s
     // stock check covers; the operand is read before it is trusted.
@@ -242,7 +242,7 @@ fn hud_time() -> Option<f32> {
 
 /// Calls `each` with every occupied slot's address, in order. The game keeps
 /// them packed from slot 0, so the first empty one ends the list.
-fn for_each_line(mut each: impl FnMut(usize)) {
+pub(super) fn for_each_line(mut each: impl FnMut(usize)) {
     let Some(base) = engine::client_module_base() else {
         return;
     };
@@ -258,7 +258,7 @@ fn for_each_line(mut each: impl FnMut(usize)) {
     }
 }
 
-fn stamp(item: usize) -> f32 {
+pub(super) fn stamp(item: usize) -> f32 {
     // Safety: `item` is a slot `for_each_line` handed out.
     unsafe { std::ptr::read_unaligned((item + FIELD_DISPLAY_TIME) as *const f32) }
 }
@@ -297,9 +297,35 @@ fn expire_up_to(cutoff: f32) -> usize {
     count
 }
 
+/// Gives the lines the stamps `new` returns for all their stamps, in the
+/// feed's order, leaving those it returns `None` for (`seek_restamp`).
+/// Returns how many changed.
+pub(super) fn restamp_lines(new: impl FnOnce(&[f32]) -> Vec<Option<f32>>) -> usize {
+    let mut items = Vec::new();
+    let mut stamps = Vec::new();
+    for_each_line(|item| {
+        items.push(item);
+        stamps.push(stamp(item));
+    });
+    let mut count = 0;
+    for (item, to) in items.into_iter().zip(new(&stamps)) {
+        if let Some(to) = to {
+            // Safety: as `stamp`.
+            unsafe { std::ptr::write_unaligned((item + FIELD_DISPLAY_TIME) as *mut f32, to) };
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Every line goes on the next frame. Returns how many.
+pub(super) fn expire_all() -> usize {
+    expire_up_to(f32::INFINITY)
+}
+
 /// `clear`: every line goes on the next frame.
 pub(super) fn clear_now() -> String {
-    match expire_up_to(f32::INFINITY) {
+    match expire_all() {
         0 => format!("{COMMAND}: the kill feed is already empty\n"),
         1 => format!("{COMMAND}: cleared 1 line\n"),
         n => format!("{COMMAND}: cleared {n} lines\n"),

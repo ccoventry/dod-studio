@@ -9,6 +9,11 @@
 //! looking at a spot.
 //!
 //!     cargo run --release -p analysis --example sandbag_probe -- <demo> <from> <to> [<track-ent>]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
