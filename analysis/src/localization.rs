@@ -20,6 +20,8 @@ pub fn get_active_language() -> &'static str {
     *read_or_recover(&ACTIVE_LANGUAGE)
 }
 
+/// Takes ACTIVE_LANGUAGE before LOCALIZATIONS, as `translate_key` does: one
+/// order everywhere, so the two can't deadlock.
 pub fn set_active_language(lang: &'static str) {
     if *read_or_recover(&ACTIVE_LANGUAGE) != lang {
         let mut active_lock = write_or_recover(&ACTIVE_LANGUAGE);
@@ -69,11 +71,15 @@ pub fn translate_key(key: &str) -> Option<String> {
         }
     }
 
-    // 2. If it is None, acquire write lock to initialize it
+    // 2. If it is None, acquire write lock to initialize it. ACTIVE_LANGUAGE
+    // is taken first, the order set_active_language takes the two in:
+    // reading it under the LOCALIZATIONS lock instead could deadlock against
+    // a language change. It stays held so a change can't clear the cache
+    // between reading the language and loading it.
+    let active = read_or_recover(&ACTIVE_LANGUAGE);
     let mut write_lock = write_or_recover(&LOCALIZATIONS);
     if write_lock.is_none() {
-        let active = *read_or_recover(&ACTIVE_LANGUAGE);
-        *write_lock = Some(load_localizations_from_disk(active));
+        *write_lock = Some(load_localizations_from_disk(*active));
     }
     write_lock.as_ref().unwrap().get(&lookup_key).cloned()
 }
