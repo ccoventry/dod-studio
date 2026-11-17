@@ -13,6 +13,11 @@
 //! the point lands in, and whether a trace from a nearby open-space eye — one
 //! placed off the surface along the face normal, i.e. exactly where a camera
 //! looking at that decal would be — reaches it.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::maps::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID};
 

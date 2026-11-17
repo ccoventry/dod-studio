@@ -1,5 +1,3 @@
-// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
-#![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use analysis::Analysis;

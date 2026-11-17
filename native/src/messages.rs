@@ -991,7 +991,9 @@ pub fn cfgs_unreferenced_row(file: impl Display) -> String {
 // ── bin/check_maps.rs (#237) ──────────────────────────────────────────────
 
 pub const CHECK_MAPS_USAGE: &str = "usage: check_maps <demo-or-folder> [maps-dir] [--fetch]";
-pub const MAPS_READ_FOLDER_FAILED: &str = "read folder";
+pub fn maps_read_folder_failed(dir: impl Display, err: impl Display) -> String {
+    format!("could not read folder {}: {}", dir, err)
+}
 pub const MAPS_TO_FETCH: &str = "\nmaps to fetch:";
 pub const MAPS_PASS_FETCH: &str = "\npass --fetch to download these.";
 

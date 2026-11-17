@@ -28,6 +28,11 @@
 //! Leaving `FLUSH_ATLAS_DIR` unset is how a **new map** is simulated: no
 //! coordinate store, so the demo stands on its own decals and, failing those,
 //! on the map's own faces.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::decals::{
     Cancel, DecalCleanOptions, FlushSource, VisibilityBasis, clean_demo_decals,

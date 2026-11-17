@@ -25,6 +25,11 @@
 //! One line per demo, plus a summary. A demo that panics the parser takes the
 //! process with it, which is itself the answer to "does it still break" — run
 //! it per file if that matters.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use std::path::{Path, PathBuf};
 

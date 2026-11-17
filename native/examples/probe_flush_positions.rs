@@ -8,6 +8,11 @@
 //! in-clip camera sample with each of the on-screen test's three gates taken
 //! away in turn. Whichever gate is the only thing calling a position hidden is
 //! the one letting it onto the screen.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::decals::{Cancel, DecalCleanOptions, clean_demo_decals, on_screen_half_angle};
 use native::maps::bsp::Bsp;
