@@ -1122,7 +1122,7 @@ button.danger-btn {
    sideways instead of cutting them. On every row's column, so it never
    changes when a row turns missing (#1513). */
 #master-demo-table th:nth-child(2) {
-  min-width: 120px;
+  min-width: 96px;
 }
 
 #master-demo-table tr:hover {
