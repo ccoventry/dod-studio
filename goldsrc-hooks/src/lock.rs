@@ -1,12 +1,13 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
-//! it poisoned: this crate's copy of `native::shared::lock`, which a 32-bit
-//! DLL with no workspace dependencies can't use (#1377).
+//! it poisoned: this crate's copy of `native::shared::lock` (#1377). The DLL
+//! depends on `analysis`, `dod` and `dem` but not on `native`, the host-side
+//! engine crate, and none of the crates it does use exports the helpers.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every
 //! later `.lock().unwrap()` panic too and bury the first failure. Each helper
-//! is the same single `.lock()` call, so it blocks no more than that call
-//! does and is fine on the per-frame path. Use these only where the data
+//! is the same single `.lock()` call and adds nothing over it: per-frame code
+//! still must not block on a mutex (CLAUDE.md). Use these only where the data
 //! behind the lock is still valid after a panic mid-update; if it might not
 //! be, unwrap and let the panic stand (`docs/coding_standards.md`, section 4).
 
