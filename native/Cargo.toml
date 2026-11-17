@@ -29,7 +29,7 @@ hl-demo-auditor = { path = "../hl-demo-auditor" }
 open = "5.1"
 sysinfo = { workspace = true }
 keepawake = "0.6"
-# Map fetching (see patch/map_fetch.rs). Blocking and small on purpose: the
+# Map fetching (see maps/map_fetch.rs). Blocking and small on purpose: the
 # download runs on a worker thread and verifies before it installs, so there is
 # nothing for an async client to overlap with.
 ureq = "3"

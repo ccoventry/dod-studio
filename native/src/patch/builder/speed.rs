@@ -6,7 +6,7 @@
 // Beside them, `sys_ramp_on` / `sys_ramp_off`, which speed up a gap between
 // kills inside a clip (#831), on the hook's batch only.
 
-use crate::patch::cfg_scan::{self, CfgScan};
+use crate::game_config::cfg_scan::{self, CfgScan};
 use crate::patch::types::PatcherConfig;
 
 /// What `sys_fast_forward` sets each of [`FAST_FORWARD_CVARS`] to (#724). With
@@ -73,7 +73,7 @@ pub fn normal_speed_alias_body(init_commands: &[String], scan: Option<&CfgScan>)
 
 /// The value `sys_normal_speed` puts back for `cvar`: Initial Commands first,
 /// then the config chain the engine executes, then the engine default — the
-/// precedence `hd::gl_max_size::effective` and `decal_strip::ring_limit` use,
+/// precedence `hd::gl_max_size::effective` and `game_config::decal_ring::ring_limit` use,
 /// since it is the order the engine itself applied them in at demo load.
 ///
 /// Only a finite number is taken: all three are numeric cvars, and a stray
@@ -131,7 +131,7 @@ pub fn speed_alias_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::cfg_scan::{CvarSetting, FAST_FORWARD_CVARS};
+    use crate::game_config::cfg_scan::{CvarSetting, FAST_FORWARD_CVARS};
 
     fn scan_with(settings: &[(&str, &str)]) -> CfgScan {
         CfgScan {

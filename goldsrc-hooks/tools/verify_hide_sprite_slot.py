@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Checks that `engine.rs`'s `SLOT_HUD_ADD_ENTITY` really is `HUD_AddEntity`.
+"""Checks that `engine/client_exports.rs`'s `SLOT_HUD_ADD_ENTITY` really is `HUD_AddEntity`.
 
-`engine.rs` already establishes its other three `cldll_func_t` slots
+`engine/client_exports.rs` already establishes its other three `cldll_func_t` slots
 (`Initialize`, `HUD_Frame`, `HUD_GetStudioModelInterface`) by resolving all 43
 addresses `F` writes back to their own exports and checking the result lines
 up with Xash3D's identically-ordered `cldll_func_src_t`. This does the same
 thing independently for slot 20, by disassembling `F` directly rather than
-trusting the constant in `engine.rs` -- a wrong slot index would not fail to
+trusting the constant in `engine/client_exports.rs` -- a wrong slot index would not fail to
 compile or fail a unit test, it would swap a *different* function's pointer
 for our trampoline and misbehave (or crash) only in the running game.
 
@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover - developer tooling
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from survey_client_dll import DEFAULT_DLL, Image  # noqa: E402
 
-RUST = Path(__file__).resolve().parent.parent / "src" / "engine.rs"
+RUST = Path(__file__).resolve().parent.parent / "src" / "engine" / "client_exports.rs"
 
 # `F`'s own RVA, from docs/goldsrc_client_dll_internals.md §2. Not derived
 # here (finding "F" itself needs the export table, done separately below) --
@@ -52,7 +52,7 @@ EXPECTED_EXPORT = "HUD_AddEntity"
 def rust_slot(src: str) -> int:
     match = re.search(r"const SLOT_HUD_ADD_ENTITY: usize = (\d+);", src)
     if not match:
-        raise SystemExit("could not find `const SLOT_HUD_ADD_ENTITY` in engine.rs")
+        raise SystemExit("could not find `const SLOT_HUD_ADD_ENTITY` in engine/client_exports.rs")
     return int(match.group(1))
 
 
@@ -87,7 +87,7 @@ def main(argv: list[str]) -> int:
     exports = {exp.address: exp.name.decode() for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols if exp.name}
     name = exports.get(target_rva)
 
-    print(f"engine.rs SLOT_HUD_ADD_ENTITY = {wanted_slot}")
+    print(f"engine/client_exports.rs SLOT_HUD_ADD_ENTITY = {wanted_slot}")
     print(f"F writes slot {wanted_slot} = {target_rva:#x}, which exports as {name!r}")
     if name == EXPECTED_EXPORT:
         print(f"OK    slot {wanted_slot} really is {EXPECTED_EXPORT}")

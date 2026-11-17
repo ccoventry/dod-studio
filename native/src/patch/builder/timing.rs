@@ -218,7 +218,7 @@ pub struct RollFloors {
 /// from an unknown would be worse than leaving it out and saying so.
 pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
     let flush_lead = if config.decal_flush {
-        crate::patch::DEFAULT_LEAD_SECONDS
+        crate::decals::DEFAULT_LEAD_SECONDS
     } else {
         0.0
     };

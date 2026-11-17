@@ -33,7 +33,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("goldsrc-hooks/src/review.rs", 1500),
     ("goldsrc-hooks/src/demo_seek.rs", 1350),
     // `native`.
-    ("native/src/patch/cfg_scan.rs", 1300),
+    ("native/src/game_config/cfg_scan.rs", 1300),
 ];
 
 #[test]

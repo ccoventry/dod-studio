@@ -1,11 +1,12 @@
-// patch/decal_strip/placement.rs
+// decals/decal_strip/placement.rs
 // Where the flush burst goes: the map it is judged against, what a camera can
 // see, and the ranked walk through every source of candidate positions.
 
 use super::geometry::{DECAL_PROJECTION_REACH, DECAL_SURFACE_LIFT, distance, tile_positions};
 use super::survey::Survey;
 use super::{DecalCleanOptions, DecalCleanStats, MIN_POSITION_SPACING};
-use crate::patch::{bsp, decal_atlas};
+use crate::decals::decal_atlas;
+use crate::maps::bsp;
 
 /// How the flush coordinate was chosen, for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -611,7 +612,7 @@ mod tests {
         bytes[0] = 30;
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join(format!("{}.bsp", name)), &bytes).unwrap();
-        crate::patch::bsp::map_checksum(&bytes).unwrap()
+        crate::maps::bsp::map_checksum(&bytes).unwrap()
     }
 
     #[test]

@@ -29,8 +29,9 @@
 
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
+use native::game_config::cfg_scan;
+use native::patch::StreamPatcher;
 use native::patch::types::{PatchJob, PatcherConfig};
-use native::patch::{StreamPatcher, cfg_scan};
 use std::sync::{Arc, atomic::AtomicBool};
 
 const COMMANDS: &[&str] = &[

@@ -320,7 +320,9 @@ pub fn batch_needs_fresh_game(why: &str) -> String {
 /// The activity-log line when a Seek Between Clips batch falls back to
 /// patching and some of its Initial or Scheduled Commands are ones the
 /// game's demo filter drops (#679), or `None` when there are none.
-pub fn dropped_when_patched(dropped: &[native::patch::cfg_scan::DemoFiltered]) -> Option<String> {
+pub fn dropped_when_patched(
+    dropped: &[native::game_config::cfg_scan::DemoFiltered],
+) -> Option<String> {
     if dropped.is_empty() {
         return None;
     }
@@ -773,7 +775,7 @@ mod tests {
     #[test]
     fn dropped_when_patched_lists_each_command_or_says_nothing() {
         assert_eq!(dropped_when_patched(&[]), None);
-        let dropped = native::patch::cfg_scan::demo_filtered_commands(&[
+        let dropped = native::game_config::cfg_scan::demo_filtered_commands(&[
             "exec movie.cfg".to_string(),
             "sensitivity 2".to_string(),
             "quit".to_string(),

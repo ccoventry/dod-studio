@@ -192,7 +192,7 @@ to trade quality for speed.
 
 ## Where this touches the codebase
 
-- **`native/src/patch/builder.rs`** — `final_init_commands` and the `dodstudio_helper.cfg` writer.
+- **`native/src/game_config/init_commands.rs`** — `final_init_commands`; `native/src/patch/builder/helper_cfg.rs` writes the `dodstudio_helper.cfg`.
   The `enabled` and `options` lines go here. `mirv_movie_separate_hud` already branches nearby and
   decides whether `hudColor`/`hudAlpha` need their own options.
 - **`native/src/hlcr/scanner.rs`** — `is_renderable_take` currently requires a `.wav` **and** a

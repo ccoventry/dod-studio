@@ -20,7 +20,7 @@
 //! constraint on the ring sweep.
 
 use clap::Parser;
-use native::patch::{
+use native::decals::{
     CameraView, GridStats, ProbeOptions, ProbeRow, ProbeStats, best_view_for, camera_at_time,
     decal_texture_histogram, probe_decal_offsets, project,
 };

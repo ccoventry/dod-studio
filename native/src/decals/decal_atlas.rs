@@ -1,4 +1,4 @@
-// patch/decal_atlas.rs
+// decals/decal_atlas.rs
 // A per-map store of proven surface coordinates, accumulated across demos.
 //
 // ── Why this exists ──────────────────────────────────────────────────────────

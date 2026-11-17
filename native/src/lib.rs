@@ -10,6 +10,15 @@ use std::path::PathBuf;
 
 pub mod patch;
 
+/// Clearing decals out of a demo before it is recorded (#604).
+pub mod decals;
+
+/// What the game's configs and the init commands say about a capture (#604).
+pub mod game_config;
+
+/// The game's map files: the BSP reader, the map check and map downloads (#604).
+pub mod maps;
+
 /// What a highlight's clip name can say beyond the streak itself (#441).
 pub mod clip_facts;
 

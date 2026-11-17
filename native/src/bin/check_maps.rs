@@ -9,9 +9,9 @@
 //! or is the wrong build, verifying each one against the demo that wants it
 //! before it is installed.
 
+use native::maps::map_check::{MapStatus, check_demo};
+use native::maps::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 use native::messages;
-use native::patch::map_check::{MapStatus, check_demo};
-use native::patch::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

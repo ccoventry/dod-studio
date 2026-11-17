@@ -236,7 +236,7 @@ On failure or cancel the copied demos, junctions and scratch files are removed. 
 
 ### 3.6 Command tiers
 
-Commands you type into Initial or Scheduled Commands are checked twice: once for the warning banner, and again when the batch starts. The lists live in `native/src/patch/cfg_scan.rs`; read it rather than trusting this summary. `docs/command_tiers.md` explains each tier.
+Commands you type into Initial or Scheduled Commands are checked twice: once for the warning banner, and again when the batch starts. The lists live in `native/src/game_config/cfg_scan.rs`; read it rather than trusting this summary. `docs/command_tiers.md` explains each tier.
 
 Every command must also fit a demo's 64-byte command field, which holds 63 characters. A longer one is refused the same way as a banned command, with a red row under its field.
 
