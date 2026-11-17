@@ -11,8 +11,8 @@
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
-// Covers every Tauri command file's error/status strings: lib.rs,
-// capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
+// Covers every Tauri command file's error/status strings: the `*_cmd.rs`
+// files, capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
 // hd_manager.rs, updater_manager.rs, settings_manager.rs, and
 // dir_browser.rs. Errors built in `native` and `analysis` are wrapped here
 // too, as `failed_to_<action>(err)` around the lower crate's text (#650).
@@ -83,20 +83,20 @@ pub fn background_task_crashed(err: impl Display) -> String {
     format!("Background task crashed: {}", err)
 }
 
-// ── lib.rs ───────────────────────────────────────────────────────────────
+// ── project_session_cmd.rs ───────────────────────────────────────────────
 
 /// `default_projects_dir` when Windows reports no Documents folder.
 pub const NO_DOCUMENTS_FOLDER: &str = "Could not find the Documents folder";
 
 /// Generic "Failed to write <path>: <err>" — same shape independently
-/// authored at least twice (lib.rs's project session save, plus whatever
+/// authored at least twice (project_session_cmd.rs's session save, plus whatever
 /// else reads a user-given path); reused rather than re-typed per call site.
 pub fn failed_to_write_file(path: &str, err: impl Display) -> String {
     format!("Failed to write {}: {}", path, err)
 }
 
 /// See [`failed_to_write_file`] — the read-side counterpart, same reuse
-/// rationale (lib.rs's project session load, dir_browser.rs's directory
+/// rationale (project_session_cmd.rs's session load, dir_browser.rs's directory
 /// listing).
 pub fn failed_to_read_file(path: &str, err: impl Display) -> String {
     format!("Failed to read {}: {}", path, err)
