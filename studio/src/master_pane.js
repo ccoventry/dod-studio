@@ -322,10 +322,6 @@ export function getCheckedDemoPaths() {
   return Array.from(checkedPaths);
 }
 
-/** Clears all row checkboxes — call after Clear Untracked/All, or any other
- *  action that changes the queue wholesale and makes the old selection
- *  meaningless. Clear Selected does NOT use this for rows it never touched —
- *  see setCheckedDemoPaths below. */
 /**
  * Takes one demo out of the queue, as its row's remove button does: the other
  * rows keep their ticks and the selection follows its demo. Asks nothing; a
@@ -347,6 +343,10 @@ export function removeQueuedDemo(demo) {
   return true;
 }
 
+/** Clears all row checkboxes — call after Clear Untracked/All, or any other
+ *  action that changes the queue wholesale and makes the old selection
+ *  meaningless. Clear Selected does NOT use this for rows it never touched —
+ *  see setCheckedDemoPaths below. */
 export function clearCheckedPaths() {
   checkedPaths.clear();
   const selectAllCb = document.querySelector('#master-select-all-cb');

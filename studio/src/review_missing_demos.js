@@ -56,6 +56,7 @@ export function createReviewMissingDemos({
 }) {
   async function removeRow(demo) {
     if (isDemoTracked(demo) && !(await confirmTrackedRemove(demo))) return false;
+    // False only when the row had already left the queue: dropped either way.
     removeDemo(demo);
     return true;
   }
