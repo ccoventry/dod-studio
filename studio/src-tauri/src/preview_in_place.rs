@@ -51,6 +51,7 @@ pub fn plan(config: &PatcherConfig, dod_dir: &Path, demo: &Path) -> Option<Strin
 pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
     let before = crate::game_process_manager::running_game_pids();
     let mut cmd = config.build_hlae_process("");
+    native::tool_versions::log_hlae_launch(config);
     let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
     native::log_markdown(&crate::messages::preview::preview_launched_in_place(arg));
