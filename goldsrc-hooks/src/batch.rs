@@ -138,6 +138,21 @@ fn command_text(raw: &str, number: usize) -> Result<String, String> {
     Ok(command.to_string())
 }
 
+/// The demo the `keyword` line on line `number` belongs to: the last `demo`
+/// line's, or an error when no `demo` line came before it.
+fn current_demo<'p>(
+    plan: &'p mut Plan,
+    keyword: &str,
+    number: usize,
+) -> Result<&'p mut DemoPlan, String> {
+    plan.demos.last_mut().ok_or_else(|| {
+        format!(
+            "line {number}: \"{}\" before any \"demo\" line",
+            keyword.trim()
+        )
+    })
+}
+
 /// Reads a batch file's text.
 pub(crate) fn parse(text: &str) -> Result<Plan, String> {
     let mut lines = text.lines();
@@ -165,16 +180,6 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
                 Ok(())
             }
         };
-        let in_demo = |plan: &mut Plan| -> Result<(), String> {
-            if plan.demos.is_empty() {
-                Err(format!(
-                    "line {number}: \"{}\" before any \"demo\" line",
-                    fields[0].trim()
-                ))
-            } else {
-                Ok(())
-            }
-        };
         match fields[0].trim() {
             "demo" => {
                 need(2)?;
@@ -189,34 +194,30 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
             }
             "init" => {
                 need(2)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let line = command_text(&fields[1..].join("\t"), number)?;
-                plan.demos.last_mut().unwrap().init.push(line);
+                demo.init.push(line);
             }
             "at" => {
                 need(3)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
                 let action = Action::Run(command_text(fields[2], number)?);
-                plan.demos
-                    .last_mut()
-                    .unwrap()
-                    .entries
-                    .push(Entry { at, action });
+                demo.entries.push(Entry { at, action });
             }
             "seek" => {
                 need(3)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
                 let to = time(fields[2], number)?;
-                plan.demos.last_mut().unwrap().entries.push(Entry {
+                demo.entries.push(Entry {
                     at,
                     action: Action::Seek(to),
                 });
             }
             "back" => {
                 need(3)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
                 let to = time(fields[2], number)?;
                 // A `back` that lands at or past its own time would step
@@ -227,7 +228,6 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
                         "line {number}: a \"back\" at {at} must go back, not to {to}"
                     ));
                 }
-                let demo = plan.demos.last_mut().unwrap();
                 end_pass(&demo.entries, at).map_err(|why| format!("line {number}: {why}"))?;
                 demo.entries.push(Entry {
                     at,
@@ -236,9 +236,9 @@ pub(crate) fn parse(text: &str) -> Result<Plan, String> {
             }
             "next" => {
                 need(2)?;
-                in_demo(&mut plan)?;
+                let demo = current_demo(&mut plan, fields[0], number)?;
                 let at = time(fields[1], number)?;
-                plan.demos.last_mut().unwrap().entries.push(Entry {
+                demo.entries.push(Entry {
                     at,
                     action: Action::Next,
                 });
@@ -600,15 +600,18 @@ pub fn poll() {
             let ready = frames >= SETTLE_FRAMES
                 && (seen_loading || frames >= UNSEEN_LOAD_FRAMES)
                 && clock.is_some_and(|c| c.active && !c.loading);
-            if !ready {
-                batch.phase = Phase::Loading {
-                    since,
-                    frames,
-                    seen_loading,
-                };
-                return;
-            }
-            let c = clock.expect("ready implies a clock");
+            // `ready` already needs a clock; the match only names it.
+            let c = match clock {
+                Some(c) if ready => c,
+                _ => {
+                    batch.phase = Phase::Loading {
+                        since,
+                        frames,
+                        seen_loading,
+                    };
+                    return;
+                }
+            };
             let plan = &batch.plan.demos[batch.at];
             trace(&format!(
                 "demo {} of {}: loaded in {:.1} s, clock {:.1} ({:.1}..{:.1}); {} init command(s), {} timed",

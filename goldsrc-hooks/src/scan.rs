@@ -85,6 +85,10 @@ pub unsafe fn find_unique(module: usize, pattern: &str) -> Result<usize, String>
     if code.len() < pattern.0.len() {
         return Err("the module's code is smaller than the pattern".to_string());
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "`Pattern::parse` refuses an empty pattern and a leading wildcard"
+    )]
     let first = pattern.0[0].expect("parse rejects a leading wildcard");
     let mut found: Option<usize> = None;
     for at in 0..=(code.len() - pattern.0.len()) {
