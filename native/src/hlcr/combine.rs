@@ -53,14 +53,17 @@ pub async fn probe(ffmpeg: &Path, clip: &Path) -> Result<ClipInfo, String> {
     cmd.kill_on_drop(true)
         .args(["-hide_banner", "-i"])
         .arg(clip)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // `ffmpeg -i` with no output exits 1 after printing the report; that is
     // expected, so only the text matters.
-    let out = cmd
-        .output()
-        .await
-        .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+    let out = crate::sys::child_job::output_ending_with_studio(
+        &mut cmd,
+        crate::messages::FFMPEG_CLIP_PROBE,
+    )
+    .await
+    .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     let report = String::from_utf8_lossy(&out.stderr);
     parse_report(&clip.to_string_lossy(), &report)
         .ok_or_else(|| crate::messages::combine_unreadable_clip(&clip.to_string_lossy()))
@@ -305,7 +308,8 @@ pub fn combine_args(plan: &CombinePlan, list: &Path, output: &Path) -> Vec<Strin
 
 /// Joins `plan`'s clips into `output`. `progress` gets the fraction done
 /// (0..1), at most every 33 ms; `cancel` stops FFmpeg and removes the
-/// half-written file.
+/// half-written file. A file already at `output` is replaced only once the
+/// join has finished.
 pub async fn combine(
     ffmpeg: &Path,
     plan: &CombinePlan,
@@ -319,22 +323,28 @@ pub async fn combine(
     if plan.clips.iter().any(|c| Path::new(&c.path) == output) {
         return Err(crate::messages::COMBINE_OUTPUT_IS_INPUT.to_string());
     }
+    // Written under its unfinished name, and listed, until it is finished
+    // (#1496): a combine that Studio's way out stops leaves nothing under
+    // `output`, and a file already there stays as it was until the rename.
+    let in_flight = crate::hlcr::renderer::partial_output::in_flight();
+    let held = in_flight
+        .hold_combine(output.to_path_buf())
+        .ok_or_else(|| crate::messages::COMBINE_NAME_BEING_WRITTEN.to_string())?;
     let list = std::env::temp_dir().join(format!("dodstudio_combine_{}.txt", std::process::id()));
     if plan.stream_copy {
         std::fs::write(&list, concat_list(&plan.clips))
             .map_err(|e| crate::messages::labeled(list.display(), e))?;
     }
-
     let mut cmd = Command::new(ffmpeg);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000);
     cmd.kill_on_drop(true)
-        .args(combine_args(plan, &list, output))
+        .args(combine_args(plan, &list, &held.partial))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+    let mut child =
+        crate::sys::child_job::spawn_ending_with_studio(&mut cmd, crate::messages::FFMPEG_COMBINE)
+            .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
 
     // FFmpeg's -progress lines: out_time_us=<microseconds>.
     let done_us = Arc::new(AtomicU64::new(0));
@@ -366,14 +376,17 @@ pub async fn combine(
     let status = loop {
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill().await;
-            let _ = std::fs::remove_file(output);
+            let _ = std::fs::remove_file(&held.partial);
             let _ = std::fs::remove_file(&list);
             return Err(cancelled_error());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {}
-            Err(e) => return Err(crate::messages::labeled("FFmpeg", e)),
+            Err(e) => {
+                let _ = std::fs::remove_file(&held.partial);
+                return Err(crate::messages::labeled("FFmpeg", e));
+            }
         }
         if last.elapsed() >= std::time::Duration::from_millis(33) {
             last = std::time::Instant::now();
@@ -383,10 +396,13 @@ pub async fn combine(
     };
     let _ = std::fs::remove_file(&list);
     if status.success() {
+        in_flight
+            .finish_replacing(&held)
+            .map_err(|e| crate::messages::combine_rename_failed(held.partial.display(), e))?;
         progress(1.0);
         Ok(())
     } else {
-        let _ = std::fs::remove_file(output);
+        let _ = std::fs::remove_file(&held.partial);
         let log = errors.await.unwrap_or_default();
         Err(crate::messages::combine_failed(log.trim()))
     }

@@ -129,6 +129,12 @@ frames. Meanwhile eight of them are HLTV by the `analysis` crate's own
 implementation is `native/src/obs/client.rs`, which is where the pinned
 handshake tests live — don't treat the copy here as authoritative.
 
+### Child processes
+
+| Probe | Question it answers |
+| --- | --- |
+| `combine_exit_probe` | Does a combine's FFmpeg end when the process that started it is killed (`taskkill /F`)? Runs one combine, as Studio's Combine does (#1496) |
+
 ### Performance
 
 | Probe | Question it answers |

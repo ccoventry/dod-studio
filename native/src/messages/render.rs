@@ -80,16 +80,23 @@ pub fn rename_failed(partial: impl Display, out_file: impl Display, err: impl Di
     format!("Rendered, but could not rename {partial} to {out_file}: {err}")
 }
 
-/// Studio's way out could not end its render FFmpegs.
+/// Studio's way out could not end the FFmpegs in its job (renders, combines,
+/// take checks, the OBS benchmark: #1496).
 pub fn exit_stop_failed(err: impl Display) -> String {
-    format!("[render] DoD Studio is closing: could not stop its running renders: {err}")
+    format!("[exit] DoD Studio is closing: could not stop the FFmpegs it started: {err}")
 }
 
-/// Studio's way out stopped `stopped` renders and removed `removed` of their
-/// unfinished files (one not written yet has none to remove).
-pub fn exit_renders_stopped(stopped: usize, removed: usize, took: std::time::Duration) -> String {
+/// Studio's way out stopped `renders` renders and `combines` combines and
+/// removed `removed` of their unfinished files (one not written yet has none
+/// to remove).
+pub fn exit_renders_stopped(
+    renders: usize,
+    combines: usize,
+    removed: usize,
+    took: std::time::Duration,
+) -> String {
     format!(
-        "[render] DoD Studio is closing: stopped {stopped} running render(s) and removed {removed} unfinished file(s) in {} ms",
+        "[exit] DoD Studio is closing: stopped {renders} running render(s) and {combines} combine(s) and removed {removed} unfinished file(s) in {} ms",
         took.as_millis()
     )
 }
@@ -100,9 +107,9 @@ pub fn leftover_partial_replaced(partial: impl Display) -> String {
     format!("[render] {partial} was left by a render that never finished: writing over it")
 }
 
-/// An unfinished render file Studio's way out could not remove.
+/// An unfinished render or combine file Studio's way out could not remove.
 pub fn exit_partial_left(path: impl Display, err: impl Display) -> String {
-    format!("[render] DoD Studio is closing: could not remove the unfinished render {path}: {err}")
+    format!("[exit] DoD Studio is closing: could not remove the unfinished file {path}: {err}")
 }
 
 /// A render cut into segments (#1451) started: how many, how long each, the
