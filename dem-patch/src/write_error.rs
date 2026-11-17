@@ -95,7 +95,10 @@ impl fmt::Display for DeltaWriteError {
 impl fmt::Display for WriteErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoAux => write!(f, "the demo has no delta tables to encode its messages with"),
+            Self::NoAux => write!(
+                f,
+                "the demo has no delta tables to encode its messages with"
+            ),
             Self::MissingDeltaTable(table) => {
                 write!(f, "the demo has no `{}` delta table", shown(table))
             }
@@ -117,3 +120,145 @@ impl fmt::Display for WriteError {
 }
 
 impl std::error::Error for WriteError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::open_demo_from_bytes;
+    use crate::types::{Demo, EngineMessage, FrameData, MessageData, NetMessage};
+
+    fn fixture() -> Vec<u8> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    /// `ci_fixture.dem` with a second `entity_state_t` description in its last
+    /// network frame, carrying `weapon_data_t`'s fields: a demo whose table for
+    /// one struct changes mid-file. It parses, since nothing after it is read
+    /// with the new table, but the writer re-encodes every earlier entity delta
+    /// with the table the parse ended on, which lacks their fields.
+    fn table_replaced_at_the_end() -> Vec<u8> {
+        let mut demo = open_demo_from_bytes(&fixture()).unwrap();
+        let weapon_data = demo
+            .directory
+            .entries
+            .iter()
+            .flat_map(|e| &e.frames)
+            .find_map(|frame| match &frame.frame_data {
+                FrameData::NetworkMessage(network) => match &network.1.messages {
+                    MessageData::Parsed(messages) => messages.iter().find_map(|m| match m {
+                        NetMessage::EngineMessage(e) => match &**e {
+                            EngineMessage::SvcDeltaDescription(d)
+                                if d.name == b"weapon_data_t\0" =>
+                            {
+                                Some(d.clone())
+                            }
+                            _ => None,
+                        },
+                        _ => None,
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the fixture describes weapon_data_t");
+        let mut entity_state = weapon_data;
+        entity_state.name = b"entity_state_t\0".to_vec();
+
+        let last = demo
+            .directory
+            .entries
+            .iter_mut()
+            .flat_map(|e| e.frames.iter_mut())
+            .filter_map(|frame| match &mut frame.frame_data {
+                FrameData::NetworkMessage(network) => Some(&mut network.1),
+                _ => None,
+            })
+            .last()
+            .expect("the fixture has network frames");
+        if let MessageData::Parsed(messages) = last.messages_mut() {
+            messages.push(NetMessage::EngineMessage(Box::new(
+                EngineMessage::SvcDeltaDescription(entity_state),
+            )));
+        }
+        demo.write_to_bytes().unwrap()
+    }
+
+    fn parsed(bytes: &[u8]) -> Demo {
+        open_demo_from_bytes(bytes).expect("a table changed mid-file still parses")
+    }
+
+    #[test]
+    fn a_table_changed_mid_file_fails_the_write_naming_the_table() {
+        let demo = parsed(&table_replaced_at_the_end());
+        let error = demo
+            .write_to_bytes()
+            .expect_err("entity deltas lost their fields");
+        assert!(
+            matches!(
+                &error.kind,
+                WriteErrorKind::Delta {
+                    table,
+                    error: DeltaWriteError::UnknownField(_)
+                } if table == "entity_state_t\0"
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("`entity_state_t`"), "{error}");
+    }
+
+    /// The copying writer re-encodes only edited frames, so an untouched
+    /// demo is still written whatever its tables; an edited frame is not.
+    #[test]
+    fn the_copying_writer_fails_only_on_a_frame_it_re_encodes() {
+        let bytes = table_replaced_at_the_end();
+        let mut demo = parsed(&bytes);
+        let untouched = demo
+            .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+            .expect("nothing is re-encoded")
+            .expect("not cancelled");
+        assert!(untouched == bytes);
+
+        for frame in demo
+            .directory
+            .entries
+            .iter_mut()
+            .flat_map(|e| &mut e.frames)
+        {
+            if let FrameData::NetworkMessage(network) = &mut frame.frame_data {
+                network.1.messages_mut();
+            }
+        }
+        assert!(
+            demo.write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+                .is_err()
+        );
+    }
+
+    /// The file is encoded before it is opened, so a failed write leaves
+    /// what was there.
+    #[test]
+    fn a_failed_write_to_file_leaves_the_file_alone() {
+        let demo = parsed(&table_replaced_at_the_end());
+        let path = std::env::temp_dir().join(format!("dem_write_error_{}.dem", std::process::id()));
+        std::fs::write(&path, b"kept").unwrap();
+        let result = demo.write_to_file(&path);
+        let kept = std::fs::read(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err());
+        assert_eq!(kept.unwrap(), b"kept");
+    }
+
+    #[test]
+    fn decoded_messages_without_delta_tables_are_an_error() {
+        let mut demo = parsed(&fixture());
+        demo._aux = None;
+        assert_eq!(
+            demo.write_to_bytes().map(|_| ()).map_err(|e| e.kind),
+            Err(WriteErrorKind::NoAux)
+        );
+    }
+}

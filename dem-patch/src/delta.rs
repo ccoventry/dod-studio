@@ -368,3 +368,129 @@ fn write_delta_field(
 
     Ok(())
 }
+
+/// Each delta a table cannot encode is an error naming the field, where it
+/// was an `unwrap` or a slice out of bounds. #1510.
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    use crate::types::{Delta, DeltaDecoderS, DeltaType};
+
+    const BYTE: u32 = DeltaType::Byte as u32;
+    const INTEGER: u32 = DeltaType::Integer as u32;
+    const SIGNED: u32 = DeltaType::Signed as u32;
+
+    fn field(name: &[u8], bits: u32, flags: u32) -> DeltaDecoderS {
+        DeltaDecoderS::new(name.to_vec(), bits, 1.0, flags)
+    }
+
+    fn write(delta: &Delta, table: &DeltaDecoder) -> Result<BitWriter, DeltaWriteError> {
+        let mut bw = BitWriter::new();
+        write_delta(delta, table, &mut bw).map(|()| bw)
+    }
+
+    /// Reads back what `write` wrote.
+    fn read_back(bw: &mut BitWriter, table: &DeltaDecoder) -> Delta {
+        let bytes = bw.get_u8_vec();
+        parse_delta(table, &mut BitReader::new(&bytes))
+    }
+
+    #[test]
+    fn a_field_whose_name_is_not_utf8_is_written_back() {
+        let table = vec![
+            field(b"or\xffigin\0", 8, BYTE),
+            field(b"angles\0", 16, INTEGER),
+        ];
+        let mut delta = Delta::new();
+        delta.insert(table[0].key.clone(), [7u8].as_slice());
+        delta.insert("angles\0", 300u32.to_le_bytes().as_slice());
+
+        let mut bw = write(&delta, &table).expect("both fields are described");
+        assert_eq!(read_back(&mut bw, &table), delta);
+    }
+
+    #[test]
+    fn a_field_the_table_lacks_is_an_error() {
+        let table = vec![field(b"angles\0", 16, INTEGER)];
+        let mut delta = Delta::new();
+        delta.insert("origin[0]\0", 1u32.to_le_bytes().as_slice());
+        assert_eq!(
+            write(&delta, &table).err(),
+            Some(DeltaWriteError::UnknownField("origin[0]\0".into()))
+        );
+    }
+
+    /// The parse keeps the later of two alike-named fields; here that is the
+    /// byte, so the integer before it would have sliced 4 bytes out of 1.
+    #[test]
+    fn a_field_described_twice_is_an_error() {
+        let table = vec![field(b"frame\0", 32, INTEGER), field(b"frame\0", 8, BYTE)];
+        let mut delta = Delta::new();
+        delta.insert("frame\0", [3u8].as_slice());
+        assert_eq!(
+            write(&delta, &table).err(),
+            Some(DeltaWriteError::DuplicateField("frame\0".into()))
+        );
+    }
+
+    /// A table changed under a delta: the field is an integer now.
+    #[test]
+    fn a_value_narrower_than_its_type_is_an_error() {
+        let table = vec![field(b"frame\0", 32, INTEGER)];
+        let mut delta = Delta::new();
+        delta.insert("frame\0", [3u8].as_slice());
+        assert_eq!(
+            write(&delta, &table).err(),
+            Some(DeltaWriteError::ValueTooShort {
+                field: "frame\0".into(),
+                have: 1,
+                need: 4
+            })
+        );
+    }
+
+    #[test]
+    fn a_width_that_cannot_be_written_is_an_error() {
+        let mut delta = Delta::new();
+        delta.insert("frame\0", 3u32.to_le_bytes().as_slice());
+        for (bits, flags) in [(40, INTEGER), (0, INTEGER | SIGNED)] {
+            let table = vec![field(b"frame\0", bits, flags)];
+            assert_eq!(
+                write(&delta, &table).err(),
+                Some(DeltaWriteError::BadWidth {
+                    field: "frame\0".into(),
+                    bits
+                }),
+                "{bits} bits"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_with_no_type_is_an_error() {
+        let table = vec![field(b"frame\0", 8, 0)];
+        let mut delta = Delta::new();
+        delta.insert("frame\0", [3u8].as_slice());
+        assert_eq!(
+            write(&delta, &table).err(),
+            Some(DeltaWriteError::NoType("frame\0".into()))
+        );
+    }
+
+    /// Upstream indexed an 8-byte mask with it: field 64 was out of bounds.
+    #[test]
+    fn a_field_past_the_mask_is_an_error() {
+        let table: DeltaDecoder = (0..65)
+            .map(|i| field(format!("f{i}\0").as_bytes(), 8, BYTE))
+            .collect();
+        let mut delta = Delta::new();
+        delta.insert("f64\0", [1u8].as_slice());
+        assert_eq!(
+            write(&delta, &table).err(),
+            Some(DeltaWriteError::FieldOutOfMask {
+                field: "f64\0".into(),
+                index: 64
+            })
+        );
+    }
+}

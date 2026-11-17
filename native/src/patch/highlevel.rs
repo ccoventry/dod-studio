@@ -214,3 +214,26 @@ pub fn patch_demo_highlights(
     demo.write_to_bytes()
         .map_err(crate::messages::demo_could_not_be_rewritten)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A demo its own delta tables can't re-encode (one changed mid-file) is
+    /// an error naming the table, where the write used to abort. #1510.
+    #[test]
+    fn a_demo_its_tables_cannot_re_encode_is_an_error() {
+        let bytes = crate::test_support::ci_fixture_with_a_table_changed_at_the_end();
+        let why = patch_demo_highlights(&bytes, &[(1.0, 2.0)], &PatchOptions::default())
+            .expect_err("the demo can't be re-encoded");
+        assert!(why.contains("could not be written"), "{why}");
+        assert!(why.contains("`entity_state_t`"), "{why}");
+    }
+
+    #[test]
+    fn a_readable_demo_is_still_patched() {
+        let bytes = crate::test_support::ci_fixture();
+        patch_demo_highlights(&bytes, &[(1.0, 2.0)], &PatchOptions::default())
+            .expect("the fixture patches");
+    }
+}
