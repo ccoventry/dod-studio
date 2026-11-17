@@ -93,6 +93,10 @@ pub(crate) fn resolve_ffmpeg(override_path: Option<&String>) -> PathBuf {
 
 // ── Per-job runtime state ───────────────────────────────────────────────────
 
+/// `Clone` is for `scan_and_merge`, which merges from a copy so a panic
+/// mid-merge leaves the list as it was; a clone shares `cancel_flag` with the
+/// row it came from.
+#[derive(Clone)]
 struct RenderJobRuntime {
     id: String,
     clip: ClipData,
@@ -1384,12 +1388,17 @@ async fn scan_and_merge(
     // The merge and the autosave rewrite share one jobs lock, so the
     // scheduler can neither start a row mid-merge nor tear the autosave down
     // between the two (see its exit check). Nothing here touches the disk
-    // but the autosave write itself.
+    // but the autosave write itself. The merge works on a copy and the list
+    // is swapped only once it returns: taking the list out instead would
+    // leave it empty under a poisoned lock if the merge panicked, and the
+    // next lock_or_recover would read "nothing queued" while a render still
+    // runs (the scheduler's exit check would then drop the autosave and the
+    // session). A copy of a few hundred rows per scan is cheap.
     let (summary, empty) = {
         let mut guard = lock_or_recover(&state.jobs);
         let mut next_id = state.next_job_id.load(Ordering::SeqCst);
         let (merged, summary) = merge_scan(
-            std::mem::take(&mut *guard),
+            guard.clone(),
             scanned,
             &gone_folders,
             &new_job_settings,
