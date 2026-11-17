@@ -446,8 +446,10 @@ pub fn run() {
         }
     };
     app.run(|_app, event| {
-        // Render FFmpegs end with Studio's process anyway (their job
-        // object); this also removes the clips they were writing (#1439).
+        // Every FFmpeg Studio starts (renders, combines, take checks, the
+        // OBS benchmark) ends with Studio's process anyway (their job
+        // object, #1496); this ends them first and removes the unfinished
+        // renders and combines they were writing (#1439).
         if let tauri::RunEvent::Exit = event {
             native::hlcr::renderer::stop_renders_for_exit();
         }

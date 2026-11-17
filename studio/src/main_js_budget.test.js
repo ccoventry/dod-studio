@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 552; // +2: the import and the one startDamagedDemoToasts call for the game's damaged-demo toast (#1373); +6: the Auditor's Consolidate hands the demos it moved to the project, relocateMoved wired in over five lines and the destructured function (#872)
+const BUDGET = 561; // +1: the Render tab gets the project's markDirty, so Find Moved Videos can save the clips' new paths (#1442); +4: Review asking about a demo whose file is missing (review_missing_demos.js), one import and a factory call over three lines (#1376); +5: demo_file_recheck.js's import and call, and the two project_demos.js functions it takes, so a demo renamed while Studio is open shows as missing; +2: startDamagedDemoToasts import and call (#1373); +6: the Auditor's Consolidate hands the demos it moved to the project, relocateMoved wired in over five lines and the destructured function (#872)
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {

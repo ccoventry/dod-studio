@@ -57,7 +57,11 @@ pub async fn combine_clips(
         .await
     }
     .await;
-    native::log_markdown(&end_log(&result, &output, started.elapsed().as_secs_f64()));
+    // Stopped by Studio's own way out: the exit's line says so, as for a
+    // render (#1496), so no "failed" line here.
+    if result.is_ok() || !native::hlcr::renderer::is_exiting() {
+        native::log_markdown(&end_log(&result, &output, started.elapsed().as_secs_f64()));
+    }
     result
 }
 

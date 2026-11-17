@@ -130,7 +130,7 @@ pub(super) async fn run_to_end(
         Ok(c) => c,
         Err(e) => return RunEnd::NotStarted(spawn_error_text(&e)),
     };
-    if let Err(e) = crate::sys::child_job::end_with_studio(&child) {
+    if let Err(e) = crate::sys::child_job::end_with_studio(&child, crate::messages::FFMPEG_RENDER) {
         crate::log_markdown(&crate::messages::render::not_tied_to_studio(&job.job_id, e));
     }
 

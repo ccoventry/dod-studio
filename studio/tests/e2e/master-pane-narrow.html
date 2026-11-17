@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+  Harness for the queue's missing-demo row in the pane's real width at a
+  1280-wide window (about 538 px, measured in the app), with the real
+  stylesheet and the real column headers: a long demo name must be cut with
+  an ellipsis instead of pushing Locate and Remove out of the pane.
+  See tests/e2e/README.md.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>master_pane.js narrow queue harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="demo-search-input" />
+  <div id="pane" style="width: 538px; margin: 20px">
+    <div class="table-wrapper">
+      <table id="master-demo-table">
+        <thead>
+          <tr>
+            <th class="col-center"><input type="checkbox" id="master-select-all-cb" /></th>
+            <th>Demo File</th>
+            <th class="col-center">Highlights</th>
+            <th class="col-center">Selected</th>
+            <th class="col-center"><span>Status</span><div class="count-legend" id="status-count-legend"></div></th>
+            <th class="col-center"><span>Review</span><div class="count-legend" id="review-count-legend"></div></th>
+            <th class="col-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="master-demo-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+
+    const runtime = { writable: true, configurable: true, enumerable: false };
+    const missing = (demo, foundAt) => {
+      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
+      Object.defineProperty(demo, 'foundAt', { ...runtime, value: foundAt });
+      return demo;
+    };
+    const longName = 'harrington_vs_the_extremely_long_clan_match_name_dod_anzio_final_round_pov_recording_2026-11-12.dem';
+    const demos = [
+      { name: 'here.dem', path: 'C:/demos/here.dem', streaks: [] },
+      missing({ name: 'gone.dem', path: 'C:/demos/gone.dem', streaks: [] }, null),
+      missing({ name: longName, path: `D:/a/very/deep/folder/for/a/demo/${longName}`, streaks: [] }, `D:/found/${longName}`),
+    ];
+    initMasterPane(null, null, () => {}, () => {}, null);
+    renderMasterList(demos, null, () => {});
+    window.__longName = longName;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

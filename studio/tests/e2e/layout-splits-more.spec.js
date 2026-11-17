@@ -14,6 +14,9 @@ async function boot(page, savedSettings = {}) {
   }, savedSettings);
   await page.goto('/index.html');
   await expect(page.locator('#capture-split-handle')).toBeVisible();
+  // The nav buttons get their click handlers when main.js's boot (which awaits
+  // the settings) ends, so a click before then lands on nothing (#1511).
+  await page.waitForFunction(() => window.dodStudioBoot?.state() === 'started');
 }
 
 const size = (page, sel, dim) => page.locator(sel).evaluate((el, d) => el.getBoundingClientRect()[d], dim);

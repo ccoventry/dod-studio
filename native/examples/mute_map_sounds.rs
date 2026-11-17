@@ -150,7 +150,10 @@ fn main() {
         return;
     }
 
-    let bytes = parsed.write_to_bytes();
+    let bytes = parsed.write_to_bytes().unwrap_or_else(|e| {
+        eprintln!("re-encode: {e}");
+        std::process::exit(1);
+    });
     match std::fs::write(&out_path, &bytes) {
         Ok(()) => println!("\nwrote {} ({} bytes)", out_path.display(), bytes.len()),
         Err(e) => {
