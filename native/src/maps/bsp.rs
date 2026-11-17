@@ -1,4 +1,4 @@
-// patch/bsp.rs
+// maps/bsp.rs
 // Minimal read-only parser for GoldSrc BSP version 30.
 //
 // ── Why the decal flush reads maps at all ────────────────────────────────────
@@ -706,7 +706,7 @@ impl Default for FaceSampling {
 /// map, and an orientation in which sampling buries every candidate in the
 /// brush while still returning the right count.
 #[cfg(test)]
-pub(super) fn one_wall_room() -> Bsp {
+pub(crate) fn one_wall_room() -> Bsp {
     let mut bsp = tests::synthetic_bsp();
     bsp.faces[0].side = 1;
     debug_assert_eq!(bsp.face_normal(0), Some([-1.0, 0.0, 0.0]));

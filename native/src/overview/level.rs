@@ -2,13 +2,13 @@
 //! polygons in world space, the clip hulls a player collides with, the point
 //! hull's contents (sky, water), and the entities.
 //!
-//! `patch::bsp` reads a different subset for the decal flush (visibility, no
+//! `maps::bsp` reads a different subset for the decal flush (visibility, no
 //! clip hulls); this one is kept separate so neither has to carry the other's
 //! fields.
 
 use std::collections::HashMap;
 
-use crate::patch::bsp_entities::{self, MapEntity};
+use crate::maps::bsp_entities::{self, MapEntity};
 
 const LUMP_ENTITIES: usize = 0;
 const LUMP_PLANES: usize = 1;

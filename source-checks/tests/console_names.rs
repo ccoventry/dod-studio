@@ -1,14 +1,14 @@
 //! Every console name the hook registers is in the #555 old-to-new table
 //! (`goldsrc-hooks/src/old_names.rs`), or listed as new since. Reads sources
 //! only, so it runs in the fast `Source checks` CI job, before any compile of
-//! `native` (which re-exports the same table as `patch::console_prefix`).
+//! `native` (which re-exports the same table as `game_config::console_prefix`).
 
 #[path = "../../goldsrc-hooks/src/old_names.rs"]
 mod old_names;
 use old_names::OLD_NAMES;
 
 /// The prefix of every console name the hook registers (`goldsrc-hooks`'
-/// `names.rs`; `native::patch::console_prefix::PREFIX` is the same string).
+/// `names.rs`; `native::game_config::console_prefix::PREFIX` is the same string).
 const PREFIX: &str = "ds_";
 /// The prefix before #555.
 const OLD_PREFIX: &str = "dodstudio_";

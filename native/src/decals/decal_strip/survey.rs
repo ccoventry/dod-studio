@@ -1,4 +1,4 @@
-// patch/decal_strip/survey.rs
+// decals/decal_strip/survey.rs
 // The read-only walk over a parsed demo: every decal the engine accepted, the
 // spawn, the floor under the player, and the cameras inside each clip.
 
@@ -12,30 +12,30 @@ use dem::types::{EngineMessage, FrameData, MessageData, NetMessage, TempEntity};
 const TE_GUNSHOTDECAL: u8 = 109;
 
 /// Everything the survey pass needs to pick a flush coordinate and place bursts.
-pub(in crate::patch) struct Survey {
+pub(in crate::decals) struct Survey {
     /// Positions of decals the engine actually accepted during playback.
-    pub(in crate::patch) harvested: Vec<[f32; 3]>,
+    pub(in crate::decals) harvested: Vec<[f32; 3]>,
     /// The subset of those stamped on world geometry rather than on a brush
     /// entity. Only these are durable enough to contribute to `decal_atlas` —
     /// see `is_world_decal`.
-    pub(in crate::patch) world_harvested: Vec<[f32; 3]>,
-    pub(in crate::patch) texture_index: Option<u8>,
+    pub(in crate::decals) world_harvested: Vec<[f32; 3]>,
+    pub(in crate::decals) texture_index: Option<u8>,
     /// Earliest camera eye position seen in playback.
-    pub(in crate::patch) spawn_eye: Option<[f32; 3]>,
+    pub(in crate::decals) spawn_eye: Option<[f32; 3]>,
     /// Player origin once the spawn has settled onto solid ground — see the
     /// grounded-run detection below. This, not `spawn_eye`, is the spawn
     /// reference worth trusting.
-    pub(in crate::patch) grounded_origin: Option<[f32; 3]>,
+    pub(in crate::decals) grounded_origin: Option<[f32; 3]>,
     /// Floor points sampled beneath the player wherever they stood on solid
     /// ground. A sweep needs far more distinct positions than a demo has
     /// decals, and every one of these is a surface the demo proves exists —
     /// the player was standing on it. Walking naturally spreads them out, so
     /// they satisfy the no-overlap requirement for free.
-    pub(in crate::patch) floor_candidates: Vec<[f32; 3]>,
+    pub(in crate::decals) floor_candidates: Vec<[f32; 3]>,
     /// Camera (eye position, forward vector) pairs sampled inside the capture
     /// windows. The forward vector is what makes a real "is it on screen?"
     /// test possible, rather than distance alone.
-    pub(in crate::patch) window_cameras: Vec<([f32; 3], [f32; 3])>,
+    pub(in crate::decals) window_cameras: Vec<([f32; 3], [f32; 3])>,
 }
 
 /// Running frame ordinal, matching `engine.rs`'s `frame_counter`: every frame
@@ -46,7 +46,7 @@ pub(in crate::patch) struct Survey {
 /// share one of those (a DemoBuffer, a ClientData and a NetworkMessage per
 /// tick), so the two spaces differ by roughly 2.6x on a real demo. Mixing them
 /// silently targets the wrong frames.
-pub(in crate::patch) fn frame_ordinals(demo: &dem::types::Demo) -> Vec<(usize, usize, i32)> {
+pub(in crate::decals) fn frame_ordinals(demo: &dem::types::Demo) -> Vec<(usize, usize, i32)> {
     let mut out = Vec::new();
     let mut ordinal = 0i32;
     for (entry_idx, entry) in demo.directory.entries.iter().enumerate() {
@@ -119,7 +119,7 @@ pub(super) fn deadline_before(
     None
 }
 
-pub(in crate::patch) fn survey(
+pub(in crate::decals) fn survey(
     demo: &dem::types::Demo,
     keep_windows: &[(i32, i32)],
     opts: &DecalCleanOptions,

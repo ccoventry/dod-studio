@@ -1224,8 +1224,8 @@ fn finish_batch(
 // ── Public command handler ─────────────────────────────────────────────────────
 
 /// `Some(message)` when `init_commands` or any `custom_commands` entry is too
-/// long for a demo's ConsoleCommand frame (`native::patch::too_long_commands`),
-/// names a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
+/// long for a demo's ConsoleCommand frame (`native::game_config::too_long_commands`),
+/// names a `native::game_config::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
 /// `custom_commands` names a `SCHEDULED_BANNED_COMMANDS` one (fine in Initial
 /// Commands, refused only here) — the first one found, checking the
 /// everywhere-banned tier before the scheduled-only tier. `None` means clean.
@@ -1240,8 +1240,8 @@ fn first_banned_command_error(
 
     // Each command is written into one ConsoleCommand frame as typed; one that
     // does not fit used to abort the whole app partway through patching (#453).
-    let mut too_long = native::patch::too_long_commands(init_commands);
-    too_long.extend(native::patch::too_long_commands(&custom_texts));
+    let mut too_long = native::game_config::too_long_commands(init_commands);
+    too_long.extend(native::game_config::too_long_commands(&custom_texts));
     if let Some(command) = too_long.first() {
         return Some(format!(
             "\"{command}\" is {} bytes — Initial and Scheduled Commands must be under {} bytes each to fit in a demo. Split it into shorter commands.",
@@ -1250,8 +1250,10 @@ fn first_banned_command_error(
         ));
     }
 
-    let mut banned = native::patch::cfg_scan::banned_commands(init_commands);
-    banned.extend(native::patch::cfg_scan::banned_commands(&custom_texts));
+    let mut banned = native::game_config::cfg_scan::banned_commands(init_commands);
+    banned.extend(native::game_config::cfg_scan::banned_commands(
+        &custom_texts,
+    ));
     if let Some((cvar, command)) = banned.first() {
         return Some(format!(
             "\"{command}\" is not allowed in Initial or Scheduled Commands — {cvar} is controlled entirely by the app."
@@ -1262,7 +1264,7 @@ fn first_banned_command_error(
     // configured — but the flush sizes itself against these once, before the
     // demo plays, so a Scheduled Command changing one mid-demo would silently
     // break that sizing rather than merely surprise.
-    let scheduled_banned = native::patch::cfg_scan::scheduled_banned_commands(&custom_texts);
+    let scheduled_banned = native::game_config::cfg_scan::scheduled_banned_commands(&custom_texts);
     scheduled_banned.first().map(|(cvar, command)| {
         format!(
             "\"{command}\" is not allowed in Scheduled Commands — {cvar} must not change mid-demo; set it in Initial Commands instead."
@@ -1276,7 +1278,7 @@ pub async fn start_capture_batch_impl(
     manager: &CaptureManager,
     payload: CapturePayload,
 ) -> Result<(), String> {
-    // ── Guard: banned commands (native::patch::cfg_scan::BANNED_COMMANDS) ─────
+    // ── Guard: banned commands (native::game_config::cfg_scan::BANNED_COMMANDS) ─────
     // The frontend already disables Start Capture Batch while one is present
     // (capture_pane.js's refreshLaunchGuard) — this is the same "the frontend
     // check is only as good as the frontend" reasoning as the separate-HUD
@@ -1609,7 +1611,7 @@ pub async fn start_capture_batch_impl(
                             .map(|c| c.command.clone()),
                     );
                     if let Some(line) = crate::messages::dropped_when_patched(
-                        &native::patch::cfg_scan::demo_filtered_commands(&commands),
+                        &native::game_config::cfg_scan::demo_filtered_commands(&commands),
                     ) {
                         log_markdown(&line);
                     }

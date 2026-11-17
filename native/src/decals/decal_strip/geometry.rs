@@ -1,4 +1,4 @@
-// patch/decal_strip/geometry.rs
+// decals/decal_strip/geometry.rs
 // Decal wire layouts, plane fitting and tiling: pure functions over
 // coordinates, with no demo or map access of their own.
 
@@ -21,7 +21,7 @@ fn encode_coord(v: f32) -> [u8; 2] {
 /// Texture index carried by a decal temp entity, by wire layout.
 /// TE_WORLDDECAL/HIGH: coord(6) + index. TE_GUNSHOTDECAL/TE_DECALHIGH:
 /// coord(6) + entity(2) + index. TE_DECAL: coord(6) + index + entity(2).
-pub(in crate::patch) fn decal_texture_index(entity_type: u8, payload: &[u8]) -> Option<u8> {
+pub(in crate::decals) fn decal_texture_index(entity_type: u8, payload: &[u8]) -> Option<u8> {
     match entity_type {
         116 | 117 if payload.len() >= 7 => Some(payload[6]),
         104 if payload.len() >= 7 => Some(payload[6]),
@@ -73,7 +73,7 @@ pub(super) fn decal_position(payload: &[u8]) -> Option<[f32; 3]> {
     ])
 }
 
-pub(in crate::patch) fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+pub(in crate::decals) fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     let (dx, dy, dz) = (a[0] - b[0], a[1] - b[1], a[2] - b[2]);
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
@@ -88,7 +88,7 @@ pub(in crate::patch) fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
 /// A sweep rather than bucket-rounding: rounding puts two values a hair apart
 /// into different buckets whenever they straddle a boundary, which would split
 /// one surface into two undersized patches and lose it to a minimum-size check.
-pub(in crate::patch) fn cluster(values: &[f32], tolerance: f32) -> Vec<(f32, Vec<usize>)> {
+pub(in crate::decals) fn cluster(values: &[f32], tolerance: f32) -> Vec<(f32, Vec<usize>)> {
     let mut order: Vec<usize> = (0..values.len()).collect();
     order.sort_by(|&a, &b| {
         values[a]
@@ -122,7 +122,7 @@ pub(in crate::patch) fn cluster(values: &[f32], tolerance: f32) -> Vec<(f32, Vec
 }
 
 /// The two axes that lie in a plane whose normal runs along `axis`.
-pub(in crate::patch) fn tangent_axes(axis: usize) -> (usize, usize) {
+pub(in crate::decals) fn tangent_axes(axis: usize) -> (usize, usize) {
     match axis {
         0 => (1, 2),
         1 => (0, 2),
@@ -130,7 +130,7 @@ pub(in crate::patch) fn tangent_axes(axis: usize) -> (usize, usize) {
     }
 }
 
-pub(in crate::patch) fn extent(members: &[[f32; 3]], ax: usize) -> f32 {
+pub(in crate::decals) fn extent(members: &[[f32; 3]], ax: usize) -> f32 {
     let mut lo = f32::INFINITY;
     let mut hi = f32::NEG_INFINITY;
     for m in members {
@@ -148,7 +148,10 @@ pub(in crate::patch) fn extent(members: &[[f32; 3]], ax: usize) -> f32 {
 /// A grid centred anywhere in it would have had columns hanging in mid-air over
 /// a different room. Linking members that sit within `radius` of each other is
 /// what makes "there is surface between these two decals" a defensible claim.
-pub(in crate::patch) fn connected_patches(members: &[[f32; 3]], radius: f32) -> Vec<Vec<[f32; 3]>> {
+pub(in crate::decals) fn connected_patches(
+    members: &[[f32; 3]],
+    radius: f32,
+) -> Vec<Vec<[f32; 3]>> {
     let n = members.len();
     let mut seen = vec![false; n];
     let mut out = Vec::new();
@@ -333,7 +336,7 @@ fn tile_patch(
     }
 }
 
-pub(in crate::patch) fn build_world_decal(pos: &[f32; 3], texture_index: u8) -> NetMessage {
+pub(in crate::decals) fn build_world_decal(pos: &[f32; 3], texture_index: u8) -> NetMessage {
     let mut payload = Vec::with_capacity(7);
     payload.extend_from_slice(&encode_coord(pos[0]));
     payload.extend_from_slice(&encode_coord(pos[1]));
@@ -349,7 +352,7 @@ pub(in crate::patch) fn build_world_decal(pos: &[f32; 3], texture_index: u8) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::decal_strip::MIN_POSITION_SPACING;
+    use crate::decals::decal_strip::MIN_POSITION_SPACING;
 
     /// A patch of decals on an upright wall at x = `plane`.
     fn wall_patch(plane: f32, ys: &[f32], zs: &[f32]) -> Vec<[f32; 3]> {

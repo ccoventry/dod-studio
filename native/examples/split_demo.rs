@@ -45,7 +45,7 @@ fn main() {
         let find_bsp = |map: &str| {
             let dir = std::path::Path::new(&input).parent()?;
             let bytes = std::fs::read(dir.join("maps").join(format!("{map}.bsp"))).ok()?;
-            native::patch::bsp::map_checksum(&bytes).ok()
+            native::maps::bsp::map_checksum(&bytes).ok()
         };
         let Some(part) = extract(&demo, i, &find_bsp) else {
             println!("map {i}: no such map");

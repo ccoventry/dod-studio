@@ -399,7 +399,7 @@ fn a_cvar_only_a_config_sets_is_reported_as_unseen() {
 
 #[test]
 fn a_config_only_fov_is_not_reported_as_unseen() {
-    // Regression: decal_strip::capture_fov_resolved already adopts a
+    // Regression: game_config::capture_fov_resolved already adopts a
     // config's mirv_fov/default_fov whenever Initial Commands state
     // neither — reporting it as unseen here would tell the user to do
     // something the pipeline is already doing (the same reasoning
