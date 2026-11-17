@@ -26,7 +26,7 @@
 //!
 //! The hook DLL's side is `goldsrc-hooks/src/review_ask.rs`.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};

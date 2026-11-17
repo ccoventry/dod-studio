@@ -11,7 +11,7 @@
 //     async Tauri command never parks the main thread.
 // ============================================================
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

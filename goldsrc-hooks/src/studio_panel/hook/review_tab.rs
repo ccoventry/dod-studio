@@ -8,7 +8,7 @@
 //! playing (#1142), greyed while that can't happen, and the second line says
 //! why or how the request is going ([`crate::review::IdleFacts`]).
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicU32, Ordering};
 

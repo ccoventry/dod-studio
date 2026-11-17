@@ -24,7 +24,6 @@ pub mod highlights;
 pub mod integrity;
 mod kill;
 mod localization;
-mod lock;
 /// Which match and which half a demo records, from its contents (#685).
 mod match_group;
 mod mortality;

@@ -152,7 +152,7 @@ pub fn run() {
     let settings_manager = SettingsManager::new();
     let render_manager = RenderManager::new();
     {
-        let loaded = native::shared::lock::lock_or_recover(&settings_manager.inner);
+        let loaded = lock_recover::lock_or_recover(&settings_manager.inner);
         render_manager
             .export_dirs()
             .saved(&loaded.render_export_dirs);

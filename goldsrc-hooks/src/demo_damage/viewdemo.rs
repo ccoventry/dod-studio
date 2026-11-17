@@ -33,7 +33,7 @@
 //! It watches only from a named `viewdemo` until that demo has loaded, so
 //! nothing runs per frame otherwise but one atomic load.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};

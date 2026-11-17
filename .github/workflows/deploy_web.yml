@@ -8,6 +8,7 @@ on:
       - 'analysis/**'
       - 'dod/**'
       - 'dem-patch/**'
+      - 'lock-recover/**'
       - '.github/workflows/deploy_web.yml'
   workflow_dispatch:
 

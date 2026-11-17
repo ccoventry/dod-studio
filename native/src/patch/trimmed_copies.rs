@@ -25,7 +25,7 @@
 //! read the copy again. The entry keeps the original's file info, so Studio's
 //! list of analysed demos shows the demo once, by its own name.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;

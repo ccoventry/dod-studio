@@ -14,6 +14,7 @@ analysis = { path = "../analysis" }
 clap = { workspace = true, features = ["derive"] }
 dem = { workspace = true }
 dod = { path = "../dod" }
+lock-recover = { workspace = true }
 filetime = { workspace = true }
 humantime = { workspace = true }
 serde = { workspace = true }

@@ -1,7 +1,7 @@
-// The one Option unwrap below is guarded by the write above it; locks go through `crate::lock` (#1377).
+// The one Option unwrap below is guarded by the write above it; locks go through the `lock-recover` crate (#1377).
 #![allow(clippy::unwrap_used)]
 
-use crate::lock::{read_or_recover, write_or_recover};
+use lock_recover::{read_or_recover, write_or_recover};
 use std::collections::HashMap;
 use std::sync::RwLock;
 

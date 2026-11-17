@@ -8,7 +8,7 @@
 //! the file's own directory ([`crate::demo_file::length`]), less the stretch
 //! the LOADING segment adds in front (#810).
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{CString, c_void};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;

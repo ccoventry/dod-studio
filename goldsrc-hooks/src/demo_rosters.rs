@@ -12,7 +12,7 @@
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

@@ -9,8 +9,8 @@
 //! what is left: after a schema bump, most of a folder is cached again in
 //! seconds instead of a parse per demo.
 
-use crate::shared::lock::lock_or_recover;
 use analysis::cache::{NotUpgraded, WorkPlan};
+use lock_recover::lock_or_recover;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;

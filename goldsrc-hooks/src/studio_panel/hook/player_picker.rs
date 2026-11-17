@@ -27,7 +27,7 @@
 //! window's help line spells out every name of the entry under the mouse
 //! (#781).
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;

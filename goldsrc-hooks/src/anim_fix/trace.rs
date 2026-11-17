@@ -1,7 +1,7 @@
 //! Diagnostics: the log lines and status reply that say what `apply()` is
 //! doing. Nothing here changes what the fix plays.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};

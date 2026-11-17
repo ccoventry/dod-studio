@@ -10,9 +10,9 @@
 
 use crate::render_manager::{RenderManager, resolve_ffmpeg};
 use crate::settings_manager::SettingsManager;
+use lock_recover::lock_or_recover;
 use native::hlcr::take_cleanup::folder_key;
 use native::hlcr::take_frames::{self, Sheet};
-use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

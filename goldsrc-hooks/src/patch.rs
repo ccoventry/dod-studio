@@ -28,7 +28,7 @@
 //! crashed us; we can't see whether it is, so we never make the page stricter
 //! than writable.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, Once, TryLockError};

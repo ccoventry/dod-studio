@@ -8,7 +8,7 @@
 //! `capture_takes_verified`, so they never mark a highlight captured, never
 //! fill the Last Batch panel and never start Finish clips.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

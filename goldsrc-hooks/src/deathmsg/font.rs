@@ -118,7 +118,7 @@
 // tests) keeps the tables and helpers for the unit tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::borrow::Cow;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};

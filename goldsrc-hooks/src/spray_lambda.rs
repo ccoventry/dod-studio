@@ -38,7 +38,7 @@
 
 mod plan;
 
-use crate::lock::write_or_recover;
+use lock_recover::write_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};

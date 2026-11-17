@@ -14,7 +14,7 @@
 //! own text, plus the arrow on the sorted one. The headings' own text is read
 //! once per list, before any arrow is added, through `GetColumnHeaderText`.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;

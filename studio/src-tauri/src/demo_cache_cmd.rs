@@ -4,7 +4,7 @@
 //! after the throttled ones of its first step, upgrading older cache entries.
 //! One run at a time; **Stop** sets the run's cancel flag.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

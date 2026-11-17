@@ -25,6 +25,7 @@ use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use crate::take_delete_manager::capture_dirs;
 use crate::take_preview_manager::TakePreviewManager;
+use lock_recover::{lock_or_recover, read_or_recover, write_or_recover};
 use native::hlcr::take_cleanup::{
     AfterFinish, CleanupPolicy, RoomPlan, RoomStep, SpaceNeed, finished_at, folder_key, format_gb,
     plan_room,
@@ -33,7 +34,6 @@ use native::hlcr::take_delete::{
     TakeDeletion, delete_take_permanently, plan_take_deletion, recycle_take,
 };
 use native::log_markdown;
-use native::shared::lock::{lock_or_recover, read_or_recover, write_or_recover};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;

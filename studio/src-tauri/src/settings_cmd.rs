@@ -7,7 +7,7 @@ use crate::messages;
 use crate::players_tab;
 use crate::render_manager;
 use crate::settings_manager::{self, AppSettings, SettingsManager};
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::sync::Arc;
 
 #[tauri::command]

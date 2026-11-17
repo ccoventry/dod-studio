@@ -1,7 +1,7 @@
 //! Each model's sequence list, read once out of its studio header and cached,
 //! and the label lookups that pick a viewmodel animation from it.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};

@@ -20,7 +20,7 @@
 //! there) ends the segments and the take renders in one piece, which trims
 //! to what is there as it always did.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

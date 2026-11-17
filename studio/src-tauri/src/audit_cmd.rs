@@ -4,7 +4,7 @@
 
 use crate::audit_manager::{self, AuditManager, AuditOutcome, DeleteOutcome};
 use crate::settings_manager::SettingsManager;
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

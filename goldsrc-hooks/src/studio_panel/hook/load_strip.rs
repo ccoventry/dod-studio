@@ -13,7 +13,7 @@
 //! window open or not; the Highlights tab only shows its result. The demo
 //! load needs nothing: it runs at the same rate with the window closed.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 

@@ -3,7 +3,7 @@
 //! a sprite for the tile picker, and tells running games the "Use in the
 //! game" box (`ds_player_overrides`).
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

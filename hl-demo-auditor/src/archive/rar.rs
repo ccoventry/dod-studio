@@ -31,7 +31,7 @@
 
 use super::{ContentHasher, ZipDemoEntry, is_demo_name};
 use crate::ContentHashes;
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::io::Read;

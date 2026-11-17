@@ -72,7 +72,7 @@
 // rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};

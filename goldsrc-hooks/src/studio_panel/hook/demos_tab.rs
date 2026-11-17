@@ -3,7 +3,7 @@
 //! folder line and the navigation buttons; the pure parts are in
 //! `studio_panel::demos_tab`.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

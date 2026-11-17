@@ -2,7 +2,7 @@
 //! folders it never enters (system folders, `.git`, `node_modules`, Windows),
 //! and path forms for comparing and showing.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -11,6 +11,7 @@
 
 use crate::render_export_dirs::LiveExportDirs;
 use crate::render_live_resumable::LiveResumable;
+use lock_recover::{lock_or_recover, read_or_recover, write_or_recover};
 use native::hlcr::autosave::{RenderJobStatus as AutosaveJobStatus, RenderSessionData};
 use native::hlcr::clip_id::{ClipTag, StreamTagFailures, stamp_new_render};
 use native::hlcr::config::{RenderCodec, RenderConfig};
@@ -22,7 +23,6 @@ use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_backgro
 use native::hlcr::take_cleanup::attempt_stream;
 use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
-use native::shared::lock::{lock_or_recover, read_or_recover, write_or_recover};
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
