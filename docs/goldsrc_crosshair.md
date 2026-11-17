@@ -24,7 +24,7 @@ frame. `CHud::Redraw` **silently forces the value back** every frame — it is
 one of three cvars in that enforcement block
 (`docs/goldsrc_client_dll_survey.md` §8, step 3). The other two in the same
 block, `r_drawentities` and `cl_lw`, do not merely reset: they quit the game,
-which is why `native/src/patch/cfg_scan.rs` refuses them as typed commands.
+which is why `native/src/game_config/cfg_scan.rs` refuses them as typed commands.
 
 So the gap is not "there is no setting". It is "the setting is overwritten
 before it can take effect".

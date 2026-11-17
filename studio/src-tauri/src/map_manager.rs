@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use native::patch::map_check::{self, MapStatus};
-use native::patch::map_fetch;
+use native::maps::map_check::{self, MapStatus};
+use native::maps::map_fetch;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,8 +9,8 @@
 //!
 //! Read-only. This never writes, edits or removes a config file.
 
+use native::game_config::cfg_scan;
 use native::messages;
-use native::patch::cfg_scan;
 
 fn main() {
     let mut args = std::env::args().skip(1);

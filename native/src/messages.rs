@@ -6,7 +6,7 @@
 // Tauri command (studio's messages.rs wraps them with extra context,
 // e.g. `failed_to_patch_preview_demo`, but the inner text — what actually
 // went wrong — is authored here). Scoped to the modules studio's
-// Tauri layer actually calls (patch::map_fetch, shared::hlae_ffmpeg,
+// Tauri layer actually calls (maps::map_fetch, shared::hlae_ffmpeg,
 // obs::session), plus the user-facing output of the real command-line
 // binaries (`preview_cli`, `dod-studio-cli`, `check_maps`, `check_cfgs`; see
 // the `bin/` sections below). Not in scope: the dev-only binaries
@@ -32,7 +32,7 @@ pub mod windows_drive;
 
 use std::fmt::Display;
 
-// ── patch/map_fetch.rs ───────────────────────────────────────────────────
+// ── maps/map_fetch.rs ───────────────────────────────────────────────────
 
 pub fn not_a_usable_map_name(map_name: &str) -> String {
     format!("`{}` is not a usable map name", map_name)
@@ -1331,7 +1331,7 @@ pub fn obs_take_state_not_recorded(path: impl Display, err: impl Display) -> Str
     )
 }
 
-// ── patch/decal_strip/flush_job.rs: activity log (#237) ───────────────────
+// ── game_config/cfg_warn.rs: activity log (#237) ───────────────────
 
 pub fn decal_flush_game_cfgs_set_values(found: impl Display) -> String {
     format!(
@@ -1641,7 +1641,7 @@ pub fn demo_commands_past_end(
     )
 }
 
-// ── patch/decal_atlas.rs: activity log (#237) ─────────────────────────────
+// ── decals/decal_atlas.rs: activity log (#237) ─────────────────────────────
 
 pub fn decal_atlas_unreadable(path: impl std::fmt::Display) -> String {
     format!("⚠️ **Decal atlas unreadable** at `{path}` — ignoring it for this run.")

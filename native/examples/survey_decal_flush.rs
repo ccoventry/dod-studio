@@ -29,12 +29,13 @@
 //! coordinate store, so the demo stands on its own decals and, failing those,
 //! on the map's own faces.
 
-use native::patch::scanner::scan_demo_for_highlights;
-use native::patch::types::PatcherConfig;
-use native::patch::{
-    Cancel, DecalCleanOptions, FlushSource, VisibilityBasis, build_batch_queue, clean_demo_decals,
+use native::decals::{
+    Cancel, DecalCleanOptions, FlushSource, VisibilityBasis, clean_demo_decals,
     on_screen_half_angle,
 };
+use native::patch::build_batch_queue;
+use native::patch::scanner::scan_demo_for_highlights;
+use native::patch::types::PatcherConfig;
 
 fn main() {
     let mut args = std::env::args().skip(1);

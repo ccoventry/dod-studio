@@ -1,4 +1,4 @@
-// patch/decal_probe.rs
+// decals/decal_probe.rs
 // Measures the one number the flush design is currently guessing at: how far a
 // decal message's position may sit from a solid surface and still create a
 // decal.
@@ -1596,7 +1596,7 @@ pub fn probe_decal_offsets(
     let eligible: Vec<(usize, usize, i32)> = frame_ordinals(&demo)
         .into_iter()
         .filter(|&(entry_idx, frame_idx, ordinal)| {
-            ordinal > floor && crate::patch::is_injectable_frame(&demo, entry_idx, frame_idx)
+            ordinal > floor && crate::decals::is_injectable_frame(&demo, entry_idx, frame_idx)
         })
         .collect();
 

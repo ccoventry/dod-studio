@@ -7,7 +7,7 @@
 //! The game gets no aliases for the old names. Only DoD Studio's own files
 //! move to the new ones: the in-game window's saved settings and layouts
 //! (`names::current_name`), and Studio's settings, with a warning for the
-//! game's own configs (`native::patch::console_prefix`, which includes this
+//! game's own configs (`native::game_config::console_prefix`, which includes this
 //! file). `studio/src/console_renames.js` is the copy Studio's frontend
 //! uses; a test there checks it against this one.
 //!

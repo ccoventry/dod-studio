@@ -5,11 +5,11 @@
 //! the engine's own default is 256. An install whose configs leave it there
 //! shows HD files shrunk back to 256 px with nothing saying so. This reads
 //! what the configs and Studio's Initial Commands leave it at, read-only: the
-//! game's `.cfg` files are the user's ([`cfg_scan`](crate::patch::cfg_scan)).
+//! game's `.cfg` files are the user's ([`cfg_scan`](crate::game_config::cfg_scan)).
 
 use serde::Serialize;
 
-use crate::patch::cfg_scan::{self, CfgScan};
+use crate::game_config::cfg_scan::{self, CfgScan};
 
 const CVAR: &str = "gl_max_size";
 /// What the engine starts with when nothing sets it.
@@ -78,7 +78,7 @@ fn shows_at(value: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::cfg_scan::CvarSetting;
+    use crate::game_config::cfg_scan::CvarSetting;
     use std::path::PathBuf;
 
     fn config(value: &str, file: &str, line: usize, auto_executed: bool) -> CvarSetting {

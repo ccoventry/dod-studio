@@ -18,7 +18,7 @@ use std::sync::{
 /// An error, not a panic, for a command too long for one ConsoleCommand frame.
 /// Release builds abort on panic (#225), so this used to take the whole app
 /// down mid-batch (#453). User commands are refused before a batch starts
-/// (`patch::too_long_commands`); this is the backstop for any other path.
+/// (`game_config::too_long_commands`); this is the backstop for any other path.
 fn check_console_cmd_len(cmd: &str) -> std::io::Result<()> {
     if cmd.len() <= crate::patch::MAX_CONSOLE_CMD_SAFE_LEN {
         return Ok(());
@@ -195,10 +195,10 @@ impl StreamPatcher {
         // the one thing it does not fall back from: the pass is checked at
         // every stage boundary and from inside the demo serialise, so a
         // Cancel press no longer waits out a whole flush. See #193.
-        let cleaned_source = crate::patch::decal_strip::prepare_flushed_source(
+        let cleaned_source = crate::decals::decal_strip::prepare_flushed_source(
             job,
             config,
-            crate::patch::Cancel::new(cancel_token),
+            crate::decals::Cancel::new(cancel_token),
         )
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user"))?;
         let source_demo: &std::path::Path = match &cleaned_source {
@@ -980,7 +980,7 @@ mod director_event_tests {
         let fits = "a".repeat(63);
         let too_long = "b".repeat(64);
         assert_eq!(
-            crate::patch::too_long_commands(&[fits, too_long.clone()]),
+            crate::game_config::too_long_commands(&[fits, too_long.clone()]),
             vec![too_long]
         );
     }

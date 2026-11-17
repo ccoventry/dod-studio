@@ -12,6 +12,7 @@
 // `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
+use crate::game_config::final_init_commands;
 use crate::patch::engine::StreamPatcher;
 use crate::patch::types::{
     CaptureStreak, CaptureWorker, CommandRelation, PatchEvent, PatchJob, PatcherConfig,
@@ -110,91 +111,6 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
         "_route_{drive_idx}/{demo_name}_b{block_index}/{}",
         agr_file_name(demo_name, block_index)
     )
-}
-
-/// Every command the engine will run at demo load: the user's own init
-/// commands, then the ones the pipeline adds for itself.
-///
-/// Extracted so it can be asked ahead of a capture as well as during one. The
-/// app's own additions override whatever the game's configs set — `capture_fps`
-/// beats a `mirv_movie_fps` in `movie.cfg`, and the decal pin beats an
-/// `r_decals` there — and a user is entitled to know that before it happens
-/// rather than by noticing the result.
-pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
-    let mut out = config.init_commands.clone();
-    out.push("sys_autodir".to_string());
-    // AGR mode's sound-only movie (#450) runs at the AGR rate: the movie
-    // recorder pins the timestep to `1 / mirv_movie_fps`, and that has to be
-    // the timestep the `.agr` is stamped with.
-    let movie_fps = if config.capture_mode == crate::patch::CaptureMode::Agr {
-        config.effective_agr_fps()
-    } else {
-        config.capture_fps
-    };
-    out.push(format!("mirv_movie_fps {movie_fps}"));
-
-    // A batch runs at full speed with another window in front: without it the
-    // engine waits up to 20 ms for input every frame while it isn't the active
-    // app, which slows the fast-forward between clips 5-8x (measured on both
-    // builds). The hook DLL's setting; without the hook it is an unknown
-    // command and does nothing. Whether the window stays behind is a separate
-    // setting, sent as 0 too when the user wants to watch, so a game left
-    // running from an earlier batch (#666) drops it.
-    out.push(format!("{RUN_IN_BACKGROUND} 1"));
-    out.push(format!(
-        "{STAY_BEHIND} {}",
-        u8::from(config.keep_game_behind)
-    ));
-
-    // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
-    // `mirv_movie_fps` above is inert on this path — nothing reads it. OBS
-    // samples whatever frame the game last drew, once per frame of its own
-    // `obs_capture_fps` (obs::provision::ensure_dod_studio_setup), so the
-    // game has to draw faster than that: at exactly OBS's rate the two beat
-    // against each other and OBS repeats a frame every time the game is a
-    // little late. Measured (#645, POST, 120 fps): 1.5-2.1% repeated frames
-    // with `fps_max` at OBS's rate, 0.2-0.8% with the game drawing faster.
-    // Hence twice OBS's rate, and `gl_vsync 0`, since vsync would cap the
-    // game at the monitor's refresh, below OBS's rate on a 60 Hz screen.
-    // `fps_override 1` first: GoldSrc's default `fps_max` ceiling (~100) is
-    // below these, and `fps_max` alone is silently clamped under it.
-    if config.capture_mode == crate::patch::CaptureMode::Obs {
-        out.push("fps_override 1".to_string());
-        out.push(format!("fps_max {}", obs_game_fps_max(config)));
-        out.push("gl_vsync 0".to_string());
-    }
-
-    // The decal flush needs the ring set once, at demo load, and never again.
-    // r_decals bounds how far the rotating index may travel before it wraps; it
-    // does not evict anything, so lowering it once decals have accumulated
-    // strands every one sitting above the new limit.
-    //
-    // The sweep is sized to that same number, so there is only one number here
-    // and `r_decals` is where the engine reads it, at the same precedence
-    // `ring_limit` itself resolves (see that function): Initial Commands, then
-    // an executed config, then the app's own default. When either of the first
-    // two states it, that line is already the pin — appending a second one
-    // here would either silently overrule what Initial Commands asked for, or
-    // be a no-op duplicate of what the config already set. Only the true
-    // "nothing anywhere states it" case needs one appended, to replace the
-    // engine's own uncontrolled standing value with a known one.
-    //
-    // Not at the maximum, though. r_decals is clamped to MAX_RENDER_DECALS, so a
-    // sweep that size turns a full revolution whatever the cvar happens to be —
-    // any smaller ring simply gets swept several times over. Pinning then buys
-    // nothing and costs the precondition the rest of this design works around:
-    // that nothing else may touch r_decals.
-    if config.decal_flush
-        && crate::patch::ring_limit_from_init(&config.init_commands).is_none()
-        && crate::patch::ring_limit_from_game_config(config).is_none()
-    {
-        let ring = config.decal_ring_limit.min(crate::patch::MAX_RENDER_DECALS);
-        if ring > 0 && ring < crate::patch::MAX_RENDER_DECALS {
-            out.push(format!("r_decals {}", ring));
-        }
-    }
-
-    out
 }
 
 /// The hook DLL's camera follow for HLTV demos (goldsrc-hooks

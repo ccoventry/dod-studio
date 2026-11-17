@@ -528,8 +528,8 @@ fn a_path_module_resolves_beside_the_declaring_file() {
         path: Some("cfg_scan_tests.rs".to_string()),
     };
     assert_eq!(
-        external_module_files(Path::new("native/src/patch/cfg_scan.rs"), &module),
-        vec![PathBuf::from("native/src/patch/cfg_scan_tests.rs")]
+        external_module_files(Path::new("native/src/game_config/cfg_scan.rs"), &module),
+        vec![PathBuf::from("native/src/game_config/cfg_scan_tests.rs")]
     );
     let up = ExternalMod {
         name: "tests".to_string(),

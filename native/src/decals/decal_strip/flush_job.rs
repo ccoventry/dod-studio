@@ -1,4 +1,4 @@
-// patch/decal_strip/flush_job.rs
+// decals/decal_strip/flush_job.rs
 // ── Batch-pipeline pre-pass ──────────────────────────────────────────────────
 //
 // `StreamPatcher::patch` streams its input as a file, while `clean_demo_decals`
@@ -12,8 +12,10 @@ use super::{
     DECALS_PER_POSITION, DecalCleanError, DecalCleanOptions, DecalCleanStats, FlushSource,
     VisibilityBasis, clean_demo_decals,
 };
+use crate::decals::decal_atlas;
+use crate::game_config::cfg_warn::warn_about_game_cfgs;
+use crate::game_config::{capture_fov_resolved, ring_limit};
 use crate::patch::types::{PatchJob, PatcherConfig};
-use crate::patch::{cfg_scan, decal_atlas};
 
 /// A cleaned copy of a source demo, alive only as long as the patch reading it.
 /// Removed on drop, which covers the error and cancellation paths as well as
@@ -137,205 +139,6 @@ pub fn on_screen_half_angle(fov_degrees: f32, width: i32, height: i32) -> f32 {
     (corner + CAMERA_TURN_MARGIN_DEGREES).min(89.0)
 }
 
-/// The FOV a capture will actually run at.
-///
-/// Read out of `init_commands` when HLAE's `mirv_fov` is among them, because
-/// that is the value the engine will be using and a separate setting could
-/// silently disagree with it. The last one wins, matching the console. Falls
-/// back to the configured default when nothing sets it.
-pub fn capture_fov(config: &PatcherConfig) -> f32 {
-    capture_fov_from_init(&config.init_commands).unwrap_or(config.capture_fov)
-}
-
-/// The FOV `init_commands` states, if it states one at all.
-///
-/// Separate from `capture_fov` because "nothing was stated" and "the stated
-/// value happens to equal the default" are different facts, and collapsing them
-/// into one number loses the difference. `capture_fov_resolved` needs it: the
-/// app's own seeded default is `mirv_fov 90`, so a user who takes the defaults
-/// and has `mirv_fov 105` in a config would otherwise have their explicit 90
-/// silently replaced by the config's 105.
-pub fn capture_fov_from_init(init_commands: &[String]) -> Option<f32> {
-    for cmd in init_commands.iter().rev() {
-        let trimmed = cmd.trim();
-        let Some(rest) = trimmed
-            .strip_prefix("mirv_fov")
-            .or_else(|| trimmed.strip_prefix("default_fov"))
-        else {
-            continue;
-        };
-        // Guard against matching a longer command that merely starts the same.
-        if !rest.starts_with(char::is_whitespace) {
-            continue;
-        }
-        // Real .cfg syntax quotes every value ("105", not 105) — the same
-        // convention "Load from .cfg file…" carries straight into Initial
-        // Commands. Parsing the raw token instead of the unquoted value
-        // means this silently reads a quoted line as "nothing stated" and
-        // falls through to the default, which is the whole bug this exists
-        // to prevent.
-        if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<f32>()
-            && v > 0.0
-        {
-            return Some(v);
-        }
-    }
-    None
-}
-
-/// The mod folder holding the game's configs, for a configured `hl.exe`.
-fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
-    let dir = crate::shared::paths::mod_dir_for_exe(std::path::Path::new(&config.game_path))?;
-    dir.is_dir().then_some(dir)
-}
-
-/// The FOV a capture will actually run at, including what the game's own
-/// configs set.
-///
-/// `capture_fov` reads the app's init commands, which was the whole story only
-/// as long as nothing else set it. It is not: a `config.cfg` ending in
-/// `exec movie.cfg`, with `mirv_fov 105` inside, renders at 105 while the
-/// pipeline sizes its on-screen test for the configured default — a cone some
-/// seven degrees too narrow, calling in-shot positions hidden.
-///
-/// So the order is init commands, then an executed config, then the configured
-/// default. `ring_limit` (r_decals) follows exactly this same order. Adopting
-/// a `movie.cfg`'s `r_decals 0` does not silently stand the flush down: a
-/// resolved 0 with Flush Decals on is its own loud, reported fact
-/// (`decal_flush_is_noop` in the studio report) rather than something this
-/// function would hide by disagreeing with the config.
-///
-/// Reads config files. Never writes one.
-pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
-    // An init command is the app's own statement and outranks a config —
-    // including when it states the same number the default happens to be. The
-    // seeded default IS `mirv_fov 90`, so treating that as "nothing was said"
-    // would hand every defaulted install over to whatever its movie.cfg says.
-    if let Some(stated) = capture_fov_from_init(&config.init_commands) {
-        return stated;
-    }
-
-    let Some(dir) = game_dir_for(config) else {
-        return config.capture_fov;
-    };
-    let scan = cfg_scan::scan_cached(&dir);
-    for cvar in ["mirv_fov", "default_fov"] {
-        if let Some(setting) = scan.effective(cvar)
-            && let Ok(v) = setting.value.parse::<f32>()
-            && v > 0.0
-        {
-            return v;
-        }
-    }
-    config.capture_fov
-}
-
-/// Report anything the game's configs set that the pipeline depends on.
-///
-/// Read-only, and advisory: the user's configs are theirs to change. This only
-/// makes sure a value the app never hears about does not stay invisible.
-fn warn_about_game_cfgs(config: &PatcherConfig) {
-    let Some(dir) = game_dir_for(config) else {
-        return;
-    };
-    let scan = cfg_scan::scan_cached(&dir);
-    let found = scan.effective_settings();
-    if found.is_empty() {
-        return;
-    }
-
-    // Once per folder per run. This is called per demo, and a batch of forty
-    // would otherwise write the same paragraph into the activity log forty
-    // times — which is how a warning worth reading becomes one nobody reads.
-    {
-        static WARNED: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashSet<std::path::PathBuf>>,
-        > = std::sync::OnceLock::new();
-        let warned = WARNED.get_or_init(Default::default);
-        let Ok(mut w) = warned.write() else {
-            return;
-        };
-        if !w.insert(dir.clone()) {
-            return;
-        }
-    }
-
-    let lines: Vec<String> = found
-        .iter()
-        .map(|s| {
-            format!(
-                "`{} {}` in `{}` line {}",
-                s.cvar,
-                s.value,
-                s.file_name(),
-                s.line
-            )
-        })
-        .collect();
-
-    crate::log_markdown(&crate::messages::decal_flush_game_cfgs_set_values(
-        lines.join(", "),
-    ));
-}
-
-/// `r_decals` as stated in `init_commands`, if it is stated there at all.
-///
-/// The last one wins, matching the console. Clamped to the engine's own
-/// ceiling, because the engine clamps it too and a sweep sized past the ceiling
-/// would spend its extra positions turning a ring that had already come round.
-pub fn ring_limit_from_init(init_commands: &[String]) -> Option<u32> {
-    for cmd in init_commands.iter().rev() {
-        let trimmed = cmd.trim();
-        let Some(rest) = trimmed.strip_prefix("r_decals") else {
-            continue;
-        };
-        // Guard against matching a longer command that merely starts the same.
-        if !rest.starts_with(char::is_whitespace) {
-            continue;
-        }
-        // Quoted, same as capture_fov_from_init above and for the same
-        // reason: real .cfg syntax quotes every value, and a raw parse on
-        // `"512"` fails silently, reading a stated line as unstated.
-        if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<u32>() {
-            return Some(v.min(crate::patch::MAX_RENDER_DECALS));
-        }
-    }
-    None
-}
-
-/// How many decals the ring will hold, and so how many positions a full sweep
-/// has to turn.
-///
-/// This is one number, and `r_decals` is where the engine reads it. A separate
-/// setting could only ever agree with the cvar or silently disagree with it, so
-/// an `init_commands` entry is the authority when there is one, an executed
-/// config is next, and the configured default fills in when neither states it.
-/// Same precedence as `capture_fov_resolved` — genuinely the same rule now,
-/// not merely similar (see that function's doc comment for the history of why
-/// `r_decals` used to be the one exception).
-pub fn ring_limit(config: &PatcherConfig) -> u32 {
-    ring_limit_from_init(&config.init_commands)
-        .or_else(|| ring_limit_from_game_config(config))
-        .unwrap_or_else(|| config.decal_ring_limit.min(crate::patch::MAX_RENDER_DECALS))
-}
-
-/// `r_decals` as an executed config states it, if one does and the value
-/// actually parses — same shape as `ring_limit_from_init`, just for the other
-/// place a value can come from. Clamped the same way, for the same reason.
-///
-/// Read-only, like everything touching the user's configs — this decides what
-/// the pipeline treats as the standing value, never what the config says.
-/// See [`crate::patch::cfg_scan`].
-pub fn ring_limit_from_game_config(config: &PatcherConfig) -> Option<u32> {
-    let dir = game_dir_for(config)?;
-    let setting = cfg_scan::scan_cached(&dir).effective("r_decals")?.clone();
-    setting
-        .value
-        .parse::<u32>()
-        .ok()
-        .map(|v| v.min(crate::patch::MAX_RENDER_DECALS))
-}
-
 /// Clean options for the batch pipeline, as distinct from the `strip_decals`
 /// CLI's.
 ///
@@ -355,7 +158,7 @@ pub fn ring_limit_from_game_config(config: &PatcherConfig) -> Option<u32> {
 /// resolve to a real directory rather than handing the loader a path that can
 /// only fail per demo.
 fn maps_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
-    crate::patch::map_check::maps_dir_for_exe(std::path::Path::new(&config.game_path))
+    crate::maps::map_check::maps_dir_for_exe(std::path::Path::new(&config.game_path))
 }
 
 fn flush_options(config: &PatcherConfig) -> DecalCleanOptions {
@@ -425,14 +228,14 @@ fn keep_windows_for(job: &PatchJob) -> Option<Vec<(i32, i32)>> {
 pub fn prepare_flushed_source(
     job: &PatchJob,
     config: &PatcherConfig,
-    cancel: crate::patch::Cancel<'_>,
-) -> Result<Option<CleanedSource>, crate::patch::Cancelled> {
+    cancel: crate::decals::Cancel<'_>,
+) -> Result<Option<CleanedSource>, crate::decals::Cancelled> {
     // First, before the ~110MB read below: a job that has not started its
     // flush when Cancel is pressed should do none of it. With PATCH_CONCURRENCY
     // jobs in flight, this is what keeps the queued ones from each adding
     // another full pass to the wait. See #193.
     if cancel.requested() {
-        return Err(crate::patch::Cancelled);
+        return Err(crate::decals::Cancelled);
     }
 
     if !config.decal_flush {
@@ -485,7 +288,7 @@ pub fn prepare_flushed_source(
         // Not a failure, and deliberately silent: the user asked for the
         // batch to stop. Reporting it as a flush failure would put a warning
         // in the capture log for something they did on purpose.
-        Err(DecalCleanError::Cancelled) => return Err(crate::patch::Cancelled),
+        Err(DecalCleanError::Cancelled) => return Err(crate::decals::Cancelled),
         Err(e) => {
             crate::log_markdown(&crate::messages::decal_flush_failed(&job.source_demo, e));
             return Ok(None);
@@ -498,7 +301,7 @@ pub fn prepare_flushed_source(
     // owns removing it, so the copy loop in `engine.rs` -- which checks the
     // same token once per frame -- is the right place for any later check.
     if cancel.requested() {
-        return Err(crate::patch::Cancelled);
+        return Err(crate::decals::Cancelled);
     }
 
     let path = scratch_path(&job.source_demo);

@@ -20,7 +20,7 @@
 //! **Somebody else's ini is never overwritten.** HLAE is shared with Source work
 //! and other projects, so silently repointing it would break someone else's
 //! workflow to fix ours. Where one exists and disagrees, that is reported and
-//! left alone — the same discipline `patch::cfg_scan` applies to the game's own
+//! left alone — the same discipline `game_config::cfg_scan` applies to the game's own
 //! `.cfg` files.
 //!
 //! What is protected is a *configuration*, not a filename. An ini with no

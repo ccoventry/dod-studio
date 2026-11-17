@@ -15,9 +15,10 @@
 //! cargo run --release -p native --bin verify_decal_pipeline -- <demo> <outdir>
 //! ```
 
+use native::decals::{Cancel, prepare_flushed_source};
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{Cancel, StreamPatcher, build_batch_queue, prepare_flushed_source};
+use native::patch::{StreamPatcher, build_batch_queue};
 
 fn frame_count(path: &std::path::Path) -> Option<usize> {
     let bytes = std::fs::read(path).ok()?;

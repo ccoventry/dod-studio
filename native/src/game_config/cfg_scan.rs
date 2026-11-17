@@ -1,4 +1,4 @@
-// patch/cfg_scan.rs
+// game_config/cfg_scan.rs
 // What the game's own config files set behind the pipeline's back.
 //
 // STRICTLY READ-ONLY. This module never writes, edits, moves or deletes a
@@ -129,7 +129,7 @@ pub enum ValueSource {
     /// An Initial Command the user typed.
     Initial,
     /// An Initial Command the pipeline appends for itself
-    /// (`builder::final_init_commands`), e.g. `mirv_movie_fps` from Capture FPS.
+    /// (`game_config::final_init_commands`), e.g. `mirv_movie_fps` from Capture FPS.
     App,
     /// A line in a file an Initial Command `exec`s (Seek Between Clips only:
     /// the demo filter drops the `exec` in a patched batch).
@@ -393,7 +393,7 @@ pub fn value_warnings_with_execs(
 /// design rests on the ring being set once at demo load and never touched
 /// again.
 ///
-/// `mirv_fov` is the same shape of problem: `decal_strip::capture_fov_resolved`
+/// `mirv_fov` is the same shape of problem: `game_config::capture_fov_resolved`
 /// reads it once, from `init_commands`/the detected game config, as a pre-pass
 /// before the demo plays, and sizes the whole sweep's on-screen test against
 /// that single value. A Scheduled Command changing it mid-demo does not
@@ -414,7 +414,7 @@ pub fn value_warnings_with_execs(
 /// have diverged. `mirv_recordmovie_start`/`_stop` are what `sys_record_start`/
 /// `sys_record_stop` schedule at the block's own record bounds — a stray one
 /// races that and can start or end a take at the wrong tick. `mirv_movie_fps`
-/// is pinned once at load (see `builder::final_init_commands`) and everything
+/// is pinned once at load (see `game_config::final_init_commands`) and everything
 /// downstream — the fps stamped into take metadata, Render Studio's own
 /// expectation — assumes that never changes mid-batch. `mirv_movie_ffmpeg`
 /// configures the direct-to-video encoder pipe the same way, once, before
@@ -671,7 +671,7 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 ///
 /// `r_decals`, `mirv_fov` and `gl_widescreenfov` all feed the decal flush's
 /// one-time sizing pre-pass: `r_decals` bounds the decal ring, `mirv_fov`
-/// sizes the on-screen sweep test against `decal_strip::capture_fov_resolved`'s
+/// sizes the on-screen sweep test against `game_config::capture_fov_resolved`'s
 /// single read of it before the demo plays, and `gl_widescreenfov` widens the
 /// effective FOV the same way without the flush even knowing the cvar exists.
 /// A Scheduled Command changing any of them mid-demo does not retroactively
