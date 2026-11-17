@@ -60,6 +60,8 @@ class AreaTests(unittest.TestCase):
     def test_parser_crates_run_rust_hooks_and_wasm(self):
         self.assertEqual(on(["analysis/src/kill.rs"]), {"rust", "hooks", "web_python"})
         self.assertEqual(on(["localizations/dod_english.txt"]), {"rust", "hooks", "web_python"})
+        # Every crate, the hook DLL and the wasm build use the lock helper.
+        self.assertEqual(on(["lock-recover/src/lib.rs"]), {"rust", "hooks", "web_python"})
 
     def test_bundled_scripts_count_as_rust(self):
         self.assertEqual(on(["vegas/DoD Studio Nameplates.cs"]), {"rust"})

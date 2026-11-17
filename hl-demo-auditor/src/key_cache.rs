@@ -14,9 +14,10 @@
 //! it empty, and a failed save loses nothing but time.
 
 use crate::{ContentHashes, Stamp, ZipDemoEntry};
+use lock_recover::lock_or_recover;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 /// Bumped when [`KeyEntry`] changes meaning; an older file is dropped.
 const VERSION: u32 = 1;
@@ -60,6 +61,13 @@ impl ArchiveEntry {
     }
 }
 
+/// How the remembered zip entry names were decoded. 1: zip 9's (UTF-8 first,
+/// then CP437, whatever the entry's UTF-8 flag says). zip 4 (no field, 0)
+/// went by the flag, so a UTF-8 name without it was stored as CP437 text,
+/// which zip 9 no longer finds by name; such a listing is read again
+/// rather than every demo key re-hashed (#1503).
+const ARCHIVE_NAMES: u32 = 1;
+
 /// `archives` sits beside `entries` without a version bump: an older Studio
 /// ignores it, and a file without it reads as no zips remembered.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -68,6 +76,9 @@ struct CacheFile {
     entries: HashMap<String, KeyEntry>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     archives: HashMap<String, ArchiveEntry>,
+    /// [`ARCHIVE_NAMES`] when `archives` was written.
+    #[serde(default)]
+    archive_names: u32,
 }
 
 /// The remembered entries, plus what this run changed: [`KeyCache::save`]
@@ -94,6 +105,12 @@ fn read_file(file: &Path) -> CacheFile {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<CacheFile>(&bytes).ok())
         .filter(|cache| cache.version == VERSION)
+        .map(|mut cache| {
+            if cache.archive_names != ARCHIVE_NAMES {
+                cache.archives.clear();
+            }
+            cache
+        })
         .unwrap_or_default()
 }
 
@@ -289,7 +306,7 @@ impl KeyCache {
         if !self.has_changes() {
             return Ok(());
         }
-        let _one_at_a_time = SAVE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let _one_at_a_time = lock_or_recover(&SAVE_LOCK);
         let saved = read_file(file);
         let mut entries = saved.entries;
         let mut archives = saved.archives;
@@ -339,6 +356,7 @@ impl KeyCache {
             version: VERSION,
             entries,
             archives,
+            archive_names: ARCHIVE_NAMES,
         })
         .map_err(std::io::Error::other)?;
         if let Some(dir) = file.parent() {
@@ -530,6 +548,28 @@ mod tests {
         // An older file, without zips, still loads.
         std::fs::write(&file, br#"{"version":1,"entries":{}}"#).unwrap();
         assert!(KeyCache::load(&file).archives.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn zip_listings_saved_with_zip_4s_names_are_listed_again_but_demo_keys_stay() {
+        let dir = scratch("zip_names");
+        let file = dir.join("audit_keys.json");
+        let zip = Path::new(r"C:\demos\pack.zip");
+        let demo = Path::new(r"C:\demos\a.dem");
+        let mut cache = KeyCache::default();
+        cache.put(demo, STAMP, 7);
+        cache.put_archive(zip, STAMP, Ok(zip_listing()));
+        cache.save(&file).unwrap();
+        assert!(KeyCache::load(&file).archive(zip, STAMP).is_some());
+        // The same file as a zip 4 build wrote it: no `archive_names`.
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        json.as_object_mut().unwrap().remove("archive_names");
+        std::fs::write(&file, serde_json::to_vec(&json).unwrap()).unwrap();
+        let loaded = KeyCache::load(&file);
+        assert!(loaded.archive(zip, STAMP).is_none());
+        assert_eq!(loaded.entry(demo, STAMP).map(|e| e.head), Some(7));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -426,6 +426,13 @@ pub fn parse_header(i: &[u8]) -> Result<Header> {
         return nom_fail(format!("magic is not HLDEMO: `{:?}`", magic));
     }
 
+    // Refused here, by number, before a frame is read with rules that may
+    // not hold for it (#239, `protocol.rs`).
+    let (_, network_protocol) = nom::sequence::preceded(le_i32, le_i32).parse(i)?;
+    if let Err(unsupported) = crate::protocol::check_network_protocol(network_protocol) {
+        return nom_fail(unsupported.to_string());
+    }
+
     map(
         (
             le_i32,

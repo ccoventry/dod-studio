@@ -841,9 +841,9 @@ same location in three places:
 
 | location | ours | HLAE's |
 | --- | --- | --- |
-| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine.rs` | at load |
+| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine/loader.rs` | at load |
 | the `connect` command's handler | `connect_guard.rs` | after `Host_Init` |
-| `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
+| `cldll_func_t` slot 19 | `engine/client_exports.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
 
 In every one, **both sides save the slot's current value and call through it**
 — `hook_import` stores `*slot` as the real function, `cmd_list::wrap`
@@ -1081,6 +1081,22 @@ truncated: the 9-byte header reads are unchecked, so the type byte keeps
 whatever that stack slot held, and the frame is decided by that.
 *Inferred from the code, not tested:* the likely outcome is the
 network-message path, ending at `Bad demo length.`.
+
+*Measured on PRE (2026-11-11, #1373):* a file cut short loses its directory,
+which sits at the end, so `playdemo` refuses it at the start with
+`Error: Corrupt demo file.` (a real recording 451 bytes short, and 50% copies
+with the directory offset past the end or zeroed); nothing reaches
+`Host_EndGame`. 11 healthy demos (8 POV from 7 players, 3 HLTV from 3 matches)
+all ended through `Host_EndGame("End of demo.")`, while damaged ones end through
+`Host_EndGame("Demo message > MAX_POSSIBLE_MSG")` or
+`Host_Error("CL_ParseServerMessage: Illegible server message - svc_bad")`.
+`viewdemo` reaches neither function: `DemoPlayer`'s loader (`Core.dll`) prints
+`WARNING! DemoFile::ReadDemoPacket: ...` or `WARNING! Server::ParseBad: ...` at
+load and plays the part before the damage; `goldsrc-hooks/src/demo_damage/viewdemo.rs`
+catches that once the load ends (the player's buffered span against a walk of
+the file's frames, which stops on the same frame). `goldsrc-hooks/src/demo_damage.rs`
+hooks both functions (`Host_EndGame` PRE `+0x55ea0` / Anniversary `+0x1d26e0`,
+`Host_Error` `+0x55f60` / `+0x1d27c0`).
 
 ### 14.3 The clock: `playdemo`'s speed, `host_framerate` and `timedemo`
 

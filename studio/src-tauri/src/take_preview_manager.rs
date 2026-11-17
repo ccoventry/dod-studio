@@ -10,6 +10,7 @@
 
 use crate::render_manager::{RenderManager, resolve_ffmpeg};
 use crate::settings_manager::SettingsManager;
+use lock_recover::lock_or_recover;
 use native::hlcr::take_cleanup::folder_key;
 use native::hlcr::take_frames::{self, Sheet};
 use serde::Serialize;
@@ -38,11 +39,7 @@ struct Running<'a> {
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        let mut running = self
-            .previews
-            .running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut running = lock_or_recover(&self.previews.running);
         if running.as_deref() == Some(self.key.as_str()) {
             *running = None;
         }
@@ -53,8 +50,8 @@ impl TakePreviewManager {
     fn start(&self, take_folder: &str) -> (Arc<AtomicBool>, Running<'_>) {
         let flag = Arc::new(AtomicBool::new(false));
         let key = folder_key(take_folder);
-        let mut running = self.running.lock().unwrap_or_else(|p| p.into_inner());
-        *self.cancel.lock().unwrap_or_else(|p| p.into_inner()) = flag.clone();
+        let mut running = lock_or_recover(&self.running);
+        *lock_or_recover(&self.cancel) = flag.clone();
         *running = Some(key.clone());
         (
             flag,
@@ -81,19 +78,14 @@ impl TakePreviewManager {
                 .is_some_and(|k| k == key || k.starts_with(&inside))
         };
         {
-            let running = self.running.lock().unwrap_or_else(|p| p.into_inner());
+            let running = lock_or_recover(&self.running);
             if !in_take(&running) {
                 return false;
             }
-            self.cancel
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .store(true, Ordering::Relaxed);
+            lock_or_recover(&self.cancel).store(true, Ordering::Relaxed);
         }
         let end = Instant::now() + wait;
-        while Instant::now() < end
-            && in_take(&self.running.lock().unwrap_or_else(|p| p.into_inner()))
-        {
+        while Instant::now() < end && in_take(&lock_or_recover(&self.running)) {
             std::thread::sleep(Duration::from_millis(20));
         }
         true
@@ -132,7 +124,7 @@ pub(crate) fn check_listed(render: &RenderManager, take_folder: &str) -> Result<
 }
 
 pub(crate) fn ffmpeg_path(settings: &SettingsManager) -> PathBuf {
-    resolve_ffmpeg(settings.inner.lock().unwrap().ffmpeg_path.as_ref())
+    resolve_ffmpeg(lock_or_recover(&settings.inner).ffmpeg_path.as_ref())
 }
 
 /// The take's frames for `stream`, made when they aren't cached yet, with
@@ -253,11 +245,7 @@ pub async fn take_preview_sheet(
 /// Stops the pass running now, if any: its call returns the cancelled error.
 #[tauri::command]
 pub fn cancel_take_previews(previews: tauri::State<'_, TakePreviewManager>) {
-    previews
-        .cancel
-        .lock()
-        .unwrap()
-        .store(true, Ordering::Relaxed);
+    lock_or_recover(&previews.cancel).store(true, Ordering::Relaxed);
 }
 
 #[cfg(test)]

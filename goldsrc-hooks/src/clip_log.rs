@@ -39,6 +39,7 @@
 // The demo clock is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use lock_recover::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -80,7 +81,7 @@ pub(crate) fn on_marker(line: &str) {
     };
     let label = label.trim();
     let now = crate::demo_seek::clock().map(|c| c.now);
-    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = lock_or_recover(&STATE);
     let frames = FRAMES.load(Ordering::Relaxed);
     let done = state.on_label(label, now, frames);
     if label.starts_with("START_RECORD") {
@@ -97,7 +98,7 @@ pub(crate) fn on_marker(line: &str) {
 /// recording is reported now, without its stop, rather than at the next
 /// batch's first `DEMO_START` with every frame drawn in between.
 pub fn batch_stopped() {
-    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = lock_or_recover(&STATE);
     let done = state.stopped(FRAMES.load(Ordering::Relaxed));
     RECORDING.store(false, Ordering::Relaxed);
     drop(state);

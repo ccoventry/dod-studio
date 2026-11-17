@@ -27,7 +27,9 @@
 //!
 //! A line starting `review ` is the in-game Review tab asking Studio to
 //! review the demo it has loaded instead (#1142); `game_review_requests`
-//! answers it on the same connection.
+//! answers it on the same connection. A line starting `damaged ` is the
+//! game saying a demo it plays is damaged (#1373); `game_damage_notices`
+//! answers it.
 //!
 //! ## Names
 //!
@@ -169,6 +171,12 @@ fn handle_client(pipe: std::fs::File) {
     }
     if super::game_review_requests::is_review_request(&line) {
         super::game_review_requests::serve(&line, &mut writer);
+        // Safety: the pipe's own handle, as below.
+        unsafe { FlushFileBuffers(std::os::windows::io::AsRawHandle::as_raw_handle(&writer)) };
+        return;
+    }
+    if super::game_damage_notices::is_damage_notice(&line) {
+        super::game_damage_notices::serve(&line, &mut writer);
         // Safety: the pipe's own handle, as below.
         unsafe { FlushFileBuffers(std::os::windows::io::AsRawHandle::as_raw_handle(&writer)) };
         return;

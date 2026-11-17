@@ -145,9 +145,9 @@ describe('kept in step with the code', () => {
     const body = source.match(new RegExp(`pub const ${name}: &\\[&str\\] = &\\[([^\\]]*)\\]`))[1];
     return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
   };
-  const cfgScan = fs.readFileSync(path.join(repo, 'native', 'src', 'patch', 'cfg_scan.rs'), 'utf8');
+  const cfgScan = fs.readFileSync(path.join(repo, 'native', 'src', 'game_config', 'cfg_scan.rs'), 'utf8');
 
-  it("matches native::patch::cfg_scan's tiers", () => {
+  it("matches native::game_config::cfg_scan's tiers", () => {
     expect([...OWNED_BY_STUDIO, ...GAME_QUITS_OVER].sort()).toEqual(rustList(cfgScan, 'BANNED_COMMANDS'));
     expect([...SCHEDULED_BANNED].sort()).toEqual(rustList(cfgScan, 'SCHEDULED_BANNED_COMMANDS'));
     expect([...MID_DEMO_HAZARDS].sort()).toEqual(rustList(cfgScan, 'MID_DEMO_HAZARDS'));

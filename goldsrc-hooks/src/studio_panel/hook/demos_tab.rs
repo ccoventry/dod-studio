@@ -3,6 +3,7 @@
 //! folder line and the navigation buttons; the pure parts are in
 //! `studio_panel::demos_tab`.
 
+use lock_recover::lock_or_recover;
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -164,28 +165,43 @@ static DEMO_INFO: std::sync::Mutex<Vec<(String, u64, Option<DemoInfo>)>> =
 /// How much of a demo `demo_info` reads.
 const DEMO_START: usize = 4096;
 
-/// The demo file a row names (a path from `dod/`), or `None` for a
-/// folder row.
+thread_local! {
+    /// Each row's file, found once per fill (engine thread, like the list).
+    static ROW_FILES: std::cell::RefCell<crate::demo_locate::RowFiles> =
+        std::cell::RefCell::new(crate::demo_locate::RowFiles::default());
+}
+
+/// The demo file a row names (a path from `dod/`, which the game also
+/// looks for in `dod_addon` and `dod_downloads`, #1474), or `None` for a
+/// folder row. Found once per row until the list fills again.
 pub(super) fn row_path(row: &str) -> Option<std::path::PathBuf> {
     let name = row.trim().trim_matches('"');
     if name.ends_with('/') || name.is_empty() {
         return None;
     }
-    Some(crate::demo_list_folders::full_path(&dod_dir(), name))
+    Some(ROW_FILES.with(|rows| rows.borrow_mut().file(name, crate::demo_locate::file_for)))
 }
 
-/// The header facts of the demo a row names (a path from `dod/`).
+/// The header facts of the demo a row names (a path from `dod/`). A row
+/// whose remembered file has gone is looked for once more.
 fn info_for(row: &str) -> Option<DemoInfo> {
     let name = row.trim().trim_matches('"');
-    let path = row_path(row)?;
-    let meta = std::fs::metadata(&path).ok()?;
+    let mut path = row_path(row)?;
+    let meta = match std::fs::metadata(&path) {
+        Ok(meta) => meta,
+        Err(_) => {
+            ROW_FILES.with(|rows| rows.borrow_mut().drop_row(name));
+            path = row_path(row)?;
+            std::fs::metadata(&path).ok()?
+        }
+    };
     let modified = meta
         .modified()
         .ok()?
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_secs();
-    let mut cache = DEMO_INFO.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = lock_or_recover(&DEMO_INFO);
     if let Some((_, m, info)) = cache.iter().find(|(p, _, _)| p == name)
         && *m == modified
     {
@@ -232,7 +248,7 @@ pub(super) unsafe fn filter_demo_list(vgui: &Vgui) {
             ),
             None => String::new(),
         };
-        let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
+        let mut headed = lock_or_recover(&HEADED);
         if *headed != (page as usize, line_text.clone()) {
             if let Some(line) = line
                 && let Ok(text) = std::ffi::CString::new(line_text.clone())
@@ -259,9 +275,7 @@ pub(super) unsafe fn filter_demo_list(vgui: &Vgui) {
         // fills again, which puts the heading back (#779).
         let picked = box_text(vgui, page, DEMO_PLACE);
         if folders & 1 == 1 && !picked.is_empty() && picked.as_bytes() != PLACE_HEADING.to_bytes() {
-            let folder = PLACES
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            let folder = lock_or_recover(&PLACES)
                 .iter()
                 .find(|p| p.label == picked)
                 .map(|p| p.folder.clone());
@@ -282,10 +296,7 @@ pub(super) unsafe fn filter_demo_list(vgui: &Vgui) {
         };
         // The picked players only: what is typed in the Player box
         // searches its list, not the demos.
-        let terms = PICKED_PLAYERS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let terms = lock_or_recover(&PICKED_PLAYERS).clone();
         let player = terms.join(" | ");
         let all = box_text(vgui, page, PLAYER_MATCH)
             .trim()
@@ -308,7 +319,7 @@ pub(super) unsafe fn filter_demo_list(vgui: &Vgui) {
         if list.is_null() {
             return;
         }
-        let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = lock_or_recover(&FILTERED_FOR);
         // A refilled list shows every row again: stamp it and filter afresh.
         if stamp_demo_rows(list) {
             resort_demo_list(list, build);
@@ -364,7 +375,7 @@ pub(super) unsafe fn filter_demo_list(vgui: &Vgui) {
             "{:?} {filters:?} {player:?} {all} {recorded}",
             crate::demo_list_folders::current_folder()
         );
-        let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+        let mut scrolled = lock_or_recover(&SCROLLED_FOR);
         if *scrolled != typed {
             crate::list_panel::scroll_to_top(list);
             *scrolled = typed;
@@ -688,7 +699,7 @@ pub(super) unsafe fn fill_place_box(vgui: &Vgui, base: usize, build: &Build) {
         let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
         activate_row(o, 0);
     }
-    *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
+    *lock_or_recover(&PLACES) = places;
 }
 
 /// Back, Forward, Up and Go to as last set, a bit each in that order;
@@ -732,7 +743,7 @@ static CLEAR_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8:
 /// Greys out the Player box's Clear button while no player is picked
 /// (#800), the way [`show_nav_enabled`] does the navigation.
 unsafe fn show_clear_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
-    let on = clear_players_enabled(&PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner()));
+    let on = clear_players_enabled(&lock_or_recover(&PICKED_PLAYERS));
     let want = u8::from(on);
     if !new_page && CLEAR_ENABLED.load(Ordering::Acquire) == want {
         return;
@@ -770,9 +781,7 @@ unsafe fn widen_place_menu(vgui: &Vgui, page: Vpanel) {
         if menu.is_null() || !vgui.visible(vpanel_of(menu)) {
             return;
         }
-        let longest = PLACES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        let longest = lock_or_recover(&PLACES)
             .iter()
             .map(|p| p.label.chars().count())
             .max()
@@ -796,6 +805,7 @@ pub(super) unsafe fn navigate(step: fn() -> bool) -> Result<(), String> {
 /// Lists the demos again in our Load Demo window (new recordings, or a
 /// folder change), with the window's own fill.
 pub(super) unsafe fn refill_demo_list() {
+    ROW_FILES.with(|rows| rows.borrow_mut().clear());
     let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
     if dialog.is_null() {
         return;
@@ -809,6 +819,6 @@ pub(super) unsafe fn refill_demo_list() {
             }
         }
         // Every row shows again: filter afresh.
-        *FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *lock_or_recover(&FILTERED_FOR) = None;
     }
 }

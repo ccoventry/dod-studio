@@ -14,6 +14,7 @@ analysis = { path = "../analysis" }
 clap = { workspace = true, features = ["derive"] }
 dem = { workspace = true }
 dod = { path = "../dod" }
+lock-recover = { workspace = true }
 filetime = { workspace = true }
 humantime = { workspace = true }
 serde = { workspace = true }
@@ -29,7 +30,7 @@ hl-demo-auditor = { path = "../hl-demo-auditor" }
 open = "5.1"
 sysinfo = { workspace = true }
 keepawake = "0.6"
-# Map fetching (see patch/map_fetch.rs). Blocking and small on purpose: the
+# Map fetching (see maps/map_fetch.rs). Blocking and small on purpose: the
 # download runs on a worker thread and verifies before it installs, so there is
 # nothing for an async client to overlap with.
 ureq = "3"
@@ -47,7 +48,7 @@ trash = "5.2"
 # "Add a crosshair file…" (#842) takes the sprite out of the ZIP Vertex's
 # crosshair creator downloads. Only DEFLATE (with flate2's default pure-Rust
 # backend, which zip's own dependency leaves off) and STORE are needed.
-zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.6.1", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1.1"
 
 # ── Binaries ────────────────────────────────────────────────────────────────

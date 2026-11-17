@@ -8,7 +8,7 @@
 //! still matches. Each highlight entry is the frontend's (`review_library.js`):
 //! this module stores it as it comes and never reads inside it.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

@@ -2,6 +2,11 @@
 //! successfully-typed decode AND raw bytes when typed decode fails -- to find
 //! whether find_crash_spot.rs is silently dropping events my simple script
 //! can't decode, vs. them genuinely not being in the file (#15).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{FrameData, MessageData, NetMessage};
 use dod::UserMessage;

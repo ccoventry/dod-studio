@@ -1,14 +1,21 @@
-// Panicking `unwrap()` / `expect()` stay out of non-test code; tests are allowed in clippy.toml (#1179).
-#![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-use crate::shared::lock::lock_or_recover;
 use analysis::Analysis;
+use lock_recover::lock_or_recover;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
 pub mod patch;
+
+/// Clearing decals out of a demo before it is recorded (#604).
+pub mod decals;
+
+/// What the game's configs and the init commands say about a capture (#604).
+pub mod game_config;
+
+/// The game's map files: the BSP reader, the map check and map downloads (#604).
+pub mod maps;
 
 /// What a highlight's clip name can say beyond the streak itself (#441).
 pub mod clip_facts;
@@ -417,9 +424,8 @@ pub fn log_markdown(msg: &str) {
             // Same session, but the date rolled over since the last log line —
             // leave a pointer in both files so this doesn't just look like the
             // session stopped mid-file to someone reading yesterday's log.
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "the else-if condition just checked that last_date is Some"
             )]
             let prev_path = dir.join(format!("activity_{}.md", last_date.as_deref().unwrap()));
@@ -440,9 +446,8 @@ pub fn log_markdown(msg: &str) {
                 .create(true)
                 .open(&log_path_md)
             {
-                #[allow(
+                #[expect(
                     clippy::unwrap_used,
-                    clippy::expect_used,
                     reason = "last_date is Some on this path (the same check as above)"
                 )]
                 let _ = writeln!(

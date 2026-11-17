@@ -23,6 +23,11 @@
 //! `in_speed.state`, nor `pparams->cmd`, nor the stamina global.)
 //!
 //!     cargo run --release -p analysis --example sprint_viewmodel_probe -- <pov-demo>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};

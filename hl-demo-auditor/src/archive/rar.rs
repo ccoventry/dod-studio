@@ -31,13 +31,14 @@
 
 use super::{ContentHasher, ZipDemoEntry, is_demo_name};
 use crate::ContentHashes;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::io::Read;
 use std::os::raw::{c_char, c_int, c_uint};
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::{Mutex, MutexGuard, mpsc};
 
 // Loads `unrar_sys`, whose build script compiles UnRAR into the static
 // library the declarations below link against.
@@ -296,7 +297,7 @@ impl Rar {
 /// archives are read one at a time; zips and 7z files still run alongside.
 fn one_at_a_time() -> MutexGuard<'static, ()> {
     static UNRAR: Mutex<()> = Mutex::new(());
-    UNRAR.lock().unwrap_or_else(PoisonError::into_inner)
+    lock_or_recover(&UNRAR)
 }
 
 /// The `.dem` entries `path` lists, from its headers alone.

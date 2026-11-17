@@ -6,6 +6,7 @@
 // `render_manager`, which owns the job list these functions read and write.
 
 use super::{RenderJobRuntime, history_for, resolve_ffmpeg};
+use lock_recover::lock_or_recover;
 use native::hlcr::autosave::{
     RenderJob as AutosaveJob, RenderJobStatus as AutosaveJobStatus, RenderSessionData,
 };
@@ -53,7 +54,7 @@ pub(super) fn write_autosave(
             .collect(),
     };
     save_autosave(&session);
-    *render_session.lock().unwrap() = Some(session);
+    *lock_or_recover(render_session) = Some(session);
 }
 
 /// The autosave's entry for the row rendering `clip`, found by take folder
@@ -166,6 +167,7 @@ pub(super) fn recovered_config(
         // The Render tab's own range for this field.
         max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
         clip_tag: None,
+        resumable_renders: true,
     })
 }
 

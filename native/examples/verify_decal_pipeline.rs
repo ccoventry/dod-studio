@@ -14,10 +14,16 @@
 //! ```text
 //! cargo run --release -p native --bin verify_decal_pipeline -- <demo> <outdir>
 //! ```
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
+use native::decals::{Cancel, prepare_flushed_source};
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{Cancel, StreamPatcher, build_batch_queue, prepare_flushed_source};
+use native::patch::{StreamPatcher, build_batch_queue};
 
 fn frame_count(path: &std::path::Path) -> Option<usize> {
     let bytes = std::fs::read(path).ok()?;

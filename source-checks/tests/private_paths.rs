@@ -7,6 +7,11 @@
 //!
 //! Skipped: binary files, `local/` (gitignored), lockfiles. A real hit that
 //! must stay goes in `ALLOWED` with the reason.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "integration test: its helpers sit outside a #[test], where clippy.toml's test allowance does not reach (#1179)"
+)]
 
 mod source_tree;
 

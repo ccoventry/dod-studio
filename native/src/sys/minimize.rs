@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 pub fn minimize_when_shown(pid: u32, timeout: Duration, alive: impl Fn() -> bool) -> bool {
     let started = Instant::now();
     while started.elapsed() < timeout && alive() {
-        if let Some(window) = win::visible_window_of(pid) {
+        if let Some(window) = crate::sys::window_list::visible_window(pid) {
             win::minimize(window);
             return true;
         }
@@ -33,43 +33,14 @@ pub fn minimize_when_shown(_pid: u32, _timeout: Duration, _alive: impl Fn() -> b
 
 #[cfg(windows)]
 mod win {
-    type Hwnd = isize;
-    type Lparam = isize;
-    type Bool = i32;
-    type EnumProc = unsafe extern "system" fn(Hwnd, Lparam) -> Bool;
+    use crate::sys::window_list::{Bool, Hwnd};
 
     /// Minimized, and the window that was active stays active.
     const SW_SHOWMINNOACTIVE: i32 = 7;
 
     #[link(name = "user32")]
     unsafe extern "system" {
-        fn EnumWindows(callback: EnumProc, param: Lparam) -> Bool;
-        fn GetWindowThreadProcessId(window: Hwnd, pid: *mut u32) -> u32;
-        fn IsWindowVisible(window: Hwnd) -> Bool;
         fn ShowWindow(window: Hwnd, cmd: i32) -> Bool;
-    }
-
-    unsafe extern "system" fn collect(window: Hwnd, param: Lparam) -> Bool {
-        // SAFETY: `param` is the `&mut Vec<Hwnd>` passed by
-        // `visible_window_of`, alive for the whole enumeration.
-        let found = unsafe { &mut *(param as *mut Vec<Hwnd>) };
-        found.push(window);
-        1
-    }
-
-    pub fn visible_window_of(pid: u32) -> Option<Hwnd> {
-        let mut found: Vec<Hwnd> = Vec::new();
-        // SAFETY: `collect` only pushes into `found`, which outlives the call.
-        unsafe { EnumWindows(collect, &mut found as *mut Vec<Hwnd> as Lparam) };
-        found.into_iter().find(|&window| {
-            let mut owner = 0u32;
-            // SAFETY: `owner` is a valid out pointer; `window` came from
-            // EnumWindows just now (a closed one only makes these fail).
-            unsafe {
-                GetWindowThreadProcessId(window, &mut owner);
-                owner == pid && IsWindowVisible(window) != 0
-            }
-        })
     }
 
     pub fn minimize(window: Hwnd) {

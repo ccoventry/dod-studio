@@ -3,6 +3,7 @@
 //! the hint is and says how far it has got. When the count is done the tab
 //! lists again (`filter_demo_list`), and the bar gives the hint back.
 
+use lock_recover::lock_or_recover;
 use std::ffi::c_void;
 use std::sync::atomic::Ordering;
 
@@ -25,7 +26,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         }
         let fraction = crate::folder_counts::progress()
             .map(|(done, total)| (done * 1000 / total.max(1)).min(1000) as u32);
-        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN);
         if *shown == fraction {
             return;
         }
