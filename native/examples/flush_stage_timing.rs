@@ -31,10 +31,16 @@
 //!
 //! Honours the same `FLUSH_MAPS_DIR` / `FLUSH_RING` overrides as
 //! `survey_decal_flush`, since both change how much work the middle stages do.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
+use native::decals::{Cancel, DecalCleanOptions, clean_demo_decals};
+use native::patch::build_batch_queue;
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{Cancel, DecalCleanOptions, build_batch_queue, clean_demo_decals};
 
 fn main() {
     let demo = std::env::args().nth(1).expect("usage: <demo>");

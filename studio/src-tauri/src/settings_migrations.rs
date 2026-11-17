@@ -11,13 +11,13 @@ pub const MIGRATIONS: u32 = 3;
 impl AppSettings {
     /// Moves every hook console name from before #555 (`dodstudio_*`) in
     /// Initial Commands, Scheduled Commands and the command profiles to the
-    /// name that replaced it (`native::patch::console_prefix::migrated`, from
+    /// name that replaced it (`native::game_config::console_prefix::migrated`, from
     /// the hook's own old -> new table). The game has no
     /// aliases for the old names, so a list left as it was would do nothing.
     /// True when anything changed.
     pub fn migrate_console_names(&mut self) -> bool {
         fn fix(command: &mut String, changed: &mut bool) {
-            if let Some(new) = native::patch::console_prefix::migrated(command) {
+            if let Some(new) = native::game_config::console_prefix::migrated(command) {
                 *command = new;
                 *changed = true;
             }

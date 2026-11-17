@@ -33,6 +33,11 @@
 //! The second form prints the raw timeline for a window instead; the third
 //! lists every round with no event (time, player), to hold a session of the
 //! hook's `ds_sound_restore_gunshots 2` log against.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

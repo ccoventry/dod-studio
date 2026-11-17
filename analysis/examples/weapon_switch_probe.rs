@@ -22,6 +22,11 @@
 //! player alone produced 117 candidates in a single half.
 //!
 //!     cargo run --release -p analysis --example weapon_switch_probe -- <demo> [changes] [window]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

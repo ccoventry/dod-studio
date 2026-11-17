@@ -8,6 +8,11 @@
 //!
 //! Without `--cache` every run keys from scratch. `--out` writes every group
 //! (sorted paths, one group per line), so two runs can be diffed.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use hl_demo_auditor::{AuditProgress, KeyCache, find_duplicates_cached, scan_roots};
 use std::path::PathBuf;

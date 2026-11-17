@@ -76,6 +76,32 @@ pub fn game_pids_in(sys: &System) -> Vec<u32> {
     pids_named_in(sys, &[GAME_EXE])
 }
 
+/// One `hl.exe` in the process list. Its start time tells the game apart
+/// from a later process Windows gives the same pid (#1213).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameProcess {
+    pub pid: u32,
+    /// Seconds since the epoch, as Windows reports it; 0 when it can't be read.
+    pub started: u64,
+}
+
+/// Every game in `sys`, with its start time.
+pub fn games_in(sys: &System) -> Vec<GameProcess> {
+    sys.processes()
+        .values()
+        .filter(|p| is_named(p, &[GAME_EXE]))
+        .map(|p| GameProcess {
+            pid: p.pid().as_u32(),
+            started: p.start_time(),
+        })
+        .collect()
+}
+
+/// Every running game, with its start time.
+pub fn games() -> Vec<GameProcess> {
+    games_in(&snapshot())
+}
+
 /// Whether `sys` holds a running game.
 pub fn is_game_in(sys: &System) -> bool {
     any_named(sys, &[GAME_EXE])

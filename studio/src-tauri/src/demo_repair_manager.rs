@@ -3,7 +3,7 @@
 //! `hl_demo_auditor::repair` (files) over `analysis::repair` (bytes); this is
 //! the IPC around it: progress events, cancelling, and the activity log.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

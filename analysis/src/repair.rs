@@ -9,6 +9,8 @@
 //! 2. **Joins** (`joins.rs`, `join_state.rs`, `snapshot.rs`): at each join,
 //!    a full entity snapshot of what the client held, and a ramp of no-op
 //!    frames up to it.
+//!    A frame whose view (origin, angles, health) the damage reached, a ramp
+//!    frame copying one included, takes a clean frame's (`view_range.rs`).
 //! 3. **Entity counts** (`entity_count.rs`): every packet's declared count
 //!    restated as the set the engine really builds.
 //! 4. **Checks**: the result parses, the engine discards no entity packet, and
@@ -25,6 +27,7 @@ mod frame_walk;
 mod join_state;
 mod joins;
 mod snapshot;
+mod view_range;
 
 pub use snapshot::JoinReport;
 
@@ -131,6 +134,9 @@ pub struct RepairReport {
     pub joins: Vec<JoinReport>,
     /// Damaged frames left out at the edges of holes.
     pub edge_frames_dropped: usize,
+    /// Frames whose view (origin, angles, health) the damage reached, ramp
+    /// frames copying one included, given a clean frame's view.
+    pub views_restated: usize,
     /// Bytes of the original's frames kept, and the original's frames.
     pub bytes_kept: u64,
     pub bytes_total: u64,
@@ -279,6 +285,9 @@ pub fn repair_demo(bytes: &[u8], hooks: RepairHooks) -> Result<RepairOutcome, Re
     let states = join_state::states_at_joins(&demo, &joins);
     report.joins = snapshot::inject(&mut demo, &joins, &states);
     drop(states);
+    // After the ramps are in: each copies the view of the first network frame
+    // after its hole, which the damage can reach.
+    report.views_restated = view_range::restate_damaged_views(&mut demo);
     entity_count::restate_entity_counts(&mut demo);
 
     cancelled()?;

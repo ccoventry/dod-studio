@@ -6,7 +6,7 @@
 //! "Keep free on the Windows drive" needs nothing here: every render reads
 //! it as it picks its folder (`native::sys::windows_drive`).
 
-use native::shared::lock::{read_or_recover, write_or_recover};
+use lock_recover::{read_or_recover, write_or_recover};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 

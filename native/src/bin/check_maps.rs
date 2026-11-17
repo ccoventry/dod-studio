@@ -9,19 +9,28 @@
 //! or is the wrong build, verifying each one against the demo that wants it
 //! before it is installed.
 
+use native::maps::map_check::{MapStatus, check_demo};
+use native::maps::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 use native::messages;
-use native::patch::map_check::{MapStatus, check_demo};
-use native::patch::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let fetch = args.iter().any(|a| a == "--fetch");
     let mut args = args.into_iter().filter(|a| !a.starts_with("--"));
-    let target = std::path::PathBuf::from(args.next().expect(messages::CHECK_MAPS_USAGE));
+    let Some(target) = args.next().map(std::path::PathBuf::from) else {
+        eprintln!("{}", messages::CHECK_MAPS_USAGE);
+        std::process::exit(1);
+    };
 
     let demos: Vec<std::path::PathBuf> = if target.is_dir() {
-        let mut found: Vec<_> = std::fs::read_dir(&target)
-            .expect(messages::MAPS_READ_FOLDER_FAILED)
+        let entries = match std::fs::read_dir(&target) {
+            Ok(entries) => entries,
+            Err(e) => {
+                eprintln!("{}", messages::maps_read_folder_failed(target.display(), e));
+                std::process::exit(1);
+            }
+        };
+        let mut found: Vec<_> = entries
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
             .collect();

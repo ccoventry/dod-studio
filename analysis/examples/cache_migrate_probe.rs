@@ -15,6 +15,11 @@
 //!     cargo run --release -p analysis --example cache_migrate_probe -- --from 7 --compare 10
 //!
 //! `--root <folder>` defaults to `%APPDATA%\dod-studio\analyzer_cache`.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use analysis::cache::{Entry, upgrade_entry_bytes};
 use analysis::highlights::highlights;

@@ -1,6 +1,11 @@
 //! Dump the message-type sequence immediately around a demo's injected join
 //! frame(s), so a live crash's tick/time can be matched against known
 //! structure instead of guessed at (#224).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 

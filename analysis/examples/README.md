@@ -7,6 +7,11 @@ are reproducible rather than asserted.
 These are `examples/`, so they are not part of any shipped binary. `cargo build`
 ignores them; `cargo build --examples` and `cargo test` compile them.
 
+A probe that unwraps starts with `#![allow(clippy::unwrap_used,
+clippy::expect_used, reason = "...")]`: Clippy refuses both everywhere else
+outside tests (#1179, `docs/coding_standards.md` section 4), and in a probe run
+by hand a panic is its error report.
+
 ## The stats probes
 
 The table covers the probes that measure what statistics a demo can yield.
@@ -114,6 +119,7 @@ is `analysis::repair`, run by `hl-demo-auditor --repair` and Studio (#15);
 | `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
 | `crouch_eye_probe` | Camera and origin heights through a crouch: the POV recorder's per frame, every player's `usehull` and gait per snapshot (#1144). |
 | `forcehltv_pov_probe` | What a POV demo loses under `dem_forcehltv 1`, and when it holds another player (`FH_TRACK`) (#1452). |
+| `entity_edit_probe` | Rewrite what a player does: swerve another player or the recorder, or give a player data for seconds before he first appears (`docs/goldsrc_demo_editing.md`, #1469). |
 | `sandbag_probe` | A demo's model precache, spawn baselines and the entities around a window of the viewdemo clock, with model names, origins and render fields; `SB_VIEW=1` prints the recorder's view every 0.5 s. Showed a map's `env_model`s are never networked (the forcehltv sandbag case). |
 | `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
@@ -148,6 +154,12 @@ is `analysis::repair`, run by `hl-demo-auditor --repair` and Studio (#15);
 | `verify_curweapon` | Verifies the join's injected `CurWeapon` message landed, and what it names. |
 | `tempentity_scan` | Every `SvcTempEntity` in a time window, by variant. |
 | `patch_resource_url` | Replaces a demo's recorded `SvcResourceLocation` (download URL). |
+
+### Demo protocols
+
+| Probe | What it does |
+| --- | --- |
+| `protocol47_probe` | One line per demo in a folder: header, `svc_serverinfo` and `svc_version` protocols, the server build, the VAC byte, engine message ids, a delta-table signature, whether every frame re-encodes byte for byte, and what the analyzer reads. What showed protocol 47 differs from 48 only in those two numbers (#239; `docs/goldsrc_protocol_47.md`). |
 
 ## What they established
 

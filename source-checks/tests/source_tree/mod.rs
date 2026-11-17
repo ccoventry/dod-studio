@@ -1,4 +1,9 @@
 #![allow(dead_code)] // each test crate uses a subset of these helpers
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside a #[test], where clippy.toml's test allowance does not reach (#1179)"
+)]
 
 //! Shared by the source-tree standards tests (`test_attribute_scan.rs`,
 //! `file_ceilings.rs`): finds the workspace's `.rs` files and reads them

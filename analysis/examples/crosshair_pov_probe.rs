@@ -27,6 +27,11 @@
 //! `<player entity>` 0 means the recording player.
 //!
 //!     cargo run --release -p analysis --example crosshair_pov_probe -- <pov demo> <player entity> [from] [to]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

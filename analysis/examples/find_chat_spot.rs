@@ -5,6 +5,11 @@
 //! (player X killed player Y) legitimately recurs many times a match.
 //!
 //!     cargo run --release -p analysis --example find_chat_spot -- <demo.dem> <substring>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{FrameData, MessageData, NetMessage};
 use dod::UserMessage;

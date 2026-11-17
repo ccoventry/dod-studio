@@ -17,7 +17,7 @@ whole instructions of the kind the Rust assumes, so this does:
      immediate is `gEngfuncs + 4*slot` for the slot the table names -- and
      each is followed by `add esp, 0xc` (three cdecl arguments, as the Rust
      signatures have).
-  3. `gEngfuncs` is where `engine.rs`'s client-cmd watch expects it:
+  3. `gEngfuncs` is where `engine/client_cmd.rs`'s client-cmd watch expects it:
      `client.dll`'s own copy of the table, in `.data`.
   4. The step span holds `STEP_STOLEN`, nothing in `Draw` branches into its
      middle, and it is long enough for the jump.

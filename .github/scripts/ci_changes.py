@@ -44,7 +44,7 @@ ALWAYS_ALL = [
 # that reads a file outside the crates adds that path here.
 RUST = [
     "*.rs",
-    "analysis/", "benchmark/", "dem-patch/", "dod/", "goldsrc-hooks/", "hl-demo-auditor/",
+    "analysis/", "benchmark/", "dem-patch/", "dod/", "goldsrc-hooks/", "hl-demo-auditor/", "lock-recover/",
     "native/", "source-checks/", "studio/src-tauri/", "web-analyzer/",
     "localizations/", "blender/", "vegas/",
     "rustfmt.toml", "clippy.toml",
@@ -54,7 +54,7 @@ RUST = [
 # Hooks 32-bit: the hook crate, the crates it depends on, and the native files
 # its tests read (native/src/sys/: the pipe and review-request tables).
 HOOKS = [
-    "goldsrc-hooks/", "analysis/", "dod/", "dem-patch/", "localizations/", "native/src/sys/",
+    "goldsrc-hooks/", "analysis/", "dod/", "dem-patch/", "lock-recover/", "localizations/", "native/src/sys/",
     "rustfmt.toml", "clippy.toml",
 ]
 
@@ -67,7 +67,7 @@ FRONTEND_EXCLUDE = ["studio/src-tauri/"]
 # Web analyzer and Python: the wasm build's crates, the web analyzer's node
 # tests, and every Python file CI compiles or tests.
 WEB_AND_PYTHON = [
-    "*.py", "web-analyzer/", "analysis/", "dod/", "dem-patch/", "localizations/",
+    "*.py", "web-analyzer/", "analysis/", "dod/", "dem-patch/", "lock-recover/", "localizations/",
 ]
 
 DOCS = ["docs/", "*.md"]

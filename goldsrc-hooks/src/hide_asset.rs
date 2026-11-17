@@ -37,11 +37,11 @@
 //!
 //! ## The mechanism: `HUD_AddEntity`
 //!
-//! Slot 20 of the `cldll_func_t` table `engine.rs` already partially owns
+//! Slot 20 of the `cldll_func_t` table `engine/client_exports.rs` already partially owns
 //! (three of its 43 slots were already swapped for `Initialize`, `HUD_Frame`
 //! and `HUD_GetStudioModelInterface` — see `docs/goldsrc_client_dll_internals.md`
 //! §2). The slot index itself is checked the same rigorous way as the other
-//! three, independently of the constant in `engine.rs`: disassemble `F`
+//! three, independently of the constant in `engine/client_exports.rs`: disassemble `F`
 //! directly and resolve what it actually writes into slot 20 back to its own
 //! export name (`tools/verify_hide_sprite_slot.py`). The engine calls
 //! `HUD_AddEntity(int type, cl_entity_t *ent, const
@@ -50,7 +50,7 @@
 //! through. This is the standard Half-Life SDK contract for that slot, and
 //! is not established here by disassembling `hw.dll`'s own caller (a closed,
 //! heavily obfuscated binary — see `docs/goldsrc_hw_dll_survey.md`) — it is
-//! cross-checked the same way `engine.rs`'s own slot table is, against
+//! cross-checked the same way `engine/client_exports.rs`'s own slot table is, against
 //! Xash3D's open-source engine, whose `CL_AddVisibleEntity`-equivalent path
 //! explicitly treats a zero return from this slot as "don't add". That is a
 //! different, weaker standard of evidence than the byte-level verification
@@ -268,7 +268,7 @@ fn describe(list: &[Entry]) -> String {
         .join(", ")
 }
 
-/// Called from `engine::tramp_hud_add_entity` for every entity the engine is
+/// Called from `engine::client_exports::tramp_hud_add_entity` for every entity the engine is
 /// about to add to the render list, and from `particle_hide` for every
 /// particle DoD makes. `true` means suppress it.
 ///

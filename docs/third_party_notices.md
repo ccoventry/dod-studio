@@ -1,6 +1,6 @@
 # Third-party notices
 
-DoD Studio's own code is MIT (`LICENSE`); `dem-patch/` is LGPL-3.0. Almost every library it builds with is MIT or Apache-2.0 and asks for nothing beyond its licence file. This page lists the ones whose terms ask for more, or that aren't open source.
+DoD Studio's own code is MIT (`LICENSE`); `dem-patch/` is LGPL-3.0. Almost every library it builds with is MIT or Apache-2.0 and asks for nothing beyond its licence file. This page lists the ones whose terms ask for more, or that aren't open source, and the outside code that ours derives from.
 
 ## UnRAR (RARLAB)
 
@@ -25,3 +25,19 @@ The rest of its licence (copyright to Alexander Roshal; the UnRAR utility may be
 ## sevenz-rust2
 
 **Used for:** the `.dem` files inside `.7z` archives, same feature. Pure Rust, Apache-2.0, no NOTICE file; listed here only because it sits beside UnRAR.
+
+## HLAE DemoTools (advancedfx.org)
+
+**Used for:** converting protocol-47 demos to protocol 48 (#239, `native/src/patch/protocol47.rs`, `docs/goldsrc_protocol_47.md`). The conversion follows the approach of HLAE's DemoTools wizard, "Try to convert demo version (47 -> 48)": which two fields to rewrite (the header's network version, and the protocol `svc_serverinfo` carries). Our code is written from that description, not copied, and finds the server info its own way; it is listed here because it derives from their work.
+
+**Source:** `AfxCppCli/old/tools/demotools/demotools.cpp` and `demotoolswizard.cpp` in the main advancedfx repository, commit `41b158171b275f9bb8ead737e8c7d0a159daf0af`. Those files carry no licence header of their own and fall under the repository's root MIT licence; the proprietary `advancedfx-prop` submodule is not involved.
+
+**Licence:** MIT.
+
+> Copyright (c) 2021 advancedfx.org
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

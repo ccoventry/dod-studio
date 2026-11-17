@@ -49,7 +49,7 @@ DEFAULT_DLL = Path(
 )
 SRC = Path(__file__).resolve().parent.parent / "src" / "spectator_deathcam.rs"
 
-# `cl_entity_s::origin` and `::player`, as `engine.rs`'s ClEntityS lays them out.
+# `cl_entity_s::origin` and `::player`, as `engine/sdk.rs`'s ClEntityS lays them out.
 ORIGIN_OFFSET = 0xB48
 PLAYER_OFFSET = 4
 
