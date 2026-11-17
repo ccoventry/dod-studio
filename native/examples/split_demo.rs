@@ -58,7 +58,8 @@ fn main() {
         };
         let out = part
             .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
-            .expect("write");
+            .expect("write")
+            .expect("not cancelled");
         let name = split_name(&stem, &segs, &segs[i]);
         let path = std::path::Path::new(&out_dir).join(format!("{name}.dem"));
         std::fs::write(&path, &out).expect("write file");

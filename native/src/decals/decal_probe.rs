@@ -1704,7 +1704,10 @@ pub fn probe_decal_offsets(
             .unwrap_or(0.0),
     };
 
-    Ok((demo.write_to_bytes(), stats))
+    let bytes = demo
+        .write_to_bytes()
+        .map_err(crate::messages::demo_could_not_be_rewritten)?;
+    Ok((bytes, stats))
 }
 
 #[cfg(test)]

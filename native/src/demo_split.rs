@@ -749,7 +749,10 @@ pub fn split_file_cancellable(
         });
         let part = extract(&demo, i, &find_bsp)
             .ok_or_else(|| format!("map {} ({}) could not be cut out", i + 1, seg.map))?;
-        let Some(out) = part.write_to_bytes_reusing_source_cancellable(&bytes, cancel) else {
+        let Some(out) = part
+            .write_to_bytes_reusing_source_cancellable(&bytes, cancel)
+            .map_err(|e| crate::messages::split_part_not_written(i + 1, &seg.map, e))?
+        else {
             return Ok((written, true));
         };
         let back = dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {

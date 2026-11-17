@@ -75,7 +75,7 @@ fn main() {
         entry.track_time = entry.frames.last().map(|f| f.time).unwrap_or(0.0);
     }
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!(
         "  wrote {:.1} MB ({:.1}% of original)",

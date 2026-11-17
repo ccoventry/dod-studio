@@ -117,7 +117,7 @@ fn main() {
                     .get(540..544)
                     .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize)
                     .unwrap_or(0);
-                let written = demo.write_to_bytes();
+                let written = demo.write_to_bytes().expect("re-encode");
                 let first = written.iter().zip(&bytes).position(|(a, b)| a != b);
                 let same = first.is_none_or(|at| at >= directory);
                 (

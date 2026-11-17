@@ -70,7 +70,7 @@ fn main() {
         entry.track_time = entry.frames.last().map(|f| f.time).unwrap_or(0.0);
     }
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write output");
 
     let after: usize = demo.directory.entries.iter().map(|e| e.frames.len()).sum();

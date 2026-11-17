@@ -1,28 +1,37 @@
+#![warn(clippy::unwrap_used, clippy::expect_used)]
+
 use std::{ffi::OsStr, fs::OpenOptions, io::Write, path::Path};
 
 use crate::{
     byte_writer::ByteWriter,
     types::{Demo, DirectoryEntry, FrameData, MessageData, NetworkMessageType},
+    write_error::{WriteError, WriteErrorKind},
 };
 
 impl Demo {
     pub fn write_to_file(&self, path: impl AsRef<OsStr> + AsRef<Path>) -> eyre::Result<()> {
+        // Encoded before the file is opened, so a demo that cannot be written
+        // leaves the file as it was rather than truncated. #1510.
+        let bytes = self.write_to_bytes()?;
+
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(path)?;
 
-        file.write_all(self.write_to_bytes().as_slice())?;
+        file.write_all(bytes.as_slice())?;
         file.flush()?;
 
         Ok(())
     }
 
-    pub fn write_to_bytes(&self) -> Vec<u8> {
+    /// Fails when a re-encoded frame does not fit the demo's delta tables
+    /// ([`WriteError`], #1510).
+    pub fn write_to_bytes(&self) -> Result<Vec<u8>, WriteError> {
         // The check never fires, so `None` is unreachable here.
-        match self.write_to_bytes_cancellable(&|| false) {
-            Some(bytes) => bytes,
+        match self.write_to_bytes_cancellable(&|| false)? {
+            Some(bytes) => Ok(bytes),
             None => unreachable!("a never-cancelling check reported cancellation"),
         }
     }
@@ -43,8 +52,12 @@ impl Demo {
     /// hundreds of thousands of times while still bounding the wait to a few
     /// milliseconds of writing. Returns `None` if it gave up; the partial
     /// buffer is dropped rather than returned, so a cancelled write can never
-    /// be mistaken for a complete demo.
-    pub fn write_to_bytes_cancellable(&self, should_cancel: &dyn Fn() -> bool) -> Option<Vec<u8>> {
+    /// be mistaken for a complete demo. A frame that cannot be re-encoded
+    /// drops it the same way and returns the [`WriteError`] (#1510).
+    pub fn write_to_bytes_cancellable(
+        &self,
+        should_cancel: &dyn Fn() -> bool,
+    ) -> Result<Option<Vec<u8>>, WriteError> {
         self.write_frames(None, should_cancel)
     }
 
@@ -70,7 +83,7 @@ impl Demo {
         &self,
         source: &[u8],
         should_cancel: &dyn Fn() -> bool,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, WriteError> {
         let parsed_from = self._aux.as_ref().and_then(|aux| aux.borrow().parsed_from);
         let source =
             (parsed_from == Some((source.as_ptr() as usize, source.len()))).then_some(source);
@@ -81,7 +94,7 @@ impl Demo {
         &self,
         source: Option<&[u8]>,
         should_cancel: &dyn Fn() -> bool,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, WriteError> {
         /// Frames between cancellation polls. At roughly 4µs a frame this is a
         /// check every ~15ms of writing.
         const CANCEL_CHECK_FRAMES: usize = 4096;
@@ -108,19 +121,25 @@ impl Demo {
 
         let mut entry_offsets: Vec<(usize, usize)> = vec![];
 
-        for entry in &self.directory.entries {
+        for (entry_index, entry) in self.directory.entries.iter().enumerate() {
             let mut has_written_next_section = false;
 
             let entry_offset_start = writer.get_offset();
 
-            for frame in &entry.frames {
+            for (frame_index, frame) in entry.frames.iter().enumerate() {
                 frames_since_check += 1;
                 if frames_since_check >= CANCEL_CHECK_FRAMES {
                     frames_since_check = 0;
                     if should_cancel() {
-                        return None;
+                        return Ok(None);
                     }
                 }
+                let failed = |kind| WriteError {
+                    entry: entry_index,
+                    frame: frame_index,
+                    time: frame.time,
+                    kind,
+                };
 
                 match frame.frame_data {
                     FrameData::DemoStart => writer.append_u8(2u8),
@@ -306,12 +325,14 @@ impl Demo {
 
                                 let start_length = writer.get_offset();
 
+                                // Was `_aux.as_ref().unwrap()`, and every
+                                // message an infallible write. #1510.
+                                let Some(aux) = self._aux.as_ref() else {
+                                    return Err(failed(WriteErrorKind::NoAux));
+                                };
                                 for message in vec {
-                                    writer.append_u8_slice(
-                                        message
-                                            .write(self._aux.as_ref().unwrap().clone())
-                                            .as_slice(),
-                                    );
+                                    let bytes = message.try_write(aux.clone()).map_err(failed)?;
+                                    writer.append_u8_slice(bytes.as_slice());
                                 }
 
                                 let end_length = writer.get_offset();
@@ -372,7 +393,7 @@ impl Demo {
             (directory_offset as u32).to_le_bytes(),
         );
 
-        Some(writer.data)
+        Ok(Some(writer.data))
     }
 }
 
@@ -481,7 +502,7 @@ mod reusing_source_tests {
 
     /// The file `built()` writes, and the demo parsed back out of it.
     fn parsed() -> (Vec<u8>, Demo) {
-        let bytes = built().write_to_bytes();
+        let bytes = built().write_to_bytes().unwrap();
         let demo = open_demo_from_bytes(&bytes).unwrap();
         (bytes, demo)
     }
@@ -495,6 +516,7 @@ mod reusing_source_tests {
 
     fn reuse(demo: &Demo, source: &[u8]) -> Vec<u8> {
         demo.write_to_bytes_reusing_source_cancellable(source, &|| false)
+            .unwrap()
             .expect("not cancelled")
     }
 
@@ -531,7 +553,7 @@ mod reusing_source_tests {
         assert_ne!(reused, bytes, "the edit was lost");
         assert_eq!(
             reused,
-            demo.write_to_bytes(),
+            demo.write_to_bytes().unwrap(),
             "must match re-encoding every frame, the edited one included"
         );
     }
@@ -549,7 +571,7 @@ mod reusing_source_tests {
         }
 
         let copy = bytes.clone();
-        assert_eq!(reuse(&demo, &copy), demo.write_to_bytes());
+        assert_eq!(reuse(&demo, &copy), demo.write_to_bytes().unwrap());
 
         // And the hazard `messages_mut` exists for, pinned down so a change to
         // it is noticed: the same edit against the original buffer is lost.
@@ -559,7 +581,7 @@ mod reusing_source_tests {
     #[test]
     fn a_built_demo_has_no_spans_and_is_simply_re_encoded() {
         let demo = built();
-        let bytes = demo.write_to_bytes();
+        let bytes = demo.write_to_bytes().unwrap();
         assert_eq!(reuse(&demo, &bytes), bytes);
     }
 }
@@ -613,10 +635,11 @@ mod cancellable_write_tests {
         let demo = demo();
         let cancellable = demo
             .write_to_bytes_cancellable(&|| false)
+            .unwrap()
             .expect("not cancelled");
         assert_eq!(
             cancellable,
-            demo.write_to_bytes(),
+            demo.write_to_bytes().unwrap(),
             "must match the plain writer byte for byte"
         );
     }
@@ -625,7 +648,7 @@ mod cancellable_write_tests {
     fn a_check_that_fires_abandons_the_write() {
         let demo = demo();
         assert!(
-            demo.write_to_bytes_cancellable(&|| true).is_none(),
+            demo.write_to_bytes_cancellable(&|| true).unwrap().is_none(),
             "a cancelled write must yield nothing, never a truncated demo"
         );
     }
@@ -641,7 +664,7 @@ mod cancellable_write_tests {
             seen.set(seen.get() + 1);
             seen.get() > 1
         });
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
         assert!(
             seen.get() > 1,
             "the check should have been polled more than once inside the one entry"
