@@ -323,17 +323,18 @@ pub async fn combine(
     if plan.clips.iter().any(|c| Path::new(&c.path) == output) {
         return Err(crate::messages::COMBINE_OUTPUT_IS_INPUT.to_string());
     }
+    // Written under its unfinished name, and listed, until it is finished
+    // (#1496): a combine that Studio's way out stops leaves nothing under
+    // `output`, and a file already there stays as it was until the rename.
+    let in_flight = crate::hlcr::renderer::partial_output::in_flight();
+    let held = in_flight
+        .hold_combine(output.to_path_buf())
+        .ok_or_else(|| crate::messages::COMBINE_NAME_BEING_WRITTEN.to_string())?;
     let list = std::env::temp_dir().join(format!("dodstudio_combine_{}.txt", std::process::id()));
     if plan.stream_copy {
         std::fs::write(&list, concat_list(&plan.clips))
             .map_err(|e| crate::messages::labeled(list.display(), e))?;
     }
-
-    // Written under its unfinished name, and listed, until it is finished
-    // (#1496): a combine that Studio's way out stops leaves nothing under
-    // `output`, and a file already there stays as it was until the rename.
-    let in_flight = crate::hlcr::renderer::partial_output::in_flight();
-    let held = in_flight.hold_combine(output.to_path_buf());
     let mut cmd = Command::new(ffmpeg);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000);

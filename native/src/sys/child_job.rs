@@ -168,7 +168,9 @@ pub async fn output_ending_with_studio(
 /// Ends every process `end_with_studio` was given, at once: renders,
 /// combines, take checks and the OBS benchmark's FFmpegs alike. For
 /// Studio's own way out, before it removes what they were writing. Returns
-/// what was still running, counted by name (`messages::FFMPEG_*`).
+/// what was still running, counted by name (`messages::FFMPEG_*`). Only
+/// named ones count: each console child also has a `conhost.exe` in the
+/// job, which is none of Studio's work to report.
 pub fn end_all_with_studio() -> std::io::Result<Vec<(&'static str, usize)>> {
     let Some(job) = studio_job() else {
         return Ok(Vec::new());
@@ -177,11 +179,7 @@ pub fn end_all_with_studio() -> std::io::Result<Vec<(&'static str, usize)>> {
     let mut counts: Vec<(&'static str, usize)> = Vec::new();
     {
         let names = lock_recover::lock_or_recover(names());
-        for pid in &running {
-            let what = names
-                .get(pid)
-                .copied()
-                .unwrap_or(crate::messages::CHILD_UNNAMED);
+        for what in running.iter().filter_map(|pid| names.get(pid).copied()) {
             match counts.iter_mut().find(|(name, _)| *name == what) {
                 Some((_, n)) => *n += 1,
                 None => counts.push((what, 1)),
@@ -293,7 +291,8 @@ mod win {
 
     /// `JobObjectBasicProcessIdList`.
     const PROCESS_ID_LIST: i32 = 3;
-    /// More than Studio ever runs at once; a fuller job lists the first ones.
+    /// More than Studio ever runs at once. A fuller job makes Windows fail
+    /// the call, and the list comes back empty: the exit then logs no count.
     const MAX_LISTED: usize = 256;
 
     /// `JOBOBJECT_BASIC_PROCESS_ID_LIST` with room for `MAX_LISTED` IDs.
@@ -433,8 +432,8 @@ mod tests {
 
     #[tokio::test]
     async fn output_ending_with_studio_collects_what_the_child_printed() {
-        // Not `cmd`: the frame-check test looks for its own `cmd.exe` in
-        // Studio's job.
+        // Not `waitfor`: the frame-check test looks for its own
+        // `waitfor.exe` in Studio's job.
         let mut cmd = tokio::process::Command::new("ping");
         cmd.args(["-n", "1", "127.0.0.1"])
             .creation_flags(0x08000000)

@@ -424,8 +424,6 @@ pub const FFMPEG_CLIP_PROBE: &str = "[clip probe] FFmpeg";
 /// `take_frames::run_ffmpeg_watched`: take checks, frame sheets, video probes.
 pub const FFMPEG_TAKE_FRAMES: &str = "[take frames] FFmpeg";
 pub const FFMPEG_OBS_BENCH: &str = "[obs bench] FFmpeg";
-/// A process in Studio's job that none of the above named.
-pub const CHILD_UNNAMED: &str = "unnamed process";
 
 /// A child Studio started could not be tied to Studio's job object: it would
 /// outlive a Studio that exits while it runs. `what` is one of the names
@@ -464,6 +462,9 @@ pub const COMBINE_NEEDS_TWO: &str = "pick at least two clips to combine";
 pub const COMBINE_OUTPUT_IS_INPUT: &str =
     "the combined video can't be saved over one of the clips going into it";
 pub const COMBINE_CANCELLED: &str = "cancelled";
+/// The chosen name is one a render or another combine is writing now (#1496).
+pub const COMBINE_NAME_BEING_WRITTEN: &str =
+    "a render or another combine is writing a video with that name right now: pick another name";
 
 pub fn combine_unreadable_clip(path: &str) -> String {
     format!("FFmpeg can't read {path} as a video")

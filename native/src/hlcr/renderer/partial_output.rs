@@ -138,16 +138,20 @@ impl InFlight {
     /// stops leaves nothing under `out_file` and a file already there stays
     /// as it was. The user picked `out_file` (the save dialog asked before
     /// overwriting one), so no free name is looked for: see
-    /// [`InFlight::finish_replacing`].
-    pub fn hold_combine(&self, out_file: PathBuf) -> Reserved<'_> {
+    /// [`InFlight::finish_replacing`]. `None` when a render or another
+    /// combine is writing that name now: two FFmpegs would write one file,
+    /// and the first to finish would unlist it for both.
+    pub fn hold_combine(&self, out_file: PathBuf) -> Option<Reserved<'_>> {
         let partial = partial_path(&out_file);
-        self.lock().insert(partial.clone());
+        if !self.lock().insert(partial.clone()) {
+            return None;
+        }
         self.lock_combines().insert(partial.clone());
-        Reserved {
+        Some(Reserved {
             list: self,
             out_file,
             partial,
-        }
+        })
     }
 
     /// Gives a finished combine its real name, replacing a file already
@@ -381,7 +385,7 @@ mod tests {
         let dir = Scratch::new("partial_combine");
         let list = InFlight::default();
         std::fs::write(dir.join("joined.mp4"), b"old").unwrap();
-        let writing = list.hold_combine(dir.join("joined.mp4"));
+        let writing = list.hold_combine(dir.join("joined.mp4")).unwrap();
         assert_eq!(writing.partial, dir.join("joined.partial.mp4"));
         std::fs::write(&writing.partial, b"half").unwrap();
         let removed = list.remove_all();
@@ -398,10 +402,32 @@ mod tests {
         let dir = Scratch::new("partial_combine_finish");
         let list = InFlight::default();
         std::fs::write(dir.join("joined.mp4"), b"old").unwrap();
-        let writing = list.hold_combine(dir.join("joined.mp4"));
+        let writing = list.hold_combine(dir.join("joined.mp4")).unwrap();
         std::fs::write(&writing.partial, b"new").unwrap();
         list.finish_replacing(&writing).unwrap();
         assert_eq!(std::fs::read(dir.join("joined.mp4")).unwrap(), b"new");
         assert!(!writing.partial.exists());
+    }
+
+    /// A combine saved as the name a running render reserved: refused, so
+    /// two FFmpegs never write one file. Free again once the render ends.
+    #[test]
+    fn a_combine_onto_a_name_a_render_is_writing_is_refused() {
+        let dir = Scratch::new("partial_combine_taken");
+        let list = InFlight::default();
+        let render = list.reserve(&dir, "clip", ".mov");
+        assert!(list.hold_combine(dir.join("clip.mov")).is_none());
+        // And the render's entry is still listed: refusing changed nothing.
+        assert_eq!(list.remove_all().in_flight, 1);
+        drop(render);
+        assert!(list.hold_combine(dir.join("clip.mov")).is_some());
+    }
+
+    #[test]
+    fn a_second_combine_onto_one_name_is_refused() {
+        let dir = Scratch::new("partial_combine_twice");
+        let list = InFlight::default();
+        let _first = list.hold_combine(dir.join("joined.mp4")).unwrap();
+        assert!(list.hold_combine(dir.join("joined.mp4")).is_none());
     }
 }

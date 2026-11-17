@@ -74,15 +74,18 @@ async fn closing_studio_mid_combine_leaves_the_existing_output_as_it_was() {
             .await
         })
     };
-    // Until the stand-in has written something, wherever it writes.
+    // Until the stand-in has written its unfinished file: the stop below
+    // must catch a combine that is running.
     let partial = dir.join("joined.partial.mp4");
     let began = Instant::now();
-    while !partial.exists()
-        && std::fs::read(&output).unwrap_or_default() == b"good"
-        && began.elapsed() < Duration::from_secs(15)
-    {
+    while !partial.exists() && began.elapsed() < Duration::from_secs(15) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert!(
+        partial.exists(),
+        "the combine writes under its unfinished name"
+    );
+    assert_eq!(std::fs::read(&output).unwrap(), b"good");
 
     tokio::task::spawn_blocking(stop_renders_for_exit)
         .await
