@@ -50,6 +50,9 @@
     ];
     initMasterPane(null, null, () => {}, () => {}, null);
     renderMasterList(demos, null, () => {});
+    // The steady-columns test re-renders with other rows (#1513).
+    window.__render = (list) => renderMasterList(list, null, () => {});
+    window.__demos = demos;
     window.__longName = longName;
     window.__harnessReady = true;
   </script>

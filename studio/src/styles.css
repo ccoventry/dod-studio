@@ -1109,6 +1109,18 @@ button.danger-btn {
   white-space: nowrap;
 }
 
+/* Use found copy and Locate under the demo name, on a line of their own (#1513). */
+#master-demo-table .queue-missing-actions {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+#master-demo-table .queue-missing-actions button {
+  margin-right: 0 !important;
+}
+
 #master-demo-table tr:hover {
   background: var(--wash-04);
 }

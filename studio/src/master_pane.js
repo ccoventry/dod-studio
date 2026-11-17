@@ -626,6 +626,11 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // A match a missing-demo search found and nobody has used yet (on load,
     // one the user left as missing; while open, a file renamed or moved):
     // one click to use it after all.
+    // The two buttons sit under the name, not in the Actions cell: a wider
+    // Actions column shifted every other column when a row turned missing or
+    // came back, and it cannot fit them at 1280 wide (#1513).
+    const missingActions = document.createElement('div');
+    missingActions.className = 'queue-missing-actions';
     if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
       const useBtn = document.createElement('button');
       useBtn.type = 'button';
@@ -637,7 +642,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
         e.stopPropagation(); // do not select the row
         currentOnUseFoundCopy(demo);
       });
-      tdActions.appendChild(useBtn);
+      missingActions.appendChild(useBtn);
     }
     if (demo.missing && currentOnLocateDemo) {
       const locateBtn = document.createElement('button');
@@ -650,8 +655,9 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
         e.stopPropagation(); // do not select the row
         currentOnLocateDemo(demo);
       });
-      tdActions.appendChild(locateBtn);
+      missingActions.appendChild(locateBtn);
     }
+    if (missingActions.childElementCount) tdName.appendChild(missingActions);
     tdActions.appendChild(deleteBtn);
 
     tr.appendChild(tdCheck);
