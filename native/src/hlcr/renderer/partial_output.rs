@@ -1,4 +1,4 @@
-//! Where a render writes until it is finished (#1439).
+//! Where a render, or a combine (#1496), writes until it is finished (#1439).
 //!
 //! FFmpeg, or the Skip copy, writes `<name>.partial<ext>` beside the finished
 //! file's name, and the file takes its real name only once the render ends
@@ -43,6 +43,8 @@ pub struct InFlight {
     /// The listed files that are render segments (#1451), not a render's
     /// own name: a segmented render holds one of each, and is one render.
     segments: Mutex<HashSet<PathBuf>>,
+    /// The listed files that are a combine's output (#1496), not a render's.
+    combines: Mutex<HashSet<PathBuf>>,
 }
 
 /// One render's reserved name: where it writes and where it ends up. Keeps
@@ -57,6 +59,7 @@ impl Drop for Reserved<'_> {
     fn drop(&mut self) {
         self.list.lock().remove(&self.partial);
         self.list.lock_segments().remove(&self.partial);
+        self.list.lock_combines().remove(&self.partial);
     }
 }
 
@@ -66,6 +69,8 @@ pub struct Removed {
     /// The renders that were in flight (a segmented render's segment
     /// counts with its render, not as one more).
     pub in_flight: usize,
+    /// The combines that were in flight (#1496).
+    pub combines: usize,
     pub removed: usize,
     /// The files still there, with why.
     pub failed: Vec<(PathBuf, String)>,
@@ -80,6 +85,10 @@ impl InFlight {
 
     fn lock_segments(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
         lock_or_recover(&self.segments)
+    }
+
+    fn lock_combines(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
+        lock_or_recover(&self.combines)
     }
 
     /// Reserves `<stem><ext>` in `dir`, or the first free `<stem>_N<ext>`. A
@@ -124,6 +133,29 @@ impl InFlight {
         }
     }
 
+    /// Lists `out_file`'s unfinished file for a combine (#1496), which
+    /// writes there until it is finished, so a combine Studio's way out
+    /// stops leaves nothing under `out_file` and a file already there stays
+    /// as it was. The user picked `out_file` (the save dialog asked before
+    /// overwriting one), so no free name is looked for: see
+    /// [`InFlight::finish_replacing`].
+    pub fn hold_combine(&self, out_file: PathBuf) -> Reserved<'_> {
+        let partial = partial_path(&out_file);
+        self.lock().insert(partial.clone());
+        self.lock_combines().insert(partial.clone());
+        Reserved {
+            list: self,
+            out_file,
+            partial,
+        }
+    }
+
+    /// Gives a finished combine its real name, replacing a file already
+    /// there. Retries for a moment while Windows still holds the file.
+    pub fn finish_replacing(&self, reserved: &Reserved) -> std::io::Result<()> {
+        retrying(|| std::fs::rename(&reserved.partial, &reserved.out_file))
+    }
+
     /// Gives a finished render its real name and returns where it is. When a
     /// file took the reserved name meanwhile (something outside Studio), the
     /// render gets the next free name instead: a finished clip is never
@@ -158,8 +190,10 @@ impl InFlight {
     pub fn remove_all(&self) -> Removed {
         let mut left: Vec<PathBuf> = self.lock().iter().cloned().collect();
         let segments = self.lock_segments().len();
+        let combines = self.lock_combines().len();
         let mut result = Removed {
-            in_flight: left.len().saturating_sub(segments),
+            in_flight: left.len().saturating_sub(segments + combines),
+            combines,
             ..Removed::default()
         };
         let deadline = Instant::now() + RETRY_FOR;
@@ -314,6 +348,7 @@ mod tests {
             result,
             Removed {
                 in_flight: 2,
+                combines: 0,
                 removed: 1,
                 failed: vec![]
             }
@@ -337,5 +372,36 @@ mod tests {
         assert_eq!((removed.in_flight, removed.removed), (1, 1));
         assert!(!writing.partial.exists());
         assert!(dir.join("0000.seg").exists());
+    }
+
+    /// A combine (#1496): counted as one, its unfinished file removed on the
+    /// way out, and the file already under its name left as it was.
+    #[test]
+    fn a_held_combine_is_removed_on_the_way_out_and_the_old_output_kept() {
+        let dir = Scratch::new("partial_combine");
+        let list = InFlight::default();
+        std::fs::write(dir.join("joined.mp4"), b"old").unwrap();
+        let writing = list.hold_combine(dir.join("joined.mp4"));
+        assert_eq!(writing.partial, dir.join("joined.partial.mp4"));
+        std::fs::write(&writing.partial, b"half").unwrap();
+        let removed = list.remove_all();
+        assert_eq!(
+            (removed.in_flight, removed.combines, removed.removed),
+            (0, 1, 1)
+        );
+        assert!(!writing.partial.exists());
+        assert_eq!(std::fs::read(dir.join("joined.mp4")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn a_finished_combine_replaces_the_file_under_its_name() {
+        let dir = Scratch::new("partial_combine_finish");
+        let list = InFlight::default();
+        std::fs::write(dir.join("joined.mp4"), b"old").unwrap();
+        let writing = list.hold_combine(dir.join("joined.mp4"));
+        std::fs::write(&writing.partial, b"new").unwrap();
+        list.finish_replacing(&writing).unwrap();
+        assert_eq!(std::fs::read(dir.join("joined.mp4")).unwrap(), b"new");
+        assert!(!writing.partial.exists());
     }
 }

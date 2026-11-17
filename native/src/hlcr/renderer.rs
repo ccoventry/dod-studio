@@ -10,7 +10,8 @@ use lock_recover::lock_or_recover;
 mod clip_frames;
 mod ffmpeg_args;
 mod ffmpeg_run;
-mod partial_output;
+// Also a combine's (#1496).
+pub(crate) mod partial_output;
 mod segment_plan;
 mod segmented;
 /// What marks a render's unfinished file name (#1439): a folder walk for
@@ -1004,23 +1005,30 @@ pub fn is_exiting() -> bool {
     EXITING.load(Ordering::SeqCst)
 }
 
-/// Studio's way out (#1439): ends every render FFmpeg at once and removes
-/// the unfinished files they were writing, so none outlives Studio or stays
-/// in an export folder. Marks Studio as exiting first, so a stopped render
-/// isn't recorded as failed and nothing new starts. Blocks for up to about
-/// 2 s while Windows lets go of the files. Logs what it did.
+/// Studio's way out (#1439): ends every FFmpeg in Studio's job at once
+/// (renders, combines, take checks, the OBS benchmark: #1496) and removes
+/// the unfinished files the renders and combines were writing, so none
+/// outlives Studio or stays in an export folder. Marks Studio as exiting
+/// first, so a stopped render isn't recorded as failed and nothing new
+/// starts. Blocks for up to about 2 s while Windows lets go of the files.
+/// Logs what it did. Named for the renders it was written for.
 pub fn stop_renders_for_exit() {
     EXITING.store(true, Ordering::SeqCst);
     let began = std::time::Instant::now();
-    if let Err(e) = crate::sys::child_job::end_all_with_studio() {
-        crate::log_markdown(&crate::messages::render::exit_stop_failed(e));
+    match crate::sys::child_job::end_all_with_studio() {
+        Ok(stopped) if !stopped.is_empty() => {
+            crate::log_markdown(&crate::messages::exit_children_stopped(&stopped));
+        }
+        Ok(_) => {}
+        Err(e) => crate::log_markdown(&crate::messages::render::exit_stop_failed(e)),
     }
     let removed = partial_output::in_flight().remove_all();
-    if removed.in_flight == 0 {
+    if removed.in_flight == 0 && removed.combines == 0 {
         return;
     }
     crate::log_markdown(&crate::messages::render::exit_renders_stopped(
         removed.in_flight,
+        removed.combines,
         removed.removed,
         began.elapsed(),
     ));

@@ -402,9 +402,11 @@ pub async fn analyze_file(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child =
-        crate::sys::child_job::spawn_ending_with_studio(&mut cmd, "FFmpeg (OBS benchmark)")
-            .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+    let mut child = crate::sys::child_job::spawn_ending_with_studio(
+        &mut cmd,
+        crate::messages::FFMPEG_OBS_BENCH,
+    )
+    .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     let stdout = child
         .stdout
         .take()
@@ -482,7 +484,10 @@ pub async fn analyze_file(
             .stderr(Stdio::piped());
         let out = tokio::time::timeout(
             ANALYSIS_TIMEOUT,
-            crate::sys::child_job::output_ending_with_studio(&mut cmd, "FFmpeg (OBS benchmark)"),
+            crate::sys::child_job::output_ending_with_studio(
+                &mut cmd,
+                crate::messages::FFMPEG_OBS_BENCH,
+            ),
         )
         .await
         .map_err(|_| {
