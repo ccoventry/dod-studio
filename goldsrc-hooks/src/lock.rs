@@ -1,7 +1,9 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
 //! it poisoned: this crate's copy of `native::shared::lock` (#1377). The DLL
 //! depends on `analysis`, `dod` and `dem` but not on `native`, the host-side
-//! engine crate, and none of the crates it does use exports the helpers.
+//! engine crate, and none of the crates it does use exports the helpers. One
+//! of four copies (here, `native`, `analysis`, `hl-demo-auditor`) until the
+//! helpers get one shared home.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every

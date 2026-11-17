@@ -1,6 +1,8 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
-//! it poisoned: this crate's copy of `native::shared::lock`, since the
-//! Auditor doesn't depend on `native` (#1377).
+//! it poisoned: this crate's copy of `native::shared::lock` (#1377). The
+//! Auditor depends on `analysis` but not on `native`, and `analysis` keeps
+//! its copy private. One of four copies (here, `native`, `analysis`,
+//! `goldsrc-hooks`) until the helpers get one shared home.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every

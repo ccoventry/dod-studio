@@ -1,6 +1,10 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
 //! it poisoned: this crate's copy of `native::shared::lock`, since `analysis`
-//! sits under `native` and also builds for wasm32 (#1377).
+//! sits under `native` and also builds for wasm32 (#1377). It is private:
+//! lock helpers aren't part of the match analytics this crate exports, so
+//! `goldsrc-hooks` and `hl-demo-auditor`, which use `analysis` but not
+//! `native`, keep copies too. One of four copies until the helpers get one
+//! shared home.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every
