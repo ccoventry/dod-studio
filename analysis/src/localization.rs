@@ -1,5 +1,4 @@
-// The one Option unwrap below is guarded by the write above it; locks go through the `lock-recover` crate (#1377).
-#![allow(clippy::unwrap_used)]
+// Locks go through the `lock-recover` crate (#1377).
 
 use lock_recover::{read_or_recover, write_or_recover};
 use std::collections::HashMap;
@@ -78,10 +77,10 @@ pub fn translate_key(key: &str) -> Option<String> {
     // between reading the language and loading it.
     let active = read_or_recover(&ACTIVE_LANGUAGE);
     let mut write_lock = write_or_recover(&LOCALIZATIONS);
-    if write_lock.is_none() {
-        *write_lock = Some(load_localizations_from_disk(*active));
-    }
-    write_lock.as_ref().unwrap().get(&lookup_key).cloned()
+    write_lock
+        .get_or_insert_with(|| load_localizations_from_disk(*active))
+        .get(&lookup_key)
+        .cloned()
 }
 
 fn get_amxx_code(lang: &str) -> &str {
