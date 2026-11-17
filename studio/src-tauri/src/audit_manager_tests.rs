@@ -88,14 +88,14 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8], bool)]) {
 /// no archive entry is ever a row of a group.
 #[test]
 fn backed_up_demos_are_marked_and_never_offered_because_of_an_archive() {
-    let s = Scratch::new("backups");
+    let s = crate::test_support::Scratch::new("backups");
     let shared = demo_bytes(4);
     let alone = demo_bytes(5);
-    let a = s.file("a.dem", &shared);
-    let b = s.file("b.dem", &shared);
-    let solo = s.file("solo.dem", &alone);
-    let one = s.0.join("one.zip");
-    let two = s.0.join("two.zip");
+    let a = scratch_file(&s, "a.dem", &shared);
+    let b = scratch_file(&s, "b.dem", &shared);
+    let solo = scratch_file(&s, "solo.dem", &alone);
+    let one = s.path().join("one.zip");
+    let two = s.path().join("two.zip");
     write_zip(
         &one,
         &[("m.dem", &shared, true), ("solo.dem", &alone, true)],
@@ -165,80 +165,38 @@ fn paths(list: &[&str]) -> Vec<PathBuf> {
     list.iter().map(PathBuf::from).collect()
 }
 
-/// A fresh folder for one test, removed when dropped.
-struct Scratch(PathBuf);
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("audit_compare_{}_{}", name, std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-    fn file(&self, name: &str, bytes: &[u8]) -> PathBuf {
-        let path = self.0.join(name);
-        std::fs::write(&path, bytes).unwrap();
-        path
-    }
-}
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+#[test]
+fn a_copy_with_other_bytes_is_marked_not_a_copy() {
+    let failure = failure_of(Refusal::NotACopy("differs".into()), "copy.dem".into());
+    assert!(failure.not_a_copy);
+    assert!(!failure_of(Refusal::Other("gone".into()), "x".into()).not_a_copy);
 }
 
 /// Same size and first 64 KiB, so the audit groups them, but not the
-/// same demo past that.
+/// same demo past that (native::demo_compare's test helper is private).
+const COMPARE_CHUNK: usize = 1 << 20;
 fn demo_bytes(tail: u8) -> Vec<u8> {
     let mut bytes = vec![7u8; COMPARE_CHUNK + 70_000];
     *bytes.last_mut().unwrap() = tail;
     bytes
 }
-
-#[test]
-fn a_byte_for_byte_copy_can_be_deleted() {
-    let s = Scratch::new("same");
-    let keep = s.file("keep.dem", &demo_bytes(1));
-    let copy = s.file("copy.dem", &demo_bytes(1));
-    assert_eq!(check_same_contents(&copy, &keep), Ok(()));
-}
-
-#[test]
-fn a_copy_that_differs_past_the_key_is_not_deleted() {
-    let s = Scratch::new("differs");
-    let keep = s.file("keep.dem", &demo_bytes(1));
-    let copy = s.file("copy.dem", &demo_bytes(2));
-    let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
-        panic!("a different file must be refused as not a copy");
-    };
-    let last = (COMPARE_CHUNK + 70_000 - 1).to_string();
-    assert!(err.contains(&format!("differ from byte {last}")), "{err}");
-    let failure = Refusal::NotACopy(err).into_failure("copy.dem".into());
-    assert!(failure.not_a_copy);
-}
-
-#[test]
-fn a_copy_of_another_size_is_not_deleted() {
-    let s = Scratch::new("size");
-    let keep = s.file("keep.dem", b"abcdef");
-    let copy = s.file("copy.dem", b"abc");
-    let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
-        panic!("another size must be refused as not a copy");
-    };
-    assert!(err.contains("differ from byte 3"), "{err}");
+fn scratch_file(s: &crate::test_support::Scratch, name: &str, bytes: &[u8]) -> PathBuf {
+    let path = s.path().join(name);
+    std::fs::write(&path, bytes).unwrap();
+    path
 }
 
 /// A copy found different is remembered, and the next scan lists it
 /// apart from the copy it was grouped with (#888).
 #[test]
 fn a_copy_found_different_is_not_grouped_again() {
-    let s = Scratch::new("remember");
-    let keep = s.file("keep.dem", &demo_bytes(1));
-    let copy = s.file("copy.dem", &demo_bytes(1));
+    let s = crate::test_support::Scratch::new("audit_remember");
+    let keep = scratch_file(&s, "keep.dem", &demo_bytes(1));
+    let copy = scratch_file(&s, "copy.dem", &demo_bytes(1));
     // Same first and last bytes as keep: only the middle differs.
     let mut middle = demo_bytes(1);
     middle[COMPARE_CHUNK / 2] = 9;
-    let odd = s.file("odd.dem", &middle);
+    let odd = scratch_file(&s, "odd.dem", &middle);
     let files = vec![keep.clone(), copy.clone(), odd.clone()];
     let never = AtomicBool::new(false);
     let mut cache = KeyCache::default();
@@ -247,7 +205,7 @@ fn a_copy_found_different_is_not_grouped_again() {
     assert_eq!(before.groups[0].files.len(), 3, "the ends match");
 
     assert!(matches!(
-        check_same_contents(&odd, &keep),
+        native::demo_compare::check_same_contents(&odd, &keep),
         Err(Refusal::NotACopy(_))
     ));
     remember_differing(&mut cache, &odd, &keep);
@@ -261,26 +219,10 @@ fn a_copy_found_different_is_not_grouped_again() {
     assert_eq!(names, ["copy.dem", "keep.dem"]);
 
     // Files of two sizes are never grouped: nothing to remember.
-    let short = s.file("short.dem", b"abc");
+    let short = scratch_file(&s, "short.dem", b"abc");
     let mut untouched = KeyCache::default();
     remember_differing(&mut untouched, &short, &keep);
     assert!(!untouched.has_changes());
-}
-
-#[test]
-fn the_kept_copy_itself_or_a_missing_one_is_never_a_reason_to_delete() {
-    let s = Scratch::new("self");
-    let keep = s.file("keep.dem", b"abc");
-    let Err(Refusal::Other(err)) = check_same_contents(&keep, &keep) else {
-        panic!("the kept file itself must be refused");
-    };
-    assert!(err.contains("is the copy being kept"), "{err}");
-    let gone = s.0.join("gone.dem");
-    let Err(Refusal::Other(err)) = check_same_contents(&keep, &gone) else {
-        panic!("a missing kept copy must be refused");
-    };
-    assert!(err.contains("no longer there"), "{err}");
-    assert!(!Refusal::Other(err).into_failure("x".into()).not_a_copy);
 }
 
 fn kept_order(files: &[&str], rules: &KeepRules) -> Vec<String> {
@@ -416,6 +358,26 @@ fn only_demo_files_are_deletable() {
         err.contains(&dir.path().join("gone.dem").display().to_string()),
         "{err}"
     );
+}
+
+#[test]
+fn singles_are_the_demos_in_no_group_with_their_sizes() {
+    let dir = crate::test_support::Scratch::new("audit_singles");
+    let one = dir.path().join("one.dem");
+    let a = dir.path().join("a.dem");
+    let b = dir.path().join("b.dem");
+    std::fs::write(&one, b"12345").unwrap();
+    std::fs::write(&a, b"x").unwrap();
+    std::fs::write(&b, b"x").unwrap();
+    let groups = [hl_demo_auditor::DuplicateGroup {
+        key: hl_demo_auditor::FileKey {
+            size: 1,
+            header_hash: 0,
+        },
+        files: vec![a.clone(), b],
+    }];
+    let gone = dir.path().join("gone.dem");
+    assert_eq!(singles_of(vec![a, one.clone(), gone], &groups), [(one, 5)]);
 }
 
 #[test]

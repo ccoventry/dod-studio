@@ -127,6 +127,7 @@ export const SHELL_STRINGS = {
     matchGroupsFailed: (err) => `Grouping the demos by match failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
+    consolidateFailed: (err) => `Moving the demos failed: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
     previewScanFailed: (err) => `Preview scan failed: ${err}`,
     previewDeletionFailed: (err) => `Preview deletion failed: ${err}`,

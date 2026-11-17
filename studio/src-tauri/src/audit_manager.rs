@@ -21,9 +21,9 @@ use hl_demo_auditor::{
     AuditProgress, Backup, DuplicateGroup, KeyCache, ZipRef, find_duplicates_in, scan_roots,
     scan_roots_and_zips,
 };
+use native::demo_compare::{Refusal, check_same_contents};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
@@ -89,6 +89,14 @@ pub struct SerializedDuplicateGroup {
     pub files: Vec<AuditFile>,
 }
 
+/// A demo with no copies: Consolidate moves these too (#872).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct SingleDemo {
+    pub path: String,
+    pub size: u64,
+    pub in_use: Option<InUse>,
+}
+
 /// The groups as the frontend gets them, each copy carrying the archive
 /// entries that hold it, and every backed-up loose demo by path, in or out
 /// of a group (#929).
@@ -135,6 +143,11 @@ fn audit_rows(
 #[derive(Serialize)]
 pub struct AuditOutcome {
     pub groups: Vec<SerializedDuplicateGroup>,
+    /// Every demo without copies, by path.
+    pub singles: Vec<SingleDemo>,
+    /// The folders walked, drives included, for Consolidate's
+    /// keep-subfolders layout.
+    pub roots: Vec<String>,
     /// Every loose demo an archive holds a copy of (#929), by path, whether
     /// or not it is in a group.
     pub backed_up: Vec<AuditFile>,
@@ -268,6 +281,23 @@ pub fn order_for_keeping(files: Vec<PathBuf>, rules: &KeepRules) -> Vec<AuditFil
         .collect();
     ranked.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
     ranked.into_iter().map(|(_, _, _, file)| file).collect()
+}
+
+/// The demos `find_duplicates` listed once that are in no group, with their
+/// sizes. A demo it couldn't read is left out: there is nothing to move.
+pub fn singles_of(
+    unique: Vec<PathBuf>,
+    groups: &[hl_demo_auditor::DuplicateGroup],
+) -> Vec<(PathBuf, u64)> {
+    let grouped: HashSet<&PathBuf> = groups.iter().flat_map(|g| g.files.iter()).collect();
+    unique
+        .into_iter()
+        .filter(|p| !grouped.contains(p))
+        .filter_map(|p| {
+            let size = std::fs::metadata(&p).ok()?.len();
+            Some((p, size))
+        })
+        .collect()
 }
 
 /// The folders to walk: the ones picked, plus every fixed drive when asked,
@@ -496,6 +526,7 @@ pub async fn run_demo_audit_impl(
             zips: look_in_zips.then_some((audit.zips, audit.zip_demos, audit.backups.len())),
         }));
         let duplicate_groups = audit.groups;
+        let unique = audit.unique_files;
         if !cancelled {
             cache.prune_unseen_under(&walked, look_in_zips);
         }
@@ -503,10 +534,11 @@ pub async fn run_demo_audit_impl(
         // failed save costs the next scan time, nothing else.
         let _ = cache.save(&cache_file);
 
-        let (groups, backed_up) = if cancelled {
-            (Vec::new(), Vec::new())
+        let (groups, singles, backed_up) = if cancelled {
+            (Vec::new(), Vec::new(), Vec::new())
         } else {
-            // Every install the copies sit in counts, not only the one the
+            let singles = singles_of(unique, &duplicate_groups);
+            // Every install the demos sit in counts, not only the one the
             // hl.exe setting names: a PC with a stock, a PRE and a POST
             // install keeps each one's demos.
             let mut game_folders = rules.0.clone();
@@ -514,13 +546,31 @@ pub async fn run_demo_audit_impl(
                 duplicate_groups
                     .iter()
                     .flat_map(|g| g.files.iter())
+                    .chain(singles.iter().map(|(p, _)| p))
                     .chain(audit.backups.iter().map(|b| &b.demo)),
             ));
             let keep_rules = KeepRules::new(&game_folders, &rules.1);
-            audit_rows(duplicate_groups, &audit.backups, &keep_rules)
+            let singles = singles
+                .into_iter()
+                .map(|(path, size)| {
+                    let in_use = keep_rules.in_use(&comparable(&path));
+                    SingleDemo {
+                        path: path.to_string_lossy().into_owned(),
+                        size,
+                        in_use,
+                    }
+                })
+                .collect();
+            let (groups, backed_up) = audit_rows(duplicate_groups, &audit.backups, &keep_rules);
+            (groups, singles, backed_up)
         };
         Ok(AuditOutcome {
             groups,
+            singles,
+            roots: walked
+                .iter()
+                .map(|r| r.to_string_lossy().into_owned())
+                .collect(),
             backed_up,
             demos: last.done.saturating_sub(archive_demos),
             archive_demos,
@@ -543,26 +593,13 @@ pub struct DeleteFailure {
     pub not_a_copy: bool,
 }
 
-/// Why [`check_same_contents`] refused a copy.
-#[derive(Debug, PartialEq)]
-enum Refusal {
-    /// The bytes differ: a different demo.
-    NotACopy(String),
-    /// Anything else: the kept copy is gone, is the same file, can't be read.
-    Other(String),
-}
-
-impl Refusal {
-    fn into_failure(self, path: String) -> DeleteFailure {
-        let (error, not_a_copy) = match self {
-            Refusal::NotACopy(e) => (e, true),
-            Refusal::Other(e) => (e, false),
-        };
-        DeleteFailure {
-            path,
-            error,
-            not_a_copy,
-        }
+/// A refused copy as the table reports it.
+fn failure_of(refusal: Refusal, path: String) -> DeleteFailure {
+    let (error, not_a_copy) = refusal.into_parts();
+    DeleteFailure {
+        path,
+        error,
+        not_a_copy,
     }
 }
 
@@ -590,86 +627,6 @@ fn check_deletable(path: &Path) -> Result<(), String> {
 pub struct DeleteCopy {
     pub path: String,
     pub keep: String,
-}
-
-/// Bytes read from each file per comparison step.
-const COMPARE_CHUNK: usize = 1 << 20;
-
-/// Fills `buf` from `file` until it is full or the file ends; how many bytes.
-fn read_chunk(file: &mut dyn Read, buf: &mut [u8]) -> std::io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match file.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
-        }
-    }
-    Ok(filled)
-}
-
-/// Whether `copy` is a true copy of `keep`: another file with every byte
-/// the same. The audit's key reads only the first 64 KiB, so two different
-/// demos can share a group; this keeps the delete from trusting that.
-fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
-    let kept_is_there = keep.symlink_metadata().is_ok_and(|m| m.is_file());
-    if !kept_is_there {
-        return Err(Refusal::Other(crate::messages::kept_copy_missing(
-            copy, keep,
-        )));
-    }
-    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(copy), std::fs::canonicalize(keep))
-        && a == b
-    {
-        return Err(Refusal::Other(crate::messages::copy_is_the_kept_copy(copy)));
-    }
-    let unreadable =
-        |e: std::io::Error| Refusal::Other(crate::messages::copy_compare_failed(copy, keep, e));
-    let mut a = std::fs::File::open(copy).map_err(unreadable)?;
-    let mut b = std::fs::File::open(keep).map_err(unreadable)?;
-    let (len_a, len_b) = (
-        a.metadata().map_err(unreadable)?.len(),
-        b.metadata().map_err(unreadable)?.len(),
-    );
-    compare_readers(copy, keep, (&mut a, len_a), (&mut b, len_b))
-}
-
-/// Whether `a` (the copy, `len_a` bytes) and `b` (the kept copy) hold the
-/// same bytes; `copy` and `keep` only name them in the refusal.
-fn compare_readers(
-    copy: &Path,
-    keep: &Path,
-    (a, len_a): (&mut dyn Read, u64),
-    (b, len_b): (&mut dyn Read, u64),
-) -> Result<(), Refusal> {
-    let unreadable =
-        |e: std::io::Error| Refusal::Other(crate::messages::copy_compare_failed(copy, keep, e));
-    let differs =
-        |at: u64| Refusal::NotACopy(crate::messages::copy_differs_from_kept(copy, keep, at));
-    if len_a != len_b {
-        return Err(differs(len_a.min(len_b)));
-    }
-    let mut buf_a = vec![0u8; COMPARE_CHUNK];
-    let mut buf_b = vec![0u8; COMPARE_CHUNK];
-    let mut offset: u64 = 0;
-    loop {
-        let n_a = read_chunk(a, &mut buf_a).map_err(unreadable)?;
-        let n_b = read_chunk(b, &mut buf_b).map_err(unreadable)?;
-        if let Some(i) = buf_a[..n_a.min(n_b)]
-            .iter()
-            .zip(&buf_b[..n_a.min(n_b)])
-            .position(|(x, y)| x != y)
-        {
-            return Err(differs(offset + i as u64));
-        }
-        if n_a != n_b {
-            // The file changed size while it was read.
-            return Err(differs(offset + n_a.min(n_b) as u64));
-        }
-        if n_a == 0 {
-            return Ok(());
-        }
-        offset += n_a as u64;
-    }
 }
 
 /// Deletes the picked copies: to the Recycle Bin, or for good when
@@ -709,7 +666,7 @@ pub fn delete_audit_files_impl(
                 if matches!(refusal, Refusal::NotACopy(_)) {
                     remember_differing(&mut cache, path, keep);
                 }
-                outcome.failed.push(refusal.into_failure(copy.path))
+                outcome.failed.push(failure_of(refusal, copy.path))
             }
         }
         emit("checking", i + 1, checking);

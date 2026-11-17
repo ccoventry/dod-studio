@@ -207,8 +207,8 @@ fn audit_manager_messages_match_their_original_inline_text() {
     );
     // The audit's canonical paths show without their `\\?\` prefix.
     assert_eq!(
-        copy_is_the_kept_copy(Path::new(r"\\?\C:\d\a.dem")),
-        r"Not deleted: C:\d\a.dem is the copy being kept"
+        failed_to_delete_audit_file(Path::new(r"\\?\C:\d\a.dem"), "in use"),
+        r"Failed to delete C:\d\a.dem: in use"
     );
     assert_eq!(
         not_a_demo_file(Path::new(r"\\?\UNC\server\share\a.dem")),
