@@ -1101,7 +1101,6 @@ button.danger-btn {
    Actions cell may wrap so Locate, Use found copy and Remove drop to a second
    line when the pane is too narrow for all three side by side (#1376). */
 #master-demo-table td.queue-name-cell {
-  min-width: 9em;
   flex-wrap: wrap;
 }
 
