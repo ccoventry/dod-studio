@@ -177,3 +177,21 @@ describe('networkProtocolValue (#239)', () => {
     expect(STRINGS.ANALYZER.networkProtocolValue(48)).toBe('48');
   });
 });
+
+// The catalog is assembled from one file per area (#604); a spread would
+// silently let a later area overwrite an earlier one's key.
+describe('catalog areas', () => {
+  it('no key is defined in two area files', async () => {
+    const files = import.meta.glob('./strings/*.js', { eager: true });
+    const seen = new Map();
+    for (const [file, mod] of Object.entries(files)) {
+      for (const area of Object.values(mod)) {
+        for (const key of Object.keys(area)) {
+          expect(seen.get(key), `${key} in ${file} and ${seen.get(key)}`).toBeUndefined();
+          seen.set(key, file);
+        }
+      }
+    }
+    expect([...seen.keys()].sort()).toEqual(Object.keys(STRINGS).sort());
+  });
+});
