@@ -104,21 +104,13 @@ impl Doer for SvcClientData {
             bw.append_vec(self.delta_update_mask.as_ref().unwrap());
         }
 
-        write_delta(
-            &self.client_data,
-            aux.delta_decoders.get("clientdata_t\0").unwrap(),
-            &mut bw,
-        );
+        write_delta_with(&aux, "clientdata_t\0", &self.client_data, &mut bw);
 
         if let Some(weapon_data) = &self.weapon_data {
             for data in weapon_data {
                 bw.append_bit(true);
                 bw.append_vec(&data.weapon_index);
-                write_delta(
-                    &data.weapon_data,
-                    aux.delta_decoders.get("weapon_data_t\0").unwrap(),
-                    &mut bw,
-                );
+                write_delta_with(&aux, "weapon_data_t\0", &data.weapon_data, &mut bw);
             }
         }
 

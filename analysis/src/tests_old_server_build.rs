@@ -66,7 +66,7 @@ fn old_server_build_demos_parse_analyse_and_round_trip() {
         // frame counts can differ from the recorder's, ci_fixture.dem's too), so
         // the frames before it are what must come back unchanged.
         let directory_offset = u32::from_le_bytes(bytes[540..544].try_into().unwrap()) as usize;
-        let written = demo.write_to_bytes();
+        let written = demo.write_to_bytes().unwrap();
         let first_difference = written.iter().zip(&bytes).position(|(a, b)| a != b);
         assert!(
             written.len() == bytes.len()

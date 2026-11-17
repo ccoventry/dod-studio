@@ -21,6 +21,86 @@ import { fileNameOf, folderOf, shortFolder, samePath } from './path_display.js';
  *   removeDemo(demo) take one row out of the queue.
  */
 export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refreshQueue, scan, removeDemo }) {
+  // Where to look for `demos` that moved, nearest first: where each demo was,
+  // then the project's folder, then the scan folders. The search is
+  // breadth-first in this order, so a demo moved next door is found before a
+  // big scan folder uses up the search budget. Scan entries that name single
+  // demo files aren't folders to search.
+  function searchDirs(demos, projectPath = null, savedScanPaths = []) {
+    const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
+    const isDemoFile = (p) => /\.dem$/i.test(p);
+    return [...new Set([
+      ...demos.map((d) => parentOf(d.path)),
+      projectPath && parentOf(projectPath),
+      ...savedScanPaths.filter((p) => !isDemoFile(p)),
+      ...getScanPaths().filter((p) => !isDemoFile(p)),
+    ].filter(Boolean))];
+  }
+
+  // Which of `demos` aren't at their path, each with the file in `dirs` that
+  // has its key, if one does. A match that is already another row's file (an
+  // identical copy) isn't offered: two rows on one file would share its take
+  // records.
+  async function findMissingDemos(demos, dirs) {
+    const missing = await locateMissingDemos(demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })), dirs);
+    missing.forEach((m) => {
+      if (m.candidate && getDemos().some((d) => d.path !== m.path && samePath(d.path, m.candidate))) {
+        m.candidate = null;
+      }
+    });
+    return missing;
+  }
+
+  // Gives each row in `demos` that `missing` names the missing state the
+  // queue shows (red name, Locate, Use found copy when `candidate` is set).
+  // Runtime only: non-enumerable, so neither field reaches the project file.
+  // Returns the rows marked.
+  function markMissing(missing, demos) {
+    const runtime = { writable: true, configurable: true, enumerable: false };
+    return missing.map((m) => {
+      const demo = demos.find((d) => d.path === m.path);
+      if (!demo) return null;
+      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
+      Object.defineProperty(demo, 'foundAt', { ...runtime, value: m.candidate || null });
+      // The search ended on its limit before looking everywhere (#1376).
+      Object.defineProperty(demo, 'searchStopped', { ...runtime, value: !m.candidate && m.search_stopped_early === true });
+      return demo;
+    }).filter(Boolean);
+  }
+
+  /** Clears the missing state from those of `demos` that had it: their files
+   *  are back. Returns the rows cleared; the caller redraws the queue. */
+  function markDemosBack(demos) {
+    const back = demos.filter((d) => d.missing);
+    back.forEach((d) => {
+      d.missing = false;
+      d.foundAt = null;
+    });
+    return back;
+  }
+
+  // How many checkMissingDemos calls are under way (project open, Start
+  // Capture Batch), for markDemosGone.
+  let checksRunning = 0;
+
+  /**
+   * Marks `demos`, whose files were there and have gone, as missing, with no
+   * dialog: the rows show it (demo_file_recheck.js, a file renamed, moved or
+   * deleted while Studio is open). Each is first looked for by its file key
+   * near where it was and in the scan folders, so a renamed file gets the
+   * row's Use found copy button. A file back by the time the search runs is
+   * left as it is. Resolves to the rows marked; the caller redraws the queue.
+   * Marks nothing while checkMissingDemos runs, or when one started during
+   * the search: that check marks the same rows itself after its dialog, and
+   * a second toast with its own Use found copy would contradict the dialog.
+   */
+  async function markDemosGone(demos) {
+    if (demos.length === 0 || checksRunning > 0) return [];
+    const missing = await findMissingDemos(demos, searchDirs(demos));
+    if (checksRunning > 0) return [];
+    return markMissing(missing, demos);
+  }
+
   // A loaded project's demos may have moved or been deleted since it was
   // saved (#21). Look for each missing one by its file key (size + first
   // 64 KB) near the project and its old folders, and ask before using a
@@ -28,44 +108,27 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // Capture Batch over the demos with a highlight picked (no project path
   // then). Resolves to how many of `demos` are still missing. `onSearched`
   // is called when the folder search is done, before any dialog (#958).
-  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
-    const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
-    // Nearest first: where each demo was, then the project's folder, then the
-    // scan folders. The search is breadth-first in this order, so a demo moved
-    // next door is found before a big scan folder uses up the search budget.
-    // Scan entries that name single demo files aren't folders to search.
-    const isDemoFile = (p) => /\.dem$/i.test(p);
-    const dirs = [...new Set([
-      ...demos.map((d) => parentOf(d.path)),
-      projectPath && parentOf(projectPath),
-      ...savedScanPaths.filter((p) => !isDemoFile(p)),
-      ...getScanPaths().filter((p) => !isDemoFile(p)),
-    ].filter(Boolean))];
-    const missing = await locateMissingDemos(
-      demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
-      dirs
-    );
+  async function checkMissingDemos(...args) {
+    checksRunning += 1;
+    try {
+      return await checkMissingDemosNow(...args);
+    } finally {
+      checksRunning -= 1;
+    }
+  }
+
+  async function checkMissingDemosNow(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
+    const missing = await findMissingDemos(demos, searchDirs(demos, projectPath, savedScanPaths));
     onSearched?.();
     logFrontendEvent(missingDemosLine(demos.length, missing.length, missing.filter((m) => m.candidate).length));
     // A demo marked missing earlier that is back where the queue says.
     const missingPaths = new Set(missing.map((m) => m.path));
-    const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
-    back.forEach((d) => {
-      d.missing = false;
-      d.foundAt = null;
-    });
+    const back = markDemosBack(demos.filter((d) => !missingPaths.has(d.path)));
     if (missing.length === 0) {
       if (back.length > 0) refreshQueue(false);
       return 0;
     }
 
-    // A match that is already another row's file (an identical copy) isn't
-    // offered: two rows on one file would share its take records.
-    missing.forEach((m) => {
-      if (m.candidate && getDemos().some((d) => d.path !== m.path && samePath(d.path, m.candidate))) {
-        m.candidate = null;
-      }
-    });
     const found = missing.filter((m) => m.candidate);
     const relocated = new Set();
     if (found.length > 0) {
@@ -100,21 +163,11 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     }
 
     const stillMissing = missing.filter((m) => !relocated.has(m.path));
-    const leftFound = [];
-    stillMissing.forEach((m) => {
-      const demo = getDemos().find((d) => d.path === m.path);
-      if (!demo) return;
-      // Runtime only: non-enumerable, so neither reaches the project file.
-      // `foundAt` keeps a declined match for the row's Use found copy button.
-      const runtime = { writable: true, configurable: true, enumerable: false };
-      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
-      Object.defineProperty(demo, 'foundAt', { ...runtime, value: m.candidate || null });
-      if (m.candidate) leftFound.push(demo);
-    });
+    const leftFound = markMissing(stillMissing, getDemos()).filter((d) => d.foundAt);
     refreshQueue(relocated.size > 0);
     const notFound = stillMissing.filter((m) => !m.candidate);
     if (notFound.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path))), 'warning', 10000);
+      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => fileNameOf(m.path)), notFound.some((m) => m.search_stopped_early)), 'warning', 10000);
     }
     if (leftFound.length > 0) {
       showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => fileNameOf(d.path))), 'warning', 15000, {
@@ -329,6 +382,8 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   return {
     checkMissingDemos,
     pickedDemosPresent,
+    markDemosGone,
+    markDemosBack,
     useFoundCopies,
     offerIdenticalCopies,
     locateDemoByHand,

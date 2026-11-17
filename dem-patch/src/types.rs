@@ -32,6 +32,12 @@ pub struct Aux {
     /// `Demo::write_to_bytes_reusing_source_cancellable` trusts the recorded
     /// spans only against exactly this buffer.
     pub parsed_from: Option<(usize, usize)>,
+
+    /// Why the message being written could not be encoded, for
+    /// [`NetMessage::try_write`] to return: `Doer::write` cannot fail, and
+    /// the doers hold a shared borrow of the whole `Aux` while they write,
+    /// hence the cell. Empty outside a write. #1510.
+    pub write_error: RefCell<Option<crate::write_error::WriteErrorKind>>,
 }
 
 impl Aux {
@@ -43,6 +49,7 @@ impl Aux {
             is_hltv: false,
             parsing_source_len: None,
             parsed_from: None,
+            write_error: RefCell::new(None),
         }
     }
 

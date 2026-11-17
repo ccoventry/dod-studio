@@ -128,7 +128,7 @@ pub fn find(hint: Option<&Path>) -> Vec<FoundInstall> {
     find_in(&common_dirs(hint))
 }
 
-fn build_of(hl_exe: &Path) -> Option<&'static str> {
+pub(crate) fn build_of(hl_exe: &Path) -> Option<&'static str> {
     match super::packet_limit::packet_entity_limit(hl_exe)? {
         super::packet_limit::ANNIVERSARY_PACKET_ENTITIES => Some("anniversary"),
         super::packet_limit::PRE_ANNIVERSARY_PACKET_ENTITIES => Some("pre_anniversary"),

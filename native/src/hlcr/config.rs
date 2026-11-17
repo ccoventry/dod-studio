@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::renderer::thread_share::LiveThreadShare;
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 pub enum RenderCodec {
     NvencH264,
@@ -72,6 +74,13 @@ pub struct RenderConfig {
     /// batch; on unless a saved config says otherwise.
     #[serde(default = "resumable_by_default")]
     pub resumable_renders: bool,
+    /// The thread share the render scheduler keeps current while the job
+    /// runs (#1512): a segmented render recounts its FFmpeg threads from it
+    /// as each segment starts, where `max_concurrent_renders` is the share
+    /// the job started with. Per job, never saved; unlinked by default, so
+    /// a job nothing schedules keeps its starting share.
+    #[serde(skip)]
+    pub live_thread_share: LiveThreadShare,
 }
 
 /// `RenderConfig::resumable_renders` for a config saved before it existed.
@@ -165,6 +174,7 @@ impl Default for RenderConfig {
             max_concurrent_renders: 2,
             clip_tag: None,
             resumable_renders: true,
+            live_thread_share: LiveThreadShare::default(),
         }
     }
 }

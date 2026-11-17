@@ -33,6 +33,7 @@ use super::segment_plan::{
     FrameRate, KeySettings, Pictures, SEGMENT_EXT, Segment, SegmentArgs, SegmentKey, SegmentPlan,
     TakeFacts, concat_list, join_args, peak_bytes, resume_clip_bytes, segment_key, take_key,
 };
+use super::thread_share::SegmentThreads;
 use super::{LEARNED_RATE_MARGIN, RenderJob, RenderUpdate, RoomAsk, remove_partial_output};
 use crate::hlcr::config::RenderCodec;
 use crate::hlcr::scanner::ClipData;
@@ -616,7 +617,6 @@ pub(super) struct SegmentedRender<'a> {
     pub(super) plan: &'a SegmentPlan,
     pub(super) folder: SegmentFolder,
     pub(super) encode: &'a Encode<'a>,
-    pub(super) threads: usize,
     /// The clip's reserved name: the join writes its partial file.
     pub(super) output: &'a Reserved<'a>,
 }
@@ -637,8 +637,11 @@ pub(super) enum SegmentedEnd {
 /// them, then all joined into `render.output` and removed. A cancel or a
 /// failure removes them too; Studio closing leaves the finished ones for
 /// the next start's recovery to resume from. `RenderWhole`, with nothing
-/// sent, when a segment comes out short.
+/// sent, when a segment comes out short. Each segment counts its FFmpeg
+/// threads as it starts, from the share the scheduler keeps current
+/// (#1512); how the count changed is logged once, as the segments end.
 pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) -> SegmentedEnd {
+    let began = std::time::Instant::now();
     job.send(RenderUpdate::Status(
         job.job_id.clone(),
         "Rendering".to_string(),
@@ -655,16 +658,28 @@ pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) 
     } else {
         msg::segments_reused(&segment_ranges(&finished), finished.len(), segments.len())
     };
+    let mut threads = SegmentThreads::new(
+        super::available_threads(),
+        job.config.max_concurrent_renders,
+        job.config.live_thread_share.clone(),
+        segments.len(),
+    );
     crate::log_markdown(&msg::segments_started(
         &job.job_id,
         segments.len(),
         plan.segment_frames,
+        threads.threads_now(),
         render.folder.dir.display(),
         reused,
     ));
+    let mut rendered_frames = 0;
     for segment in segments.iter().filter(|s| !finished.contains(&s.index)) {
-        match render_segment(job, &render, *segment).await {
-            Step::Next => {}
+        let step = render_segment(job, &render, *segment, threads.for_segment(segment.index)).await;
+        if !matches!(step, Step::Next) {
+            log_thread_changes(job, &threads);
+        }
+        match step {
+            Step::Next => rendered_frames += segment.frames,
             Step::Ended => return SegmentedEnd::Ended,
             Step::Short(frames) => {
                 crate::log_markdown(&msg::segment_short(
@@ -678,8 +693,52 @@ pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) 
             }
         }
     }
-    join_segments(job, &render, segments.len()).await;
+    log_thread_changes(job, &threads);
+    let rendered = Rendered {
+        frames: rendered_frames,
+        began,
+    };
+    join_segments(job, &render, segments.len(), rendered).await;
     SegmentedEnd::Ended
+}
+
+/// Logs how a segmented render's FFmpeg threads changed between its
+/// segments, if they did; nothing once Studio is closing.
+fn log_thread_changes(job: &RenderJob, threads: &SegmentThreads) {
+    if super::is_exiting() {
+        return;
+    }
+    if let Some(line) = threads.changes_line(&job.job_id) {
+        crate::log_markdown(&line);
+    }
+}
+
+/// What this run of a segmented render rendered itself (segments a stopped
+/// render left are not counted), and when it started, for the speed the
+/// row shows once it is joined.
+pub(super) struct Rendered {
+    pub(super) frames: usize,
+    pub(super) began: std::time::Instant,
+}
+
+/// The Render tab row's speed cell once a segmented render is joined
+/// (#1512): the frames this run rendered over the time it took, joining
+/// included, and that against the take's rate, as FFmpeg's `speed=` is (the
+/// output's time over the time taken; a render's output runs at the take's
+/// rate). Empty when it rendered nothing itself (every segment was left by
+/// a stopped render) or took no measurable time.
+pub(super) fn whole_render_speed(
+    frames: usize,
+    took: std::time::Duration,
+    rate: FrameRate,
+) -> String {
+    let seconds = took.as_secs_f64();
+    if frames == 0 || seconds <= 0.0 || rate.num == 0 || rate.den == 0 {
+        return String::new();
+    }
+    let fps = frames as f64 / seconds;
+    let take_fps = f64::from(rate.num) / f64::from(rate.den);
+    msg::whole_render_speed(fps, fps / take_fps)
 }
 
 /// How rendering one segment went.
@@ -693,15 +752,21 @@ enum Step {
     Short(usize),
 }
 
-/// Renders one segment into its file and counts its frames.
-async fn render_segment(job: &RenderJob, render: &SegmentedRender<'_>, segment: Segment) -> Step {
+/// Renders one segment into its file with `threads` FFmpeg threads and
+/// counts its frames.
+async fn render_segment(
+    job: &RenderJob,
+    render: &SegmentedRender<'_>,
+    segment: Segment,
+    threads: usize,
+) -> Step {
     let held = partial_output::in_flight().hold(render.folder.segment_file(segment.index));
     let args = SegmentArgs {
         clip: &job.clip,
         plan: render.plan,
         segment,
         encode: render.encode,
-        threads: render.threads,
+        threads,
         out_file: &held.partial,
     }
     .to_args();
@@ -779,8 +844,14 @@ async fn flush_to_disk(path: &Path) {
 /// Joins every segment into the clip's partial file by stream copy, checks
 /// it holds every frame, gives it its name, removes the segments and sends
 /// the job's last updates. FFmpeg runs in the segment folder, given the list
-/// and the segments by bare name (see [`JOIN_LIST`]).
-async fn join_segments(job: &RenderJob, render: &SegmentedRender<'_>, count: usize) {
+/// and the segments by bare name (see [`JOIN_LIST`]). The row's speed cell
+/// then shows the whole render's speed ([`whole_render_speed`]).
+async fn join_segments(
+    job: &RenderJob,
+    render: &SegmentedRender<'_>,
+    count: usize,
+    rendered: Rendered,
+) {
     job.send(RenderUpdate::Speed(
         job.job_id.clone(),
         msg::joining_segments(count),
@@ -801,14 +872,25 @@ async fn join_segments(job: &RenderJob, render: &SegmentedRender<'_>, count: usi
     );
     let began = std::time::Instant::now();
     let end = run_to_end(job, args, &render.folder.dir, None).await;
-    if !matches!(end, RunEnd::Exiting) {
-        // The row's speed cell said it was joining; that is over.
-        job.send(RenderUpdate::Speed(job.job_id.clone(), String::new()));
+    // The row's speed cell said it was joining; that is over. A join that
+    // failed shows no speed; one that holds every frame shows the whole
+    // render's, as a one-piece row keeps FFmpeg's last (#1512).
+    let clear_speed = || job.send(RenderUpdate::Speed(job.job_id.clone(), String::new()));
+    if !matches!(end, RunEnd::Exiting | RunEnd::Succeeded { .. }) {
+        clear_speed();
     }
     match end {
         RunEnd::Succeeded { last_frame } => {
             let container = count_frames(&output.partial, render.encode.file_ext);
-            match check_frames(container, last_frame, render.plan.total_frames) {
+            let check = check_frames(container, last_frame, render.plan.total_frames);
+            if matches!(check, FrameCheck::Short(_)) {
+                clear_speed();
+            } else {
+                let speed =
+                    whole_render_speed(rendered.frames, rendered.began.elapsed(), render.plan.rate);
+                job.send(RenderUpdate::Speed(job.job_id.clone(), speed));
+            }
+            match check {
                 FrameCheck::Short(frames) => {
                     let message = msg::join_short(frames, render.plan.total_frames);
                     crate::log_markdown(&msg::join_failed(&job.job_id, &message));
