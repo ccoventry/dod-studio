@@ -878,8 +878,12 @@ async fn join_segments(
     if !matches!(end, RunEnd::Exiting) {
         // The row's speed cell said it was joining; that is over. A
         // one-piece row keeps FFmpeg's last speed, so this one shows the
-        // whole render's (#1512).
-        let speed = whole_render_speed(rendered.frames, rendered.began.elapsed(), render.plan.rate);
+        // whole render's (#1512); a join that failed shows none.
+        let speed = if matches!(end, RunEnd::Succeeded { .. }) {
+            whole_render_speed(rendered.frames, rendered.began.elapsed(), render.plan.rate)
+        } else {
+            String::new()
+        };
         job.send(RenderUpdate::Speed(job.job_id.clone(), speed));
     }
     match end {
