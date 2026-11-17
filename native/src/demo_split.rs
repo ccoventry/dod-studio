@@ -206,8 +206,7 @@ pub fn segments(demo: &Demo) -> Vec<MapSegment> {
             let (map, crc) = if i == 0 {
                 (header_map.clone(), demo.header.map_checksum)
             } else {
-                #[allow(
-                    clippy::unwrap_used,
+                #[expect(
                     clippy::expect_used,
                     reason = "the first segment of a split always starts with a server-info frame"
                 )]
@@ -607,8 +606,7 @@ pub struct Written {
 
 /// A path next to `dir/name.dem` that doesn't exist yet: `name.dem`, then
 /// `name (2).dem`, and so on.
-#[allow(
-    clippy::unwrap_used,
+#[expect(
     clippy::expect_used,
     reason = "an unbounded range always yields a free name"
 )]

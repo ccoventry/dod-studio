@@ -320,8 +320,7 @@ pub fn value_warnings_with_execs(
 
     let mut out = ValueWarnings::default();
     for (cvar, values) in &pool {
-        #[allow(
-            clippy::unwrap_used,
+        #[expect(
             clippy::expect_used,
             reason = "a pool entry is created with its first value"
         )]
@@ -367,8 +366,7 @@ pub fn value_warnings_with_execs(
         let paired = values
             .iter()
             .any(|v| matches!(v.source, ValueSource::ScheduledBefore { .. }));
-        #[allow(
-            clippy::unwrap_used,
+        #[expect(
             clippy::expect_used,
             reason = "a pool entry is created with its first value"
         )]

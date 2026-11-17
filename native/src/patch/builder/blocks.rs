@@ -151,9 +151,8 @@ pub(super) fn cut_blocks(
 
         // Past the first highlight the four lists are non-empty: they grow
         // together, and the first highlight always pushes.
-        #[allow(
+        #[expect(
             clippy::unwrap_used,
-            clippy::expect_used,
             reason = "past the first highlight the four lists are non-empty"
         )]
         let prev_stop = last_kill_frame(merged_streaks.last().unwrap());
@@ -171,9 +170,8 @@ pub(super) fn cut_blocks(
             start_lead_ticks,
             stop_trail_ticks + min_separation_ticks,
         ) {
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             let last = merged_streaks.last_mut().unwrap();
@@ -197,15 +195,13 @@ pub(super) fn cut_blocks(
                 last.kills.push(kill);
                 last.end_index = last.kills.len() - 1;
             }
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             merged_sources.last_mut().unwrap().push(payload_idx);
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             let kills = merged_kill_frames.last_mut().unwrap();
