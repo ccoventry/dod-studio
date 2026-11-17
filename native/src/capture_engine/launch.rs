@@ -181,6 +181,10 @@ pub(super) fn start_game(
     std::fs::write(&cfg_path, "quit\n").ok();
 
     if reuse_game.is_none() {
+        crate::tool_versions::log_hlae_launch(
+            Path::new(&config.hlae_path),
+            Path::new(&config.game_path),
+        );
         log_markdown(&crate::messages::hlae_spawning(
             cmd.get_program(),
             cmd.get_args().collect::<Vec<_>>(),
