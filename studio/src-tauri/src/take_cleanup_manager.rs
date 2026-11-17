@@ -33,8 +33,7 @@ use native::hlcr::take_delete::{
     TakeDeletion, delete_take_permanently, plan_take_deletion, recycle_take,
 };
 use native::log_markdown;
-use native::shared::lock::lock_or_recover;
-use native::shared::lock::{read_or_recover, write_or_recover};
+use native::shared::lock::{lock_or_recover, read_or_recover, write_or_recover};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
