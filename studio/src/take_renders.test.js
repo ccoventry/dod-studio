@@ -4,8 +4,9 @@ import { pruneTakeIndex, markBlockCaptured, resolveTake } from './take_index.js'
 import { attachCaptures, capturesToSave, recordCapture } from './take_record.js';
 import {
   rendersOf, recordRender, recordTakeFolderRenders, attachRenders, rendersToSave, carryRenders,
-  projectRenderedVideos, existingVideos, relocateRender,
+  projectRenderedVideos, existingVideos, relocateRender, movedFromOf,
 } from './take_renders.js';
+import * as before1085Renders from './test_fixtures/take_renders_before_1085.js';
 import * as before1264Index from './test_fixtures/take_index_before_1264.js';
 import * as before1264Record from './test_fixtures/take_record_before_1264.js';
 
@@ -231,6 +232,49 @@ describe('relocateRender (#1442)', () => {
     recordRender(index, KEY, finished(1));
     expect(relocateRender(index, KEY, finished(2), { output_path: 'E:/x.mov' })).toBe(false);
     expect(relocateRender(index, 'other/key', finished(1), { output_path: 'E:/x.mov' })).toBe(false);
+  });
+
+  it('keeps each path a render moved away from, once, oldest first (#1514)', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'E:/sorted/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'H:/movie/a.mov' });
+    // Found again where it already is, then a case-only spelling of it.
+    relocateRender(index, KEY, copy, { output_path: 'H:/movie/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'H:/Movie/A.mov' });
+    expect(movedFromOf(rendersOf(index, KEY)[0])).toEqual(['D:/exports/clip_1.mov', 'E:/sorted/a.mov']);
+  });
+
+  it('drops a moved-from path the video was moved back to', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'E:/sorted/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'D:\\exports\\clip_1.mov' });
+    expect(movedFromOf(rendersOf(index, KEY)[0])).toEqual(['E:/sorted/a.mov']);
+  });
+
+  it('a fingerprint taken in place adds no moved-from path', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'D:/exports/clip_1.mov', content_hash: 'ab' });
+    expect('moved_from' in rendersOf(index, KEY)[0]).toBe(false);
+  });
+
+  it('moved_from survives a save and load here and in a build from before it', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    relocateRender(index, KEY, projectRenderedVideos(index)[0], { output_path: 'E:/sorted/a.mov' });
+    const json = saveProject(index, new Set([FIRST]));
+    expect(movedFromOf(rendersOf(loadProject(json), KEY)[0])).toEqual(['D:/exports/clip_1.mov']);
+    // A build from before #1514 keeps a render's entry whole: it reads the
+    // path it knows and saves the field it doesn't back unchanged.
+    const old = { [KEY]: [FIRST] };
+    before1085Renders.attachRenders(old, JSON.parse(json).takeRenders);
+    expect(before1085Renders.rendersOf(old, KEY)[0].output_path).toBe('E:/sorted/a.mov');
+    expect(before1085Renders.rendersToSave(old)[KEY][0].moved_from).toEqual(['D:/exports/clip_1.mov']);
   });
 
   it('keeps a fingerprint the render recorded through a save and load', () => {
