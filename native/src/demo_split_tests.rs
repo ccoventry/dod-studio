@@ -220,3 +220,166 @@ fn a_cancelled_split_writes_nothing_and_says_so() {
     assert_eq!(left.len(), 1, "only the original");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn scratch_with_fixture(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("demo_split_{name}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let demo = dir.join("m.dem");
+    std::fs::write(&demo, ci_fixture()).unwrap();
+    (dir, demo)
+}
+
+#[test]
+fn each_map_gets_its_own_outcome_and_one_failing_does_not_stop_another() {
+    let (dir, demo) = scratch_with_fixture("report");
+    let mut events = Vec::new();
+    // Map 6 doesn't exist: it fails, map 1 is still written.
+    let report = split_file_report(
+        &demo,
+        Keep::These(&[0, 5, 0]),
+        &[],
+        &mut |p| events.push(p),
+        &|| false,
+    )
+    .unwrap();
+    assert!(!report.cancelled);
+    assert_eq!(report.written.len(), 1, "map 1, once though asked twice");
+    assert_eq!(report.written[0].index, 0);
+    assert!(std::path::Path::new(&report.written[0].path).is_file());
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(report.failed[0].index, 5);
+    assert!(report.failed[0].error.contains("no map 6"));
+    // Callers that treat a failed map as the split failing are told the
+    // file map 1 still wrote.
+    let error = report.clone().into_written().unwrap_err();
+    assert!(error.contains("no map 6"), "{error}");
+    assert!(error.contains("(still written: m_split1_"), "{error}");
+
+    let stages = |index: usize| -> Vec<&str> {
+        let mut s: Vec<&str> = events
+            .iter()
+            .filter(|p| p.index == Some(index))
+            .map(|p| p.stage)
+            .collect();
+        s.dedup();
+        s
+    };
+    assert_eq!(stages(0), ["waiting", "writing", "checking", "finished"]);
+    assert_eq!(stages(5), ["waiting", "failed"]);
+    let finished = events.iter().find(|p| p.stage == "finished").unwrap();
+    assert_eq!(
+        finished.file.as_ref().map(|w| &w.path),
+        Some(&report.written[0].path)
+    );
+    let failed = events.iter().find(|p| p.stage == "failed").unwrap();
+    assert!(failed.error.as_deref().unwrap().contains("no map 6"));
+    // Reading comes first, and the whole split ends at 100%.
+    assert_eq!(events[0].stage, "reading");
+    let last = events.last().unwrap();
+    assert_eq!((last.done, last.parts), (2, 2));
+    assert!((last.fraction - 1.0).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The first multi-map demo in `DOD_SPLIT_DEMOS` (or the PRE install's
+/// `dod`), copied to a scratch folder: every map is written, side by side.
+#[test]
+#[ignore = "needs real multi-map demos (DOD_SPLIT_DEMOS or the PRE install)"]
+fn every_map_of_a_real_multi_map_demo_is_written() {
+    let folder = std::env::var_os("DOD_SPLIT_DEMOS").map(std::path::PathBuf::from).unwrap_or_else(|| {
+        std::path::PathBuf::from(
+            r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+        )
+    });
+    let source = std::fs::read_dir(&folder)
+        .unwrap_or_else(|e| panic!("{}: {e}", folder.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "dem"))
+        .find(|p| {
+            let bytes = std::fs::read(p).unwrap();
+            quick_maps(&bytes, header_protocol(&bytes).unwrap_or(48)).len() >= 2
+                && dem::open_demo_from_bytes(&bytes).is_ok()
+        })
+        .unwrap_or_else(|| panic!("no multi-map demo in {}", folder.display()));
+    let dir = std::env::temp_dir().join(format!("demo_split_real_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let demo = dir.join("m.dem");
+    std::fs::copy(&source, &demo).unwrap();
+    let maps = quick_demo_segments(&demo).unwrap();
+    let all: Vec<usize> = maps.iter().map(|s| s.index).collect();
+    let started = std::time::Instant::now();
+    let report = split_file_report(&demo, Keep::These(&all), &[], &mut |_| {}, &|| false).unwrap();
+    eprintln!(
+        "{}: {} maps in {:.1} s",
+        source.display(),
+        all.len(),
+        started.elapsed().as_secs_f32()
+    );
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(
+        report.written.iter().map(|w| w.index).collect::<Vec<_>>(),
+        all
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cancelled_split_says_so_for_every_map() {
+    let (dir, demo) = scratch_with_fixture("cancel_each");
+    let mut events = Vec::new();
+    let report = split_file_report(
+        &demo,
+        Keep::These(&[0]),
+        &[],
+        &mut |p| events.push(p),
+        &|| true,
+    )
+    .unwrap();
+    assert!(report.cancelled && report.written.is_empty() && report.failed.is_empty());
+    assert_eq!(events.last().map(|p| p.stage), Some("cancelled"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checks_run_side_by_side_up_to_the_limit_and_keep_their_order() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let now = AtomicUsize::new(0);
+    let most = AtomicUsize::new(0);
+    let pulled = AtomicUsize::new(0);
+    let jobs = (0..10).inspect(|_| {
+        // A job is pulled only once one of the 3 is free.
+        assert!(now.load(Ordering::SeqCst) < 3);
+        pulled.fetch_add(1, Ordering::SeqCst);
+    });
+    let work = |j: usize| {
+        let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+        most.fetch_max(n, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        now.fetch_sub(1, Ordering::SeqCst);
+        j * 2
+    };
+    let out = run_bounded(3, jobs, &work);
+    assert_eq!(out, (0..10).map(|j| j * 2).collect::<Vec<_>>());
+    assert_eq!(pulled.load(Ordering::SeqCst), 10);
+    let most = most.load(Ordering::SeqCst);
+    assert!(most > 1, "ran side by side");
+    assert!(most <= 3, "never more than the limit: {most}");
+}
+
+#[test]
+fn a_saved_map_never_takes_a_name_already_there() {
+    let dir = std::env::temp_dir().join(format!("demo_split_save_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m_split1_anzio.dem"), b"old").unwrap();
+    let p = save_new(&dir, "m_split1_anzio", b"new").unwrap();
+    assert_eq!(p, dir.join("m_split1_anzio (2).dem"));
+    assert_eq!(
+        std::fs::read(dir.join("m_split1_anzio.dem")).unwrap(),
+        b"old"
+    );
+    assert_eq!(std::fs::read(&p).unwrap(), b"new");
+    let _ = std::fs::remove_dir_all(&dir);
+}

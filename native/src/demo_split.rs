@@ -604,23 +604,6 @@ pub struct Written {
     pub size_bytes: u64,
 }
 
-/// A path next to `dir/name.dem` that doesn't exist yet: `name.dem`, then
-/// `name (2).dem`, and so on.
-#[expect(
-    clippy::expect_used,
-    reason = "an unbounded range always yields a free name"
-)]
-fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let first = dir.join(format!("{name}.dem"));
-    if !first.exists() {
-        return first;
-    }
-    (2..)
-        .map(|n| dir.join(format!("{name} ({n}).dem")))
-        .find(|p| !p.exists())
-        .expect("an unused name")
-}
-
 /// Writes maps `keep` of the demo at `path` as demos of their own, next to
 /// it, and checks each one reads back as a demo with exactly that one map.
 /// The original is never changed. A map's BSP checksum, for a header that
@@ -658,18 +641,210 @@ pub fn keep_at_least(segs: &[MapSegment], min_seconds: f32) -> Vec<usize> {
     }
 }
 
-/// How far a split has got, for a progress bar.
+/// How far a split has got, for a progress bar and each map's row (#876).
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct SplitProgress {
     /// 0.0 to 1.0 over the whole split.
     pub fraction: f32,
-    /// "reading" the demo, "writing" a map, or "checking" one read back.
+    /// "reading" the demo; then, for one map, "waiting" its turn, "writing"
+    /// it, "checking" it read back, and "finished", "failed" or "cancelled".
     pub stage: &'static str,
-    /// The map being written or checked; empty while reading.
+    /// The map this is about; empty while reading.
     pub map: String,
     /// Which of `parts` (1-based); 0 while reading.
     pub part: usize,
     pub parts: usize,
+    /// The map's [`MapSegment::index`]; `None` while reading.
+    pub index: Option<usize>,
+    /// 0.0 to 1.0 through this map's own write and check (the write is the
+    /// first half); through the read itself while reading.
+    pub map_fraction: f32,
+    /// How many maps have finished, failed or been cancelled.
+    pub done: usize,
+    /// What a finished map wrote.
+    pub file: Option<Written>,
+    /// Why a failed map failed.
+    pub error: Option<String>,
+}
+
+/// A map a split couldn't write.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MapFailure {
+    pub index: usize,
+    pub map: String,
+    pub error: String,
+}
+
+/// What a split did with each map it was asked for (#876): one map failing
+/// no longer stops the others.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct SplitReport {
+    /// In the order the maps were asked for.
+    pub written: Vec<Written>,
+    pub failed: Vec<MapFailure>,
+    /// Cancel stopped at least one map.
+    pub cancelled: bool,
+}
+
+impl SplitReport {
+    /// The written maps and whether Cancel stopped it, or an error naming
+    /// every map that failed, for callers that treat any failure as the
+    /// split's. The other maps still run, so the error also names the files
+    /// they wrote: the caller drops them (the queue keeps the demo), and they
+    /// would otherwise sit next to it unmentioned.
+    pub fn into_written(self) -> Result<(Vec<Written>, bool), String> {
+        if self.failed.is_empty() {
+            return Ok((self.written, self.cancelled));
+        }
+        let mut error = self
+            .failed
+            .iter()
+            .map(|f| f.error.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !self.written.is_empty() {
+            let names: Vec<String> = self
+                .written
+                .iter()
+                .map(|w| {
+                    let path = std::path::Path::new(&w.path);
+                    path.file_name()
+                        .map_or_else(|| w.path.clone(), |n| n.to_string_lossy().to_string())
+                })
+                .collect();
+            error.push_str(&format!(" (still written: {})", names.join(", ")));
+        }
+        Err(error)
+    }
+}
+
+/// At most this many maps are checked at once. Each check is a full parse of
+/// the written map, a few hundred MB for a long one, on top of the source
+/// demo's own parse.
+const MAX_CHECKS_AT_ONCE: usize = 4;
+
+/// Runs `work` on each job of `jobs`, up to `max` at once, each on a thread
+/// of its own. The next job is pulled, on this thread, only once one of the
+/// `max` is free, so `jobs` can do work of its own (here: write the map out
+/// of a demo that can't leave this thread) without running ahead. Results
+/// come back in the jobs' order.
+fn run_bounded<J: Send, R: Send>(
+    max: usize,
+    jobs: impl Iterator<Item = J>,
+    work: &(dyn Fn(J) -> R + Sync),
+) -> Vec<R> {
+    let max = max.max(1);
+    let mut results = Vec::new();
+    std::thread::scope(|s| {
+        let mut running = std::collections::VecDeque::new();
+        let join = |h: std::thread::ScopedJoinHandle<'_, R>| match h.join() {
+            Ok(r) => r,
+            Err(panic) => std::panic::resume_unwind(panic),
+        };
+        for job in jobs {
+            running.push_back(s.spawn(move || work(job)));
+            while running.len() >= max {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the loop runs only while `running` holds at least `max` (1 or more)"
+                )]
+                let oldest = running.pop_front().expect("one running");
+                results.push(join(oldest));
+            }
+        }
+        while let Some(h) = running.pop_front() {
+            results.push(join(h));
+        }
+    });
+    results
+}
+
+/// Makes `dir/name.dem`, or `name (2).dem` and so on when that exists, and
+/// writes `bytes` to it. Creating the file is what claims the name, so two
+/// maps saved at once can never pick the same one.
+fn save_new(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    use std::io::Write as _;
+    for n in 1.. {
+        let path = if n == 1 {
+            dir.join(format!("{name}.dem"))
+        } else {
+            dir.join(format!("{name} ({n}).dem"))
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                return match file.write_all(bytes) {
+                    Ok(()) => Ok(path),
+                    Err(e) => {
+                        drop(file);
+                        let _ = std::fs::remove_file(&path);
+                        Err(format!("could not write {}: {e}", path.display()))
+                    }
+                };
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("could not write {}: {e}", path.display())),
+        }
+    }
+    unreachable!("an unused name")
+}
+
+/// What happened to one map.
+enum MapOutcome {
+    Written(Written),
+    Failed(String),
+    Cancelled,
+}
+
+/// Tells `progress` how each map is doing, from whichever thread is on it.
+struct Reporter<'a> {
+    progress: &'a mut (dyn FnMut(SplitProgress) + Send),
+    /// Each map's own 0.0-1.0, by its place in the maps asked for.
+    fractions: Vec<f32>,
+    done: usize,
+}
+
+impl Reporter<'_> {
+    /// Map `index` (`map`), the `k`th asked for, is at `stage`.
+    fn map(
+        &mut self,
+        k: usize,
+        index: usize,
+        map: &str,
+        stage: &'static str,
+        map_fraction: f32,
+        outcome: Option<&MapOutcome>,
+    ) {
+        if let Some(f) = self.fractions.get_mut(k) {
+            *f = map_fraction;
+        }
+        if outcome.is_some() {
+            self.done += 1;
+        }
+        let parts = self.fractions.len().max(1);
+        let sum: f32 = self.fractions.iter().sum();
+        (self.progress)(SplitProgress {
+            fraction: READ_SHARE + (1.0 - READ_SHARE) * sum / parts as f32,
+            stage,
+            map: map.to_string(),
+            part: k + 1,
+            parts,
+            index: Some(index),
+            map_fraction,
+            done: self.done,
+            file: match outcome {
+                Some(MapOutcome::Written(w)) => Some(w.clone()),
+                _ => None,
+            },
+            error: match outcome {
+                Some(MapOutcome::Failed(e)) => Some(e.clone()),
+                _ => None,
+            },
+        });
+    }
 }
 
 /// Reading the demo is this much of a split; the rest is shared between the
@@ -683,22 +858,41 @@ pub fn split_file_with_progress(
     path: &std::path::Path,
     keep: Keep,
     map_dirs: &[std::path::PathBuf],
-    progress: &mut dyn FnMut(SplitProgress),
+    progress: &mut (dyn FnMut(SplitProgress) + Send),
 ) -> Result<Vec<Written>, String> {
     split_file_cancellable(path, keep, map_dirs, progress, &|| false).map(|(written, _)| written)
 }
 
-/// [`split_file_with_progress`] that stops when `cancel` answers true: after
-/// the demo is read, between maps, while a map is written, and before it is
-/// saved. A map already saved stays. Returns what was written and whether
-/// it stopped early.
+/// [`split_file_report`] for callers that treat any map failing as the
+/// split failing. Returns what was written and whether Cancel stopped it.
 pub fn split_file_cancellable(
     path: &std::path::Path,
     keep: Keep,
     map_dirs: &[std::path::PathBuf],
-    progress: &mut dyn FnMut(SplitProgress),
-    cancel: &dyn Fn() -> bool,
+    progress: &mut (dyn FnMut(SplitProgress) + Send),
+    cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<(Vec<Written>, bool), String> {
+    split_file_report(path, keep, map_dirs, progress, cancel)?.into_written()
+}
+
+/// Writes maps `keep` of the demo at `path` as demos of their own, reading
+/// the demo once (#876). The maps are cut out and written one at a time on
+/// this thread (the parsed demo stays on it), and each is checked, read
+/// back as a demo with exactly that one map, and saved on a thread of its
+/// own while the next is written: up to [`MAX_CHECKS_AT_ONCE`] at once.
+///
+/// One map failing doesn't stop the others. `cancel` stops it after the
+/// demo is read, before a map starts, while one is written, and before one
+/// is saved; a map already saved stays. Every map asked for ends with a
+/// "finished", "failed" or "cancelled" `progress` call. `Err` only when the
+/// demo can't be read at all.
+pub fn split_file_report(
+    path: &std::path::Path,
+    keep: Keep,
+    map_dirs: &[std::path::PathBuf],
+    progress: &mut (dyn FnMut(SplitProgress) + Send),
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<SplitReport, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
     let demo = dem::open_demo_from_bytes_with_progress(&bytes, &mut |read, total| {
@@ -708,16 +902,23 @@ pub fn split_file_cancellable(
             map: String::new(),
             part: 0,
             parts: 0,
+            index: None,
+            // How far through the read itself.
+            map_fraction: read as f32 / total.max(1) as f32,
+            done: 0,
+            file: None,
+            error: None,
         })
     })
     .map_err(|e| read_error(&bytes, e))?;
     let segs = segments(&demo);
-    let keep: Vec<usize> = match keep {
+    let mut keep: Vec<usize> = match keep {
         Keep::These(k) => k.to_vec(),
         Keep::AtLeast(min) => keep_at_least(&segs, min),
     };
-    let parts = keep.len().max(1);
-    let share = (1.0 - READ_SHARE) / parts as f32;
+    // A map asked for twice is written once.
+    let mut seen = std::collections::HashSet::new();
+    keep.retain(|i| seen.insert(*i));
     let dir = path.parent().ok_or("the demo has no folder")?;
     let stem = path
         .file_stem()
@@ -731,64 +932,135 @@ pub fn split_file_cancellable(
             crate::maps::bsp::map_checksum(&bytes).ok()
         })
     };
-    let mut written = Vec::new();
+    let map_name = |i: usize| segs.get(i).map_or_else(String::new, |s| s.map.clone());
+
+    let reporter = std::sync::Mutex::new(Reporter {
+        progress,
+        fractions: vec![0.0; keep.len()],
+        done: 0,
+    });
+    let report = |k: usize, i: usize, stage, fraction, outcome: Option<&MapOutcome>| {
+        reporter.lock().unwrap_or_else(|p| p.into_inner()).map(
+            k,
+            i,
+            &map_name(i),
+            stage,
+            fraction,
+            outcome,
+        );
+    };
     for (k, &i) in keep.iter().enumerate() {
+        report(k, i, "waiting", 0.0, None);
+    }
+
+    /// A map on its way: settled on this thread, or written and to be checked.
+    enum Job {
+        Settled(usize, usize, MapOutcome),
+        Check(usize, usize, Vec<u8>),
+    }
+    let jobs = keep.iter().enumerate().map(|(k, &i)| {
         if cancel() {
-            return Ok((written, true));
+            return Job::Settled(k, i, MapOutcome::Cancelled);
         }
-        let seg = segs
-            .get(i)
-            .ok_or_else(|| format!("the demo has no map {}", i + 1))?;
-        let start = READ_SHARE + share * k as f32;
-        progress(SplitProgress {
-            fraction: start,
-            stage: "writing",
-            map: seg.map.clone(),
-            part: k + 1,
-            parts,
-        });
-        let part = extract(&demo, i, &find_bsp)
-            .ok_or_else(|| format!("map {} ({}) could not be cut out", i + 1, seg.map))?;
-        let Some(out) = part
-            .write_to_bytes_reusing_source_cancellable(&bytes, cancel)
-            .map_err(|e| crate::messages::split_part_not_written(i + 1, &seg.map, e))?
-        else {
-            return Ok((written, true));
+        let Some(seg) = segs.get(i) else {
+            return Job::Settled(
+                k,
+                i,
+                MapOutcome::Failed(format!("the demo has no map {}", i + 1)),
+            );
         };
-        let back = dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {
-            progress(SplitProgress {
-                fraction: start + share * (0.5 + 0.5 * read as f32 / total.max(1) as f32),
-                stage: "checking",
-                map: seg.map.clone(),
-                part: k + 1,
-                parts,
-            })
-        })
-        .map_err(|e| format!("map {} ({}) did not read back: {e}", i + 1, seg.map))?;
+        report(k, i, "writing", 0.0, None);
+        let Some(part) = extract(&demo, i, &find_bsp) else {
+            return Job::Settled(
+                k,
+                i,
+                MapOutcome::Failed(format!("map {} ({}) could not be cut out", i + 1, seg.map)),
+            );
+        };
+        match part.write_to_bytes_reusing_source_cancellable(&bytes, cancel) {
+            Ok(Some(out)) => Job::Check(k, i, out),
+            Ok(None) => Job::Settled(k, i, MapOutcome::Cancelled),
+            Err(e) => Job::Settled(
+                k,
+                i,
+                MapOutcome::Failed(crate::messages::split_part_not_written(i + 1, &seg.map, e)),
+            ),
+        }
+    });
+    let check = |k: usize, i: usize, out: Vec<u8>| -> MapOutcome {
+        let map = map_name(i);
+        report(k, i, "checking", 0.5, None);
+        let back = match dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {
+            report(
+                k,
+                i,
+                "checking",
+                0.5 + 0.5 * read as f32 / total.max(1) as f32,
+                None,
+            )
+        }) {
+            Ok(back) => back,
+            Err(e) => {
+                return MapOutcome::Failed(format!("map {} ({map}) did not read back: {e}", i + 1));
+            }
+        };
         let back_segs = segments(&back);
-        if back_segs.len() != 1 || back_segs[0].map != seg.map {
-            return Err(format!(
-                "map {} ({}) read back as {} map(s); nothing more was written",
+        if back_segs.len() != 1 || back_segs[0].map != map {
+            return MapOutcome::Failed(format!(
+                "map {} ({map}) read back as {} map(s)",
                 i + 1,
-                seg.map,
                 back_segs.len()
             ));
         }
         if cancel() {
-            return Ok((written, true));
+            return MapOutcome::Cancelled;
         }
-        let target = free_path(dir, &split_name(&stem, &segs, seg));
-        std::fs::write(&target, &out)
-            .map_err(|e| format!("could not write {}: {e}", target.display()))?;
-        written.push(Written {
-            index: i,
-            path: target.to_string_lossy().to_string(),
-            map: seg.map.clone(),
-            seconds: back_segs[0].seconds(),
-            size_bytes: out.len() as u64,
-        });
+        let name = split_name_at(
+            &stem,
+            &segs.iter().map(|s| s.map.as_str()).collect::<Vec<_>>(),
+            i,
+        );
+        match save_new(dir, &name, &out) {
+            Ok(target) => MapOutcome::Written(Written {
+                index: i,
+                path: target.to_string_lossy().to_string(),
+                map,
+                seconds: back_segs[0].seconds(),
+                size_bytes: out.len() as u64,
+            }),
+            Err(e) => MapOutcome::Failed(e),
+        }
+    };
+    let work = |job: Job| -> (usize, MapOutcome) {
+        let (k, i, outcome) = match job {
+            Job::Settled(k, i, outcome) => (k, i, outcome),
+            Job::Check(k, i, out) => (k, i, check(k, i, out)),
+        };
+        let stage = match &outcome {
+            MapOutcome::Written(_) => "finished",
+            MapOutcome::Failed(_) => "failed",
+            MapOutcome::Cancelled => "cancelled",
+        };
+        report(k, i, stage, 1.0, Some(&outcome));
+        (i, outcome)
+    };
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(MAX_CHECKS_AT_ONCE);
+
+    let mut out = SplitReport::default();
+    for (i, outcome) in run_bounded(workers, jobs, &work) {
+        match outcome {
+            MapOutcome::Written(w) => out.written.push(w),
+            MapOutcome::Failed(error) => out.failed.push(MapFailure {
+                index: i,
+                map: map_name(i),
+                error,
+            }),
+            MapOutcome::Cancelled => out.cancelled = true,
+        }
     }
-    Ok((written, false))
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -10,9 +10,11 @@ import { STRINGS } from './strings.js';
 export function splitProgressView(p) {
   const pct = Math.max(0, Math.min(100, Math.round((p?.fraction || 0) * 100)));
   const S = STRINGS.SPLIT;
-  if (p?.stage === 'writing') return { pct, text: S.progressWriting(p.map, p.part, p.parts, pct) };
-  if (p?.stage === 'checking') return { pct, text: S.progressChecking(p.map, p.part, p.parts, pct) };
-  return { pct, text: S.progressReading(pct) };
+  if (!p || p.stage === 'reading') return { pct, text: S.progressReading(pct) };
+  // Several maps run side by side (#876): one map's name would flicker.
+  if (p.parts > 1) return { pct, text: S.progressMaps(p.done ?? 0, p.parts, pct) };
+  if (p.stage === 'waiting' || p.stage === 'writing') return { pct, text: S.progressWriting(p.map, pct) };
+  return { pct, text: S.progressChecking(p.map, pct) };
 }
 
 /**
