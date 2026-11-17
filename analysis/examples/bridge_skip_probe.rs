@@ -201,7 +201,7 @@ fn main() {
                     e.frame_count = e.frames.len() as i32;
                     e.track_time = e.frames.iter().map(|f| f.time).fold(0.0f32, f32::max);
                 }
-                d.write_to_bytes()
+                d.write_to_bytes().expect("re-encode")
             }
             Err(_) => out,
         };

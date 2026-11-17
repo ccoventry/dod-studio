@@ -98,6 +98,7 @@ fn demo_bytes() -> Vec<u8> {
         _aux: Some(Aux::new2()),
     }
     .write_to_bytes()
+    .unwrap()
 }
 
 /// Every world-decal payload in the demo, by frame ordinal.
@@ -193,6 +194,7 @@ fn a_real_demo_survives_the_verbatim_write() {
     // writes the engine's own frame counts.
     let reused = demo
         .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+        .unwrap()
         .unwrap();
     assert!(reused == bytes, "an untouched real demo did not round-trip");
 
@@ -203,9 +205,10 @@ fn a_real_demo_survives_the_verbatim_write() {
     assert!(wall + spray > 0, "the demo has no decals to strip");
     let reused = demo
         .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+        .unwrap()
         .unwrap();
     assert!(
-        reused == demo.write_to_bytes(),
+        reused == demo.write_to_bytes().unwrap(),
         "the verbatim write disagrees with a full re-encode after stripping"
     );
 }

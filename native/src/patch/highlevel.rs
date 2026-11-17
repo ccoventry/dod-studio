@@ -211,5 +211,6 @@ pub fn patch_demo_highlights(
     // Update entry header values if necessary
     entry.frame_count = entry.frames.len() as i32;
 
-    Ok(demo.write_to_bytes())
+    demo.write_to_bytes()
+        .map_err(crate::messages::demo_could_not_be_rewritten)
 }

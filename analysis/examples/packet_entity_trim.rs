@@ -541,7 +541,7 @@ fn main() {
         "  trimmed: {} entries dropped, peak {} -> {}",
         trim.entries_dropped, trim.peak_before, trim.peak_after
     );
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write output");
     println!("wrote {output} ({} -> {} bytes)", bytes.len(), out.len());
 

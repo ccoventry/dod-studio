@@ -1,8 +1,9 @@
-use std::str::from_utf8;
+#![warn(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::{
     bit::{BitReader, BitSlice, BitSliceCast, BitWriter},
     types::{Delta, DeltaDecoder, DeltaDecoderS, DeltaType, DeltaValue},
+    write_error::DeltaWriteError,
 };
 
 pub fn parse_delta(dd: &DeltaDecoder, br: &mut BitReader) -> Delta {
@@ -138,28 +139,52 @@ fn bitslice_to_u8_vec(i: &BitSlice) -> Vec<u8> {
     i.chunks(8).map(|chunk| chunk.to_u8()).collect()
 }
 
-pub fn write_delta(delta: &Delta, delta_decoder: &DeltaDecoder, bw: &mut BitWriter) {
+/// The most fields a delta's mask can address: `parse_delta` reads at most 7
+/// mask bytes (a 3-bit count).
+const MASK_FIELDS: usize = 7 * 8;
+
+/// Encodes `delta` with `delta_decoder`, the table it was read with.
+///
+/// Fields are matched by `DeltaDecoderS::key`, the name `parse_delta` files
+/// them under, so a field whose name is not UTF-8 is written back like any
+/// other. Upstream matched the raw name and unwrapped, which aborted on such a
+/// name, on a field the table lacks and on a field narrower than its value.
+/// On an error `bw` holds part of the delta: the message is not written. #1510.
+pub fn write_delta(
+    delta: &Delta,
+    delta_decoder: &DeltaDecoder,
+    bw: &mut BitWriter,
+) -> Result<(), DeltaWriteError> {
     // Consider this like a modulo.
     // Delta with description of index 13 is byte_mask[13 / 8] at 13 % 8.
     // Byte mask count adds accordingly if we have entry with biggest index number.
     let mut byte_mask = [0u8; 8];
     let mut byte_mask_count = 0u8;
-    let mut yes_data = false;
+    let mut described = 0usize;
 
     // This step marks which delta field will be encoded.
-    for key in delta.keys() {
-        let (index, _) = find_decoder(key.as_bytes(), delta_decoder).unwrap();
+    for (index, description) in delta_decoder.iter().enumerate() {
+        if !delta.contains_key(&description.key) {
+            continue;
+        }
+        if index >= MASK_FIELDS {
+            return Err(DeltaWriteError::FieldOutOfMask {
+                field: description.key.to_string(),
+                index,
+            });
+        }
         let quotient = index / 8;
         let remainder = index % 8;
 
         byte_mask[quotient] |= 1 << remainder;
-        byte_mask_count = byte_mask_count.max(quotient as u8);
-        yes_data = true;
+        byte_mask_count = byte_mask_count.max(quotient as u8 + 1);
+        described += 1;
     }
 
-    // Because we start counting at 0, we need to offset this by 1 for correct length.
-    if yes_data {
-        byte_mask_count += 1;
+    // Every field once: a field the table lacks would be dropped, and one it
+    // describes twice would be written twice under one mask bit.
+    if described != delta.len() {
+        return Err(undescribed_field(delta, delta_decoder));
     }
 
     bw.append_u32_range(byte_mask_count as u32, 3);
@@ -169,13 +194,51 @@ pub fn write_delta(delta: &Delta, delta_decoder: &DeltaDecoder, bw: &mut BitWrit
 
     // We have to write delta by the described order.
     for description in delta_decoder {
-        if delta.contains_key(from_utf8(&description.name).unwrap()) {
-            write_delta_field(description, find_delta_value(&description.name, delta), bw);
+        if let Some(value) = delta.get(&description.key) {
+            write_delta_field(description, value, bw)?;
         }
     }
+
+    Ok(())
 }
 
-fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWriter) {
+/// Which of `delta`'s fields `delta_decoder` does not describe exactly once.
+fn undescribed_field(delta: &Delta, delta_decoder: &DeltaDecoder) -> DeltaWriteError {
+    for key in delta.keys() {
+        match delta_decoder.iter().filter(|d| d.key == *key).count() {
+            0 => return DeltaWriteError::UnknownField(key.to_string()),
+            1 => {}
+            _ => return DeltaWriteError::DuplicateField(key.to_string()),
+        }
+    }
+    // Unreachable while `Delta` keeps its keys unique; say so rather than
+    // pretend a field was found.
+    DeltaWriteError::UnknownField(String::new())
+}
+
+/// The first `N` bytes of `value`, or the error naming the field.
+fn leading<const N: usize>(
+    description: &DeltaDecoderS,
+    value: &[u8],
+) -> Result<[u8; N], DeltaWriteError> {
+    value
+        .get(..N)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| DeltaWriteError::ValueTooShort {
+            field: description.key.to_string(),
+            have: value.len(),
+            need: N,
+        })
+}
+
+/// The arithmetic below wraps where it overflows, as it always has in a
+/// release build; `wrapping_` only spells that out, so a debug build (the
+/// tests) writes the same bytes instead of panicking on a value off disk.
+fn write_delta_field(
+    description: &DeltaDecoderS,
+    value: &[u8],
+    bw: &mut BitWriter,
+) -> Result<(), DeltaWriteError> {
     let lhs = description.flags;
 
     let is_signed = flag!(lhs, DeltaType::Signed);
@@ -188,16 +251,26 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
         || flag!(lhs, DeltaType::TimeWindowBig);
     let is_string = flag!(lhs, DeltaType::String);
 
+    // `append_u32_range` slices a 32-bit value, and a signed field spends one
+    // of its bits on the sign. `bits` is read off disk. #1510.
+    let is_number = is_byte || is_short || is_integer || is_some_float || is_angle;
+    if is_number && (description.bits > 32 || (is_signed && description.bits == 0)) {
+        return Err(DeltaWriteError::BadWidth {
+            field: description.key.to_string(),
+            bits: description.bits,
+        });
+    }
+
     if is_byte {
-        let bytes: [u8; 1] = value[..1].try_into().unwrap();
+        let bytes: [u8; 1] = leading(description, value)?;
         if is_signed {
             let res_value = i8::from_le_bytes(bytes);
-            let signed_value = res_value * description.divisor as i8;
+            let signed_value = res_value.wrapping_mul(description.divisor as i8);
             let is_negative = signed_value < 0;
 
             let value = if is_negative {
                 bw.append_bit(true);
-                -signed_value
+                signed_value.wrapping_neg()
             } else {
                 bw.append_bit(false);
                 signed_value
@@ -207,20 +280,20 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
             bw.append_u32_range(value as u32, description.bits - 1);
         } else {
             let res_value = u8::from_le_bytes(bytes);
-            let value = res_value * description.divisor as u8;
+            let value = res_value.wrapping_mul(description.divisor as u8);
 
             bw.append_u32_range(value as u32, description.bits);
         }
     } else if is_short {
-        let bytes: [u8; 2] = value[..2].try_into().unwrap();
+        let bytes: [u8; 2] = leading(description, value)?;
         if is_signed {
             let res_value = i16::from_le_bytes(bytes);
-            let signed_value = res_value * description.divisor as i16;
+            let signed_value = res_value.wrapping_mul(description.divisor as i16);
             let is_negative = signed_value < 0;
 
             let value = if is_negative {
                 bw.append_bit(true);
-                -signed_value
+                signed_value.wrapping_neg()
             } else {
                 bw.append_bit(false);
                 signed_value
@@ -229,20 +302,20 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
             bw.append_u32_range(value as u32, description.bits - 1);
         } else {
             let res_value = u16::from_le_bytes(bytes);
-            let value = res_value * description.divisor as u16;
+            let value = res_value.wrapping_mul(description.divisor as u16);
 
             bw.append_u32_range(value as u32, description.bits);
         }
     } else if is_integer {
-        let bytes: [u8; 4] = value[..4].try_into().unwrap();
+        let bytes: [u8; 4] = leading(description, value)?;
         if is_signed {
             let res_value = i32::from_le_bytes(bytes);
-            let signed_value = res_value * description.divisor as i32;
+            let signed_value = res_value.wrapping_mul(description.divisor as i32);
             let is_negative = signed_value < 0;
 
             let value = if is_negative {
                 bw.append_bit(true);
-                -signed_value
+                signed_value.wrapping_neg()
             } else {
                 bw.append_bit(false);
                 signed_value
@@ -251,12 +324,12 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
             bw.append_u32_range(value as u32, description.bits - 1);
         } else {
             let res_value = u32::from_le_bytes(bytes);
-            let value = res_value * description.divisor as u32;
+            let value = res_value.wrapping_mul(description.divisor as u32);
 
             bw.append_u32_range(value, description.bits);
         }
     } else if is_some_float {
-        let bytes: [u8; 4] = value[..4].try_into().unwrap();
+        let bytes: [u8; 4] = leading(description, value)?;
         if is_signed {
             let res_value = f32::from_le_bytes(bytes);
             let signed_value = res_value * description.divisor;
@@ -278,9 +351,9 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
         }
     } else if is_angle {
         // Quick hack. Angle is i16 so here it is.
-        let bytes: [u8; 4] = value[..4].try_into().unwrap();
+        let bytes: [u8; 4] = leading(description, value)?;
         let res_value = f32::from_le_bytes(bytes);
-        let multiplier = 360f32 / (1 << description.bits) as f32;
+        let multiplier = 360f32 / 1i32.wrapping_shl(description.bits) as f32;
         let value = (res_value / multiplier).round() as u32;
         bw.append_u32_range(value, description.bits);
     } else if is_string {
@@ -288,38 +361,10 @@ fn write_delta_field(description: &DeltaDecoderS, value: &[u8], bw: &mut BitWrit
             bw.append_u8(*c);
         }
     } else {
-        unreachable!("Decoded value does not match any type. Should this happens?");
-    }
-}
-
-/// There's no need to add null terminator because string from the table
-/// already includes it.
-fn find_decoder<'a>(
-    key: &'a [u8],
-    delta_decoder: &'a DeltaDecoder,
-) -> Option<(usize, &'a DeltaDecoderS)> {
-    for (index, description) in delta_decoder.iter().enumerate() {
-        if key.len() != description.name.len() {
-            continue;
-        }
-
-        if description.name[..description.name.len()]
-            .iter()
-            .zip(key)
-            .filter(|&(a, b)| a != b)
-            .count()
-            > 0
-        {
-            continue;
-        }
-
-        return Some((index, description));
+        // Was `unreachable!`: `flags` is read off disk, and `parse_delta`
+        // only flags such a field as a bad read. #1510.
+        return Err(DeltaWriteError::NoType(description.key.to_string()));
     }
 
-    None
-}
-
-/// Find delta from description name.
-fn find_delta_value<'a>(name: &[u8], delta: &'a Delta) -> &'a [u8] {
-    delta.get(from_utf8(name).unwrap()).unwrap()
+    Ok(())
 }
