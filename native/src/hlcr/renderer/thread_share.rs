@@ -10,16 +10,44 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::ffmpeg_args::threads_per_process;
 
+/// Whether a capture is recording beside the renders (#861).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Game {
+    /// A capture records: the game needs its share of the machine.
+    Capturing,
+    /// No capture, or one held between clips: nothing records.
+    Idle,
+}
+
+impl Game {
+    /// `Capturing` when a capture is `recording` now, else `Idle`.
+    pub fn recording_if(recording: bool) -> Self {
+        if recording {
+            Self::Capturing
+        } else {
+            Self::Idle
+        }
+    }
+}
+
+/// What a thread share is counted from.
+#[derive(Clone, Copy, Debug)]
+pub struct ShareCount {
+    /// The renders running now, the one asking included.
+    pub running: usize,
+    /// The batch's own "renders at once".
+    pub batch_renders: usize,
+    pub game: Game,
+}
+
 /// How many renders the machine's threads are shared between: the renders
-/// running now (`running`, the one asking included), or, while a capture
-/// runs (`game_busy`, #861), the batch's own "renders at once"
-/// (`batch_renders`), so each render takes the threads one of the batch's
-/// usual renders would and the game keeps the rest. At least 1.
-pub fn thread_share(running: usize, batch_renders: usize, game_busy: bool) -> usize {
-    if game_busy {
-        batch_renders.max(1)
-    } else {
-        running.max(1)
+/// running now, or, while a capture records, the batch's own "renders at
+/// once", so each render takes the threads one of the batch's usual renders
+/// would and the game keeps the rest. At least 1.
+pub fn thread_share(count: ShareCount) -> usize {
+    match count.game {
+        Game::Capturing => count.batch_renders.max(1),
+        Game::Idle => count.running.max(1),
     }
 }
 
@@ -83,16 +111,22 @@ impl SegmentThreads {
         }
     }
 
-    /// The threads segment `index` (counted from 0) takes, counted now from
-    /// the live share (the starting share when unlinked or set to 0), and
-    /// noted when it differs from the segment before.
-    pub(super) fn for_segment(&mut self, index: usize) -> usize {
+    /// The threads a segment starting now would take: from the live share,
+    /// or the starting share when unlinked or set to 0.
+    pub(super) fn threads_now(&self) -> usize {
         let share = self
             .live
             .current()
             .filter(|&share| share > 0)
             .unwrap_or(self.starting_share);
-        let threads = threads_per_process(self.available, share);
+        threads_per_process(self.available, share)
+    }
+
+    /// The threads segment `index` (counted from 0) takes, counted now
+    /// ([`Self::threads_now`]), and noted when it differs from the segment
+    /// before.
+    pub(super) fn for_segment(&mut self, index: usize) -> usize {
+        let threads = self.threads_now();
         let previous = self.changes.last().map(|&(_, t)| t).or(self.first);
         match previous {
             None => self.first = Some(threads),
@@ -102,26 +136,24 @@ impl SegmentThreads {
         threads
     }
 
-    /// How the count went, for the activity log (`5 → 16 at segment 11`),
-    /// or `None` when every segment took the same.
-    pub(super) fn changes_text(&self) -> Option<String> {
+    /// How the count went: the first segment's threads and each change
+    /// after it (segment counted from 1, its threads), or `None` when every
+    /// segment took the same.
+    pub(super) fn changes(&self) -> Option<(usize, &[(usize, usize)])> {
         let first = self.first?;
-        if self.changes.is_empty() {
-            return None;
-        }
-        let steps: Vec<String> = self
-            .changes
-            .iter()
-            .map(|&(segment, threads)| {
-                crate::messages::render::thread_change_step(threads, segment)
-            })
-            .collect();
-        Some(format!("{first} {}", steps.join(", ")))
+        (!self.changes.is_empty()).then_some((first, self.changes.as_slice()))
     }
 
-    /// The render's segments, for the log line.
-    pub(super) fn total_segments(&self) -> usize {
-        self.total_segments
+    /// The activity-log line for how the count changed, or `None` when it
+    /// didn't.
+    pub(super) fn changes_line(&self, job_id: &str) -> Option<String> {
+        let (first, changes) = self.changes()?;
+        Some(crate::messages::render::segment_threads_changed(
+            job_id,
+            first,
+            changes,
+            self.total_segments,
+        ))
     }
 }
 
@@ -129,26 +161,42 @@ impl SegmentThreads {
 mod tests {
     use super::*;
 
+    fn idle(running: usize, batch_renders: usize) -> usize {
+        thread_share(ShareCount {
+            running,
+            batch_renders,
+            game: Game::Idle,
+        })
+    }
+
+    fn capturing(running: usize, batch_renders: usize) -> usize {
+        thread_share(ShareCount {
+            running,
+            batch_renders,
+            game: Game::Capturing,
+        })
+    }
+
     #[test]
     fn a_lone_render_shares_with_no_one() {
-        assert_eq!(thread_share(1, 3, false), 1);
+        assert_eq!(idle(1, 3), 1);
         // Nothing counted yet still divides by one, never zero.
-        assert_eq!(thread_share(0, 3, false), 1);
+        assert_eq!(idle(0, 3), 1);
     }
 
     #[test]
     fn running_renders_share_the_threads_between_them() {
-        assert_eq!(thread_share(3, 3, false), 3);
-        assert_eq!(thread_share(2, 3, false), 2);
+        assert_eq!(idle(3, 3), 3);
+        assert_eq!(idle(2, 3), 2);
     }
 
     /// #861: beside a capture each render takes one usual render's share,
     /// however many are running.
     #[test]
     fn during_a_capture_each_render_takes_the_batchs_usual_share() {
-        assert_eq!(thread_share(1, 3, true), 3);
-        assert_eq!(thread_share(2, 4, true), 4);
-        assert_eq!(thread_share(1, 0, true), 1);
+        assert_eq!(capturing(1, 3), 3);
+        assert_eq!(capturing(2, 4), 4);
+        assert_eq!(capturing(1, 0), 1);
     }
 
     #[test]
@@ -173,15 +221,17 @@ mod tests {
     fn a_segment_started_after_the_others_finished_takes_every_thread() {
         let scheduler = LiveThreadShare::new(3);
         let mut threads = SegmentThreads::new(Some(16), 3, scheduler.clone(), 30);
+        assert_eq!(threads.threads_now(), 5);
         for index in 0..10 {
             assert_eq!(threads.for_segment(index), 5);
         }
-        scheduler.set(thread_share(1, 3, false));
+        scheduler.set(idle(1, 3));
         assert_eq!(threads.for_segment(10), 16);
         assert_eq!(threads.for_segment(11), 16);
+        assert_eq!(threads.changes(), Some((5, &[(11, 16)][..])));
         assert_eq!(
-            threads.changes_text().as_deref(),
-            Some("5 → 16 at segment 11")
+            threads.changes_line("4").as_deref(),
+            Some("[render] job 4: FFmpeg threads went 5 → 16 at segment 11 of 30")
         );
     }
 
@@ -189,12 +239,12 @@ mod tests {
     /// segments keep theirs when the other renders finish.
     #[test]
     fn during_a_capture_a_segment_keeps_the_batch_share() {
-        let scheduler = LiveThreadShare::new(thread_share(3, 3, true));
+        let scheduler = LiveThreadShare::new(capturing(3, 3));
         let mut threads = SegmentThreads::new(Some(16), 3, scheduler.clone(), 30);
         assert_eq!(threads.for_segment(0), 5);
-        scheduler.set(thread_share(1, 3, true));
+        scheduler.set(capturing(1, 3));
         assert_eq!(threads.for_segment(1), 5);
-        assert_eq!(threads.changes_text(), None);
+        assert_eq!(threads.changes_line("4"), None);
     }
 
     #[test]
@@ -208,8 +258,8 @@ mod tests {
         scheduler.set(1);
         threads.for_segment(3);
         assert_eq!(
-            threads.changes_text().as_deref(),
-            Some("5 → 8 at segment 2, → 16 at segment 4")
+            threads.changes_line("4").as_deref(),
+            Some("[render] job 4: FFmpeg threads went 5 → 8 at segment 2, → 16 at segment 4 of 30")
         );
     }
 
@@ -220,7 +270,7 @@ mod tests {
         let mut threads = SegmentThreads::new(Some(16), 2, LiveThreadShare::default(), 5);
         assert_eq!(threads.for_segment(0), 8);
         assert_eq!(threads.for_segment(1), 8);
-        assert_eq!(threads.changes_text(), None);
+        assert_eq!(threads.changes(), None);
     }
 
     #[test]
@@ -229,6 +279,6 @@ mod tests {
         let mut threads = SegmentThreads::new(Some(16), 2, scheduler, 30);
         // Segments 1-7 were on disk; the first rendered now is 8.
         assert_eq!(threads.for_segment(7), 16);
-        assert_eq!(threads.changes_text(), None);
+        assert_eq!(threads.changes(), None);
     }
 }

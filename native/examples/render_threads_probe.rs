@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use native::hlcr::config::{RenderCodec, RenderConfig};
-use native::hlcr::renderer::thread_share::{LiveThreadShare, thread_share};
+use native::hlcr::renderer::thread_share::{Game, LiveThreadShare, ShareCount, thread_share};
 use native::hlcr::renderer::{RenderUpdate, run_render_job};
 use native::hlcr::scanner::ClipData;
 
@@ -32,6 +32,15 @@ const LONG_FRAMES: usize = 10_500;
 /// 15 s: one piece (up to two segments' length renders whole).
 const SHORT_FRAMES: usize = 4_500;
 const RENDERS_AT_ONCE: usize = 3;
+
+/// The scheduler's share with `running` renders and no capture.
+fn share_with(running: usize) -> usize {
+    thread_share(ShareCount {
+        running,
+        batch_renders: RENDERS_AT_ONCE,
+        game: Game::Idle,
+    })
+}
 
 fn ffmpeg_ok(ffmpeg: &str, cwd: &Path, args: &[&str]) {
     let out = std::process::Command::new(ffmpeg)
@@ -190,7 +199,7 @@ async fn main() {
             .await,
         );
     } else {
-        let share = thread_share(RENDERS_AT_ONCE, RENDERS_AT_ONCE, false);
+        let share = share_with(RENDERS_AT_ONCE);
         let live = LiveThreadShare::new(share);
         let long_live = if mode == "new" {
             live.clone()
@@ -218,7 +227,7 @@ async fn main() {
             ran.push(short.await.unwrap());
         }
         // What the scheduler's next pass does once both have finished.
-        live.set(thread_share(1, RENDERS_AT_ONCE, false));
+        live.set(share_with(1));
         println!("shorts done at {:.1} s", began.elapsed().as_secs_f64());
         ran.push(long.await.unwrap());
     }

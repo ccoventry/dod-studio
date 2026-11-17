@@ -658,19 +658,20 @@ pub(super) async fn run_segmented(job: &RenderJob, render: SegmentedRender<'_>) 
     } else {
         msg::segments_reused(&segment_ranges(&finished), finished.len(), segments.len())
     };
-    crate::log_markdown(&msg::segments_started(
-        &job.job_id,
-        segments.len(),
-        plan.segment_frames,
-        render.folder.dir.display(),
-        reused,
-    ));
     let mut threads = SegmentThreads::new(
         super::available_threads(),
         job.config.max_concurrent_renders,
         job.config.live_thread_share.clone(),
         segments.len(),
     );
+    crate::log_markdown(&msg::segments_started(
+        &job.job_id,
+        segments.len(),
+        plan.segment_frames,
+        threads.threads_now(),
+        render.folder.dir.display(),
+        reused,
+    ));
     let mut rendered_frames = 0;
     for segment in segments.iter().filter(|s| !finished.contains(&s.index)) {
         let step = render_segment(job, &render, *segment, threads.for_segment(segment.index)).await;
@@ -707,12 +708,8 @@ fn log_thread_changes(job: &RenderJob, threads: &SegmentThreads) {
     if super::is_exiting() {
         return;
     }
-    if let Some(changes) = threads.changes_text() {
-        crate::log_markdown(&msg::segment_threads_changed(
-            &job.job_id,
-            &changes,
-            threads.total_segments(),
-        ));
+    if let Some(line) = threads.changes_line(&job.job_id) {
+        crate::log_markdown(&line);
     }
 }
 
@@ -875,21 +872,25 @@ async fn join_segments(
     );
     let began = std::time::Instant::now();
     let end = run_to_end(job, args, &render.folder.dir, None).await;
-    if !matches!(end, RunEnd::Exiting) {
-        // The row's speed cell said it was joining; that is over. A
-        // one-piece row keeps FFmpeg's last speed, so this one shows the
-        // whole render's (#1512); a join that failed shows none.
-        let speed = if matches!(end, RunEnd::Succeeded { .. }) {
-            whole_render_speed(rendered.frames, rendered.began.elapsed(), render.plan.rate)
-        } else {
-            String::new()
-        };
-        job.send(RenderUpdate::Speed(job.job_id.clone(), speed));
+    // The row's speed cell said it was joining; that is over. A join that
+    // failed shows no speed; one that holds every frame shows the whole
+    // render's, as a one-piece row keeps FFmpeg's last (#1512).
+    let clear_speed = || job.send(RenderUpdate::Speed(job.job_id.clone(), String::new()));
+    if !matches!(end, RunEnd::Exiting | RunEnd::Succeeded { .. }) {
+        clear_speed();
     }
     match end {
         RunEnd::Succeeded { last_frame } => {
             let container = count_frames(&output.partial, render.encode.file_ext);
-            match check_frames(container, last_frame, render.plan.total_frames) {
+            let check = check_frames(container, last_frame, render.plan.total_frames);
+            if matches!(check, FrameCheck::Short(_)) {
+                clear_speed();
+            } else {
+                let speed =
+                    whole_render_speed(rendered.frames, rendered.began.elapsed(), render.plan.rate);
+                job.send(RenderUpdate::Speed(job.job_id.clone(), speed));
+            }
+            match check {
                 FrameCheck::Short(frames) => {
                     let message = msg::join_short(frames, render.plan.total_frames);
                     crate::log_markdown(&msg::join_failed(&job.job_id, &message));

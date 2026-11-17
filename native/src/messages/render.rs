@@ -105,18 +105,20 @@ pub fn exit_partial_left(path: impl Display, err: impl Display) -> String {
     format!("[render] DoD Studio is closing: could not remove the unfinished render {path}: {err}")
 }
 
-/// A render cut into segments (#1451) started: how many, how long each, where
-/// they are kept until joined, and `reused` ([`segments_reused`], or
-/// nothing).
+/// A render cut into segments (#1451) started: how many, how long each, the
+/// FFmpeg threads its first segment takes (each segment recounts them,
+/// #1512), where they are kept until joined, and `reused`
+/// ([`segments_reused`], or nothing).
 pub fn segments_started(
     job_id: impl Display,
     segments: usize,
     segment_frames: usize,
+    threads: usize,
     dir: impl Display,
     reused: impl Display,
 ) -> String {
     format!(
-        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames, kept in {dir} until they are joined{reused}"
+        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames with {threads} FFmpeg threads (recounted as each segment starts), kept in {dir} until they are joined{reused}"
     )
 }
 
@@ -193,17 +195,24 @@ pub fn joining_segments(count: usize) -> String {
     format!("Joining {count} segments")
 }
 
-/// One change in a segmented render's FFmpeg threads (#1512): the count
-/// from segment `segment` (counted from 1) on.
-pub fn thread_change_step(threads: usize, segment: usize) -> String {
-    format!("→ {threads} at segment {segment}")
-}
-
 /// A segmented render's FFmpeg threads changed between its segments as
-/// other renders started or finished (#1512): `changes` is how
-/// (`5 → 16 at segment 11`), over `segments` segments.
-pub fn segment_threads_changed(job_id: impl Display, changes: &str, segments: usize) -> String {
-    format!("[render] job {job_id}: FFmpeg threads went {changes} of {segments}")
+/// other renders started or finished (#1512): the first segment's `first`
+/// threads, then each change as (segment counted from 1, threads), over
+/// `segments` segments: `5 → 8 at segment 2, → 16 at segment 4 of 30`.
+pub fn segment_threads_changed(
+    job_id: impl Display,
+    first: usize,
+    changes: &[(usize, usize)],
+    segments: usize,
+) -> String {
+    let steps: Vec<String> = changes
+        .iter()
+        .map(|(segment, threads)| format!("→ {threads} at segment {segment}"))
+        .collect();
+    format!(
+        "[render] job {job_id}: FFmpeg threads went {first} {} of {segments}",
+        steps.join(", ")
+    )
 }
 
 /// The Render tab row's speed cell once a segmented render is done (#1512):
