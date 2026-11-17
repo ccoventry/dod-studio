@@ -399,6 +399,18 @@ pub fn crash_explained(what: &str, site: &str, map: Option<&str>, cause: Option<
     }
 }
 
+// ── sys/child_job.rs (#1496) ──────────────────────────────────────────────
+
+/// A child Studio started could not be tied to Studio's job object: it would
+/// outlive a Studio that exits while it runs. `what` names it ("FFmpeg
+/// (combine)"). A render's FFmpeg has its own, naming the job:
+/// `render::not_tied_to_studio`.
+pub fn not_tied_to_studio(what: &str, err: impl Display) -> String {
+    format!(
+        "{what} could not be set to end with DoD Studio ({err}); closing DoD Studio while it runs may leave it running"
+    )
+}
+
 // ── hlcr/combine.rs (#107) ────────────────────────────────────────────────
 
 pub const COMBINE_NEEDS_TWO: &str = "pick at least two clips to combine";

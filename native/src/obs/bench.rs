@@ -402,9 +402,9 @@ pub async fn analyze_file(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+    let mut child =
+        crate::sys::child_job::spawn_ending_with_studio(&mut cmd, "FFmpeg (OBS benchmark)")
+            .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     let stdout = child
         .stdout
         .take()
@@ -480,15 +480,18 @@ pub async fn analyze_file(
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let out = tokio::time::timeout(ANALYSIS_TIMEOUT, cmd.output())
-            .await
-            .map_err(|_| {
-                format!(
-                    "FFmpeg took too long to read the sound of {}",
-                    video.display()
-                )
-            })?
-            .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
+        let out = tokio::time::timeout(
+            ANALYSIS_TIMEOUT,
+            crate::sys::child_job::output_ending_with_studio(&mut cmd, "FFmpeg (OBS benchmark)"),
+        )
+        .await
+        .map_err(|_| {
+            format!(
+                "FFmpeg took too long to read the sound of {}",
+                video.display()
+            )
+        })?
+        .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
         let (mean, peak) = parse_volumedetect(&String::from_utf8_lossy(&out.stderr));
         report.audio_mean_db = mean;
         report.audio_peak_db = peak;

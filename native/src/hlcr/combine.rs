@@ -53,12 +53,12 @@ pub async fn probe(ffmpeg: &Path, clip: &Path) -> Result<ClipInfo, String> {
     cmd.kill_on_drop(true)
         .args(["-hide_banner", "-i"])
         .arg(clip)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // `ffmpeg -i` with no output exits 1 after printing the report; that is
     // expected, so only the text matters.
-    let out = cmd
-        .output()
+    let out = crate::sys::child_job::output_ending_with_studio(&mut cmd, "FFmpeg (clip probe)")
         .await
         .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     let report = String::from_utf8_lossy(&out.stderr);
@@ -332,8 +332,7 @@ pub async fn combine(
         .args(combine_args(plan, &list, output))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
+    let mut child = crate::sys::child_job::spawn_ending_with_studio(&mut cmd, "FFmpeg (combine)")
         .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
 
     // FFmpeg's -progress lines: out_time_us=<microseconds>.

@@ -88,13 +88,60 @@ pub fn end_with_studio(child: &tokio::process::Child) -> std::io::Result<()> {
         .assign(child)
 }
 
-/// Ends every process `end_with_studio` was given, at once. For Studio's own
-/// way out, before it removes what they were writing.
+/// Starts `cmd` and makes the child end with Studio, as a render's FFmpeg
+/// does (#1496). When it can't be tied to Studio, the activity log says so,
+/// naming `what`, and the child runs on anyway: the work still gets done,
+/// and only a Studio that closes mid-run would leave it running (#1439).
+pub fn spawn_ending_with_studio(
+    cmd: &mut tokio::process::Command,
+    what: &str,
+) -> std::io::Result<tokio::process::Child> {
+    let child = cmd.spawn()?;
+    if let Err(e) = end_with_studio(&child) {
+        crate::log_markdown(&crate::messages::not_tied_to_studio(what, e));
+    }
+    Ok(child)
+}
+
+/// [`spawn_ending_with_studio`], then waits for the child and collects its
+/// output, as `Command::output` would. Unlike `output`, the pipes are the
+/// ones `cmd` sets, stdin included: set all three on it.
+pub async fn output_ending_with_studio(
+    cmd: &mut tokio::process::Command,
+    what: &str,
+) -> std::io::Result<std::process::Output> {
+    spawn_ending_with_studio(cmd, what)?
+        .wait_with_output()
+        .await
+}
+
+/// Ends every process `end_with_studio` was given, at once: renders,
+/// combines, frame checks and the OBS benchmark's FFmpegs alike. For
+/// Studio's own way out, before it removes what they were writing.
 pub fn end_all_with_studio() -> std::io::Result<()> {
     match studio_job() {
         Some(job) => job.end_all(),
         None => Ok(()),
     }
+}
+
+/// Whether the running process `pid` is in Studio's job, for the tests of
+/// code that starts children (#1496). False when it can't be told.
+#[cfg(test)]
+#[cfg(windows)]
+pub(crate) fn in_studio_job(pid: u32) -> bool {
+    studio_job().is_some_and(|job| win::contains(job.handle, pid))
+}
+
+/// The children of this process named `exe` that are in Studio's job.
+#[cfg(test)]
+#[cfg(windows)]
+pub(crate) fn children_in_studio_job(exe: &str) -> Vec<u32> {
+    let sys = crate::sys::process::snapshot();
+    crate::sys::process::children_named_in(&sys, &[exe], std::process::id())
+        .into_iter()
+        .filter(|&pid| in_studio_job(pid))
+        .collect()
 }
 
 #[cfg(windows)]
@@ -174,6 +221,30 @@ mod win {
         // Closing our own handle can only fail if it were already closed.
         unsafe { CloseHandle(handle as *mut std::ffi::c_void) };
     }
+
+    /// Whether process `pid` is in `job`. False when it can't be opened.
+    #[cfg(test)]
+    pub fn contains(job: isize, pid: u32) -> bool {
+        /// `PROCESS_QUERY_LIMITED_INFORMATION`, all `IsProcessInJob` needs.
+        const QUERY_LIMITED: u32 = 0x1000;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            // `*mut c_void`, as `modules.rs` declares it: one signature per
+            // import, or the compiler warns.
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+            fn IsProcessInJob(process: isize, job: isize, result: *mut i32) -> i32;
+        }
+        // SAFETY: plain query calls; the handle opened is closed below.
+        let process = unsafe { OpenProcess(QUERY_LIMITED, 0, pid) } as isize;
+        if process == 0 {
+            return false;
+        }
+        let mut inside = 0;
+        // SAFETY: both handles are open; `inside` outlives the call.
+        let ok = unsafe { IsProcessInJob(process, job, &mut inside) };
+        close(process);
+        ok != 0 && inside != 0
+    }
 }
 
 // Two attributes, not `all(test, windows)`: Clippy only treats a module
@@ -227,5 +298,42 @@ mod tests {
         assert!(exits_within(&mut inside, Duration::from_secs(5)).await);
         assert!(!exits_within(&mut outside, Duration::from_millis(300)).await);
         outside.kill().await.unwrap();
+    }
+
+    /// What combines, frame checks and the OBS benchmark start their FFmpegs
+    /// with (#1496): the child is in Studio's job, so it ends with Studio.
+    #[tokio::test]
+    async fn a_child_started_to_end_with_studio_is_in_studios_job() {
+        let mut cmd = tokio::process::Command::new("ping");
+        cmd.args(["-n", "60", "127.0.0.1"])
+            .creation_flags(0x08000000)
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true);
+        let mut child = super::spawn_ending_with_studio(&mut cmd, "ping").unwrap();
+        let pid = child.id().unwrap();
+        assert!(super::in_studio_job(pid));
+        child.kill().await.unwrap();
+
+        // A child started the plain way is not, so the check can tell.
+        let mut plain = long_child();
+        assert!(!super::in_studio_job(plain.id().unwrap()));
+        plain.kill().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn output_ending_with_studio_collects_what_the_child_printed() {
+        // Not `cmd`: the frame-check test looks for its own `cmd.exe` in
+        // Studio's job.
+        let mut cmd = tokio::process::Command::new("ping");
+        cmd.args(["-n", "1", "127.0.0.1"])
+            .creation_flags(0x08000000)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let out = super::output_ending_with_studio(&mut cmd, "cmd")
+            .await
+            .unwrap();
+        assert!(out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("127.0.0.1"));
     }
 }
