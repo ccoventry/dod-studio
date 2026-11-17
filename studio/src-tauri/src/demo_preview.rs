@@ -210,10 +210,7 @@ pub async fn launch_demo_preview(
             format!("+{line}")
         };
         let mut cmd = patcher_config.build_hlae_process(&extra);
-        native::tool_versions::log_hlae_launch(
-            Path::new(&patcher_config.hlae_path),
-            Path::new(&patcher_config.game_path),
-        );
+        native::tool_versions::log_hlae_launch(&patcher_config);
         let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
         watch_for_error_dialogs(app, launcher);

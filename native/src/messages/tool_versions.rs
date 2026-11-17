@@ -5,8 +5,8 @@
 
 use std::fmt::Display;
 
-/// What one file's version read gave: the version, or that it can't be read.
-fn version_or_unread(version: Option<&str>) -> String {
+/// HLAE's version for a log line, or that it can't be read.
+fn hlae_version_or_unread(version: Option<&str>) -> String {
     version.map_or_else(|| "version unreadable".to_string(), |v| format!("v{v}"))
 }
 
@@ -20,18 +20,32 @@ pub fn engine_build(build: Option<&str>) -> &'static str {
 }
 
 /// Logged as HLAE launches the game (a capture batch, a preview, Launch
-/// Game): HLAE's and its hook DLL's file versions, and the game's engine.
-/// A version that could not be read says so, and the launch goes ahead.
+/// Game): HLAE's version (its product version, which carries the build's git
+/// hash, else its file version) and the game's engine. A version that could
+/// not be read says so, and the launch goes ahead.
 pub fn hlae_launch(
     hlae_exe: impl Display,
     hlae_version: Option<&str>,
-    hook_dll_version: Option<&str>,
     engine: Option<&str>,
 ) -> String {
     format!(
-        "[HLAE] Launching with {hlae_exe} ({}); AfxHookGoldSrc.dll ({}); game engine: {}",
-        version_or_unread(hlae_version),
-        version_or_unread(hook_dll_version),
+        "[HLAE] Launching with {hlae_exe} ({}); game engine: {}",
+        hlae_version_or_unread(hlae_version),
+        engine_build(engine)
+    )
+}
+
+/// [`hlae_launch`] for a batch that runs in a game that was already open, so
+/// HLAE is not started: the versions are of the configured HLAE and of the
+/// engine the open game's install has.
+pub fn hlae_reused_game(
+    hlae_exe: impl Display,
+    hlae_version: Option<&str>,
+    engine: Option<&str>,
+) -> String {
+    format!(
+        "[HLAE] Running in a game that was already open; the configured HLAE is {hlae_exe} ({}); game engine: {}",
+        hlae_version_or_unread(hlae_version),
         engine_build(engine)
     )
 }
@@ -41,27 +55,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_launch_line_names_each_version() {
+    fn the_launch_line_names_the_version_and_engine() {
         assert_eq!(
             hlae_launch(
                 "HLAE/HLAE.exe",
-                Some("2.189.5.0"),
-                Some("2.189.5.0"),
+                Some("2.192.4.0+55ebb71"),
                 Some("anniversary")
             ),
-            "[HLAE] Launching with HLAE/HLAE.exe (v2.189.5.0); AfxHookGoldSrc.dll (v2.189.5.0); game engine: 25th Anniversary"
+            "[HLAE] Launching with HLAE/HLAE.exe (v2.192.4.0+55ebb71); game engine: 25th Anniversary"
         );
     }
 
     #[test]
     fn a_version_that_cannot_be_read_says_so() {
         assert_eq!(
-            hlae_launch("HLAE.exe", None, Some("2.1.0.0"), None),
-            "[HLAE] Launching with HLAE.exe (version unreadable); AfxHookGoldSrc.dll (v2.1.0.0); game engine: build unreadable"
+            hlae_launch("HLAE.exe", None, None),
+            "[HLAE] Launching with HLAE.exe (version unreadable); game engine: build unreadable"
         );
         assert!(
-            hlae_launch("HLAE.exe", Some("1.0.0.0"), None, Some("pre_anniversary"))
-                .ends_with("AfxHookGoldSrc.dll (version unreadable); game engine: pre-Anniversary")
+            hlae_launch("HLAE.exe", Some("1.0.0.0"), Some("pre_anniversary"))
+                .ends_with("game engine: pre-Anniversary")
+        );
+    }
+
+    #[test]
+    fn a_reused_game_says_it_was_already_running() {
+        assert_eq!(
+            hlae_reused_game("HLAE.exe", Some("2.192.4.0"), Some("pre_anniversary")),
+            "[HLAE] Running in a game that was already open; the configured HLAE is HLAE.exe (v2.192.4.0); game engine: pre-Anniversary"
         );
     }
 }

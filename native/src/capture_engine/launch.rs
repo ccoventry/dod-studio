@@ -180,11 +180,10 @@ pub(super) fn start_game(
     let cfg_path = dod_dir.join("dod_quit.cfg");
     std::fs::write(&cfg_path, "quit\n").ok();
 
-    if reuse_game.is_none() {
-        crate::tool_versions::log_hlae_launch(
-            Path::new(&config.hlae_path),
-            Path::new(&config.game_path),
-        );
+    if reuse_game.is_some() {
+        crate::tool_versions::log_reused_game(config);
+    } else {
+        crate::tool_versions::log_hlae_launch(config);
         log_markdown(&crate::messages::hlae_spawning(
             cmd.get_program(),
             cmd.get_args().collect::<Vec<_>>(),
