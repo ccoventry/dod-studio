@@ -28,7 +28,7 @@ pub async fn crash_map_warnings(demo_paths: Vec<String>) -> Result<Vec<CrashMapW
         }
         let mut out = Vec::new();
         for path in demo_paths {
-            let Ok(reference) = native::patch::map_check::map_reference(Path::new(&path)) else {
+            let Ok(reference) = native::maps::map_check::map_reference(Path::new(&path)) else {
                 continue;
             };
             let demo_name = Path::new(&path)

@@ -1,4 +1,5 @@
 import { logFrontendEvent } from './ipc_bridge.js';
+import { STRINGS } from './strings.js';
 
 /** The activity-log line for a toast (#873): its kind and its text on one
  *  line, so a log shows what the user was told. */
@@ -11,8 +12,10 @@ export function toastLogLine(message, type = 'info') {
  * Clicking it runs onClick and dismisses the toast at once.
  * Every toast is also written to the activity log (#873).
  * The same text and kind already on screen isn't shown a second time (#1097).
+ * `sticky` keeps it up until its action or its close button is clicked
+ * (`duration` is then ignored), for one the user has to act on (#1373).
  */
-export function showToast(message, type = 'info', duration = 3000, { action } = {}) {
+export function showToast(message, type = 'info', duration = 3000, { action, sticky = false } = {}) {
   let container = document.querySelector('#toast-container');
   const className = `toast toast-${type}`;
   if (!action && container && [...container.children].some(
@@ -49,6 +52,22 @@ export function showToast(message, type = 'info', duration = 3000, { action } = 
       if (toast.parentNode === container) container.removeChild(toast);
     });
     toast.appendChild(button);
+  }
+
+  if (sticky) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.textContent = '×';
+    close.title = STRINGS.TOAST_DISMISS;
+    close.setAttribute('aria-label', STRINGS.TOAST_DISMISS);
+    close.style.cssText = 'margin-left: 8px; background: transparent; color: var(--text-strong); border: none; cursor: pointer; font-size: 15px; line-height: 1;';
+    close.addEventListener('click', () => {
+      if (toast.parentNode === container) container.removeChild(toast);
+    });
+    toast.appendChild(close);
+    container.appendChild(toast);
+    return toast;
   }
 
   container.appendChild(toast);

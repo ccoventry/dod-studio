@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 // find_overlaps.rs
 //
 // Scans a folder of .dem files and reports which ones contain highlights that

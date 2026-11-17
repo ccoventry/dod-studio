@@ -22,7 +22,7 @@
 //! swallows a pointer move or confinement and shows or moves the game window
 //! without activating it, at the bottom of the stack. Otherwise it calls what
 //! the slot held. Only these modules' own calls change (the same trade-off
-//! `engine::hook_import` makes); HLAE's are left alone.
+//! `engine::loader::hook_import` makes); HLAE's are left alone.
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};

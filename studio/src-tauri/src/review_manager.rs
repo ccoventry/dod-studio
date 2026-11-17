@@ -10,7 +10,7 @@
 //! per game reads them for as long as that game runs and emits each one as a
 //! `review_event`.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

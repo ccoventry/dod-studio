@@ -9,7 +9,7 @@
 //!
 //! Measured 2026-08-26 over 107,584 coordinates from 83 demos across 18 maps:
 //! 98.93% land on a world face within 1 unit. Re-run it after touching
-//! `patch::bsp` — a drop means the parser broke, not that the demos changed.
+//! `maps::bsp` — a drop means the parser broke, not that the demos changed.
 //!
 //! ```text
 //! cargo run --release -p native --bin validate_bsp -- <demo> <maps_dir> <label>
@@ -17,10 +17,15 @@
 //!
 //! Prints one TSV line: label, demo, map, coordinates tested, hit percentage at
 //! 1/2/4/8 units, count landing on nothing, world faces, total faces.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
-use native::patch::bsp::{Bsp, CONTENTS_SOLID};
-use native::patch::decal_atlas::MapKey;
-use native::patch::decal_strip::proven_world_coordinates;
+use native::decals::decal_atlas::MapKey;
+use native::decals::decal_strip::proven_world_coordinates;
+use native::maps::bsp::{Bsp, CONTENTS_SOLID};
 
 fn main() {
     let mut args = std::env::args().skip(1);

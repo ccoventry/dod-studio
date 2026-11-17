@@ -17,6 +17,11 @@
 //! ~0.6s at 500. It is `DecalCleanOptions::lead_seconds` now, resolved by
 //! walking the frames' own timestamps — this tool reports what that flat count
 //! *would* have been worth, which is how the problem was found.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::patch::scanner::scan_demo_for_highlights;
 

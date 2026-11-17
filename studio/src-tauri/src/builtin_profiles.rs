@@ -198,10 +198,15 @@ fn mine_name(builtin: &str, taken: &[String]) -> String {
     if free(&first) {
         return first;
     }
-    (2..)
-        .map(|n| format!("{builtin} ({MINE_SUFFIX} {n})"))
-        .find(|candidate| free(candidate))
-        .expect("an unbounded range finds a free name")
+    // `taken` is finite, so some number past it is free.
+    let mut n = 2;
+    loop {
+        let candidate = format!("{builtin} ({MINE_SUFFIX} {n})");
+        if free(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// Takes every profile out of `profiles` that has a built-in profile's name
@@ -356,8 +361,8 @@ mod tests {
         // Nothing in it is refused, a no-op at demo load, or renamed. (The
         // mid-demo list doesn't apply: these run once, at demo load.)
         let commands = &profile.init_commands;
-        assert!(native::patch::cfg_scan::banned_commands(commands).is_empty());
-        assert!(native::patch::cfg_scan::noop_commands_in_init(commands).is_empty());
-        assert!(native::patch::cfg_scan::renamed_commands(commands).is_empty());
+        assert!(native::game_config::cfg_scan::banned_commands(commands).is_empty());
+        assert!(native::game_config::cfg_scan::noop_commands_in_init(commands).is_empty());
+        assert!(native::game_config::cfg_scan::renamed_commands(commands).is_empty());
     }
 }

@@ -78,7 +78,7 @@ pub(crate) fn before_demo(demo: &str) {
         return;
     }
     let game_dir = crate::texture_hires::game_dir();
-    let path = crate::streaks::demo_path(&game_dir, demo);
+    let path = crate::demo_locate::playing(demo);
     let Some(map) = map_of(&path) else {
         report(&format!(
             "{NAME}: no map name in {}'s header, so no map cfg ran",
@@ -99,7 +99,11 @@ pub(crate) fn before_demo(demo: &str) {
         }
     }
     if !ran.is_empty() {
-        report(&format!("{NAME}: {map}: ran {}", ran.join(", ")));
+        report(&format!(
+            "{NAME}: {map} ({}): ran {}",
+            path.display(),
+            ran.join(", ")
+        ));
     }
 }
 

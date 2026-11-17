@@ -218,7 +218,7 @@ pub fn set_dem_open_with(enabled: bool) -> Result<DemOpenWith, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use native::shared::lock::lock_or_recover;
+    use lock_recover::lock_or_recover;
 
     #[test]
     fn the_command_quotes_the_exe_and_the_demo() {

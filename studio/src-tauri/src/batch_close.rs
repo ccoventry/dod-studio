@@ -9,8 +9,8 @@
 // catch-up marks it. If it never gets there, the prompt says the batch has not
 // started and closing cancels it.
 
+use lock_recover::lock_or_recover;
 use native::game_handoff::{BatchStart, StartState};
-use native::shared::lock::lock_or_recover;
 use std::time::{Duration, Instant};
 
 use crate::capture_manager::CaptureManager;

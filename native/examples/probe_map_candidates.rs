@@ -18,8 +18,13 @@
 //! Columns: label, map, world faces, faces that take decals, faces large
 //! enough to sample, candidates, distinct leaves they occupy, candidates in
 //! open space, projection hit rate over a strided sample, elapsed ms.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
-use native::patch::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID, FaceSampling};
+use native::maps::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID, FaceSampling};
 
 /// Only every Nth candidate is projected back onto a face: `decal_draw_point`
 /// walks every world face, so the full set would cost more than the scan it is

@@ -4,6 +4,20 @@
 
 use super::*;
 
+/// How highlights of one demo and player are ordered (and numbered in the
+/// Event List): first recorded kill, then last recorded kill, then the Kill
+/// Range indices (two kills on one frame make the frames alone tie), then the
+/// kill ticks. Nothing in it depends on the order the batch was sent in.
+pub(super) fn highlight_order_key(s: &CaptureStreak) -> (i32, i32, usize, usize, Vec<i32>) {
+    (
+        first_kill_frame(s),
+        last_kill_frame(s),
+        s.start_index,
+        s.end_index,
+        s.kills.iter().map(|k| k.0).collect(),
+    )
+}
+
 /// One chain job's highlights: every highlight of one demo and one player,
 /// sorted by first recorded kill, each with its index in the batch's
 /// highlight list.
@@ -63,13 +77,7 @@ pub(super) fn group_highlights(highlights: &[CaptureStreak]) -> Vec<HighlightGro
             // recorded kill, then by their kill ticks, so the order (and the
             // Event List numbers built from it) doesn't follow the order the
             // batch was sent in (#1417).
-            highlights.sort_by_key(|(_, s)| {
-                (
-                    first_kill_frame(s),
-                    last_kill_frame(s),
-                    s.kills.iter().map(|k| k.0).collect::<Vec<_>>(),
-                )
-            });
+            highlights.sort_by_cached_key(|(_, s)| highlight_order_key(s));
             HighlightGroup {
                 source_demo,
                 target_player,
@@ -143,9 +151,8 @@ pub(super) fn cut_blocks(
 
         // Past the first highlight the four lists are non-empty: they grow
         // together, and the first highlight always pushes.
-        #[allow(
+        #[expect(
             clippy::unwrap_used,
-            clippy::expect_used,
             reason = "past the first highlight the four lists are non-empty"
         )]
         let prev_stop = last_kill_frame(merged_streaks.last().unwrap());
@@ -163,9 +170,8 @@ pub(super) fn cut_blocks(
             start_lead_ticks,
             stop_trail_ticks + min_separation_ticks,
         ) {
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             let last = merged_streaks.last_mut().unwrap();
@@ -189,15 +195,13 @@ pub(super) fn cut_blocks(
                 last.kills.push(kill);
                 last.end_index = last.kills.len() - 1;
             }
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             merged_sources.last_mut().unwrap().push(payload_idx);
-            #[allow(
+            #[expect(
                 clippy::unwrap_used,
-                clippy::expect_used,
                 reason = "past the first highlight the four lists are non-empty"
             )]
             let kills = merged_kill_frames.last_mut().unwrap();

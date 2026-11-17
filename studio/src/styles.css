@@ -1,4 +1,4 @@
-/* ── Absolute CSS reset — overrides Vite/browser defaults ─────────────────── */
+/* â”€â”€ Absolute CSS reset â€” overrides Vite/browser defaults â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /* Must appear before any other rules so specificity is established early.    */
 
 /* Remove Vite's injected link styling that shows blue underlined anchors. */
@@ -17,7 +17,7 @@ button, input, select, textarea {
   -webkit-appearance: none;
 }
 
-/* Checkboxes/radios need their native control box + checkmark — the reset
+/* Checkboxes/radios need their native control box + checkmark â€” the reset
    above strips it entirely with nothing to replace it, leaving an invisible
    (but still clickable) hit area. Re-enable native rendering and theme it. */
 input[type="checkbox"], input[type="radio"] {
@@ -34,7 +34,7 @@ html {
   line-height: 1.4;
 }
 
-/* ── Layout / Box model reset ─────────────────────────────────────────────── */
+/* â”€â”€ Layout / Box model reset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 * {
   box-sizing: border-box;
@@ -243,7 +243,7 @@ body {
 }
 
 /* Same button:hover:not(:disabled) specificity override as
-   .capture-detail-subtab-btn.active:hover below — without this the active
+   .capture-detail-subtab-btn.active:hover below â€” without this the active
    top-level tab's blue background flips to the generic hover gray. */
 .nav-tab-btn.active:hover {
   background: var(--primary-accent);
@@ -263,7 +263,7 @@ body {
   flex-shrink: 0;
 }
 
-/* ── File/Help menu bar (#122) — custom dropdown, not a native OS menu; see
+/* â”€â”€ File/Help menu bar (#122) â€” custom dropdown, not a native OS menu; see
    the comment above .nav-menubar in index.html for why. */
 
 .nav-menubar {
@@ -325,7 +325,7 @@ body {
   position: absolute;
   top: calc(100% + 2px);
   left: 0;
-  /* max-content, not min-width alone — a flex column with width:100% items
+  /* max-content, not min-width alone â€” a flex column with width:100% items
      is circular (100% of a not-yet-known auto width) and browsers resolve it
      by falling back to the narrowest fit, clipping a longer row's shortcut
      hint clean off. max-content sizes the panel to its widest row first, so
@@ -346,7 +346,7 @@ body {
 }
 
 .menu-dropdown-item {
-  /* No explicit width — .menu-dropdown-panel is flex-direction: column with
+  /* No explicit width â€” .menu-dropdown-panel is flex-direction: column with
      the default align-items: stretch, which already fills the cross axis;
      an explicit 100% here fed back into the panel's own width: max-content
      computation and made it size to the narrowest row instead of the
@@ -381,7 +381,7 @@ body {
   color: var(--text-bright);
 }
 
-/* File → Open Recent (#935): a submenu that opens beside its row on hover. */
+/* File â†’ Open Recent (#935): a submenu that opens beside its row on hover. */
 .menu-submenu {
   position: relative;
   cursor: default;
@@ -552,7 +552,7 @@ html.picking-path * {
   max-width: 420px;
 }
 
-/* Notification settings tab (issue #98) — two columns where they fit,
+/* Notification settings tab (issue #98) â€” two columns where they fit,
    collapsing to one on a narrow window. */
 .notification-settings-grid {
   display: grid;
@@ -609,7 +609,7 @@ html.picking-path * {
   color: var(--text-strong);
 }
 
-/* Custom tooltip for .info-icon — see info_tooltip.js and #164. Position is
+/* Custom tooltip for .info-icon â€” see info_tooltip.js and #164. Position is
    set inline (fixed, viewport-clamped) by the JS; only presentation lives here. */
 .info-tooltip {
   position: fixed;
@@ -793,7 +793,7 @@ html.picking-path * {
   justify-content: space-between;
   align-items: center;
   /* Let the two sides drop to their own row when they don't both fit,
-   * rather than fighting over one row and squeezing/overlapping — a
+   * rather than fighting over one row and squeezing/overlapping â€” a
    * squeeze-to-fit approach here previously collapsed the Highlight
    * Details title to zero width instead of actually wrapping. */
   flex-wrap: wrap;
@@ -861,7 +861,7 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
    native up/down spin buttons on number inputs across Chromium/WebView2
-   versions — they can still appear on hover, overlapping the value itself
+   versions â€” they can still appear on hover, overlapping the value itself
    in narrow inputs like the Kill Range columns. The spin-button
    pseudo-elements need to be targeted directly. */
 input[type="number"]::-webkit-outer-spin-button,
@@ -875,7 +875,7 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Custom dropdown chevron — the global `appearance: none` reset (top of this
+/* Custom dropdown chevron â€” the global `appearance: none` reset (top of this
    file) strips the native arrow with nothing to replace it, so every
    <select> otherwise looks indistinguishable from a plain text field. */
 select,
@@ -1006,7 +1006,7 @@ button.danger-btn {
   border-color: var(--danger-hot);
 }
 
-/* A text box's clear button (clearable_input.js, #529): an × at its
+/* A text box's clear button (clearable_input.js, #529): an Ã— at its
    right-hand end, shown only while the box has text. */
 .clearable-input {
   position: relative;
@@ -1059,12 +1059,12 @@ button.danger-btn {
 }
 
 /* Every centered <td> column in this table (checkbox, Highlights, Selected,
-   Status, Review, Actions — master_pane.js) needs its <th> centered too,
+   Status, Review, Actions â€” master_pane.js) needs its <th> centered too,
    or a header/body mismatch that's invisible while the column is barely
    wider than its content visibly drifts apart once the table stretches
    wider than that content (e.g. a maximized window) and the extra slack
    lands on one side or the other depending on alignment. Demo File is the
-   one column left out on purpose — its <td> is left-aligned too. */
+   one column left out on purpose â€” its <td> is left-aligned too. */
 #master-demo-table th.col-center {
   text-align: center;
   /* The count columns take only what they need, so the Demo File column gets
@@ -1078,19 +1078,30 @@ button.danger-btn {
   border-bottom: 1px solid var(--border-faint);
 }
 
-/* A long demo name is cut with an ellipsis (master_pane.js) instead of
-   widening the table past its pane, which put Locate and Remove out of
-   reach. Inline-size containment makes the cell ignore its text when the
-   table sizes its columns, so width 100% gives it all the space the count
-   columns leave, and the min-width keeps some of the name readable beside
-   a badge. The Actions cell may
-   wrap, so Locate, Use found copy and Remove drop to a second line when the
-   pane is too narrow for all three side by side. */
-#master-demo-table td.queue-name-cell {
+/* The name cell is a flex box (master_pane.js), whose nowrap name sized the
+   whole table to the longest name and pushed the count columns out of sight
+   behind a scrollbar. Zero intrinsic width lets the table fit its pane and the
+   name's ellipsis (full name on hover) do the cutting (#46). */
+#master-demo-table td:nth-child(2) {
   contain: inline-size;
-  min-width: 9em;
   width: 100%;
-  /* Badges drop under the name instead of squeezing it to nothing. */
+  /* Badges (missing, multi-map, damaged, tracked) must not paint over the
+     count columns beside this cell. */
+  overflow: hidden;
+}
+
+/* The name keeps a few characters when badges take the room. !important beats
+   master_pane.js's inline min-width: 0, which stays as it is while #1284
+   changes that file. */
+#master-demo-table td:nth-child(2) > span:first-child {
+  min-width: 4em !important;
+}
+
+/* Badges drop under a long name instead of squeezing it to nothing, and the
+   Actions cell may wrap so Locate, Use found copy and Remove drop to a second
+   line when the pane is too narrow for all three side by side (#1376). */
+#master-demo-table td.queue-name-cell {
+  min-width: 9em;
   flex-wrap: wrap;
 }
 
@@ -1139,7 +1150,7 @@ button.danger-btn {
   color: var(--text-subtle);
 }
 
-/* Highlight table "Details" column (weapon/timing chain) — wraps instead of
+/* Highlight table "Details" column (weapon/timing chain) â€” wraps instead of
    truncating so multi-kill timelines remain fully readable without relying
    on the title="" hover tooltip. */
 .details-cell {
@@ -1245,7 +1256,7 @@ button.danger-btn {
 
 /* Timings tab only: each item is a stacked label+input row plus a hint
    paragraph of its own length, so the items in one flex line are rarely the
-   same height — center alignment let a shorter item's input drift below a
+   same height â€” center alignment let a shorter item's input drift below a
    taller neighbor's. Top-align instead so every input sits on one line. */
 .grid-controls {
   align-items: flex-start;
@@ -1260,14 +1271,14 @@ button.danger-btn {
 /* A field's label+input stays a compact row (.control-group's own layout
    above); this modifier stacks that row over a hint paragraph below it
    instead, for a field whose explanation is a full sentence rather than a
-   tooltip's worth of text — e.g. Timing Options (issue #150). */
+   tooltip's worth of text â€” e.g. Timing Options (issue #150). */
 .control-group.control-group-stacked {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
 }
 
-/* No dedicated styling before issue #150 — inherited whatever a bare <p>
+/* No dedicated styling before issue #150 â€” inherited whatever a bare <p>
    picked up from its container. Explicit now that it is load-bearing
    explanatory copy, not incidental. */
 .setting-hint {
@@ -1277,7 +1288,7 @@ button.danger-btn {
   max-width: 260px;
 }
 
-/* Timing diagram (#150) — a sorted event table anchored at the first kill
+/* Timing diagram (#150) â€” a sorted event table anchored at the first kill
    (0.0s), reviving the pre-Tauri egui build's "Mock Execution Timeline"
    (see index.html's comment above .timing-diagram). Illustrative, not to
    scale; only the relative-time column updates live as the fields change. */
@@ -1287,7 +1298,7 @@ button.danger-btn {
 }
 
 /* Sits directly above the table it explains, styled distinctly from the
-   plain .setting-hint paragraphs above the fields — the goal is to read as
+   plain .setting-hint paragraphs above the fields â€” the goal is to read as
    "note about this table" rather than another field's own hint. */
 .timing-diagram-caption {
   margin: 0 0 6px;
@@ -1334,7 +1345,7 @@ button.danger-btn {
   font-weight: 600;
 }
 
-/* Pinned Bottom Status Bar — one child per tab (index.html), toggled by
+/* Pinned Bottom Status Bar â€” one child per tab (index.html), toggled by
    switchNavTab() (nav.js); only the active tab's content is visible.
    min-height rather than a fixed height: the Capture Studio footer grows
    past one row while a batch is running or the disk-space warning is up
@@ -1352,7 +1363,7 @@ button.danger-btn {
 /* Fills #pinned-action-bar's width (matching .capture-studio-footer's own
    flex: 1) so footer-row-grid-centered's child has full-width room to
    actually center into, instead of shrink-wrapping to its own content and
-   leaving the grid nothing to spread across. Scoped to just this footer —
+   leaving the grid nothing to spread across. Scoped to just this footer â€”
    Demo Auditor/Analyzer's plain .pinned-footer-content rows don't need it. */
 #footer-render-studio {
   flex: 1;
@@ -1365,7 +1376,7 @@ button.danger-btn {
 }
 
 /* Start/Cancel Batch and everything read alongside them moved here from the
-   Configuration subtab (#77) — reachable from Highlights too now, without
+   Configuration subtab (#77) â€” reachable from Highlights too now, without
    losing the disk-space warning/progress/focus-reminder rows that used to
    stack below them in that panel. Column layout only for this one footer;
    the others stay the single-row .pinned-footer-content above. */
@@ -1390,14 +1401,14 @@ button.danger-btn {
 }
 
 /* Grid instead of flex so the middle item sits in a true center column
-   regardless of how wide the left/right content is — a flex row can only
+   regardless of how wide the left/right content is â€” a flex row can only
    pack items left-to-right or spread them with justify-content, neither of
    which centers just one item while pinning its neighbors to the edges.
    Column 2 is auto-sized to its own content, so it's already centered
    without needing justify-self on it; column 1/3 content hugs its own edge
    via justify-self so it doesn't stretch to fill the full 1fr track. Used
    by both the Capture footer row (3 items) and the Render footer (2 items
-   — the unused third 1fr track is harmless, it just stays empty). */
+   â€” the unused third 1fr track is harmless, it just stays empty). */
 .footer-row-grid-centered {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -1476,7 +1487,7 @@ button.danger-btn {
   font-size: 12px;
 }
 
-/* Color set inline by refreshLaunchGuard() (capture_pane.js) — red once the
+/* Color set inline by refreshLaunchGuard() (capture_pane.js) â€” red once the
    estimate exceeds available space, same threshold that already disables
    Start Capture, so this reads as a preview of that gate rather than a
    separate opinion. */
@@ -1548,7 +1559,7 @@ button.danger-btn {
   animation: progress-indeterminate 1.2s ease-in-out infinite;
 }
 
-/* Shared editable row-list widget (list_editor.js) — Capture Output,
+/* Shared editable row-list widget (list_editor.js) â€” Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
   display: flex;
@@ -1673,7 +1684,7 @@ button.danger-btn {
   }
 }
 
-/* ── Capture Studio — in-workflow Highlights/Configuration phase switch ──────── */
+/* â”€â”€ Capture Studio â€” in-workflow Highlights/Configuration phase switch â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .capture-detail-subtabs {
   display: flex;
@@ -1699,7 +1710,7 @@ button.danger-btn {
   border-color: var(--accent-line);
 }
 
-/* Matches button.primary-btn:hover's own override below — the generic
+/* Matches button.primary-btn:hover's own override below â€” the generic
    button:hover:not(:disabled) rule outranks a plain two-class selector
    here because :not() carries its argument's specificity, so without this
    the active tab's blue background would flip to the generic hover gray. */
@@ -1709,7 +1720,7 @@ button.danger-btn {
   border-color: var(--accent-line);
 }
 
-/* ── Demo Analyzer ─────────────────────────────────────────────────────────── */
+/* â”€â”€ Demo Analyzer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .analyzer-subtabs {
   display: flex;
@@ -1754,7 +1765,7 @@ button.danger-btn {
   text-align: center;
 }
 
-/* Under "Analyzing demo… 40%" while a demo opens (analyzer_loading.js). */
+/* Under "Analyzing demoâ€¦ 40%" while a demo opens (analyzer_loading.js). */
 .analyzer-loading-bar {
   max-width: 320px;
   margin: -12px auto 0;
@@ -1798,6 +1809,8 @@ button.danger-btn {
 }
 
 .analyzer-kv-table .kv-value {
+  /* A file name with no spaces would run under the next column (#46). */
+  overflow-wrap: break-word;
   padding: 3px 0;
   color: var(--text-emphasis);
 }
@@ -2282,7 +2295,7 @@ button.danger-btn {
   margin-top: 2px;
 }
 
-/* Was a 2-column grid (Weapon Breakdown next to Kill Streaks) — squeezed
+/* Was a 2-column grid (Weapon Breakdown next to Kill Streaks) â€” squeezed
    Kill Streaks into half-width on anything narrower than an ultrawide
    monitor (#148). Stacked full-width instead; Kill Streaks especially
    needed the room. */
@@ -2448,13 +2461,13 @@ button.danger-btn {
   margin-right: 4px;
 }
 
-/* Demo Analyzer — Explorer sidebar (Quick Links + folder tree) + single-folder
+/* Demo Analyzer â€” Explorer sidebar (Quick Links + folder tree) + single-folder
    Demos panel docked above the report tabs. See docs/archive/tauri_parity_audit.md
    Area 3 for the dev layout this mirrors. */
 
 #pane-demo-analyzer {
   flex-direction: row;
-  /* Overrides .content-pane's 10px gap to 0 — the resize handle below is
+  /* Overrides .content-pane's 10px gap to 0 â€” the resize handle below is
      itself sized to the standard 10px so the total space between the
      sidebar and main column matches every other .content-pane split
      exactly, instead of stacking an extra gap on both sides of it. */
@@ -2472,12 +2485,12 @@ button.danger-btn {
 }
 
 /* Drag handle between two panels (Explorer sidebar / main column, Capture
-   Studio's two panes, the Analyzer's Demos / report) — JS-driven
+   Studio's two panes, the Analyzer's Demos / report) â€” JS-driven
    (split_resize.js) rather than native CSS `resize` so the size can persist
    to settings.json the same way every other layout preference does. Sized
    to the standard 10px .content-pane gap (see #pane-demo-analyzer above)
    with a thin 1px line centered inside it, rather than an extra bar on top
-   of that gap — keeps the resting look identical to every other split in
+   of that gap â€” keeps the resting look identical to every other split in
    the app, only revealing itself as interactive on hover/drag. */
 .split-handle {
   width: 10px;
@@ -2566,7 +2579,7 @@ button.danger-btn {
   font-size: 11px;
 }
 
-/* Quick Links — Windows-11-style Quick Access: Pinned + Recent + Local
+/* Quick Links â€” Windows-11-style Quick Access: Pinned + Recent + Local
    tiers, each hidden when empty. */
 .analyzer-quick-links {
   max-height: 140px;
@@ -2638,7 +2651,7 @@ button.danger-btn {
   gap: 6px;
 }
 
-/* Native Explorer Tree — lazily-loaded, cached, real expand/collapse. */
+/* Native Explorer Tree â€” lazily-loaded, cached, real expand/collapse. */
 .analyzer-tree {
   flex: 1;
   overflow: auto;
@@ -2808,7 +2821,7 @@ tr.keyboard-selected {
   color: var(--text-muted);
 }
 
-/* Style rows × type columns; each cell is "N files, size". */
+/* Style rows Ã— type columns; each cell is "N files, size". */
 #hd-status-table {
   border-collapse: collapse;
 }
@@ -3041,7 +3054,7 @@ tr.keyboard-selected {
   font-size: 0.85em;
 }
 
-/* ── Overviews page (#371) ─────────────────────────────────────────────── */
+/* â”€â”€ Overviews page (#371) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #pane-overviews {
   flex: 1;
   min-height: 0;
@@ -3061,6 +3074,9 @@ tr.keyboard-selected {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Without this the flex item's automatic minimum keeps it at its 250 px
+     width, so a drag narrower than the default saved a size that was not shown. */
+  min-width: 0;
 }
 
 .ov-side-body {
@@ -3614,8 +3630,98 @@ input[type="checkbox"].hd-box-pattern {
   width: 25%;
 }
 
+/* Full-row hints under a setting are not the 260 px captions of the grid ones. */
+#config-take-after-finish-hint,
+#config-render-while-capturing-hint {
+  max-width: none;
+}
+
 #detail-streaks-table td.streak-duration {
   white-space: nowrap;
+}
+
+/* Narrow panes stack Player, Time and Dur. into one column (#46): the separate
+   columns need about 1200 px with a long HLTV player name (1100 at 1920's
+   default split scrolled sideways). The wide layout keeps them. Switched on
+   the table wrapper's own width, not the window's, since the queue/details
+   split moves it. */
+#detail-pane .table-wrapper {
+  container: detail-table / inline-size;
+}
+
+#detail-streaks-table .col-stack {
+  display: none;
+}
+
+/* Cell padding and the Clip Name box's minimum live here, not inline, so the
+   narrow layout below can tighten them without !important. */
+#detail-streaks-table td {
+  padding: 8px;
+}
+
+#detail-streaks-table .streak-clip-name-input {
+  min-width: 14em;
+}
+
+#detail-streaks-table .streak-stack-player {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#detail-streaks-table .streak-stack-when {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+@container detail-table (max-width: 1200px) {
+  #detail-streaks-table .col-wide {
+    display: none;
+  }
+
+  #detail-streaks-table .col-stack {
+    display: table-cell;
+  }
+
+  /* The stacked player line is cut to this; its tooltip has the full name. */
+  #detail-streaks-table .streak-stack-player {
+    max-width: 14em;
+  }
+
+  /* Measured in the real window at 1280 with flag chips beside the kill
+     counts: these minimums are what lets the table fit a 699 px pane. */
+  #detail-streaks-table .streak-notes-input {
+    min-width: 50px;
+  }
+
+  #detail-streaks-table .streak-clip-name-input {
+    min-width: 5em;
+  }
+
+  #detail-streaks-table .streak-status-select {
+    max-width: 80px;
+  }
+
+  #detail-streaks-table th,
+  #detail-streaks-table td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
+/* Below this the table cannot take the Details column (weapon/timing chain,
+   also on the stacked cell's tooltip). Lower than the stacking threshold, so a
+   1920 window's default split still shows it. */
+@container detail-table (max-width: 800px) {
+  /* Tighter again where the Details column is gone too (measured at 699 px). */
+  #detail-streaks-table .streak-stack-player {
+    max-width: 6em;
+  }
+
+  #detail-streaks-table .col-details {
+    display: none;
+  }
 }
 
 /* What was going on at the flags at the highlight's kills (#1132,
@@ -3717,7 +3823,7 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 /* The list: the shared .analyzer-table look, with fixed columns so the two
-   names share the width evenly and a long one ends in … (full on hover). */
+   names share the width evenly and a long one ends in â€¦ (full on hover). */
 .rename-table {
   table-layout: fixed;
 }
@@ -3782,7 +3888,7 @@ input[type="checkbox"].hd-box-pattern {
   background: var(--purple-wash);
 }
 
-/* ── Setup window and checklist card (#599) ─────────────────────────────── */
+/* â”€â”€ Setup window and checklist card (#599) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .setup-modal-content {
   max-width: 600px;
   padding: 0;
@@ -4323,7 +4429,7 @@ button.setup-skip:hover:not(:disabled) {
   color: var(--text-muted);
 }
 
-/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+/* Demo Auditor â€º Duplicates: Folders to check (audit_folders.js, #844). */
 .audit-folder-list {
   list-style: none;
   margin: 4px 0 6px;
@@ -4719,12 +4825,12 @@ button.setup-skip:hover:not(:disabled) {
 
 /* A flex summary loses the browser's own triangle, so it draws one. */
 .whats-new-version > summary::before {
-  content: '▸';
+  content: 'â–¸';
   color: var(--text-muted);
 }
 
 .whats-new-version[open] > summary::before {
-  content: '▾';
+  content: 'â–¾';
 }
 
 /* OBS capture test (#646, obs_capture_test.js). */
@@ -4882,3 +4988,36 @@ input.field-invalid { border-color: var(--danger-light); }
 .output-row-invalid input { border-color: var(--danger-light); }
 /* Its text style is .field-error-line (field_error.js); this only spans the row. */
 .output-row-detail { flex-basis: 100%; }
+
+/* Draggable panels beyond the first two splits (#46, layout_splits.js). */
+
+/* The handle sits in the 10px gap between two Overviews panels; the negative
+   margins give back the flex gap on both sides so the resting look is the
+   usual gap. A saved width can't push the map below its room: each side panel
+   leaves the map 300px and the other side's 180px minimum. */
+.ov-layout > .split-handle {
+  margin: 0 -10px;
+}
+
+.ov-side {
+  max-width: calc(100% - 510px);
+}
+
+/* A handle under a table inside its panel, not in a flex gap. */
+.split-handle-inline {
+  margin: 2px 0 0;
+}
+
+/* Render job rows: a date or count never breaks over lines; the clip name and
+   the settings summary are the cells that give (#46). */
+#render-jobs-table td.rj-date,
+#render-jobs-table td.rj-frames,
+#render-jobs-table td.rj-stream,
+#render-jobs-table td.rj-speed {
+  white-space: nowrap;
+}
+
+/* The placeholder says what to type; the default input width cut it (#46). */
+#blender-frames-input {
+  min-width: 22em;
+}

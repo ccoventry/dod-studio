@@ -3,6 +3,11 @@
 //! against `local/overview-rnd` and for drawing the scene outside the app.
 //!
 //! cargo run -p native --release --example overview_probe -- <install> <out dir> <map>...
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use std::path::Path;
 use std::time::Instant;

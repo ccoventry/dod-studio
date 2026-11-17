@@ -1,5 +1,5 @@
 use crate::download_progress::DownloadMeter;
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
