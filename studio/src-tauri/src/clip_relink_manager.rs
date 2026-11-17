@@ -123,7 +123,7 @@ pub async fn relink_rendered_clips(
 ) -> Result<RelinkReport, String> {
     let export_dirs = {
         let settings = app.state::<SettingsManager>();
-        let s = native::shared::lock::lock_or_recover(&settings.inner);
+        let s = lock_recover::lock_or_recover(&settings.inner);
         s.render_export_dirs.clone()
     };
     CANCEL_REQUESTED.store(false, Ordering::Relaxed);

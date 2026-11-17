@@ -72,6 +72,23 @@ improvise one anyway, add a "Tooling ideas" section to your results saying what 
 - "Test done" section: what you ran and saw (install, demo, time, result). Honest: if something was not
   tested, say so. "Decisions" section.
 - Do NOT merge any PR. Self-review your diff against docs/coding_standards.md before opening it.
+- BEFORE OPENING THE PR, an adversarial pass of your own. Reviews of agent PRs kept finding the same kinds of
+  bug, so write the answers into your results file under "Pre-PR check":
+  1. Every caller and reader: grep every function/file/path/field you changed and list who else reads or writes it
+     (other managers, cleanup, history, exports, the frontend, the hook). Check each still holds.
+  2. Every in-between state: what happens if the app closes, a thread ticks, or another job runs in the middle of
+     your change (between two steps you do in sequence)? Background loops (schedulers, timers, pollers) keep
+     running during your shutdown/cleanup code unless you stop them.
+  3. Every input class: empty, one, many, duplicates (same name/path twice), stale leftovers from a crash, old
+     records made before your change, the file open in another program, network/cloud/FAT drives, both installs.
+  4. Every claim in your PR body has a test that would FAIL without your change. Run it once on the parent
+     commit, or with the fix reverted in the working tree, to see it fail, and say so. Where only an in-game or
+     live test can show it, say that instead.
+  5. Other open PRs touching the same files (`python -I tools/agent-kit/pr_files.py <N>`, or `gh pr list` +
+     `gh pr diff`): note interactions in the PR body.
+  Fix what you find before opening the PR, not after review.
+- Every PR then gets an independent review before it merges (the main session runs it), so expect findings:
+  put anything a reviewer will need in your results file. The worktree still gets removed when you're done.
 
 ## Live Studio tests (no mouse/keyboard; never touch the user's own Studio)
 - `tools/agent-kit/studio_live/`: `studio_live.py patch|build|seed|start|stop` (own ports from your prompt,

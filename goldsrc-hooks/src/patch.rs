@@ -28,6 +28,7 @@
 //! crashed us; we can't see whether it is, so we never make the page stricter
 //! than writable.
 
+use lock_recover::lock_or_recover;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, Once, TryLockError};
@@ -156,12 +157,7 @@ unsafe fn write_span(address: usize, len: usize, after: After, write: impl FnOnc
     });
     let (turn, waited) = match WRITE_LOCK.try_lock() {
         Ok(turn) => (turn, false),
-        Err(TryLockError::WouldBlock) => (
-            WRITE_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-            true,
-        ),
+        Err(TryLockError::WouldBlock) => (lock_or_recover(&WRITE_LOCK), true),
         Err(TryLockError::Poisoned(poisoned)) => (poisoned.into_inner(), false),
     };
 

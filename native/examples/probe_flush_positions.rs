@@ -8,13 +8,17 @@
 //! in-clip camera sample with each of the on-screen test's three gates taken
 //! away in turn. Whichever gate is the only thing calling a position hidden is
 //! the one letting it onto the screen.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
-use native::patch::bsp::Bsp;
+use native::decals::{Cancel, DecalCleanOptions, clean_demo_decals, on_screen_half_angle};
+use native::maps::bsp::Bsp;
+use native::patch::build_batch_queue;
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{
-    Cancel, DecalCleanOptions, build_batch_queue, clean_demo_decals, on_screen_half_angle,
-};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -279,7 +283,7 @@ using job for player {:?}",
             .iter()
             .filter(|p| {
                 let c = b.leaf_contents(b.leaf_at(p));
-                c == native::patch::bsp::CONTENTS_SOLID || c == native::patch::bsp::CONTENTS_SKY
+                c == native::maps::bsp::CONTENTS_SOLID || c == native::maps::bsp::CONTENTS_SKY
             })
             .count();
         println!();

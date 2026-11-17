@@ -13,7 +13,9 @@ function fakeElement() {
     children: [],
     appendChild(child) { this.children.push(child); child.parentNode = this; },
     removeChild(child) { this.children = this.children.filter((c) => c !== child); child.parentNode = null; },
-    addEventListener() {},
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    setAttribute() {},
   };
 }
 
@@ -64,5 +66,15 @@ describe('toast logging (#873)', () => {
     vi.runAllTimers();
     showToast('No takes were deleted.', 'warning');
     expect(shown()).toEqual(['toast toast-warning: No takes were deleted.']);
+  });
+
+  it('keeps a sticky toast up until its close button is clicked (#1373)', () => {
+    const toast = showToast('A demo is damaged.', 'warning', 0, { sticky: true });
+    vi.runAllTimers();
+    const container = document.querySelector();
+    expect(container.children).toEqual([toast]);
+    const close = toast.children.find((c) => c.className === 'toast-close');
+    close.listeners.click();
+    expect(container.children).toEqual([]);
   });
 });

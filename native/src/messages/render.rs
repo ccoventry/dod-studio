@@ -1,7 +1,7 @@
 // messages/render.rs
 // Activity-log lines of the render pipeline's export-drive reservations,
-// frame-rate choice and stopping on Studio's way out (`hlcr/renderer.rs`)
-// (#237, #1439).
+// frame-rate choice, stopping on Studio's way out and segmented renders
+// (`hlcr/renderer.rs`) (#237, #1439, #1451).
 
 use std::fmt::{Debug, Display};
 
@@ -105,6 +105,170 @@ pub fn exit_partial_left(path: impl Display, err: impl Display) -> String {
     format!("[render] DoD Studio is closing: could not remove the unfinished render {path}: {err}")
 }
 
+/// A render cut into segments (#1451) started: how many, how long each, where
+/// they are kept until joined, and `reused` ([`segments_reused`], or
+/// nothing).
+pub fn segments_started(
+    job_id: impl Display,
+    segments: usize,
+    segment_frames: usize,
+    dir: impl Display,
+    reused: impl Display,
+) -> String {
+    format!(
+        "[render] job {job_id}: rendering in {segments} segments of {segment_frames} frames, kept in {dir} until they are joined{reused}"
+    )
+}
+
+/// The segments a stopped render finished, which this one keeps.
+pub fn segments_reused(ranges: &str, count: usize, total: usize) -> String {
+    format!(
+        "; reusing segment(s) {ranges} ({count} of {total}) finished by a render that was stopped"
+    )
+}
+
+/// A segmented render's segments were joined into its clip.
+pub fn segments_joined(job_id: impl Display, segments: usize, took: std::time::Duration) -> String {
+    format!(
+        "[render] job {job_id}: joined {segments} segments into the clip in {} ms",
+        took.as_millis()
+    )
+}
+
+/// Why a segmented render's finished segments were removed without a clip.
+pub const SEGMENTS_CANCELLED: &str = "the render was cancelled";
+pub const SEGMENTS_FAILED: &str = "the render failed";
+pub const SEGMENTS_SHORT: &str = "a segment came out short, so the take renders in one piece";
+
+/// A segment came out with fewer frames than it was cut for: the take's
+/// pictures or sound end early there, which one piece trims to as it always
+/// did (`number` counts from 1).
+pub fn segment_short(
+    job_id: impl Display,
+    number: usize,
+    frames: usize,
+    expected: usize,
+) -> String {
+    format!(
+        "[render] job {job_id}: segment {number} came out with {frames} of its {expected} frames (the take ends early there); rendering it in one piece"
+    )
+}
+
+/// A segmented render that ended without its clip removed its segments.
+pub fn segments_removed(job_id: impl Display, removed: usize, why: &str) -> String {
+    format!("[render] job {job_id}: removed {removed} finished segment(s): {why}")
+}
+
+/// Whose segments a sweep removed, for [`leftover_segments_removed`].
+pub const LEFTOVER_OTHER_SETTINGS: &str = "a render of this take with other settings";
+pub const LEFTOVER_OTHER_FOLDER: &str = "a stopped render of this take in another export folder (this render's room is in a different one)";
+pub const LEFTOVER_TAKE_GONE: &str = "a take that is no longer there";
+pub const LEFTOVER_ONE_PIECE: &str =
+    "a stopped render of this take, which is now rendering in one piece";
+
+/// Segments no render will join, thrown away: `why` is whose they were.
+pub fn leftover_segments_removed(dir: impl Display, why: &str) -> String {
+    format!("[render] removed the segments of {why}: {dir}")
+}
+
+/// No export folder has room for a segmented render's segments and clip
+/// together, so it renders in one piece, which needs room for the clip only.
+pub fn segments_no_room(job_id: impl Display, segmented: u64) -> String {
+    format!(
+        "[render] job {job_id}: no export folder has {:.2} GB free for the segments and the clip together; rendering it in one piece",
+        segmented as f64 / GB
+    )
+}
+
+/// No export folder's path is short enough for a segment folder of at most
+/// `max_units` characters (Windows' path limits), so the render runs whole.
+pub fn segments_path_too_long(job_id: impl Display, max_units: usize) -> String {
+    format!(
+        "[render] job {job_id}: every export folder's path is too long for a segment folder (at most {max_units} characters in all); rendering it in one piece"
+    )
+}
+
+/// The Render tab row's speed cell while the segments are joined.
+pub fn joining_segments(count: usize) -> String {
+    format!("Joining {count} segments")
+}
+
+/// Why a join that FFmpeg finished without an error is no clip: it holds
+/// fewer frames than the segments did when each was counted, so one was
+/// damaged on the disk since. The segments are removed with it, so the next
+/// render of the take starts afresh.
+pub fn join_short(frames: usize, total: usize) -> String {
+    format!(
+        "Joining the segments gave {frames} of the take's {total} frames: a segment was damaged on the disk. The segments were removed; render the take again to render it afresh."
+    )
+}
+
+/// Neither the joined clip's header nor FFmpeg said how many frames it
+/// holds, so the clip is kept unchecked.
+pub fn join_uncounted(job_id: impl Display) -> String {
+    format!("[render] job {job_id}: could not count the joined clip's frames; keeping it unchecked")
+}
+
+/// A render batch's first line, logged once as it starts: which FFmpeg it
+/// runs (`banner` is the first line of its `-version`), so a user's log shows
+/// the build if a join ever fails, and whether "Resumable renders" is on
+/// (#1451).
+pub fn render_batch_start(banner: &str, path: impl Display, resumable: bool) -> String {
+    format!(
+        "[render] Rendering with FFmpeg {banner} ({path}); resumable renders {}",
+        on_off(resumable)
+    )
+}
+
+/// "on" or "off", for a setting in a log line.
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+/// [`render_batch_start`] when the FFmpeg version could not be read; the
+/// batch goes ahead.
+pub fn render_batch_start_unread(configured: &str, why: impl Display, resumable: bool) -> String {
+    format!(
+        "[render] could not read the version of the FFmpeg this batch renders with ({configured}): {why}; resumable renders {}",
+        on_off(resumable)
+    )
+}
+
+/// A segmented render's join failed: the activity log's line.
+pub fn join_failed(job_id: impl Display, message: &str) -> String {
+    format!("[render] job {job_id}: joining the segments failed: {message}")
+}
+
+/// Segments that could not be removed.
+pub fn segments_left(dir: impl Display, err: impl Display) -> String {
+    format!("[render] could not remove the render segments in {dir}: {err}")
+}
+
+/// Another render of this take and stream with the same settings holds its
+/// segment folder (or a clean-up of old segments is removing it), so this
+/// one runs whole.
+pub fn segments_busy(job_id: impl Display) -> String {
+    format!(
+        "[render] job {job_id}: another render of this take with the same settings, or a clean-up of old segments, is using its segment folder; rendering it in one piece"
+    )
+}
+
+/// The segment folder could not be made, so the render runs whole.
+pub fn segments_folder_failed(
+    job_id: impl Display,
+    dir: impl Display,
+    err: impl Display,
+) -> String {
+    format!(
+        "[render] job {job_id}: could not make the segment folder {dir} ({err}); rendering it in one piece"
+    )
+}
+
+/// Why a segmented render failed before its join.
+pub fn join_list_failed(list: impl Display, err: impl Display) -> String {
+    format!("Rendered every segment, but could not write the list to join them, {list}: {err}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +291,14 @@ mod tests {
         assert_eq!(
             fps_from_render_settings("D:/t"),
             "Render Settings' Source FPS (the take doesn't say what it was captured at; D:/t)"
+        );
+    }
+
+    #[test]
+    fn a_short_join_says_how_many_frames_it_got() {
+        assert_eq!(
+            join_short(300, 1000),
+            "Joining the segments gave 300 of the take's 1000 frames: a segment was damaged on the disk. The segments were removed; render the take again to render it afresh."
         );
     }
 }

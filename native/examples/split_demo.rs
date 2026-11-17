@@ -4,6 +4,11 @@
 //!
 //! With no indices it only lists the maps (from the quick byte scan and the
 //! full parse, which must agree).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use native::demo_split::{extract, header_protocol, quick_maps, segments, split_name};
 
@@ -45,7 +50,7 @@ fn main() {
         let find_bsp = |map: &str| {
             let dir = std::path::Path::new(&input).parent()?;
             let bytes = std::fs::read(dir.join("maps").join(format!("{map}.bsp"))).ok()?;
-            native::patch::bsp::map_checksum(&bytes).ok()
+            native::maps::bsp::map_checksum(&bytes).ok()
         };
         let Some(part) = extract(&demo, i, &find_bsp) else {
             println!("map {i}: no such map");

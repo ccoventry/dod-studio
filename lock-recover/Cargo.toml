@@ -1,0 +1,11 @@
+# Poison-recovering lock helpers shared by every crate that holds a lock across
+# a test or a `tauri dev` session (#1377). Std only, so it builds for the
+# 32-bit hook DLL and for wasm32 as well as the host.
+[package]
+name = "lock-recover"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true

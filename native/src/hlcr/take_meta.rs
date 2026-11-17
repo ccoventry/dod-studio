@@ -27,7 +27,7 @@
 //! and the walk stops two folders up, so it describes the frames beside it,
 //! and a fixed 300 made every take captured at another rate the wrong speed.
 
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
