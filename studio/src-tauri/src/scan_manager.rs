@@ -263,7 +263,7 @@ impl From<CaptureStreak> for SerializedStreak {
             total_demo_frames: c.total_demo_frames,
             demo_fps: c.demo_fps,
             viewdemo_times: c.viewdemo_times,
-            // Flatten Arc<Vec<f32>> â†’ Vec<f32> for JSON transport.
+            // Flatten Arc<Vec<f32>> → Vec<f32> for JSON transport.
             // The inbound From<SerializedStreak> impl re-wraps it in Arc::new().
             frame_times: (*c.frame_times).clone(),
             match_start_tick: c.match_start_tick,
@@ -916,7 +916,7 @@ pub async fn scan_directory_impl(
     workers: usize,
     include_subfolders: bool,
 ) -> Result<ScanOutcome, String> {
-    // â”€â”€ Reset state flags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
     is_scanning.store(true, std::sync::atomic::Ordering::SeqCst);
 
@@ -941,7 +941,7 @@ pub async fn scan_directory_impl(
             ));
         }
 
-        // â”€â”€ Phase 1: collect all .dem file paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Phase 1: collect all .dem file paths ─────────────────────────────
         for path_str in paths {
             let path_buf = PathBuf::from(path_str);
             if path_buf.is_dir() {
@@ -1053,7 +1053,7 @@ pub async fn scan_directory_impl(
 
         let total_files = list.len() as u32;
 
-        // â”€â”€ Phase 2: parse each .dem file, up to `workers` at once â”€â”€â”€
+        // ── Phase 2: parse each .dem file, up to `workers` at once ───
         // `list` is already sorted by filename (Phase 1's binary-search
         // insert), so each worker writes its result into a pre-sized slot at
         // its own original index -- the output comes out in sorted order for
@@ -1251,7 +1251,7 @@ pub async fn scan_directory_impl(
         let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
         let skipped = skipped_demo_rows(skipped.into_inner().unwrap_or_else(|p| p.into_inner()));
 
-        // â”€â”€ Final progress event (complete or cancelled) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Final progress event (complete or cancelled) ────────────────────
         let _ = app_handle.emit(
             "scan_progress",
             serde_json::json!({
