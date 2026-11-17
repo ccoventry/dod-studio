@@ -42,7 +42,7 @@ fn main() {
     let t_hi: f32 = a.next().expect("t_hi").parse().unwrap();
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
-    let rewritten = demo.write_to_bytes();
+    let rewritten = demo.write_to_bytes().expect("re-encode");
     let redone = open_demo_from_bytes(&rewritten).expect("reparse");
 
     // Walk both in lockstep by (time window), comparing serialized message
