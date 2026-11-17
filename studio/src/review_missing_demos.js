@@ -40,8 +40,10 @@ export async function askAboutMissingDemo(demo) {
  *   getDemos() the queue; lookMissing(demos) demo_file_recheck.js's, resolving
  *   to those of `demos` whose file is gone; locateDemoByHand(demo) and
  *   useFoundCopies(demos) project_demos.js's; confirmTrackedRemove(demo)
- *   queue_actions.js's requestTrackedDeleteConfirm; replaceDemos(demos) the
- *   queue's. `ask` and `log` are for tests.
+ *   queue_actions.js's requestTrackedDeleteConfirm; removeDemo(demo)
+ *   master_pane.js's removeQueuedDemo, which takes one row out the way its
+ *   remove button does and keeps the other rows' ticks. `ask` and `log` are
+ *   for tests.
  * @returns {Function} settleMissingDemos(demos), resolving to
  *   `{ ok, touched, dropped }`: `ok` false when the user closed the pop-up
  *   (the review is cancelled); `touched` when any missing demo was dealt
@@ -49,12 +51,12 @@ export async function askAboutMissingDemo(demo) {
  *   (rows) the review goes on without, skipped or removed.
  */
 export function createReviewMissingDemos({
-  getDemos, lookMissing, locateDemoByHand, useFoundCopies, confirmTrackedRemove, replaceDemos,
+  getDemos, lookMissing, locateDemoByHand, useFoundCopies, confirmTrackedRemove, removeDemo,
   ask = askAboutMissingDemo, log = logFrontendEvent,
 }) {
   async function removeRow(demo) {
     if (isDemoTracked(demo) && !(await confirmTrackedRemove(demo))) return false;
-    replaceDemos(getDemos().filter((d) => d !== demo));
+    removeDemo(demo);
     return true;
   }
 

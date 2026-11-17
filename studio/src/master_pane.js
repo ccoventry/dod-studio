@@ -326,6 +326,27 @@ export function getCheckedDemoPaths() {
  *  action that changes the queue wholesale and makes the old selection
  *  meaningless. Clear Selected does NOT use this for rows it never touched —
  *  see setCheckedDemoPaths below. */
+/**
+ * Takes one demo out of the queue, as its row's remove button does: the other
+ * rows keep their ticks and the selection follows its demo. Asks nothing; a
+ * caller confirms a tracked demo first. Review's missing-demo Remove uses it
+ * too (#1376). Returns false when the demo had already left the queue.
+ */
+export function removeQueuedDemo(demo) {
+  // By identity, not a row index captured earlier: a confirm awaited before
+  // this call lets another delete or a Clear button shift every index.
+  const idx = currentDemos.indexOf(demo);
+  if (idx === -1) return false;
+  currentDemos.splice(idx, 1);
+  // queue_state.js's remove returns the surviving selectedDemoIdx (the same
+  // demo, shifted down; or a fresh default if the removed row was the one
+  // selected), so the row highlight matches Highlight Details.
+  const newSelectedIdx = currentOnDeleteDemo ? currentOnDeleteDemo(idx, currentDemos) : null;
+  logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, isDemoTracked(demo) ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
+  renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
+  return true;
+}
+
 export function clearCheckedPaths() {
   checkedPaths.clear();
   const selectAllCb = document.querySelector('#master-select-all-cb');
@@ -600,21 +621,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
           : await themedConfirm(STRINGS.WORKSPACE.removeDemoConfirm(demo.name || demo.path), { destructive: true });
         if (!proceed) return;
       }
-      // Re-resolve the index by identity rather than trusting the closured
-      // originalIdx — the modal path awaits user input, during which
-      // another action (a different delete, a Clear button) could have
-      // already spliced this array and shifted every index after it.
-      const currentIdx = currentDemos.indexOf(demo);
-      if (currentIdx === -1) return; // already removed some other way
-      currentDemos.splice(currentIdx, 1);
-      // main.js's onDeleteDemo returns the surviving selectedDemoIdx (the
-      // same demo, shifted down; or a fresh default if the deleted row was
-      // the one selected) — pass it straight to the re-render below so the
-      // row highlight matches Highlight Details instead of always dropping
-      // it, even when the deleted row wasn't the one selected.
-      const newSelectedIdx = currentOnDeleteDemo ? currentOnDeleteDemo(currentIdx, currentDemos) : null;
-      logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, demoIsTracked ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
-      renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
+      removeQueuedDemo(demo);
     });
     // A match a missing-demo search found and nobody has used yet (on load,
     // one the user left as missing; while open, a file renamed or moved):

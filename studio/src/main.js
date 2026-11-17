@@ -1,7 +1,7 @@
 import { configurePickPath } from './pick_path.js';
 import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
-import { renderMasterList, initMasterPane, setRepairDemoHandlers } from './master_pane.js';
+import { renderMasterList, initMasterPane, setRepairDemoHandlers, removeQueuedDemo } from './master_pane.js';
 import { startDemoContextMenu } from './demo_context_menu.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
@@ -397,7 +397,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     hltvPick,
     // Review reaching a demo whose file is gone asks what to do: review_missing_demos.js.
     settleMissingDemos: createReviewMissingDemos({ getDemos: queue.getDemos, lookMissing, locateDemoByHand, useFoundCopies,
-      confirmTrackedRemove: (demo) => requestTrackedDeleteConfirm(demo), replaceDemos: queue.replace }),
+      confirmTrackedRemove: (demo) => requestTrackedDeleteConfirm(demo), removeDemo: removeQueuedDemo }),
   });
   // Right-click menu on the queue's rows: demo_context_menu.js.
   startDemoContextMenu({ startReview: reviewMode.startReview, ensureDemoFiles });

@@ -95,7 +95,7 @@
         locateDemoByHand: projectDemos.locateDemoByHand,
         useFoundCopies: projectDemos.useFoundCopies,
         confirmTrackedRemove: async () => true,
-        replaceDemos: (next) => { demos = next; draw(); },
+        removeDemo: (demo) => { demos = demos.filter((d) => d !== demo); draw(); },
       }),
     });
     draw();

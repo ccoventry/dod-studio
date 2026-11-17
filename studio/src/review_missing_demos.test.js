@@ -19,7 +19,7 @@ function setUp(demos, choices, over = {}) {
     locateDemoByHand: vi.fn(async (d) => { d.missing = false; }),
     useFoundCopies: vi.fn(async ([d]) => { d.missing = false; d.foundAt = null; }),
     confirmTrackedRemove: vi.fn(async () => true),
-    replaceDemos: vi.fn((next) => { queue = next; }),
+    removeDemo: vi.fn((demo) => { queue = queue.filter((d) => d !== demo); }),
     ask: vi.fn(async () => choices.shift()),
     log,
     ...over,
@@ -89,7 +89,8 @@ describe('settling the missing demos of a review', () => {
     const result = await settle([a, b]);
     expect(queue()).toEqual([b]);
     expect(result.dropped.has(a)).toBe(true);
-    expect(app.replaceDemos).toHaveBeenCalledTimes(1);
+    // The row's own remove path, which keeps the other rows' ticks.
+    expect(app.removeDemo).toHaveBeenCalledExactlyOnceWith(a);
   });
 
   it('keeps the row and asks again when the tracked-work confirm is declined', async () => {

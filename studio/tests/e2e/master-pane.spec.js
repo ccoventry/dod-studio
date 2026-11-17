@@ -31,6 +31,19 @@ test.describe('master_pane missing demos', () => {
     await expect(row(page, 'here.dem').locator('.use-found-copy-btn')).toHaveCount(0);
     await expect(row(page, 'here.dem').locator('.locate-demo-btn')).toHaveCount(0);
   });
+
+  test("removing a missing demo the way Review's Remove does keeps the other rows' ticks", async ({ page }) => {
+    await gotoHarness(page);
+    await row(page, 'here.dem').locator('input[type="checkbox"]').check();
+    await row(page, 'moved.dem').locator('input[type="checkbox"]').check();
+    expect(await page.evaluate(() => window.__removeQueued('gone.dem'))).toBe(true);
+    await expect(row(page, 'gone.dem')).toHaveCount(0);
+    await expect(row(page, 'here.dem').locator('input[type="checkbox"]')).toBeChecked();
+    await expect(row(page, 'moved.dem').locator('input[type="checkbox"]')).toBeChecked();
+    expect((await page.evaluate(() => window.__checked())).sort()).toEqual(['C:\\demos\\here.dem', 'C:\\demos\\moved.dem']);
+    // Already gone: nothing to do.
+    expect(await page.evaluate(() => window.__removeQueued('gone.dem'))).toBe(false);
+  });
 });
 
 test.describe('master_pane multi-map demos (#217)', () => {
