@@ -626,18 +626,23 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // A match a missing-demo search found and nobody has used yet (on load,
     // one the user left as missing; while open, a file renamed or moved):
     // one click to use it after all.
+    // The two buttons sit under the name, not in the Actions cell: a wider
+    // Actions column shifted every other column when a row turned missing or
+    // came back, and it cannot fit them at 1280 wide (#1513).
+    const missingActions = document.createElement('div');
+    missingActions.className = 'queue-missing-actions';
     if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
       const useBtn = document.createElement('button');
       useBtn.type = 'button';
       useBtn.className = 'use-found-copy-btn';
       useBtn.textContent = STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON;
       useBtn.title = STRINGS.WORKSPACE.useFoundCopyTitle(demo.foundAt);
-      useBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      useBtn.style.cssText = 'font-size:0.8em;padding:1px 6px;';
       useBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // do not select the row
         currentOnUseFoundCopy(demo);
       });
-      tdActions.appendChild(useBtn);
+      missingActions.appendChild(useBtn);
     }
     if (demo.missing && currentOnLocateDemo) {
       const locateBtn = document.createElement('button');
@@ -645,13 +650,14 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       locateBtn.className = 'locate-demo-btn';
       locateBtn.textContent = STRINGS.WORKSPACE.LOCATE_DEMO_BUTTON;
       locateBtn.title = STRINGS.WORKSPACE.LOCATE_DEMO_TITLE;
-      locateBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      locateBtn.style.cssText = 'font-size:0.8em;padding:1px 6px;';
       locateBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // do not select the row
         currentOnLocateDemo(demo);
       });
-      tdActions.appendChild(locateBtn);
+      missingActions.appendChild(locateBtn);
     }
+    if (missingActions.childElementCount) tdName.appendChild(missingActions);
     tdActions.appendChild(deleteBtn);
 
     tr.appendChild(tdCheck);

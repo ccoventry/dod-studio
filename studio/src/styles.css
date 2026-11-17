@@ -1097,9 +1097,7 @@ button.danger-btn {
   min-width: 4em !important;
 }
 
-/* Badges drop under a long name instead of squeezing it to nothing, and the
-   Actions cell may wrap so Locate, Use found copy and Remove drop to a second
-   line when the pane is too narrow for all three side by side (#1376). */
+/* Badges drop under a long name instead of squeezing it to nothing (#1376). */
 #master-demo-table td.queue-name-cell {
   flex-wrap: wrap;
 }
@@ -1107,6 +1105,24 @@ button.danger-btn {
 #master-demo-table .locate-demo-btn,
 #master-demo-table .use-found-copy-btn {
   white-space: nowrap;
+}
+
+/* Use found copy and Locate under the demo name, on a line of their own; they
+   wrap to two lines when the name column is narrow (#1513). */
+#master-demo-table .queue-missing-actions {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+/* The name cell clips and has no intrinsic width (above), so nothing else
+   holds the column open for the buttons: a floor of one button's width keeps
+   them whole when the pane is dragged to its narrowest, the wrapper scrolling
+   sideways instead of cutting them. On every row's column, so it never
+   changes when a row turns missing (#1513). */
+#master-demo-table th:nth-child(2) {
+  min-width: 96px;
 }
 
 #master-demo-table tr:hover {
