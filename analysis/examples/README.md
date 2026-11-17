@@ -7,6 +7,11 @@ are reproducible rather than asserted.
 These are `examples/`, so they are not part of any shipped binary. `cargo build`
 ignores them; `cargo build --examples` and `cargo test` compile them.
 
+A probe that unwraps starts with `#![allow(clippy::unwrap_used,
+clippy::expect_used, reason = "...")]`: Clippy refuses both everywhere else
+outside tests (#1179, `docs/coding_standards.md` section 4), and in a probe run
+by hand a panic is its error report.
+
 ## The stats probes
 
 The table covers the probes that measure what statistics a demo can yield.

@@ -4,6 +4,11 @@
 //! and the post-injection file (fully re-encoded by snapshot_inject) using
 //! `incoming_sequence`, which is untouched for real frames in either file, and
 //! diffs their Debug-formatted message content.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
 use dem::types::{Delta, EngineMessage, FrameData, MessageData, NetMessage};

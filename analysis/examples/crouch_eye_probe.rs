@@ -17,6 +17,11 @@
 //!   `ds_demo_seek_to` go by.
 //!
 //!     cargo run --release -p analysis --example crouch_eye_probe -- <demo> > rows.tsv
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{Delta, EngineMessage, FrameData, MessageData, NetMessage};
 use std::collections::HashMap;
