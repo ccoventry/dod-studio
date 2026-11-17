@@ -19,6 +19,8 @@ members = [
     "goldsrc-hooks",
     # Source-reading checks with no dependencies; see its Cargo.toml.
     "source-checks",
+    # The three poison-recovering lock helpers every other crate shares (#1377).
+    "lock-recover",
 ]
 
 [workspace.package]
@@ -30,6 +32,7 @@ version = "0.10.0"
 # sysinfo 0.29 and 0.30 both ended up in the tree, each compiled separately).
 # A member opts in with `{ workspace = true }` and adds its own `features`.
 [workspace.dependencies]
+lock-recover = { path = "lock-recover" }
 clap = "4.5.41"
 dem = "0.2.3"
 filetime = "0.2.25"

@@ -11,7 +11,6 @@ mod duplicates;
 mod key_cache;
 mod keys;
 mod lanes;
-mod lock;
 pub mod messages;
 pub mod repair;
 mod walk;

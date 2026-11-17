@@ -1,7 +1,7 @@
 //! Taking a `Mutex` or `RwLock` and carrying on when a panicking thread left
-//! it poisoned (#1377). `analysis`, `goldsrc-hooks` and `hl-demo-auditor`
-//! don't depend on `native`, so each keeps a private copy of these: one of
-//! four copies until the helpers get one shared home.
+//! it poisoned (#1377). One crate so `native`, `analysis`, `goldsrc-hooks`,
+//! `hl-demo-auditor` and Studio share a single copy; the last four can't
+//! depend on `native`.
 //!
 //! Release builds abort on a panic, so a lock is only ever poisoned in debug
 //! and test builds, where one panicking thread would otherwise make every
@@ -9,6 +9,9 @@
 //! only where the data behind the lock is still valid after a panic
 //! mid-update; if it might not be, unwrap and let the panic stand
 //! (`docs/coding_standards.md`, section 4).
+//!
+//! Std only, with no threads outside the tests, so it builds for the 32-bit
+//! hook DLL and for wasm32 too.
 
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 

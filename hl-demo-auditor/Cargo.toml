@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 # The delta-continuity check behind `--integrity` (#41).
 analysis = { path = "../analysis" }
+lock-recover = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 # The key cache file (#888).
 serde = { workspace = true }

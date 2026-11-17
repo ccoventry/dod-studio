@@ -11,8 +11,8 @@
 use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
 use crate::take_preview_manager::{check_listed, ffmpeg_path};
+use lock_recover::lock_or_recover;
 use native::hlcr::take_checks::{self, TakeChecks};
-use native::shared::lock::lock_or_recover;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

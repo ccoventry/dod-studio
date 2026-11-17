@@ -350,7 +350,6 @@ mod hw_call_site;
 mod lightmap_gamma;
 mod lightmap_rebuild;
 mod list_panel;
-mod lock;
 mod lookahead;
 mod map_cfgs;
 mod map_file_leak;

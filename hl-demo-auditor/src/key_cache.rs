@@ -13,8 +13,8 @@
 //! cache: a file that is missing, unreadable or from another version starts
 //! it empty, and a failed save loses nothing but time.
 
-use crate::lock::lock_or_recover;
 use crate::{ContentHashes, Stamp, ZipDemoEntry};
+use lock_recover::lock_or_recover;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

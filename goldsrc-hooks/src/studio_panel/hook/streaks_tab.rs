@@ -12,7 +12,7 @@
 //! The hint line under the list says when there is nothing to list, and why;
 //! how far the analysis has got is the loading strip's and the progress bar's.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

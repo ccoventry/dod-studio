@@ -3,7 +3,7 @@
 //! the hint is and says how far it has got. When the count is done the tab
 //! lists again (`filter_demo_list`), and the bar gives the hint back.
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::c_void;
 use std::sync::atomic::Ordering;
 

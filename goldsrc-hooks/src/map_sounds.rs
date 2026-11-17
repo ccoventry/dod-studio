@@ -84,7 +84,7 @@
 //! `tools/verify_map_sounds_offsets.py` checks the call sites in both builds,
 //! `tools/verify_map_entities_offsets.py` the `model_t` offsets.
 
-use crate::lock::write_or_recover;
+use lock_recover::write_or_recover;
 use std::collections::BTreeSet;
 use std::ffi::CStr;
 use std::sync::RwLock;

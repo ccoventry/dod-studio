@@ -11,9 +11,9 @@
 
 use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
+use lock_recover::lock_or_recover;
 use native::hlcr::take_delete::{TakeDeletion, plan_take_deletion, recycle_take};
 use native::log_markdown;
-use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

@@ -36,7 +36,7 @@
 pub(crate) mod frames;
 pub mod timeline;
 
-use crate::lock::write_or_recover;
+use lock_recover::write_or_recover;
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};

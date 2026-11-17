@@ -24,6 +24,7 @@
 use crate::render_manager::RenderManager;
 use crate::render_manager::TakeRender;
 use crate::settings_manager::SettingsManager;
+use lock_recover::lock_or_recover;
 use native::hlcr::capture_room::{
     ClipSizeModel, OutputRatio, PendingTake, RoomDecision, RoomInputs, StopDebounce,
     TakeRenderState, decide, hold_seconds, may_resume, render_coming,
@@ -31,7 +32,6 @@ use native::hlcr::capture_room::{
 use native::hlcr::take_cleanup::{AfterFinish, CleanupPolicy, format_gb, volume_of};
 use native::log_markdown;
 use native::patch::types::CaptureBlock;
-use native::shared::lock::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

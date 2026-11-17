@@ -70,7 +70,7 @@
 // The window is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::CStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

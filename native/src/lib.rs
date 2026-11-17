@@ -2,8 +2,8 @@
 #![warn(clippy::unwrap_used, clippy::expect_used)]
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-use crate::shared::lock::lock_or_recover;
 use analysis::Analysis;
+use lock_recover::lock_or_recover;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;

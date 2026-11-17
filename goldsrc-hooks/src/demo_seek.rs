@@ -151,7 +151,7 @@
 // for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::Ordering;
 

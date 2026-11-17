@@ -3,7 +3,7 @@
 // game that is already running, the running-process guard, and watching a
 // launch for the game's error boxes.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 

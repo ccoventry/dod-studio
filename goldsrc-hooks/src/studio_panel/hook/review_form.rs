@@ -52,7 +52,7 @@
 //! form cancels with, so a menu that comes up just after the form's Esc, or
 //! while it shows, is put away again: Esc on the form means the form.
 
-use crate::lock::{read_or_recover, write_or_recover};
+use lock_recover::{read_or_recover, write_or_recover};
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

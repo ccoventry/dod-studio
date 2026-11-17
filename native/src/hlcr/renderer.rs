@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
-use crate::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 
 mod clip_frames;
 mod ffmpeg_args;

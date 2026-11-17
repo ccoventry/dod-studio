@@ -6,6 +6,7 @@
 // `render_manager`, which owns the job list these functions read and write.
 
 use super::{RenderJobRuntime, history_for, resolve_ffmpeg};
+use lock_recover::lock_or_recover;
 use native::hlcr::autosave::{
     RenderJob as AutosaveJob, RenderJobStatus as AutosaveJobStatus, RenderSessionData,
 };
@@ -13,7 +14,6 @@ use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::scanner::ClipData;
 use native::hlcr::take_cleanup::attempt_stream;
 use native::log_markdown;
-use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;

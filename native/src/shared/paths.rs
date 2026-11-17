@@ -1,4 +1,4 @@
-use crate::shared::lock::{read_or_recover, write_or_recover};
+use lock_recover::{read_or_recover, write_or_recover};
 use std::path::{Path, PathBuf};
 
 /// Name of this app's directory under `%APPDATA%`.

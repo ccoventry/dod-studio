@@ -3,7 +3,7 @@
 // already knows, parsing the rest for highlights, and finding demos that have
 // moved or changed since the project last saw them.
 
-use native::shared::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

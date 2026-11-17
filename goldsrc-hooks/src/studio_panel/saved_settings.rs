@@ -1,7 +1,7 @@
 //! What the window keeps between launches: the Settings tab's changes
 //! (`settings.cfg`) and the layout files it writes (`defaults.txt`).
 
-use crate::lock::lock_or_recover;
+use lock_recover::lock_or_recover;
 use std::ffi::CStr;
 use std::sync::atomic::Ordering;
 
