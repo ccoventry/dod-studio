@@ -429,6 +429,8 @@ pub fn run() {
         .build(tauri::generate_context!());
     // A release build has no console, so a panic here would leave no trace:
     // the activity log is the one place a user can see why Studio closed.
+    // This covers `Builder::build` failing (event loop, plugin, menu, tray);
+    // the windows are created later, inside `app.run()`.
     let app = match app {
         Ok(app) => app,
         Err(err) => {

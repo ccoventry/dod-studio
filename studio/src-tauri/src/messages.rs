@@ -85,10 +85,10 @@ pub fn background_task_crashed(err: impl Display) -> String {
 
 // ── lib.rs ───────────────────────────────────────────────────────────────
 
-/// Activity-log line when Tauri cannot build Studio's window (a missing or
-/// broken WebView2, say), just before Studio exits.
+/// Activity-log line when `Builder::build` fails (event loop, plugin, menu or
+/// tray set-up), just before Studio exits.
 pub fn studio_start_failed(err: impl Display) -> String {
-    format!("❌ **Studio** — could not start its window: {err}")
+    format!("❌ **Studio** — could not start: {err}")
 }
 
 // ── project_session_cmd.rs ───────────────────────────────────────────────
