@@ -70,6 +70,7 @@
 // The window is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
+use crate::lock::lock_or_recover;
 use std::ffi::CStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1617,7 +1618,7 @@ mod hook {
             load(frame, WINDOW_RES.0.as_ptr(), std::ptr::null());
             let vgui = Vgui::get()?;
             let (_, _, fw, fh) = vgui.rect(vpanel_of(frame));
-            *WINDOW_DESIGN.lock().unwrap_or_else(|e| e.into_inner()) = Some((fw, fh));
+            *lock_or_recover(&WINDOW_DESIGN) = Some((fw, fh));
             let mut designs = Vec::new();
 
             let sheet = allocate(base, build, build.sheet_size)?;
@@ -1988,7 +1989,7 @@ mod hook {
                 }
                 let sheet = vpanel_of(SHEET.load(Ordering::Acquire) as *mut c_void);
                 let window_now = window(vgui).map(|(_, vp)| vgui.rect(vp));
-                let window_design = *WINDOW_DESIGN.lock().unwrap_or_else(|e| e.into_inner());
+                let window_design = *lock_or_recover(&WINDOW_DESIGN);
                 let settings_page =
                     vpanel_of(PAGE_OBJECTS[SETTINGS_PAGE].load(Ordering::Acquire) as *mut c_void);
                 if page == settings_page {
@@ -2955,10 +2956,7 @@ mod hook {
             Action::Vcr(c) => Vgui::get().and_then(|vgui| unsafe { to_vcr_bar(&vgui, c) }),
             Action::Goto => unsafe { goto_typed_time() },
             Action::ClearPlayers => {
-                PICKED_PLAYERS
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clear();
+                lock_or_recover(&PICKED_PLAYERS).clear();
                 Ok(())
             }
             Action::DemoBack => unsafe { navigate(crate::demo_list_folders::go_back) },

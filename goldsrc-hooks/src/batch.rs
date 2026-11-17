@@ -59,6 +59,7 @@
 // The demo player is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -477,7 +478,7 @@ pub(crate) fn running() -> bool {
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Batch>> {
-    BATCH.lock().unwrap_or_else(|e| e.into_inner())
+    lock_or_recover(&BATCH)
 }
 
 fn say(line: &str) {

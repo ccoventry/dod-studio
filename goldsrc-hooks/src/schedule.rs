@@ -33,6 +33,7 @@
 // The demo player is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::lock_or_recover;
 use std::sync::Mutex;
 
 use crate::names::console_name;
@@ -141,7 +142,7 @@ impl Schedule {
 static SCHEDULE: Mutex<Option<Schedule>> = Mutex::new(None);
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Schedule>> {
-    SCHEDULE.lock().unwrap_or_else(|e| e.into_inner())
+    lock_or_recover(&SCHEDULE)
 }
 
 fn say(line: &str) {

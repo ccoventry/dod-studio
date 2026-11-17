@@ -13,10 +13,11 @@
 //! cache: a file that is missing, unreadable or from another version starts
 //! it empty, and a failed save loses nothing but time.
 
+use crate::lock::lock_or_recover;
 use crate::{ContentHashes, Stamp, ZipDemoEntry};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 /// Bumped when [`KeyEntry`] changes meaning; an older file is dropped.
 const VERSION: u32 = 1;
@@ -305,7 +306,7 @@ impl KeyCache {
         if !self.has_changes() {
             return Ok(());
         }
-        let _one_at_a_time = SAVE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let _one_at_a_time = lock_or_recover(&SAVE_LOCK);
         let saved = read_file(file);
         let mut entries = saved.entries;
         let mut archives = saved.archives;

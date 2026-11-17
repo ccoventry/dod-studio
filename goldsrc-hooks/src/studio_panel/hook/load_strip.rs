@@ -13,6 +13,7 @@
 //! window open or not; the Highlights tab only shows its result. The demo
 //! load needs nothing: it runs at the same rate with the window closed.
 
+use crate::lock::lock_or_recover;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
@@ -40,7 +41,7 @@ pub(super) fn request_highlights() {
         return;
     };
     let path = crate::demo_locate::playing(&name);
-    let mut requested = REQUESTED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut requested = lock_or_recover(&REQUESTED);
     if requested.as_ref() == Some(&path) {
         return;
     }
@@ -89,7 +90,7 @@ pub(super) unsafe fn update(vgui: &Vgui, frame_vp: Vpanel) {
         if vgui.visible(strip) != text.is_some() {
             vgui.set_visible(strip, text.is_some());
         }
-        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = lock_or_recover(&SHOWN);
         if shown.0 == strip && shown.1 == text {
             return;
         }

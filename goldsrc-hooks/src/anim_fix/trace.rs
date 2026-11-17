@@ -1,6 +1,7 @@
 //! Diagnostics: the log lines and status reply that say what `apply()` is
 //! doing. Nothing here changes what the fix plays.
 
+use crate::lock::lock_or_recover;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -31,7 +32,7 @@ pub(super) fn note_held_model(spectated: &ClEntityS) {
         // Forget what was last seen, so switching this on mid-session reports
         // the current model straight away rather than waiting for the next
         // change -- which might never come if the player just stands there.
-        *LAST_HELD_MODEL.lock().unwrap() = None;
+        *lock_or_recover(&LAST_HELD_MODEL) = None;
         return;
     }
     let Some(studio) = engine::engine_studio() else {
@@ -43,7 +44,7 @@ pub(super) fn note_held_model(spectated: &ClEntityS) {
     }
     let name = unsafe { (*held).name_str() }.into_owned();
 
-    let mut last = LAST_HELD_MODEL.lock().unwrap();
+    let mut last = lock_or_recover(&LAST_HELD_MODEL);
     if last.as_deref() == Some(name.as_str()) {
         return;
     }
@@ -68,7 +69,7 @@ pub(super) fn note_held_model(spectated: &ClEntityS) {
 static REPORTED_MISMATCHES: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
 
 pub(super) fn note_unmatched_pair(viewmodel_name: &str, held_name: &str) {
-    let mut guard = REPORTED_MISMATCHES.lock().unwrap();
+    let mut guard = lock_or_recover(&REPORTED_MISMATCHES);
     let seen = guard.get_or_insert_with(HashSet::new);
     if !seen.insert((viewmodel_name.to_string(), held_name.to_string())) {
         return;
@@ -145,7 +146,7 @@ pub(super) fn stage_with<A, B>(stage: i32, entity: *mut A, model: *mut B, index:
     STAGE.store(stage, Ordering::Relaxed);
 
     let key = (stage, entity as usize, model as usize, index);
-    let mut last = LAST_TRACE.lock().unwrap();
+    let mut last = lock_or_recover(&LAST_TRACE);
     if *last == Some(key) {
         return;
     }
@@ -162,7 +163,7 @@ pub(super) fn stage_with<A, B>(stage: i32, entity: *mut A, model: *mut B, index:
 
 /// One-line summary for `ds_debug_status`.
 pub fn status() -> String {
-    let seen = SEEN_VIEWMODELS.lock().unwrap();
+    let seen = lock_or_recover(&SEEN_VIEWMODELS);
     let count = seen.as_ref().map(|s| s.len()).unwrap_or(0);
     format!(
         "{} -- {count} viewmodels, {} played",
@@ -181,7 +182,7 @@ static SEEN_VIEWMODELS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 pub(super) fn note_viewmodel(name: &str, deployable: bool, model: *mut ModelSPartial) {
     const LIMIT: usize = 24;
-    let mut guard = SEEN_VIEWMODELS.lock().unwrap();
+    let mut guard = lock_or_recover(&SEEN_VIEWMODELS);
     let seen = guard.get_or_insert_with(HashSet::new);
     if seen.len() >= LIMIT || !seen.insert(name.to_string()) {
         return;

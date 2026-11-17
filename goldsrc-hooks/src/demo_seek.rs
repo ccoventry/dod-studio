@@ -151,6 +151,7 @@
 // for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::lock_or_recover;
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::Ordering;
 
@@ -503,7 +504,7 @@ fn start(
                 if relative { "by" } else { "to" },
                 clock_text(seconds)
             );
-            *QUEUED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Queued {
+            *lock_or_recover(&QUEUED) = Some(Queued {
                 name,
                 seconds,
                 relative,
@@ -580,7 +581,7 @@ static QUEUED: std::sync::Mutex<Option<Queued>> = std::sync::Mutex::new(None);
 
 /// Drops a waiting seek, saying why.
 fn cancel_queued(why: &str) {
-    let queued = QUEUED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let queued = lock_or_recover(&QUEUED).take();
     if let Some(q) = queued {
         say(&cancelled_line(&q, why));
     }
@@ -1256,7 +1257,7 @@ mod player {
             let get_start: TimeFn = slot(player, SLOT_GET_START_TIME);
             let (now, start, end) = (get_now(player), get_start(player), get_end(player));
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pending = lock_or_recover(&PENDING);
             crate::deathmsg::seek_restamp::cancel(); // a stepped one notes anew from its clear
             // A seek on its way: count from where it is heading (`chain.rs`).
             let chain = in_flight(pending.as_ref());

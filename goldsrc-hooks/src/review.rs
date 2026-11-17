@@ -72,6 +72,7 @@
 // rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -496,7 +497,7 @@ pub(crate) fn generation() -> u32 {
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Review>> {
-    REVIEW.lock().unwrap_or_else(|e| e.into_inner())
+    lock_or_recover(&REVIEW)
 }
 
 fn say(line: &str) {

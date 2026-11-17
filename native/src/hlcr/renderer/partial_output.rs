@@ -11,9 +11,10 @@
 //! of one clip name started together can't pick the same file. Studio's way
 //! out removes the listed files after it has ended their FFmpegs.
 
+use crate::shared::lock::lock_or_recover;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// What marks an unfinished render's file name, before its extension.
@@ -74,11 +75,11 @@ impl InFlight {
     // The set stays valid after a panic mid-update: each change is one
     // insert or remove.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
-        self.paths.lock().unwrap_or_else(PoisonError::into_inner)
+        lock_or_recover(&self.paths)
     }
 
     fn lock_segments(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
-        self.segments.lock().unwrap_or_else(PoisonError::into_inner)
+        lock_or_recover(&self.segments)
     }
 
     /// Reserves `<stem><ext>` in `dir`, or the first free `<stem>_N<ext>`. A

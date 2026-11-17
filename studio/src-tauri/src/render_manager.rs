@@ -526,9 +526,7 @@ impl RenderManager {
     /// folder: HLAE writes the take into a `take0000` folder inside it.
     pub(crate) fn renders_under(&self, folder: &str) -> Vec<TakeRender> {
         let key = native::hlcr::take_cleanup::folder_key(folder);
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .filter(|j| {
                 let job = native::hlcr::take_cleanup::folder_key(&j.clip.take_folder);
@@ -544,9 +542,7 @@ impl RenderManager {
 
     /// Whether any render is queued or running.
     pub(crate) fn has_pending_renders(&self) -> bool {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .any(|j| j.status == "Queued" || j.status == "Rendering")
     }
@@ -555,9 +551,7 @@ impl RenderManager {
     /// with a HUD pair, none for a take not in the list. Delete Take (#644)
     /// refuses on these.
     pub(crate) fn take_statuses(&self, take_folder: &str) -> Vec<String> {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .filter(|j| j.clip.take_folder == take_folder)
             .map(|j| j.status.clone())
@@ -573,7 +567,7 @@ impl RenderManager {
         take_folder: &str,
     ) -> Result<(), String> {
         {
-            let mut jobs = self.jobs.lock().unwrap();
+            let mut jobs = lock_or_recover(&self.jobs);
             let statuses: Vec<&str> = jobs
                 .iter()
                 .filter(|j| j.clip.take_folder == take_folder)
@@ -593,9 +587,7 @@ impl RenderManager {
     /// Take folders with a job queued or rendering, as `folder_key`s: the
     /// automatic take cleanup (#644) never touches one.
     pub(crate) fn busy_take_keys(&self) -> std::collections::HashSet<String> {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .filter(|j| j.status == "Queued" || j.status == "Rendering")
             .map(|j| native::hlcr::take_cleanup::folder_key(&j.clip.take_folder))
@@ -606,9 +598,7 @@ impl RenderManager {
     /// the scanner and the list can spell one folder differently, and the
     /// rows are matched by their exact text.
     pub(crate) fn listed_take_folder(&self, key: &str) -> Option<String> {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .find(|j| native::hlcr::take_cleanup::folder_key(&j.clip.take_folder) == key)
             .map(|j| j.clip.take_folder.clone())
@@ -617,9 +607,7 @@ impl RenderManager {
     /// The queued jobs' takes and settings, for [`first_wave_pieces`]: copied
     /// out so the estimates, which read take headers, run without the lock.
     pub(crate) fn queued_takes(&self) -> Vec<QueuedTake> {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .filter(|j| j.status == "Queued")
             .map(|j| QueuedTake {
@@ -643,7 +631,7 @@ impl RenderManager {
         take_folders: &[String],
     ) -> Result<(), String> {
         {
-            let mut jobs = self.jobs.lock().unwrap();
+            let mut jobs = lock_or_recover(&self.jobs);
             for folder in take_folders {
                 let statuses: Vec<&str> = jobs
                     .iter()
@@ -664,13 +652,11 @@ impl RenderManager {
     /// Whether this process already holds a batch (#771): a page reload
     /// over it is not an interruption to recover from.
     fn holds_batch(&self) -> bool {
-        self.is_rendering.load(Ordering::SeqCst) || !self.jobs.lock().unwrap().is_empty()
+        self.is_rendering.load(Ordering::SeqCst) || !lock_or_recover(&self.jobs).is_empty()
     }
 
     fn views(&self) -> Vec<RenderJobView> {
-        self.jobs
-            .lock()
-            .unwrap()
+        lock_or_recover(&self.jobs)
             .iter()
             .map(RenderJobRuntime::to_view)
             .collect()
@@ -679,17 +665,14 @@ impl RenderManager {
     /// What Start runs with, and how many rows it starts. A recovered batch
     /// that couldn't rebuild its config says what a scan has to fill in.
     fn start_config(&self) -> Result<(RenderConfig, usize), String> {
-        let starting = self
-            .jobs
-            .lock()
-            .unwrap()
+        let starting = lock_or_recover(&self.jobs)
             .iter()
             .filter(|j| j.status == "Queued")
             .count();
         if starting == 0 {
             return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
         }
-        match self.last_config.lock().unwrap().clone() {
+        match lock_or_recover(&self.last_config).clone() {
             Some(mut config) => {
                 // The folders Settings has now, not the ones the last scan
                 // brought (#1430).
@@ -699,10 +682,7 @@ impl RenderManager {
                 }
                 Ok((config, starting))
             }
-            None => Err(self
-                .recovery_gap
-                .lock()
-                .unwrap()
+            None => Err(lock_or_recover(&self.recovery_gap)
                 .clone()
                 .unwrap_or_else(|| crate::messages::NOTHING_QUEUED_TO_RENDER.to_string())),
         }
@@ -718,17 +698,17 @@ impl RenderManager {
         let jobs = recovered_jobs(&session);
         match recovered_config(&session, settings) {
             Ok(config) => {
-                *self.last_config.lock().unwrap() = Some(config);
-                *self.recovery_gap.lock().unwrap() = None;
+                *lock_or_recover(&self.last_config) = Some(config);
+                *lock_or_recover(&self.recovery_gap) = None;
             }
             Err(gap) => {
                 log_markdown(&crate::messages::render::recover_gap(&gap));
-                *self.last_config.lock().unwrap() = None;
-                *self.recovery_gap.lock().unwrap() = Some(gap);
+                *lock_or_recover(&self.last_config) = None;
+                *lock_or_recover(&self.recovery_gap) = Some(gap);
             }
         }
-        *self.jobs.lock().unwrap() = jobs;
-        *self.render_session.lock().unwrap() = Some(session);
+        *lock_or_recover(&self.jobs) = jobs;
+        *lock_or_recover(&self.render_session) = Some(session);
         self.views()
     }
 
@@ -752,9 +732,7 @@ impl RenderManager {
 }
 
 fn emit_jobs_snapshot(app: &AppHandle, jobs: &Arc<Mutex<Vec<RenderJobRuntime>>>) {
-    let views: Vec<RenderJobView> = jobs
-        .lock()
-        .unwrap()
+    let views: Vec<RenderJobView> = lock_or_recover(jobs)
         .iter()
         .map(RenderJobRuntime::to_view)
         .collect();
@@ -771,25 +749,25 @@ fn apply_render_update(
 ) -> Option<String> {
     match update {
         RenderUpdate::Progress(id, pct) => {
-            if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            if let Some(job) = lock_or_recover(jobs).iter_mut().find(|j| j.id == id) {
                 job.progress = pct;
             }
             None
         }
         RenderUpdate::Speed(id, speed) => {
-            if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            if let Some(job) = lock_or_recover(jobs).iter_mut().find(|j| j.id == id) {
                 job.speed = speed;
             }
             None
         }
         RenderUpdate::Status(id, status) => {
-            if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            if let Some(job) = lock_or_recover(jobs).iter_mut().find(|j| j.id == id) {
                 job.status = status;
             }
             None
         }
         RenderUpdate::OutputPath(id, path) => {
-            if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            if let Some(job) = lock_or_recover(jobs).iter_mut().find(|j| j.id == id) {
                 // Stat'd once, here, rather than on every `to_view()` call —
                 // this only ever arrives once per job, right after the file
                 // has been fully written (see run_render_job), so this is
@@ -824,7 +802,7 @@ fn apply_render_update(
             let mut finished_attempt: Option<RenderAttempt> = None;
             let mut finished_clip: Option<ClipData> = None;
             {
-                let mut guard = jobs.lock().unwrap();
+                let mut guard = lock_or_recover(jobs);
                 if let Some(job) = guard.iter_mut().find(|j| j.id == id) {
                     // #438: how this attempt ended, for the take's history.
                     // Status updates have already run, so "Cancelled" is
@@ -945,7 +923,7 @@ fn apply_render_update(
                 ));
             }
             // Autosave only tracks success — matches dev's ui.rs exactly.
-            if success && let Some(session) = render_session.lock().unwrap().as_mut() {
+            if success && let Some(session) = lock_or_recover(render_session).as_mut() {
                 if let Some(clip) = &finished_clip
                     && let Some(rj) = autosave_entry(session, clip)
                 {
@@ -992,7 +970,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 return;
             }
             if handles.global_cancel.load(Ordering::SeqCst) {
-                let mut guard = handles.jobs.lock().unwrap();
+                let mut guard = lock_or_recover(&handles.jobs);
                 for job in guard.iter_mut() {
                     if job.status == "Rendering" || job.status == "Queued" {
                         job.cancel_flag.store(true, Ordering::Relaxed);
@@ -1048,7 +1026,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 log_markdown(&crate::messages::render::export_dirs_changed(&exports_now));
             }
             let started_any = {
-                let mut guard = handles.jobs.lock().unwrap();
+                let mut guard = lock_or_recover(&handles.jobs);
                 let active_count = guard.iter().filter(|j| j.status == "Rendering").count();
                 let mut started = 0usize;
                 // Checked again under the lock: the way out may have begun
@@ -1185,14 +1163,14 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 return;
             }
             let finished = {
-                let mut guard = handles.jobs.lock().unwrap();
+                let mut guard = lock_or_recover(&handles.jobs);
                 let has_active_or_queued = guard
                     .iter()
                     .any(|j| j.status == "Rendering" || j.status == "Queued");
                 if !has_active_or_queued {
-                    *handles.wake_lock.lock().unwrap() = None; // Drop releases the wake lock.
+                    *lock_or_recover(&handles.wake_lock) = None; // Drop releases the wake lock.
                     let _ = std::fs::remove_file(autosave_path());
-                    *handles.render_session.lock().unwrap() = None;
+                    *lock_or_recover(&handles.render_session) = None;
                     // Clear Queue (#70) asked while this batch ran: every
                     // render has stopped by now, so the whole list can go.
                     if handles.clear_on_finish.swap(false, Ordering::SeqCst) {
@@ -1294,10 +1272,7 @@ async fn scan_and_merge(
     // The folders of the rows already listed, to tell a take that is gone
     // from one this scan just didn't reach. Checked with the walk below, off
     // the jobs lock.
-    let mut known_folders: Vec<String> = state
-        .jobs
-        .lock()
-        .unwrap()
+    let mut known_folders: Vec<String> = lock_or_recover(&state.jobs)
         .iter()
         .map(|j| j.clip.take_folder.clone())
         .collect();
@@ -1411,7 +1386,7 @@ async fn scan_and_merge(
     // between the two (see its exit check). Nothing here touches the disk
     // but the autosave write itself.
     let (summary, empty) = {
-        let mut guard = state.jobs.lock().unwrap();
+        let mut guard = lock_or_recover(&state.jobs);
         let mut next_id = state.next_job_id.load(Ordering::SeqCst);
         let (merged, summary) = merge_scan(
             std::mem::take(&mut *guard),
@@ -1441,8 +1416,8 @@ async fn scan_and_merge(
     } else {
         // What the next Start runs with; a batch already rendering keeps the
         // config it started with.
-        *state.last_config.lock().unwrap() = Some(config);
-        *state.recovery_gap.lock().unwrap() = None;
+        *lock_or_recover(&state.last_config) = Some(config);
+        *lock_or_recover(&state.recovery_gap) = None;
     }
 
     emit_jobs_snapshot(app, &state.jobs);
@@ -1586,7 +1561,7 @@ pub async fn start_queued_render(
         ));
     });
     state.global_cancel.store(false, Ordering::SeqCst);
-    *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
+    *lock_or_recover(&state.wake_lock) = hold_render_wake_lock();
     spawn_scheduler(app, state.handles(), config);
 
     Ok(())
@@ -1609,7 +1584,7 @@ pub async fn cancel_render_batch(
         // Cancel All behaves the same regardless of whether Start was ever
         // clicked. Rows stay in the list (Reset can still revive one, Remove
         // All clears them) rather than being wiped outright.
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         for job in jobs.iter_mut() {
             if job.status == "Queued" {
                 job.cancel_flag.store(true, Ordering::Relaxed);
@@ -1637,7 +1612,7 @@ pub async fn set_render_job_codec(
     custom_codec_args: Option<String>,
 ) -> Result<(), String> {
     let requested = RenderCodec::from_str_id(&codec);
-    let mut jobs = state.jobs.lock().unwrap();
+    let mut jobs = lock_or_recover(&state.jobs);
     let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) else {
         return Err(crate::messages::no_such_job(&job_id));
     };
@@ -1658,7 +1633,7 @@ pub async fn set_render_job_codec(
     ));
     // Into the autosave too, so a crash before this job renders recovers it
     // with the codec it was given, not the batch's (#85).
-    if let Some(session) = state.render_session.lock().unwrap().as_mut()
+    if let Some(session) = lock_or_recover(&state.render_session).as_mut()
         && let Some(rj) = autosave_entry(session, &job.clip)
     {
         rj.codec = Some(job.codec.to_str_id().to_string());
@@ -1677,7 +1652,7 @@ pub async fn cancel_render_job(
     job_id: String,
 ) -> Result<(), String> {
     log_markdown(&crate::messages::render::cancel_job_requested(&job_id));
-    let mut jobs = state.jobs.lock().unwrap();
+    let mut jobs = lock_or_recover(&state.jobs);
     let mutated = if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
         job.cancel_flag.store(true, Ordering::Relaxed);
         if job.status == "Queued" {
@@ -1706,11 +1681,11 @@ pub async fn cancel_render_job(
 /// used to wipe unconditionally, so a stale `last_config`/autosave file
 /// doesn't linger describing a batch that no longer has any rows.
 fn clear_batch_state_if_empty(state: &RenderManager) {
-    if state.jobs.lock().unwrap().is_empty() {
-        *state.last_config.lock().unwrap() = None;
-        *state.recovery_gap.lock().unwrap() = None;
+    if lock_or_recover(&state.jobs).is_empty() {
+        *lock_or_recover(&state.last_config) = None;
+        *lock_or_recover(&state.recovery_gap) = None;
         let _ = std::fs::remove_file(autosave_path());
-        *state.render_session.lock().unwrap() = None;
+        *lock_or_recover(&state.render_session) = None;
     }
 }
 
@@ -1725,7 +1700,7 @@ pub async fn remove_render_job(
     state: tauri::State<'_, RenderManager>,
     job_id: String,
 ) -> Result<(), String> {
-    let mut jobs = state.jobs.lock().unwrap();
+    let mut jobs = lock_or_recover(&state.jobs);
     let Some(idx) = jobs.iter().position(|j| j.id == job_id) else {
         return Err(crate::messages::no_such_job(&job_id));
     };
@@ -1747,7 +1722,7 @@ pub async fn remove_non_rendering_render_jobs(
     app: AppHandle,
     state: tauri::State<'_, RenderManager>,
 ) -> Result<(), String> {
-    let mut jobs = state.jobs.lock().unwrap();
+    let mut jobs = lock_or_recover(&state.jobs);
     let before = jobs.len();
     jobs.retain(|j| j.status == "Rendering");
     let removed_count = before - jobs.len();
@@ -1790,7 +1765,7 @@ pub async fn reset_render_job(
 ) -> Result<(), String> {
     let mut previous_status = None;
     {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
             previous_status = Some(job.status.clone());
             requeue(job);
@@ -1816,7 +1791,7 @@ pub async fn reset_all_render_jobs(
 ) -> Result<(), String> {
     let mut reset_count = 0usize;
     {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         for job in jobs.iter_mut() {
             if is_terminal(job) {
                 requeue(job);
@@ -1852,7 +1827,7 @@ pub async fn cancel_render_jobs(
     let mut cancelled = 0usize;
     let mut mutated = false;
     {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         for job in jobs.iter_mut().filter(|j| job_ids.contains(&j.id)) {
             if job.status == "Rendering" || job.status == "Queued" {
                 job.cancel_flag.store(true, Ordering::Relaxed);
@@ -1886,7 +1861,7 @@ pub async fn cancel_queued_render_jobs(
 ) -> Result<usize, String> {
     let mut cancelled = 0usize;
     {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         for job in jobs.iter_mut().filter(|j| j.status == "Queued") {
             job.cancel_flag.store(true, Ordering::Relaxed);
             job.status = "Cancelled".to_string();
@@ -1910,7 +1885,7 @@ pub async fn reset_render_jobs(
 ) -> Result<(), String> {
     let mut reset_count = 0usize;
     {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         for job in jobs.iter_mut().filter(|j| job_ids.contains(&j.id)) {
             if is_terminal(job) {
                 requeue(job);
@@ -1939,7 +1914,7 @@ pub async fn remove_render_jobs(
     job_ids: Vec<String>,
 ) -> Result<usize, String> {
     let removed_count = {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         let before = jobs.len();
         jobs.retain(|j| j.status == "Rendering" || !job_ids.contains(&j.id));
         before - jobs.len()
@@ -1971,7 +1946,7 @@ pub async fn clear_render_queue(
         return Ok(());
     }
     let count = {
-        let mut jobs = state.jobs.lock().unwrap();
+        let mut jobs = lock_or_recover(&state.jobs);
         let count = jobs.len();
         jobs.clear();
         count
@@ -1999,10 +1974,7 @@ pub async fn clear_render_queue(
 /// a number this loose is a real prediction.
 #[tauri::command]
 pub fn get_render_required_estimate_gb(state: tauri::State<'_, RenderManager>) -> f64 {
-    let total: u64 = state
-        .jobs
-        .lock()
-        .unwrap()
+    let total: u64 = lock_or_recover(&state.jobs)
         .iter()
         .filter(|j| j.status == "Queued" || j.status == "Rendering")
         .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
@@ -2072,7 +2044,7 @@ pub fn recover_render_batch(
         .map_err(|e| format!("Couldn't read {}: {}", path.display(), e))?;
     let session: RenderSessionData = serde_json::from_str(&json)
         .map_err(|e| format!("Couldn't parse {}: {}", path.display(), e))?;
-    let recovery_settings = RecoverySettings::from(&*settings.inner.lock().unwrap());
+    let recovery_settings = RecoverySettings::from(&*lock_or_recover(&settings.inner));
     let views = state.install_recovered(session, &recovery_settings);
     let _ = std::fs::remove_file(&path);
     Ok(views)

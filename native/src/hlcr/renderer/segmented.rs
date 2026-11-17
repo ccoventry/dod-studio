@@ -20,9 +20,10 @@
 //! there) ends the segments and the take renders in one piece, which trims
 //! to what is there as it always did.
 
+use crate::shared::lock::lock_or_recover;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 use super::clip_frames::count_frames;
 use super::ffmpeg_args::{Encode, encode_settings};
@@ -105,9 +106,7 @@ fn folders_in_use() -> &'static Mutex<HashSet<String>> {
 
 /// The set stays valid after a panic mid-update: one insert or remove.
 fn lock_in_use() -> std::sync::MutexGuard<'static, HashSet<String>> {
-    folders_in_use()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    lock_or_recover(folders_in_use())
 }
 
 /// A segment folder name claimed in [`folders_in_use`] until dropped.

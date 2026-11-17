@@ -1,6 +1,7 @@
 //! Each model's sequence list, read once out of its studio header and cached,
 //! and the label lookups that pick a viewmodel animation from it.
 
+use crate::lock::lock_or_recover;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -36,7 +37,7 @@ static NO_SEQUENCES: LazyLock<SequenceInfo> = LazyLock::new(|| Arc::from(Vec::ne
 /// so it must not look anything up here itself.
 fn with_sequences<R>(model: *mut ModelSPartial, f: impl FnOnce(&SequenceInfo) -> R) -> R {
     let key = model as usize;
-    let mut cache = SEQUENCE_CACHE.lock().unwrap();
+    let mut cache = lock_or_recover(&SEQUENCE_CACHE);
     let cache = cache.get_or_insert_with(HashMap::new);
     if let Some(cached) = cache.get(&key) {
         return f(cached);

@@ -23,6 +23,7 @@
 // The window is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use crate::lock::write_or_recover;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -139,7 +140,7 @@ pub(crate) fn menu_is_from_esc() -> bool {
 /// Hands a save to the review's next poll; a second save before it replaces
 /// the first.
 pub(crate) fn save(saved: Saved) {
-    *SAVED.write().unwrap_or_else(|e| e.into_inner()) = Some(saved);
+    *write_or_recover(&SAVED) = Some(saved);
     HAS_SAVED.store(true, Ordering::Release);
 }
 
@@ -149,7 +150,7 @@ pub(crate) fn take_saved() -> Option<Saved> {
     if !HAS_SAVED.swap(false, Ordering::AcqRel) {
         return None;
     }
-    SAVED.write().unwrap_or_else(|e| e.into_inner()).take()
+    write_or_recover(&SAVED).take()
 }
 
 /// The kill range typed in the From and To boxes, for a highlight with

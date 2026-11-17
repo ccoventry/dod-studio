@@ -33,6 +33,7 @@
 //! It watches only from a named `viewdemo` until that demo has loaded, so
 //! nothing runs per frame otherwise but one atomic load.
 
+use crate::lock::lock_or_recover;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -102,7 +103,7 @@ pub(super) fn started(name: String, path: std::path::PathBuf) {
         };
         return;
     }
-    let mut watch = WATCH.lock().unwrap_or_else(|e| e.into_inner());
+    let mut watch = lock_or_recover(&WATCH);
     *watch = Some(Watch {
         name,
         started: Instant::now(),

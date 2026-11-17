@@ -13,6 +13,7 @@ use native::hlcr::config::{RenderCodec, RenderConfig};
 use native::hlcr::scanner::ClipData;
 use native::hlcr::take_cleanup::attempt_stream;
 use native::log_markdown;
+use native::shared::lock::lock_or_recover;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -53,7 +54,7 @@ pub(super) fn write_autosave(
             .collect(),
     };
     save_autosave(&session);
-    *render_session.lock().unwrap() = Some(session);
+    *lock_or_recover(render_session) = Some(session);
 }
 
 /// The autosave's entry for the row rendering `clip`, found by take folder

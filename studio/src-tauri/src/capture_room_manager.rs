@@ -249,7 +249,7 @@ fn room_blocks(blocks: &[CaptureBlock], planned_total: u64) -> Vec<RoomBlock> {
 
 fn policy(app: &AppHandle) -> CleanupPolicy {
     let settings = app.state::<SettingsManager>();
-    let s = settings.inner.lock().unwrap();
+    let s = lock_or_recover(&settings.inner);
     CleanupPolicy {
         after_finish: AfterFinish::from_setting(&s.take_after_finish),
         only_when_space_needed: s.take_delete_only_when_space_needed,
@@ -258,7 +258,7 @@ fn policy(app: &AppHandle) -> CleanupPolicy {
 
 fn export_volumes(app: &AppHandle) -> Vec<String> {
     let settings = app.state::<SettingsManager>();
-    let s = settings.inner.lock().unwrap();
+    let s = lock_or_recover(&settings.inner);
     s.render_export_dirs
         .iter()
         .filter(|d| !d.trim().is_empty())
@@ -276,20 +276,13 @@ fn folder_bytes(path: &Path) -> u64 {
 
 /// Whether Render While Capturing is on in the saved settings.
 pub(crate) fn enabled(app: &AppHandle) -> bool {
-    app.state::<SettingsManager>()
-        .inner
-        .lock()
-        .unwrap()
-        .render_while_capturing
+    lock_or_recover(&app.state::<SettingsManager>().inner).render_while_capturing
 }
 
 /// How many renders run at once beside the capture, from the saved
 /// settings: 1 to 4.
 fn renders_beside(app: &AppHandle) -> usize {
-    app.state::<SettingsManager>()
-        .inner
-        .lock()
-        .unwrap()
+    lock_or_recover(&app.state::<SettingsManager>().inner)
         .renders_while_capturing
         .clamp(1, 4)
 }
