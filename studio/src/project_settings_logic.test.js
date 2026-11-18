@@ -72,6 +72,19 @@ describe('resolveSettings', () => {
     expect(resolved.render_export_dirs).toEqual(['G:/mine']);
   });
 
+  it('takes an empty folder list as not set, so Configuration\'s folders show through', () => {
+    const block = { folders: { [PC]: { destinations: [], exports: [] } } };
+    const resolved = resolveSettings(appForm(), block, PC);
+    expect(resolved.target_drives).toEqual(['E:/captures']);
+    expect(resolved.render_export_dirs).toEqual(['F:/renders']);
+    expect(keysDifferingFromForm(appForm(), block, PC)).toEqual([]);
+  });
+
+  it('gives Configuration\'s folders to a project first saved before any was set', () => {
+    const saved = blockFromForm(appForm({ target_drives: [], render_export_dirs: [] }), { pcId: PC });
+    expect(resolveSettings(appForm(), saved, PC).target_drives).toEqual(['E:/captures']);
+  });
+
   it('ignores the folders without a PC id', () => {
     const block = { folders: { '': { destinations: ['X:/x'] } } };
     expect(resolveSettings(appForm(), block, '').target_drives).toEqual(['E:/captures']);

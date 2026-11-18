@@ -139,11 +139,12 @@ function paint() {
   if (hint) hint.textContent = settingHint(enabled, choice);
 }
 
-/** `holdsForRoom` for the settings on the page. */
-export function rendersMakeRoom() {
+/** `holdsForRoom` for the settings on the page, with `captureMode` the
+ *  batch's: the open project's (#1085), which capture_pane.js resolves. */
+export function rendersMakeRoom(captureMode) {
   return holdsForRoom({
     enabled,
-    captureMode: document.querySelector('#config-capture-mode')?.value,
+    captureMode,
     hookRunsBatch: document.querySelector('#config-hook-runs-batch')?.checked ?? true,
     takeChoice: document.querySelector('#config-take-after-finish')?.value,
   });

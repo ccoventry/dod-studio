@@ -1,6 +1,6 @@
 import { launchObs, obsTestConnection } from './ipc_bridge.js';
 import { isObsConnected, setObsConnected } from './obs_status.js';
-import { numberField } from './number_field.js';
+import { obsSizeAndRateInEffect } from './capture_in_effect.js';
 import { STRINGS } from './strings.js';
 
 // Start Capture Batch's gate (capture_pane.js refreshLaunchGuard) is handed in
@@ -43,9 +43,8 @@ export async function runObsConnectionTest({ auto = false } = {}) {
       host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
       port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
       password: document.querySelector('#config-obs-password')?.value || '',
-      gameWidth: numberField('#config-res-width', 1280, { integer: true, positive: true }),
-      gameHeight: numberField('#config-res-height', 720, { integer: true, positive: true }),
-      obsCaptureFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+      // The open project's size and rate (#1085): OBS is set up for them.
+      ...obsSizeAndRateInEffect(),
       obsRecordingQuality: document.querySelector('#config-obs-recording-quality')?.value || '',
     });
     renderObsReport(report);
