@@ -106,6 +106,27 @@ fn pc_id_roundtrip_and_default() {
     assert!(old.pc_id.is_empty());
 }
 
+/// The New UI switch survives a save, and a file from before it has it
+/// off (#1085).
+#[test]
+fn new_ui_roundtrip_and_default_off() {
+    let original = AppSettings {
+        new_ui: true,
+        ..AppSettings::default()
+    };
+    let json = serde_json::to_string(&original).expect("settings must serialize");
+    let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+    assert!(restored.new_ui);
+    let mut before = serde_json::to_value(AppSettings::default()).expect("settings must serialize");
+    before
+        .as_object_mut()
+        .expect("settings are an object")
+        .remove("new_ui");
+    let old: AppSettings =
+        serde_json::from_value(before).expect("a file without new_ui must deserialize");
+    assert!(!old.new_ui);
+}
+
 /// Open Recent's list survives a save, and a file from before it has none (#935).
 #[test]
 fn recent_projects_roundtrip_and_default() {

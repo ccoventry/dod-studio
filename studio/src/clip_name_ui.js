@@ -56,7 +56,15 @@ function showLines(selector, lines) {
 }
 
 function insertAtCursor(text) {
-  const input = templateInput();
+  insertIntoTemplate(templateInput(), text);
+}
+
+/**
+ * Puts a placeholder chip's `text` into the template box `input` at its
+ * cursor, then fires `input` and `change` as typing would. Shared with the
+ * Project settings page's Clip names (#1085).
+ */
+export function insertIntoTemplate(input, text) {
   if (!input) return;
   const start = input.selectionStart ?? input.value.length;
   const end = input.selectionEnd ?? start;

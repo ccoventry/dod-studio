@@ -8,6 +8,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { isCaptureRunning } from './capture_pane.js';
+import { leaveProjectSettingsPage } from './project_settings.js';
 import { confirmCloseDuringRenders } from './render_close_prompt.js';
 import { isCombineRunning } from './combine_clips.js';
 
@@ -29,6 +30,9 @@ export function startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirma
     // Renders and a combine can't go on without Studio: closing stops them
     // (#1439, #1496).
     if (!(await confirmCloseDuringRenders({ isCombining: isCombineRunning }))) return;
+    // Project settings edits not applied yet: Apply, Discard or Stay (#1085).
+    // Before the save prompt, so an Apply there is saved with the rest.
+    if (!(await leaveProjectSettingsPage('window closing'))) return;
     // Project state changed since the last save: offer save, discard or cancel.
     if (needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();

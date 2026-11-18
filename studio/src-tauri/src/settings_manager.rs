@@ -355,6 +355,11 @@ pub struct AppSettings {
     /// (project_settings.js) the first time a file has none.
     #[serde(default)]
     pub pc_id: String,
+    /// The "New UI" switch (#1085): the facelift's new pages (File ›
+    /// Project Settings… first) show only while it is on. Off by default,
+    /// and per PC, not per project (new_ui.js).
+    #[serde(default)]
+    pub new_ui: bool,
     /// The one-time look at the pinned folders ran (#533): older builds
     /// pinned every folder + Add Folder scanned, and Studio lists them once
     /// so the user can unpin the ones they never chose.
@@ -663,6 +668,7 @@ impl Default for AppSettings {
             audit_look_in_zips: false,
             setup_dismissed: false,
             pc_id: String::new(),
+            new_ui: false,
             pinned_folders_reviewed: false,
             scan_include_subfolders: default_scan_include_subfolders(),
             players: native::player_overrides::PlayerTable::default(),

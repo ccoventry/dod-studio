@@ -2,6 +2,16 @@
 // App-wide keyboard shortcuts and the suppressed browser context menu. Kept
 // out of main.js, which only wires (#683).
 
+// Off while the Project settings page is open (#1085): Ctrl+N or Ctrl+O
+// there would leave its pending edits behind. The keys stay swallowed, and
+// text boxes keep Ctrl+C, V, Z and A, which never come through here.
+let enabled = true;
+
+/** Turns Ctrl+N, Ctrl+O and Ctrl+S on or off. */
+export function setAppShortcutsEnabled(on) {
+  enabled = !!on;
+}
+
 export function startAppShortcuts() {
   window.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
@@ -23,6 +33,7 @@ export function startAppShortcuts() {
 
     // New/Save/Load Session work from any tab (#122): the buttons live in
     // the always-visible File menu.
+    if (!enabled) return;
     if (isCtrlN) document.querySelector('#new-session-btn')?.click();
     if (isCtrlO) document.querySelector('#load-project-btn')?.click();
     if (isCtrlS) document.querySelector('#save-project-btn')?.click();
