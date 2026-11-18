@@ -6,13 +6,14 @@
 // Same pattern as take_record.js (#439): the project file's `takeIndex` stays
 // `take_key -> uid[]`, and the renders live in a sibling `takeRenders` key,
 // `take_key -> [{ started_unix_ms, stream, codec, custom_codec_args?, fps,
-// output_path, output_size_bytes?, content_hash? }]`, oldest first: one entry per finished
+// output_path, output_size_bytes?, content_hash?, moved_from? }]`, oldest first: one entry per finished
 // render, in the shape of the take folder's own history (#438), so the render
 // history's line builder reads both. Older builds ignore the key (and drop it
 // when they save). In memory the map rides on the take index as a
 // non-enumerable property, so JSON.stringify of the index never includes it.
 
 import { capturedAtOf } from './take_record.js';
+import { samePath } from './path_display.js';
 
 const RENDERS = 'takeRenders';
 
@@ -60,16 +61,35 @@ export function recordRender(takeIndex, takeKey, attempt) {
   return true;
 }
 
+/** The paths a render had before it was moved (#1514), oldest first. */
+export function movedFromOf(render) {
+  return Array.isArray(render?.moved_from) ? render.moved_from.filter((p) => typeof p === 'string' && p !== '') : [];
+}
+
+/** Adds `oldPath` to the render's `moved_from`, once, and never its current
+ *  path (a video moved back where it was). */
+function rememberOldPath(render, oldPath) {
+  const kept = movedFromOf(render).filter((p) => !samePath(p, render.output_path));
+  if (oldPath && !samePath(oldPath, render.output_path) && !kept.some((p) => samePath(p, oldPath))) {
+    kept.push(oldPath);
+  }
+  if (kept.length > 0) render.moved_from = kept;
+  else delete render.moved_from;
+}
+
 /**
  * Points a recorded render at where a Find Moved Videos scan found it
  * (#1442): `found` is `{ output_path, output_size_bytes, content_hash }`, a
  * field left null keeps what was recorded. `render` is the recorded entry or
- * a copy of it (`projectRenderedVideos`), matched by start and stream.
- * Returns true when the record changed.
+ * a copy of it (`projectRenderedVideos`), matched by start and stream. The
+ * path it leaves goes on its `moved_from`, so a VEGAS project still pointing
+ * there can be relinked (#1514); older builds keep the field as it is (they
+ * save a render's entry whole). Returns true when the record changed.
  */
 export function relocateRender(takeIndex, takeKey, render, found) {
   const known = rendersOf(takeIndex, takeKey).find((entry) => sameRender(entry, render));
   if (!known || !found) return false;
+  const oldPath = known.output_path;
   let changed = false;
   ['output_path', 'output_size_bytes', 'content_hash'].forEach((field) => {
     const value = found[field];
@@ -77,6 +97,7 @@ export function relocateRender(takeIndex, takeKey, render, found) {
     known[field] = value;
     changed = true;
   });
+  if (known.output_path !== oldPath) rememberOldPath(known, oldPath);
   return changed;
 }
 

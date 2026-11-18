@@ -84,10 +84,31 @@ export const RENDER_STRINGS = {
     FIND_MOVED_PICK_ACTION: 'Look in a folder…',
     FIND_MOVED_PICK_TITLE: 'Folder to look for the videos in',
     findMovedFailed: (err) => `Couldn't look for the project's videos: ${err}`,
-    // #429: the nameplate script into VEGAS's script menu.
-    VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
-    VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
-    vegasScriptDone: (path) => `Script copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick it from Tools > Scripting.`,
+    // #429, #1514: the nameplate and relink scripts into VEGAS's script menu.
+    VEGAS_SCRIPT_BUTTON: 'Add Scripts to VEGAS',
+    VEGAS_SCRIPT_TITLE: 'Copy the VEGAS scripts (nameplates, and relinking moved clips) into Documents\\Vegas Script Menu (made if it is not there), replacing older copies of them. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
+    vegasScriptDone: (path) => `Scripts copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick them from Tools > Scripting.`,
+    // #1514: the relink list for a VEGAS project made before the clips moved.
+    RELINK_EXPORT_BUTTON: 'Export VEGAS Relink List…',
+    RELINK_EXPORT_TITLE: "Save a list of where each video rendered for the loaded project used to be and where it is now, from the moves Find Moved Videos found. In VEGAS Pro, run the DoD Studio Relink Clips script on your project: it points every moved clip at its new file and keeps your edit. Save it beside your .veg project and the script finds it by itself.",
+    RELINK_BACKUP_BUTTON: 'From a Project Backup…',
+    RELINK_BACKUP_TITLE: "The same list, also comparing with an older copy of this project file saved before the videos moved (for videos moved before Studio kept track of moves). The copy is only read, never changed.",
+    RELINK_BACKUP_PICK_TITLE: 'Older copy of this project file, from before the videos moved',
+    RELINK_PICKING_BACKUP: 'Pick the older copy of the project file…',
+    relinkReadingBackup: (name) => `Reading ${name}…`,
+    relinkChecking: (count) => `Checking the ${count} new file${count === 1 ? '' : 's'} are there…`,
+    RELINK_PICKING_SAVE: 'Choose where to save the relink list…',
+    RELINK_WRITING: 'Writing the relink list…',
+    RELINK_NONE: "No video of the loaded project has been moved since Studio started keeping track (Find Moved Videos keeps each one's old place). For videos moved before that, use From a Project Backup… with a copy of the project file from before the move.",
+    RELINK_NONE_BACKUP: 'The backup and the loaded project have every video in the same place: nothing to relink.',
+    relinkBackupFailed: (path, err) => `Couldn't read ${path} as a project file: ${err}`,
+    relinkWriteFailed: (err) => `Couldn't save the relink list: ${err}`,
+    relinkDone: ({ moved, missingTargets = 0 }) => {
+      const parts = [`${moved} moved video${moved === 1 ? '' : 's'}`];
+      const notes = [];
+      if (missingTargets > 0) notes.push(` ${missingTargets} new file${missingTargets === 1 ? " isn't" : "s aren't"} there now: run Find Moved Videos first.`);
+      return `Relink list saved (${parts.join(', ')}). In VEGAS, run DoD Studio Relink Clips on the project.${notes.join('')}`;
+    },
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
     exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
