@@ -8,8 +8,9 @@
 // blockForPage and applyBlockFromPage. Configuration still does too, until
 // it shows a read-only "This project sets" line (build plan): an edit there
 // is saved as the app's value, as always, and copied into the open project
-// too (noteFormSaved). The project's values themselves never go into the
-// form, which would make them the app's.
+// too (noteFormSaved), except, while the New UI is on, the lists the page
+// sets (LISTS_THE_PAGE_OWNS). The project's values themselves never go into
+// the form, which would make them the app's.
 //
 // One project is open per window, so the block lives at module level, like
 // clip_name_ui.js's template; project_session.js opens, saves and clears it
@@ -17,11 +18,13 @@
 
 import { logFrontendEvent } from './ipc_bridge.js';
 import {
-  resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
+  resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf, LISTS_THE_PAGE_OWNS,
 } from './project_settings_logic.js';
 import {
   projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine, projectSettingsFromSnapshotLine,
+  projectSettingsKeptLine,
 } from './project_log.js';
+import { isNewUiOn } from './new_ui.js';
 import { snapshotInEffect, blockFromSnapshot, startSnapshot } from './project_settings_snapshot.js';
 
 // The open project's block, or null when no project is open or a new one
@@ -96,13 +99,16 @@ export function withProjectLaunchSize(request) {
 /**
  * settings_sync.js calls this with each settings payload it saves. An owned
  * value that changed since the form was last read goes into the open
- * project too, which is then unsaved (followFormEdits).
+ * project too, which is then unsaved (followFormEdits). While the New UI is
+ * on, the lists the Project settings page sets stay the project's.
  */
 export function noteFormSaved(payload) {
   const before = formAtLastLook;
   formAtLastLook = payload;
   if (!block || !before) return;
-  const { block: next, changed } = followFormEdits(block, before, payload, pcId);
+  const keep = isNewUiOn() ? LISTS_THE_PAGE_OWNS : [];
+  const { block: next, changed, kept } = followFormEdits(block, before, payload, pcId, { keep });
+  if (kept.length > 0) logFrontendEvent(projectSettingsKeptLine(kept));
   if (changed.length === 0) return;
   block = next;
   logFrontendEvent(projectSettingsFollowedLine(changed));
@@ -165,6 +171,9 @@ export function blockForPage() {
  */
 export function applyBlockFromPage(next) {
   block = next;
+  // A session not saved yet had no block, so nothing read the form for it:
+  // the form now is what the next Configuration edit is told apart from.
+  if (!formAtLastLook) formAtLastLook = formNow();
   markDirty();
 }
 

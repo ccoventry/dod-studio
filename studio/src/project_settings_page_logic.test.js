@@ -162,8 +162,8 @@ describe('blockWithPending', () => {
 
   it("puts folders under this PC's id only", () => {
     const start = startingValues(form(), block(), 'pc-a');
-    const next = blockWithPending(block(), start, { ...structuredClone(start), render_export_dirs: ['F:/clips'] }, 'pc-a');
-    expect(next.folders).toEqual({ 'pc-a': { destinations: ['G:/takes'], exports: ['F:/clips'] } });
+    const next = blockWithPending(block(), start, { ...structuredClone(start), render_export_dirs: ['H:/clips'] }, 'pc-a');
+    expect(next.folders).toEqual({ 'pc-a': { destinations: ['G:/takes'], exports: ['H:/clips'] } });
   });
 
   it('leaves the block it was given as it was', () => {

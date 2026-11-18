@@ -4,7 +4,7 @@
 // an edit in Configuration reaches the open project, and the Project settings
 // page (step 6) edits its block through the session.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn() }));
@@ -41,6 +41,7 @@ globalThis.document = { querySelector: () => null };
 const { createProjectSession } = await import('./project_session.js');
 const snapshots = await import('./project_settings_snapshot.js');
 const settings = await import('./project_settings.js');
+const newUi = await import('./new_ui.js');
 const ipc = await import('./ipc_bridge.js');
 const { showToast } = await import('./toast.js');
 
@@ -274,6 +275,43 @@ describe('the Project settings page (#1085, step 6)', () => {
     expect(form.record_start_lead).toBeUndefined();
     await session.saveProjectSession();
     expect(lastWritten().settings.clipLength).toEqual({ beforeSeconds: 2 });
+  });
+
+  it('copies the first Configuration edit after an Apply on a session not saved yet (review 7)', async () => {
+    const session = openSession(projectText());
+    await session.newSession({ quiet: true });
+    settings.applyBlockFromPage({ ...settings.blockForPage().block, clipLength: { beforeSeconds: 2 } });
+    form = appForm({ resolution_width: 2560 });
+    settings.noteFormSaved(form);
+    expect(settings.effectiveSetting('resolution_width', 1)).toBe(2560);
+    expect(settings.effectiveSetting('record_start_lead', 5)).toBe(2);
+  });
+
+  describe('with the New UI on (review 2)', () => {
+    const pageFolders = { ...own, folders: { 'pc-a': { destinations: ['F:/wsod'], exports: ['G:/renders'] } } };
+    beforeEach(() => newUi.loadNewUi(true));
+    afterEach(() => newUi.loadNewUi(false));
+
+    it("keeps the folders set on the page when Configuration's change, and copies a single value", async () => {
+      const session = openSession(projectText({ schema: 3, settings: pageFolders }));
+      await session.openProject(PATH);
+      form = appForm({ target_drives: ['E:/captures', 'H:/more'], render_export_dirs: ['I:/x'], capture_fps: 300 });
+      settings.noteFormSaved(form);
+      expect(settings.effectiveSetting('target_drives', [])).toEqual(['F:/wsod']);
+      expect(settings.effectiveSetting('render_export_dirs', [])).toEqual(['G:/renders']);
+      expect(settings.effectiveSetting('capture_fps', 120)).toBe(300);
+      const lines = vi.mocked(ipc.logFrontendEvent).mock.calls.map(([line]) => line);
+      expect(lines).toContain('[project] Configuration change not copied into the open project, which sets it on Project Settings: target_drives, render_export_dirs');
+    });
+
+    it('copies the folders as before once it is off', async () => {
+      newUi.loadNewUi(false);
+      const session = openSession(projectText({ schema: 3, settings: pageFolders }));
+      await session.openProject(PATH);
+      form = appForm({ target_drives: ['H:/more'] });
+      settings.noteFormSaved(form);
+      expect(settings.effectiveSetting('target_drives', [])).toEqual(['H:/more']);
+    });
   });
 
   it('keeps another project from opening while the page says Stay', async () => {

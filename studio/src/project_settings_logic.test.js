@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   PROJECT_FIELDS, resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm,
-  madeWithOf, installFor, installToOffer, withMadeWith,
+  madeWithOf, installFor, installToOffer, withMadeWith, LISTS_THE_PAGE_OWNS,
 } from './project_settings_logic.js';
 
 const PC = 'pc-a';
@@ -144,6 +144,15 @@ describe('followFormEdits', () => {
     expect(next.picture).toEqual({ width: 2560, captureFps: 240 });
   });
 
+  it('leaves the keys in `keep` alone, and names them', () => {
+    const block = { folders: { [PC]: { destinations: ['F:/page'] } } };
+    const after = appForm({ target_drives: ['E:/captures', 'H:/more'], capture_fps: 240 });
+    const { block: next, changed, kept } = followFormEdits(block, appForm(), after, PC, { keep: LISTS_THE_PAGE_OWNS });
+    expect(changed).toEqual(['capture_fps']);
+    expect(kept).toEqual(['target_drives']);
+    expect(next.folders[PC].destinations).toEqual(['F:/page']);
+  });
+
   it('keeps fields this build does not know', () => {
     const block = { picture: { width: 1 }, players: { a: 1 }, clipSettings: { future: true } };
     const { block: next } = followFormEdits(block, appForm(), appForm({ init_commands: ['x'] }), PC);
@@ -154,7 +163,7 @@ describe('followFormEdits', () => {
   it('returns the same block when no owned setting changed', () => {
     const block = { picture: {} };
     const result = followFormEdits(block, appForm(), appForm({ notify_error: false }), PC);
-    expect(result).toEqual({ block, changed: [] });
+    expect(result).toEqual({ block, changed: [], kept: [] });
   });
 
   it('puts a changed folder list under this PC only', () => {

@@ -171,6 +171,12 @@ export function projectSettingsFollowedLine(keys) {
   return `[project] Configuration change copied into the open project: ${keys.join(', ')}`;
 }
 
+/** Configuration edits to lists the Project settings page sets, left out
+ *  of the open project while the New UI is on. */
+export function projectSettingsKeptLine(keys) {
+  return `[project] Configuration change not copied into the open project, which sets it on Project Settings: ${keys.join(', ')}`;
+}
+
 /** The project a Project settings page line is about: its file, or a
  *  session not saved yet. */
 const pageProject = (path) => path || 'an untitled session';
