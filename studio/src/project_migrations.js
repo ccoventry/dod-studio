@@ -17,11 +17,20 @@ import { STRINGS } from './strings.js';
  *  by project_file.js on save. Nothing already in the file changes. */
 function v1ToV2() {}
 
+/** Schema 3 adds `settings`, the project's own settings (#1085). Nothing here
+ *  can fill it: what goes in is this PC's snapshot of Configuration (decision
+ *  6, project_settings_snapshot.js), which only a window has, so
+ *  project_settings.js puts it in where a project opens in one, and the next
+ *  save writes it. A file a batch catch-up raised
+ *  (batch_catch_up.js) gets it at its next open the same way. */
+function v2ToV3() {}
+
 /** Every step there is, oldest first. `upgrade(data)` edits the parsed file
  *  in place. A step goes from one schema that was written to disk to the next
  *  one that was. */
 export const MIGRATIONS = [
   { from: 1, to: 2, upgrade: v1ToV2 },
+  { from: 2, to: 3, upgrade: v2ToV3 },
 ];
 
 /** The schema this build writes. */

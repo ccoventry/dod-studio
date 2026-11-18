@@ -137,3 +137,35 @@ test('with one install and no hl.exe set, it fills itself in', async ({ page }) 
   expect(await page.evaluate(() => window.__prefill())).toBe(false);
   expect(await page.evaluate(() => window.__hlPath())).toBe('');
 });
+
+test('a project made with another install asks to switch, and Switch picks it (#1085)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate((p) => window.__start({ hlPath: p }), PRE.hl_exe);
+  const answer = page.evaluate((p) => window.__offerInstall(p), POST.hl_exe);
+  await expect(page.locator('#themed-confirm-title')).toHaveText('Switch install?');
+  await expect(page.locator('#themed-confirm-message')).toHaveText(
+    'This project was made with Half-Life - POST-Anniversary for Movies (25th Anniversary). '
+    + 'Half-Life - PRE-Anniversary for Movies (pre-Anniversary) is picked now. Switch?',
+  );
+  await page.click('#themed-confirm-ok-btn');
+  expect((await answer).answer).toBe('switched');
+  await expect.poll(() => page.evaluate(() => window.__hlPath())).toBe(POST.hl_exe);
+  await expect(box(page)).toHaveValue('Half-Life - POST-Anniversary for Movies (25th Anniversary)');
+});
+
+test('Keep leaves the picked install and makes it the project\'s (#1085)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate((p) => window.__start({ hlPath: p }), PRE.hl_exe);
+  const answer = page.evaluate((p) => window.__offerInstall(p), POST.hl_exe);
+  await page.click('#themed-confirm-cancel-btn');
+  expect(await answer).toEqual({ answer: 'kept', madeWith: PRE.hl_exe });
+  expect(await page.evaluate(() => window.__projectDirty)).toBe(true);
+  expect(await page.evaluate(() => window.__hlPath())).toBe(PRE.hl_exe);
+});
+
+test('a project made with the picked install asks nothing (#1085)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate((p) => window.__start({ hlPath: p }), POST.hl_exe);
+  expect((await page.evaluate((p) => window.__offerInstall(p), POST.hl_exe)).answer).toBe(null);
+  await expect(page.locator('#themed-confirm-modal')).toBeHidden();
+});

@@ -26,7 +26,7 @@ const FILE_VERSION = '0.12.0';
 /** Top-level keys this build reads and writes itself. */
 const KNOWN_KEYS = new Set([
   'version', 'schema', 'saveNeeds', 'scanPaths', 'demos', 'takeIndex', 'takeCaptures',
-  'takeRenders', 'teams', 'review', 'mode',
+  'takeRenders', 'teams', 'review', 'mode', 'settings',
 ]);
 
 /** Keys older builds wrote and this one drops on purpose: those paths are this

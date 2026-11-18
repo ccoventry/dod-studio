@@ -157,3 +157,19 @@ describe('holdsForRoom', () => {
     expect(holdsForRoom({ ...on, captureMode: 'agr' })).toBe(false);
   });
 });
+
+describe('rendersMakeRoom', () => {
+  it("decides from the mode it is given (the batch's), not Configuration's field (#1085)", async () => {
+    const { rendersMakeRoom, setRenderWhileCapturing } = await import('./render_while_capturing.js');
+    const fields = { '#config-capture-mode': { value: 'obs' }, '#config-hook-runs-batch': { checked: true }, '#config-take-after-finish': { value: 'delete' } };
+    globalThis.document = { querySelector: (s) => fields[s] || null };
+    try {
+      setRenderWhileCapturing(true, 1);
+      expect(rendersMakeRoom('agr')).toBe(false);
+      expect(rendersMakeRoom('frame_sequence')).toBe(true);
+    } finally {
+      setRenderWhileCapturing(false, 1);
+      delete globalThis.document;
+    }
+  });
+});

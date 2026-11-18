@@ -350,6 +350,11 @@ pub struct AppSettings {
     /// goes missing later opens the window again.
     #[serde(default)]
     pub setup_dismissed: bool,
+    /// This PC's id (#1085): a project keeps its folders under it, so a
+    /// project opened on another PC uses that PC's. Made by the frontend
+    /// (project_settings.js) the first time a file has none.
+    #[serde(default)]
+    pub pc_id: String,
     /// The one-time look at the pinned folders ran (#533): older builds
     /// pinned every folder + Add Folder scanned, and Studio lists them once
     /// so the user can unpin the ones they never chose.
@@ -657,6 +662,7 @@ impl Default for AppSettings {
             demo_rename_lowercase: false,
             audit_look_in_zips: false,
             setup_dismissed: false,
+            pc_id: String::new(),
             pinned_folders_reviewed: false,
             scan_include_subfolders: default_scan_include_subfolders(),
             players: native::player_overrides::PlayerTable::default(),

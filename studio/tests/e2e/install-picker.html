@@ -30,6 +30,8 @@
     import { initThemedConfirm } from '/src/themed_confirm.js';
     import { createInstallPicker, setHiddenInstalls, getHiddenInstalls, prefillSingleInstall } from '/src/install_picker.js';
     import { createGameFolderUi, getGameFolder, setGameFolder } from '/src/game_folder_ui.js';
+    import { offerProjectInstall } from '/src/project_install_offer.js';
+    import { withMadeWith } from '/src/project_settings_logic.js';
     initThemedConfirm();
     window.__persisted = 0;
     const persist = () => { window.__persisted += 1; };
@@ -45,6 +47,15 @@
       await picker.refresh();
     };
     window.__prefill = () => prefillSingleInstall();
+    // "This project was made with ... Switch?" (#1085): a project made with
+    // `madeWithExe`, opened while the picked install is another.
+    window.__offerInstall = async (madeWithExe) => {
+      let block = withMadeWith({}, madeWithExe);
+      window.__projectDirty = false;
+      const settings = { block: () => block, setBlock: (next) => { block = next; } };
+      const answer = await offerProjectInstall({ path: 'D:/p/movie.dodstudio', settings, markDirty: () => { window.__projectDirty = true; } });
+      return { answer, madeWith: block.install.madeWith?.hlExe ?? null };
+    };
     window.__hlPath = () => input.value;
     window.__gameFolder = () => getGameFolder();
     window.__hidden = () => getHiddenInstalls();

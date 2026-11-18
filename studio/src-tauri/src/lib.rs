@@ -53,6 +53,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod project_session_cmd;
+mod project_settings_snapshot;
 mod render_export_dirs;
 mod render_live_resumable;
 mod render_manager;
@@ -425,6 +426,7 @@ pub fn run() {
             dem_open_with::set_dem_open_with,
             project_convert::project_convert_offer,
             project_convert::convert_project_file,
+            project_settings_snapshot::keep_project_settings_snapshot,
         ])
         .build(tauri::generate_context!());
     // A release build has no console, so a panic here would leave no trace:

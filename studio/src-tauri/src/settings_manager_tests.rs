@@ -86,6 +86,26 @@ fn test_setup_dismissed_roundtrip() {
     assert!(restored.setup_dismissed);
 }
 
+/// The PC id survives a save, and a file from before it has none (#1085).
+#[test]
+fn pc_id_roundtrip_and_default() {
+    let original = AppSettings {
+        pc_id: "3f2a".into(),
+        ..AppSettings::default()
+    };
+    let json = serde_json::to_string(&original).expect("settings must serialize");
+    let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+    assert_eq!(restored.pc_id, "3f2a");
+    let mut before = serde_json::to_value(AppSettings::default()).expect("settings must serialize");
+    before
+        .as_object_mut()
+        .expect("settings are an object")
+        .remove("pc_id");
+    let old: AppSettings =
+        serde_json::from_value(before).expect("a file without pc_id must deserialize");
+    assert!(old.pc_id.is_empty());
+}
+
 /// Open Recent's list survives a save, and a file from before it has none (#935).
 #[test]
 fn recent_projects_roundtrip_and_default() {
