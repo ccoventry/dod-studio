@@ -54,6 +54,13 @@ describe('snapshotFromForm', () => {
 describe('blockFromSnapshot', () => {
   const snap = snapshotFromForm(form(), { takenAt: TAKEN });
 
+  it('leaves Configuration\'s folders in effect when the snapshot was taken before any was set', () => {
+    const empty = snapshotFromForm(form({ target_drives: [], render_export_dirs: [] }), { takenAt: TAKEN });
+    const block = blockFromSnapshot(empty, 'pc-a');
+    expect(resolveSettings({ target_drives: ['G:/now'], render_export_dirs: ['H:/now'] }, block, 'pc-a'))
+      .toEqual({ target_drives: ['G:/now'], render_export_dirs: ['H:/now'] });
+  });
+
   it('puts the folders under this PC\'s id, which resolves them on this PC only', () => {
     const block = blockFromSnapshot(snap, 'pc-a');
     expect(block.folders).toEqual({ 'pc-a': { destinations: ['E:/captures'], exports: ['F:/clips'] } });

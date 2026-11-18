@@ -32,6 +32,11 @@ const KINDS = {
   text: (v) => (typeof v === 'string' ? v : undefined),
   textOrNone: (v) => (typeof v === 'string' || v === null ? v : undefined),
   texts: (v) => (Array.isArray(v) && v.every((s) => typeof s === 'string') ? [...v] : undefined),
+  // A folder list: empty is "not set", so Configuration's folders show
+  // through. A block can't tell "no folders yet" (a project or the snapshot
+  // saved before any was picked) from "none on purpose", and a capture with
+  // no folder can't run anyway.
+  folders: (v) => (Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? [...v] : undefined),
   killGaps: (v) => (v && typeof v === 'object' ? killGapsFrom(v) : undefined),
   fov: (v) => (isUsableFov(v) ? v : undefined),
   scheduled: (v) => (Array.isArray(v) && v.every((c) => c && typeof c.command === 'string')
@@ -99,7 +104,7 @@ function blockValues(block, pcId) {
   if (!block || typeof block !== 'object') return [];
   const values = PROJECT_FIELDS.map((f) => [f.key, KINDS[f.kind](readPath(block, f.path))]);
   if (pcId) {
-    PC_FIELDS.forEach((f) => values.push([f.key, KINDS.texts(readPath(block, pcPath(f, pcId)))]));
+    PC_FIELDS.forEach((f) => values.push([f.key, KINDS.folders(readPath(block, pcPath(f, pcId)))]));
   }
   return values.filter(([, value]) => value !== undefined);
 }
@@ -170,18 +175,25 @@ export function blockFromForm(form, { pcId, madeWith = null }) {
  * for Configuration, which changes the open project too until it shows a
  * read-only "This project sets" line (build plan): each owned value that differs
  * between `before` and `after` (two settings payloads) goes into `block`,
- * and a new `hl_path` becomes its `install.madeWith`. Returns `{ block, changed }`, `changed` the keys copied, `block` the same
- * object when none were.
+ * and a new `hl_path` becomes its `install.madeWith`. A key in `keep`
+ * changes nothing (LISTS_THE_PAGE_OWNS). Returns `{ block, changed, kept }`,
+ * `changed` the keys copied, `kept` the changed ones left alone, `block` the
+ * same object when none were copied.
  */
-export function followFormEdits(block, before, after, pcId = '') {
+export function followFormEdits(block, before, after, pcId = '', { keep = [] } = {}) {
   const fields = [
     ...PROJECT_FIELDS.map((f) => ({ key: f.key, path: f.path })),
     ...(pcId ? PC_FIELDS.map((f) => ({ key: f.key, path: pcPath(f, pcId) })) : []),
   ];
   const changed = [];
+  const kept = [];
   let next = block;
   for (const { key, path } of fields) {
     if (!(key in after) || JSON.stringify(before?.[key]) === JSON.stringify(after[key])) continue;
+    if (keep.includes(key)) {
+      kept.push(key);
+      continue;
+    }
     next = writePath(next, path, copyOf(after[key]));
     changed.push(key);
   }
@@ -192,8 +204,18 @@ export function followFormEdits(block, before, after, pcId = '') {
     next = withMadeWith(next, picked);
     changed.push('hl_path');
   }
-  return { block: next, changed };
+  return { block: next, changed, kept };
 }
+
+/**
+ * The lists the Project settings page sets while the New UI is on, which a
+ * Configuration edit then leaves alone (project_settings.js's noteFormSaved).
+ * A list is copied whole, so one line added in Configuration would replace
+ * every row set on the page. A single value is still copied: changing it in
+ * Configuration loses nothing but the value it replaces. With the New UI
+ * off there is no page, and Configuration still sets them all.
+ */
+export const LISTS_THE_PAGE_OWNS = Object.freeze(PC_FIELDS.map((f) => f.key));
 
 /** `block` saying it is made with the install at `hlExe` from now on. */
 export function withMadeWith(block, hlExe) {

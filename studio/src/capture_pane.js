@@ -45,6 +45,7 @@ import { usableCaptureBytes, windowsDriveShortWarning, readWindowsDriveKeepFree,
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 import { effectiveSettings, effectiveCaptureSettings, withProjectLaunchSize, projectPictureFov } from './project_settings.js';
+import { captureModeInEffect } from './capture_in_effect.js';
 import { createBatchUntick } from './batch_untick.js';
 
 let listeningForExternalErrors = false;
@@ -364,7 +365,7 @@ export async function refreshLaunchGuard(state) {
   // is a heads-up here, not a block.
   // Render While Capturing (#861) holds between clips for renders to free
   // room, and the backend refuses only a clip no drive could ever hold.
-  const rendersRoom = insufficientSpace && rendersMakeRoom();
+  const rendersRoom = insufficientSpace && rendersMakeRoom(captureMode);
   const makesRoom = insufficientSpace && (rendersRoom || takeCleanupMakesRoom());
   // Pool is usable overall (at least one real drive with room) but not every
   // configured entry is — worth a heads-up, not worth blocking the batch.
@@ -379,7 +380,8 @@ export async function refreshLaunchGuard(state) {
   // deny that recovery path a first click ever reaching it — OBS is not
   // expected to already be open just because dod-studio switched into OBS
   // mode or even opened at all.
-  const obsMode = document.querySelector('#config-capture-mode')?.value === 'obs';
+  // The batch's mode: the open project's (#1085), not Configuration's.
+  const obsMode = captureMode === 'obs';
   const obsNotReady = obsMode && obsConnectionChecked() && !isObsConnected();
   // Reflects cfg_warnings.js's own most recent scan rather than fetching its
   // own — a banned command (cfg_scan::BANNED_COMMANDS) is a correctness bug
@@ -394,7 +396,7 @@ export async function refreshLaunchGuard(state) {
     hlaePath: document.querySelector('#hlae-path-input')?.value,
     driveCount: effectiveDrivePool.length,
     captureMode,
-    agrFps: numberField('#config-agr-fps', 0, { integer: true, positive: true }),
+    agrFps: agrFpsRaw, // the project's (#1085), as Start's block below reads it
   }, !noHighlightsSelected);
   // AGR has no default to fall back on: an AGR batch needs its own rate. The
   // backend refuses a 0 rate too (start_capture_batch_impl).
@@ -1265,7 +1267,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // proactively at app startup instead. If it's not reachable, launch
       // it (much like HLAE doesn't need to already be open either) and wait
       // for it to come up before giving up.
-      if (document.querySelector('#config-capture-mode')?.value === 'obs') {
+      if (captureModeInEffect() === 'obs') { // the batch's: the open project's (#1085)
         precheck.step('obs');
         await runObsConnectionTest();
         if (!isObsConnected() && !(await launchObsAndRetry())) {
