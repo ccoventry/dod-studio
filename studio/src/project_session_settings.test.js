@@ -53,6 +53,7 @@ const { createProjectSession } = await import('./project_session.js');
 const snapshots = await import('./project_settings_snapshot.js');
 const settings = await import('./project_settings.js');
 const newUi = await import('./new_ui.js');
+const { SENT_ROWS } = await import('./clip_settings_rows.js');
 const { startingValues, blockWithPending } = await import('./project_settings_page_logic.js');
 const ipc = await import('./ipc_bridge.js');
 const { showToast } = await import('./toast.js');
@@ -324,6 +325,25 @@ describe('the Project settings page (#1085, step 6)', () => {
       settings.noteFormSaved(form);
       expect(settings.effectiveSetting('init_commands', [])).toEqual(['ds_hud_hide_scoreboard 1', 'cl_bob 0']);
       expect(settings.effectiveSetting('command_profile_active', 'x')).toBe(null);
+    });
+
+    it('opens an older project with Use Clip settings off: its batch sends its lines as they were', async () => {
+      const session = openSession(projectText());
+      await session.openProject(PATH);
+      expect(settings.blockForPage().block.clipSettings.useRows).toBeUndefined();
+      expect(settings.effectiveCaptureSettings({ init_commands: ['x 1'] }).init_commands).toEqual(['mirv_fov 90']);
+    });
+
+    it('starts a new project with Use Clip settings on: its batch sends every row, and says how many', async () => {
+      const session = openSession(projectText());
+      await session.newSession({ quiet: true });
+      expect(settings.blockForPage().block.clipSettings.useRows).toBe(true);
+      vi.mocked(ipc.logFrontendEvent).mockClear();
+      settings.applyBlockFromPage(settings.blockForPage().block);
+      const sent = settings.effectiveCaptureSettings({ init_commands: [] }).init_commands;
+      expect(sent).toHaveLength(1 + SENT_ROWS.length);
+      const lines = vi.mocked(ipc.logFrontendEvent).mock.calls.map(([line]) => line);
+      expect(lines).toContain(`[project] Clip settings: sending ${SENT_ROWS.length} row(s) after 1 line(s) of the project's own commands`);
     });
 
     it('copies the folders as before once it is off', async () => {

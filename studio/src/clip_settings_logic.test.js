@@ -7,8 +7,9 @@ import { describe, it, expect } from 'vitest';
 import {
   parseSetting, rowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
   fovFromLines, presetPick, isUsableNumber, numberRowValue, isUsableFov, clipProblems,
+  rowsAreOn, shownRowValue, linesWithRows, differsFromConfig,
 } from './clip_settings_logic.js';
-import { CLIP_SETTINGS_ROWS } from './clip_settings_rows.js';
+import { CLIP_SETTINGS_ROWS, SENT_ROWS, ROW_DEFAULTS } from './clip_settings_rows.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CLIP_SETTINGS;
@@ -45,7 +46,7 @@ describe('rowValue and withRowValue', () => {
     expect(withRowValue(['cl_righthand 1'], 'ds_hud_show_scope', '1')).toEqual(['cl_righthand 1', 'ds_hud_show_scope 1']);
   });
 
-  it('drops every line for the cvar on Not set', () => {
+  it('drops every line for the cvar on null (a blank number box: back to the game\'s own)', () => {
     expect(withRowValue(lines, 'ds_hud_hide_scoreboard', null)).toEqual(['r_decals 256', 'cl_righthand 1', 'exec mine.cfg']);
   });
 
@@ -67,6 +68,10 @@ describe('Your own commands', () => {
     ]);
   });
 
+  it('lists every line with Use Clip settings off, since no row shows', () => {
+    expect(ownEntries(lines, { rowsOn: false }).map((e) => e.text)).toEqual(lines);
+  });
+
   it('edits and removes by that place', () => {
     expect(withLineAt(lines, 1, 'cl_righthand 0')[1]).toBe('cl_righthand 0');
     expect(withoutLineAt(lines, 2)).toHaveLength(lines.length - 1);
@@ -76,6 +81,42 @@ describe('Your own commands', () => {
     const typed = [...lines, 'ds_spec_xray_show 2'];
     expect(withRowLinesMerged(typed)).toEqual(['r_decals 256', 'cl_righthand 1', '', 'mirv_fov 90', 'exec mine.cfg', 'ds_spec_xray_show 2']);
     expect(withRowLinesMerged(lines)).toBe(lines);
+  });
+});
+
+describe('Use Clip settings', () => {
+  const lines = ['cl_righthand 1', 'ds_hud_hide_scoreboard 1', 'exec mine.cfg', 'mirv_fov 90', 'r_decals 256'];
+
+  it('is on only when the value is true: a project without it reads as Off', () => {
+    expect(rowsAreOn({ clip_rows_on: true })).toBe(true);
+    expect(rowsAreOn({})).toBe(false);
+    expect(rowsAreOn({ clip_rows_on: false })).toBe(false);
+  });
+
+  it("shows a row's line, else the game's own value: never nothing", () => {
+    expect(shownRowValue(lines, 'ds_hud_hide_scoreboard')).toBe('1');
+    expect(shownRowValue(lines, 'ds_hud_show_scope')).toBe(ROW_DEFAULTS.ds_hud_show_scope);
+    for (const r of SENT_ROWS) expect(shownRowValue([], r.cvar)).toBe(ROW_DEFAULTS[r.cvar]);
+  });
+
+  it('sends the own lines in order, then one line for every row with its shown value', () => {
+    const sent = linesWithRows(lines);
+    expect(sent.slice(0, 3)).toEqual(['cl_righthand 1', 'exec mine.cfg', 'mirv_fov 90']);
+    expect(sent.slice(3)).toEqual(SENT_ROWS.map((r) => `${r.cvar} ${shownRowValue(lines, r.cvar)}`));
+    expect(sent).toContain('r_decals 256');
+    expect(sent).toContain(`ds_hud_show_scope ${ROW_DEFAULTS.ds_hud_show_scope}`);
+  });
+
+  it('sends every row even with no lines at all, each under 64 bytes', () => {
+    const sent = linesWithRows([]);
+    expect(sent).toHaveLength(SENT_ROWS.length);
+    for (const line of sent) expect(new TextEncoder().encode(line).length).toBeLessThan(64);
+  });
+
+  it('compares a config value as the native rules do', () => {
+    expect(differsFromConfig('1', '1.0')).toBe(false);
+    expect(differsFromConfig('0', '1')).toBe(true);
+    expect(differsFromConfig('ultrasharp', 'UltraSharp')).toBe(false);
   });
 });
 
@@ -125,10 +166,15 @@ describe('number rows and problems', () => {
 
   it('names a number row with no usable number, and a command with no usable seconds', () => {
     const problems = clipProblems({
+      clip_rows_on: true,
       init_commands: ['r_decals lots', 'mirv_movie_sound_volume 0.25'],
       custom_commands: [{ command: 'cl_righthand 0', relation: 'Before', offset_seconds: NaN }],
     });
     expect(problems).toEqual({ 'clip-decals': S.badNumber(0), custom_commands: S.BAD_OFFSET });
+  });
+
+  it('leaves a number row line alone with Use Clip settings off: it is an own line, sent as typed', () => {
+    expect(clipProblems({ clip_rows_on: false, init_commands: ['r_decals lots'], custom_commands: [] })).toEqual({});
   });
 
   it('lets a blank At each clip row through: a capture drops it', () => {

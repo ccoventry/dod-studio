@@ -12,14 +12,28 @@
 // lines and leaves their `mirv_fov <n>` out (native picture_fov.rs), so
 // such a line is no row: it shows in Your own commands with its refused
 // note. `r_decals` stays a line.
+//
+// Use Clip settings (`clip_rows_on`, the block's `clipSettings.useRows`)
+// decides whether the rows count at all. On, every row shows a value (its
+// line's, else the game's own, ROW_DEFAULTS) and a batch sends every row
+// after the user's own lines (linesWithRows), so the page is what a capture
+// gets. Off, the tab shows only Your own commands, every line in it, and a
+// batch sends the lines as they are, as before the rows existed. A block
+// without the field (a project made before it) reads as Off; a new project
+// starts On (project_settings.js).
 
-import { ROW_CVARS, CLIP_SETTINGS_ROWS } from './clip_settings_rows.js';
+import { ROW_CVARS, CLIP_SETTINGS_ROWS, ROW_DEFAULTS, SENT_ROWS } from './clip_settings_rows.js';
 import { profileLists } from './command_profiles.js';
 import { STRINGS } from './strings.js';
 
-/** The settings the Clip settings tab edits, by their settings-file names
- *  (the project block's `clipSettings`). */
-export const CLIP_TAB_KEYS = Object.freeze(['command_profile_active', 'init_commands', 'custom_commands']);
+/** The settings the Clip settings tab edits: the settings-file names of the
+ *  project block's `clipSettings` lists, and Use Clip settings
+ *  (`clip_rows_on`), which only the page sets: Configuration has none. */
+export const CLIP_TAB_KEYS = Object.freeze(['clip_rows_on', 'command_profile_active', 'init_commands', 'custom_commands']);
+
+/** Whether `pending` (or a block's resolved values) has Use Clip settings
+ *  on. Only `true` is on, so a project without the field reads as Off. */
+export const rowsAreOn = (values) => values?.clip_rows_on === true;
 
 /** Field of view's cvar, which the project owns on the Project tab. */
 export const FOV_CVAR = 'mirv_fov';
@@ -70,10 +84,37 @@ function lastIndexFor(lines, cvar) {
 }
 
 /** The value the last line setting `cvar` gives it, or null when no line
- *  does: then Studio sends nothing and the game keeps its own setting. */
+ *  does. */
 export function rowValue(lines, cvar) {
   const i = lastIndexFor(lines || [], cvar);
   return i < 0 ? null : parseSetting(lines[i]).value;
+}
+
+/** The value a row shows, and a batch sends, with Use Clip settings on: its
+ *  line's, else the game's own (ROW_DEFAULTS). */
+export function shownRowValue(lines, cvar) {
+  return rowValue(lines, cvar) ?? ROW_DEFAULTS[cvar];
+}
+
+/**
+ * The Initial Commands a batch sends with Use Clip settings on: the lines no
+ * row shows, in their order, then one line for every row (SENT_ROWS, page
+ * order) with its shown value. The rows go last, as Which wins says, so a cfg
+ * an own line `exec`s never has the last word over a row.
+ */
+export function linesWithRows(lines) {
+  const own = (lines || []).filter((line) => !isRowLine(line));
+  return [...own, ...SENT_ROWS.map((r) => `${r.cvar} ${shownRowValue(lines, r.cvar)}`)];
+}
+
+/** Whether a config's `configValue` for a row differs from the row's
+ *  `shown` value: numbers compared as numbers (`1` and `1.0` agree), else
+ *  any case, as the native value rules do (cfg_scan.rs same_value). */
+export function differsFromConfig(shown, configValue) {
+  const a = Number(shown);
+  const b = Number(configValue);
+  if (String(shown).trim() !== '' && String(configValue).trim() !== '' && Number.isFinite(a) && Number.isFinite(b)) return a !== b;
+  return String(shown).toLowerCase() !== String(configValue).toLowerCase();
 }
 
 /**
@@ -95,10 +136,12 @@ export function withRowValue(lines, cvar, value) {
   return next;
 }
 
-/** The lines no row shows, as `{ index, text }` with `index` into `lines`:
- *  what Your own commands lists. */
-export function ownEntries(lines) {
-  return (lines || []).map((text, index) => ({ index, text })).filter((e) => !isRowLine(e.text));
+/** What Your own commands lists, as `{ index, text }` with `index` into
+ *  `lines`: with `rowsOn` the lines no row shows, else every line (no row
+ *  shows then, and every line is sent as it is). */
+export function ownEntries(lines, { rowsOn = true } = {}) {
+  const entries = (lines || []).map((text, index) => ({ index, text }));
+  return rowsOn ? entries.filter((e) => !isRowLine(e.text)) : entries;
 }
 
 /** `lines` with the line at `index` replaced by `text`. */
@@ -148,7 +191,8 @@ export function fovFromLines(lines) {
 /**
  * What picking `profile` (a command profile, built in or the user's) puts
  * into the tab's pending values: a copy of its lists, and its name. Null
- * (No preset) empties both lists, so every row is left to the game.
+ * (No preset) empties both lists, so every row goes back to the game's own
+ * value.
  */
 export function presetPick(profile) {
   if (!profile) return { command_profile_active: '', init_commands: [], custom_commands: [] };
@@ -165,7 +209,8 @@ export function isUsableNumber(row, value) {
   return row.min === undefined || n >= row.min;
 }
 
-/** A value for a row's line from a number box: blank is null (no line). */
+/** A value for a row's line from a number box: blank is null (no line, so
+ *  the row is back at the game's own value). */
 export function numberRowValue(text) {
   const t = String(text ?? '').trim();
   return t === '' ? null : t;
@@ -176,17 +221,18 @@ export const clipRowKey = (row) => `clip-${row.id}`;
 
 /**
  * What is wrong with the Clip settings tab's pending values, as `{ key:
- * message }` (pendingProblems' shape): a number row whose line holds no
- * usable number, and an At each clip command with no usable seconds.
- * Refused or warned commands are not problems: they get a note, and Start
- * Capture Batch checks them as it always has.
+ * message }` (pendingProblems' shape): with Use Clip settings on, a number
+ * row whose line holds no usable number (off, that line is the user's own,
+ * sent as typed, and no row shows), and an At each clip command with no
+ * usable seconds. Refused or warned commands are not problems: they get a
+ * note, and Start Capture Batch checks them as it always has.
  */
 export function clipProblems(pending) {
   const S = STRINGS.CLIP_SETTINGS;
   const problems = {};
   const lines = pending.init_commands || [];
   for (const row of CLIP_SETTINGS_ROWS) {
-    if (row.kind !== 'number') continue;
+    if (row.kind !== 'number' || !rowsAreOn(pending)) continue;
     const value = rowValue(lines, row.cvar);
     if (value !== null && !isUsableNumber(row, value)) problems[clipRowKey(row)] = S.badNumber(row.min);
   }

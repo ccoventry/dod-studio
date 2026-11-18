@@ -201,6 +201,19 @@ export function clipSettingsAppliedLine(path, { preset, initCount, scheduledCoun
   return `[project settings] Clip settings for ${pageProject(path)}: ${from}, ${initCount} line(s), ${scheduledCount} at each clip, ${view}`;
 }
 
+/** Use Clip settings turned on or off by an Apply (#1085): on, a batch
+ *  sends every row; off, only the project's own lines. */
+export function clipRowsSwitchedLine(path, on) {
+  const what = on ? 'on: its captures send every Clip settings row' : 'off: its captures send only its own commands';
+  return `[project settings] Use Clip settings turned ${what}, in ${pageProject(path)}`;
+}
+
+/** A batch's Initial Commands carry the open project's Clip settings rows
+ *  (Use Clip settings on): how many rows, after how many lines of its own. */
+export function clipRowsSentLine({ rows, own }) {
+  return `[project] Clip settings: sending ${rows} row(s) after ${own} line(s) of the project's own commands`;
+}
+
 /** A project with no field of view of its own took what the game uses for
  *  it (#1085, decision 3; project_fov.js's fovToFill): `from` 'lines',
  *  'exec' (`file` the cfg its Initial Commands exec), 'game' (`file` a

@@ -10,6 +10,7 @@ pub mod capture_fov;
 pub mod cfg_report;
 pub mod cfg_scan;
 pub mod cfg_warn;
+pub mod config_values;
 pub mod console_prefix;
 pub mod decal_ring;
 pub mod init_commands;

@@ -22,14 +22,15 @@ import {
   startingValues, changedKeys, pendingProblems, blockWithPending,
 } from './project_settings_page_logic.js';
 import { createProjectTab, PROJECT_SECTIONS } from './project_settings_project_tab.js';
-import { createClipSettingsTab, CLIP_SECTIONS } from './clip_settings_tab.js';
+import { createClipSettingsTab, clipSections } from './clip_settings_tab.js';
 import { el, showProblems } from './project_settings_dom.js';
 import { getAllCommandProfiles, saveCommandProfileToLibrary } from './command_profiles_ui.js';
-import { CLIP_TAB_KEYS } from './clip_settings_logic.js';
+import { CLIP_TAB_KEYS, rowsAreOn } from './clip_settings_logic.js';
 import { showToast } from './toast.js';
 import { setAppShortcutsEnabled } from './app_shortcuts.js';
 import {
   projectSettingsPageOpenedLine, projectSettingsPageAppliedLine, projectSettingsPageClosedLine, clipPresetSavedLine, clipSettingsAppliedLine,
+  clipRowsSwitchedLine,
 } from './project_log.js';
 import { fileNameOf } from './path_display.js';
 import { isNewUiOn, onNewUiChange } from './new_ui.js';
@@ -81,17 +82,30 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
       showToast(STRINGS.CLIP_SETTINGS.presetSavedToast(name), 'success');
     },
   });
-  // The tabs that are built, by id, with the sections their side list shows.
+  // The tabs that are built, by id, with the sections their side list shows
+  // now (Clip settings' depend on Use Clip settings).
   const TABS = {
-    project: { tab: projectTab, sections: PROJECT_SECTIONS },
-    clip: { tab: clipTab, sections: CLIP_SECTIONS },
+    project: { tab: projectTab, sections: () => PROJECT_SECTIONS },
+    clip: { tab: clipTab, sections: () => clipSections(state.pending) },
   };
 
   function onEdit(changes, { redraw = false } = {}) {
     if (!state) return;
     state.pending = { ...state.pending, ...changes };
-    if (redraw) TABS[state.tab].tab.render(tabBody);
+    if (redraw) {
+      TABS[state.tab].tab.render(tabBody);
+      drawSectionLinks(state.tab);
+    }
     refresh();
+  }
+
+  /** The side list: a link to each section tab `id` shows now. */
+  function drawSectionLinks(id) {
+    sectionsNav.replaceChildren(...TABS[id].sections().map((s) => {
+      const link = el('button', { type: 'button', class: 'ps-section-link', text: s.label });
+      link.addEventListener('click', () => tabBody.querySelector(`#ps-section-${s.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+      return link;
+    }));
   }
 
   /** Shows tab `id` (its cards and its side list), scrolled to `sectionId`
@@ -105,11 +119,7 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
       tab.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     tabBody.dataset.tab = id;
-    sectionsNav.replaceChildren(...TABS[id].sections.map((s) => {
-      const link = el('button', { type: 'button', class: 'ps-section-link', text: s.label });
-      link.addEventListener('click', () => tabBody.querySelector(`#ps-section-${s.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-      return link;
-    }));
+    drawSectionLinks(id);
     TABS[id].tab.render(tabBody);
     refresh();
     const scroll = root.querySelector('.ps-scroll');
@@ -243,6 +253,7 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     state.block = next;
     state.start = structuredClone(state.pending);
     logFrontendEvent(projectSettingsPageAppliedLine(getProjectPath(), how, changed));
+    if (changed.includes('clip_rows_on')) logFrontendEvent(clipRowsSwitchedLine(getProjectPath(), rowsAreOn(state.pending)));
     if (changed.some((key) => CLIP_TAB_KEYS.includes(key) || key === 'capture_fov')) {
       logFrontendEvent(clipSettingsAppliedLine(getProjectPath(), {
         preset: state.pending.command_profile_active,

@@ -10,7 +10,7 @@ import { samePath } from './path_display.js';
 import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
 import { sameDriveFolders } from './setup_checklist.js';
-import { CLIP_TAB_KEYS, clipProblems, isUsableFov } from './clip_settings_logic.js';
+import { CLIP_TAB_KEYS, clipProblems, isUsableFov, rowsAreOn } from './clip_settings_logic.js';
 import { STRINGS } from './strings.js';
 
 /** Every setting the Project tab edits, by its settings-file name. The
@@ -94,12 +94,15 @@ const copyOf = (value) => (value === undefined ? undefined : JSON.parse(JSON.str
 /**
  * The values the Project tab starts from when the page opens: the open
  * project's (`block`) over the app's (`form`, the settings file's values),
- * for every key the tab edits. `pcId` picks this PC's folders.
+ * for every key the tab edits. `pcId` picks this PC's folders. Use Clip
+ * settings is true or false, false for a block without it (a project made
+ * before it), so turning it on and off again is no change.
  */
 export function startingValues(form, block, pcId) {
   const asked = Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(form?.[key])]));
   const values = resolveSettings(asked, block, pcId);
-  return Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(values[key])]));
+  const start = Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(values[key])]));
+  return { ...start, clip_rows_on: rowsAreOn(values) };
 }
 
 const RATE_KEYS = ['capture_fps', 'obs_capture_fps', 'agr_fps'];

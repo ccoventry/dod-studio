@@ -49,6 +49,22 @@ describe('startingValues', () => {
     expect(startingValues(form(), block(), 'pc-b').target_drives).toEqual(['E:/captures']);
   });
 
+  it('opens a project made before Use Clip settings with it off, and a new one with it on', () => {
+    expect(startingValues(form(), block(), 'pc-a').clip_rows_on).toBe(false);
+    expect(startingValues(form(), { ...block(), clipSettings: { useRows: true } }, 'pc-a').clip_rows_on).toBe(true);
+  });
+});
+
+describe('Use Clip settings as a page setting', () => {
+  it('is an edit like any other: Apply writes it, and turning it back is no change', () => {
+    const start = startingValues(form(), block(), 'pc-a');
+    expect(changedKeys(start, { ...start, clip_rows_on: true })).toEqual(['clip_rows_on']);
+    expect(changedKeys(start, { ...start, clip_rows_on: false })).toEqual([]);
+    const next = blockWithPending(block(), start, { ...start, clip_rows_on: true }, 'pc-a');
+    expect(next.clipSettings.useRows).toBe(true);
+    expect(next.futureField).toEqual({ kept: true });
+  });
+
   it('holds only the keys the page edits, both tabs', () => {
     expect(Object.keys(startingValues(form(), block(), 'pc-a')).sort()).toEqual([...PAGE_KEYS].sort());
     expect(PAGE_KEYS).toEqual(expect.arrayContaining([...PROJECT_TAB_KEYS, 'init_commands', 'custom_commands', 'command_profile_active']));

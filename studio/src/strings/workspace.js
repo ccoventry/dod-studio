@@ -315,11 +315,13 @@ export const WORKSPACE_STRINGS = {
   },
   // ── Project settings › Clip settings (clip_settings_tab.js, #1085 step 8) ──
   CLIP_SETTINGS: {
+    USE_ROWS: 'Use Clip settings',
+    USE_ROWS_HINT: 'On: every row below goes with each capture, so this page is what you get. Off: only your game configs and your own commands decide.',
     START_FROM_SUB: 'Pick a preset, then change anything below',
     PRESET: 'Preset',
     PRESET_HINT: 'Picking one copies its lines into this project. Nothing links back: changing or deleting the preset later leaves this project as it is.',
     NO_PRESET: 'No preset',
-    NO_PRESET_TITLE: 'Empty every row and command: the game keeps its own settings.',
+    NO_PRESET_TITLE: "Empty your own commands and put every row back to the game's own value.",
     BUILTIN_TITLE: 'Built in. Picking it copies its lines; the preset itself never changes.',
     presetEdited: (name) => `${name} (edited)`,
     SAVE_AS_NEW: '+ Save as new…',
@@ -331,8 +333,9 @@ export const WORKSPACE_STRINGS = {
     presetSavedToast: (name) => `Saved the preset ${name} on this PC.`,
     MANAGE_NOTE: 'Rename, change or delete a preset in Configuration › Commands.',
 
-    NOT_SET: 'Not set',
-    NOT_SET_TITLE: "Studio sends nothing for this, so the game keeps what its own Settings tab or your configs set.",
+    gameDefaultTitle: (value) => `The game's own value is ${value}. Blank goes back to it.`,
+    configSets: (file, value) => `${file} sets ${value}`,
+    CONFIG_SETS_TITLE: "One of the game's configs sets this to another value. This row is sent after the configs, so captures use the row's.",
     OFF: 'Off',
     ON: 'On',
     typedValue: (value) => `${value} (typed)`,
@@ -347,11 +350,14 @@ export const WORKSPACE_STRINGS = {
     BAD_OFFSET: 'Each command needs 0 or more seconds.',
 
     OWN_COMMANDS_SUB: 'For anything not listed above',
+    OWN_COMMANDS_SUB_OFF: 'Sent as they are, after your game configs',
     WHICH_WINS: 'Which wins',
     WHICH_WINS_HINT: 'Each runs after the one before, so later wins.',
     WHICH_WINS_ORDER: ['Game configs', 'Your own commands', 'Clip settings rows'],
+    WHICH_WINS_ORDER_OFF: ['Game configs', 'Your own commands'],
     COMMANDS: 'Commands',
     COMMANDS_HINT: 'Run when each demo loads, one per line. A line that sets a row above moves into that row.',
+    COMMANDS_HINT_OFF: 'Run when each demo loads, one per line.',
     ADD_COMMAND: '+ Add a command',
     REMOVE_COMMAND_TITLE: 'Remove this command',
     NO_COMMANDS: 'None',
@@ -362,6 +368,7 @@ export const WORKSPACE_STRINGS = {
     SECONDS: 's',
 
     SECTIONS: {
+      'use-rows': 'Use Clip settings',
       'start-from': 'Start from',
       hud: 'HUD',
       view: 'View',

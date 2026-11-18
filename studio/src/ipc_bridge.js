@@ -293,6 +293,21 @@ export async function projectFovSources(gamePath, initCommands = []) {
     });
 }
 
+/**
+ * What the game's start-up configs set each of `cvars` to (native
+ * config_values.rs), for Project settings › Clip settings' row warnings
+ * (#1085): `[{ cvar, value, file, line }]`, only the cvars a config sets,
+ * `file` the config's name. Reads only. Empty when the scan fails: the rows
+ * then warn about nothing.
+ */
+export async function configCvarValues(gamePath, cvars) {
+  return invoke("config_cvar_values", { gamePath, cvars })
+    .catch((err) => {
+      console.error("IPC Execution Error (config_cvar_values):", err);
+      return [];
+    });
+}
+
 export async function validatePaths(hlaePath, hlPath) {
   return await invoke('validate_paths', { hlaePath, hlPath })
     .catch((err) => {

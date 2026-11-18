@@ -19,14 +19,15 @@
 import { logFrontendEvent } from './ipc_bridge.js';
 import {
   resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
-  blockFov, LISTS_THE_PAGE_OWNS,
+  blockFov, blockUsesRows, LISTS_THE_PAGE_OWNS,
 } from './project_settings_logic.js';
 import { DEFAULT_FOV, fovFromLines } from './clip_settings_logic.js';
+import { SENT_ROWS } from './clip_settings_rows.js';
 import { withFilledFov, fovTheGameUses } from './project_fov.js';
 import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import {
   projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine, projectSettingsFromSnapshotLine,
-  projectSettingsKeptLine,
+  projectSettingsKeptLine, clipRowsSentLine,
 } from './project_log.js';
 import { snapshotInEffect, blockFromSnapshot, startSnapshot } from './project_settings_snapshot.js';
 
@@ -73,11 +74,18 @@ export function effectiveSettings(form) {
   return resolveSettings(form, block, pcId);
 }
 
-/** effectiveSettings for the batch payload: with the project's field of view
- *  as `picture_fov` while the New UI is on (the page that sets it exists).
- *  See resolveCaptureSettings. */
+/** effectiveSettings for the batch payload: while the New UI is on (the page
+ *  that sets them exists), with the project's field of view as `picture_fov`
+ *  and, with Use Clip settings on, every Clip settings row in its Initial
+ *  Commands. See resolveCaptureSettings. Logs how many rows it adds: called
+ *  once per batch start (and OBS capture test). */
 export function effectiveCaptureSettings(form) {
-  return resolveCaptureSettings(form, block, pcId, { pictureFov: isNewUiOn() });
+  const newUi = isNewUiOn();
+  const resolved = resolveCaptureSettings(form, block, pcId, { pictureFov: newUi, clipRows: newUi });
+  if (newUi && blockUsesRows(block) && Array.isArray(resolved.init_commands)) {
+    logFrontendEvent(clipRowsSentLine({ rows: SENT_ROWS.length, own: resolved.init_commands.length - SENT_ROWS.length }));
+  }
+  return resolved;
 }
 
 /** The field of view a batch sends for the open project (#1085), or null:
@@ -173,12 +181,20 @@ export function leaveProjectSettingsPage(how) {
 /**
  * What the Project settings page edits: `form` the settings file's values
  * now (null before settings load), `block` the open project's block, or one
- * made from `form` for a session not saved yet, and `pcId`.
+ * made from `form` for a session not saved yet (a new project, so with Use
+ * Clip settings on), and `pcId`.
  */
 export function blockForPage() {
   const form = formNow();
-  const base = block || (form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null);
+  const base = block || (form ? newProjectBlock(form) : null);
   return { form, block: base, pcId };
+}
+
+/** The block a new project starts with: `form`'s values, Use Clip settings
+ *  on. A project made before that setting (the snapshot, or a file opened
+ *  with no block) gets blockFromForm's block without it, which reads Off. */
+function newProjectBlock(form) {
+  return blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path), useRows: true });
 }
 
 /**
@@ -325,7 +341,7 @@ export function createProjectSettings({ markDirty: mark }) {
     if (!block) {
       const form = formNow();
       formAtLastLook = form;
-      block = form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null;
+      block = form ? newProjectBlock(form) : null;
     }
     return block || undefined;
   }

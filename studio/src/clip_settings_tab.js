@@ -1,37 +1,44 @@
 // clip_settings_tab.js
 // The Clip settings tab of the Project settings page (#1085, build plan
-// step 8): a preset to start from, the rows (clip_settings_rows.js), Your
-// own commands and At each clip, drawn from the page's pending values. Like
-// the Project tab it never writes the project: each edit goes to the page
-// (onEdit), which holds it until OK or Apply. The rows are an editor over
-// the project's Initial Commands lines; the rules are clip_settings_logic.js's.
+// step 8): Use Clip settings, a preset to start from, the rows
+// (clip_settings_rows.js), Your own commands and At each clip, drawn from
+// the page's pending values. With Use Clip settings off only Your own
+// commands shows, every line in it. Like the Project tab it never writes the
+// project: each edit goes to the page (onEdit), which holds it until OK or
+// Apply. The rows are an editor over the project's Initial Commands lines;
+// the rules are clip_settings_logic.js's.
 
-import { CLIP_SETTINGS_SECTIONS, ROW_CVARS } from './clip_settings_rows.js';
+import { CLIP_SETTINGS_SECTIONS, ROW_CVARS, ROW_DEFAULTS, SENT_ROWS } from './clip_settings_rows.js';
 import {
-  rowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
-  DEFAULT_FOV, presetPick, numberRowValue, parseSetting, clipRowKey,
+  shownRowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
+  DEFAULT_FOV, presetPick, numberRowValue, parseSetting, clipRowKey, rowsAreOn, differsFromConfig,
 } from './clip_settings_logic.js';
 import { profileState } from './command_profiles.js';
 import { isBuiltinName } from './builtin_profiles.js';
 import { attachCommandSuggest, tierNote, typedName } from './command_suggest.js';
+import { configCvarValues } from './ipc_bridge.js';
 import { el, row, card, chips } from './project_settings_dom.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CLIP_SETTINGS;
 
-/** The sections, in page order, for the side list and the cards. */
-export const CLIP_SECTIONS = Object.freeze([
-  { id: 'start-from', label: S.SECTIONS['start-from'] },
-  ...CLIP_SETTINGS_SECTIONS.map((s) => ({ id: s.id, label: S.SECTIONS[s.id] })),
-  { id: 'own-commands', label: S.SECTIONS['own-commands'] },
-]);
+const section = (id) => ({ id, label: S.SECTIONS[id] });
+
+/** The sections `pending` shows, in page order, for the side list: all of
+ *  them with Use Clip settings on, else only the switch and Your own
+ *  commands. */
+export function clipSections(pending) {
+  if (!rowsAreOn(pending)) return [section('use-rows'), section('own-commands')];
+  return [
+    section('use-rows'), section('start-from'),
+    ...CLIP_SETTINGS_SECTIONS.map((s) => section(s.id)),
+    section('own-commands'),
+  ];
+}
 
 /** Seek Between Clips, Configuration's app setting: on, the hook runs both
  *  lists past the demo filter, which changes what a line's note says. */
 const seeks = () => document.querySelector('#config-hook-runs-batch')?.checked ?? true;
-
-/** The value a "Not set" choice carries: no line for the row. */
-const UNSET = 'unset';
 
 /** The note under a command, from command_suggest.js's tiers, or null.
  *  The page is the New UI's, so the project always sets the field of view
@@ -54,6 +61,42 @@ function noteFor(command, scheduled) {
 export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset, goTo, onPresetSaved = () => {} }) {
   const lines = () => getState().pending.init_commands || [];
   const setLines = (next, redraw = false) => onEdit({ init_commands: next }, { redraw });
+  const rowsOn = () => rowsAreOn(getState().pending);
+
+  /** Use Clip settings, with what On and Off do written under it. */
+  function useRowsCard() {
+    const on = rowsOn();
+    const control = chips('clip_rows_on', [{ value: false, label: S.OFF }, { value: true, label: S.ON }], on, (value) => {
+      onEdit({ clip_rows_on: value }, { redraw: true });
+    });
+    return card('use-rows', S.SECTIONS['use-rows'], null, [row(S.USE_ROWS, S.USE_ROWS_HINT, [control], { id: 'clip_rows_on' })]);
+  }
+
+  /**
+   * What the game's start-up configs set the rows' cvars to, by cvar lower
+   * case (`{ value, file, line }`), read once per page open from the install
+   * the page's form names (native config_values.rs). Undefined until it
+   * arrives; the tab is redrawn then, if this page is still open.
+   */
+  function configValues() {
+    const state = getState();
+    if (state.ui.configValuesAsked) return state.ui.configValues;
+    state.ui.configValuesAsked = true;
+    configCvarValues(state.form?.hl_path || '', SENT_ROWS.map((r) => r.cvar)).then((found) => {
+      if (getState() !== state) return;
+      state.ui.configValues = Object.fromEntries((found || []).map((v) => [v.cvar.toLowerCase(), v]));
+      if (state.tab === 'clip' && rowsAreOn(state.pending)) onEdit({}, { redraw: true });
+    });
+    return undefined;
+  }
+
+  /** A warning beside a row whose cvar a game config sets to another value
+   *  than the row shows, or null. */
+  function configWarning(r) {
+    const found = configValues()?.[r.cvar.toLowerCase()];
+    if (!found || !differsFromConfig(shownRowValue(lines(), r.cvar), found.value)) return null;
+    return el('span', { class: 'ps-state ps-state-warn', text: S.configSets(found.file, found.value), title: S.CONFIG_SETS_TITLE });
+  }
 
   function startFromCard() {
     const { pending, ui } = getState();
@@ -125,9 +168,10 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     return el('div', { class: 'ps-inline ps-grow' }, [input, save, cancel, problem]);
   }
 
-  /** One row's controls, by its kind. */
+  /** One row's controls, by its kind. Every row that is a line shows a
+   *  value: its line's, else the game's own. */
   function rowControls(r) {
-    const value = r.cvar ? rowValue(lines(), r.cvar) : null;
+    const value = r.cvar ? shownRowValue(lines(), r.cvar) : null;
     if (r.kind === 'toggle') return [toggleChips(r, value)];
     if (r.kind === 'select') return [selectBox(r, value)];
     if (r.kind === 'number') return [numberInput(r, value)];
@@ -141,30 +185,29 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     return [el('span', { class: 'ps-muted', text: S.SPRAYS_STATE, title: S.SPRAYS_TITLE })];
   }
 
-  /** Not set, Off, On; and the typed value when a line holds another. */
+  /** Off, On; and the typed value when a line holds another. */
   function toggleChips(r, value) {
     const choices = [
-      { value: UNSET, label: S.NOT_SET, title: S.NOT_SET_TITLE },
       { value: '0', label: S.OFF },
       { value: '1', label: S.ON },
     ];
-    if (value !== null && !r.values.includes(value)) choices.push({ value, label: S.typedValue(value) });
-    return chips(r.cvar, choices, value ?? UNSET, (v) => setLines(withRowValue(lines(), r.cvar, v === UNSET ? null : v), true));
+    if (!r.values.includes(value)) choices.push({ value, label: S.typedValue(value) });
+    return chips(r.cvar, choices, value, (v) => setLines(withRowValue(lines(), r.cvar, v), true));
   }
 
   function selectBox(r, value) {
     const select = el('select', { class: 'ps-select', dataset: { field: r.cvar } });
-    select.append(el('option', { value: UNSET, text: S.NOT_SET, title: S.NOT_SET_TITLE }));
     r.values.forEach((v, i) => select.append(el('option', { value: v, text: S.CHOICES[r.id][i] })));
-    if (value !== null && !r.values.includes(value)) select.append(el('option', { value, text: S.typedValue(value) }));
-    select.value = value ?? UNSET;
-    select.addEventListener('change', () => setLines(withRowValue(lines(), r.cvar, select.value === UNSET ? null : select.value)));
+    if (!r.values.includes(value)) select.append(el('option', { value, text: S.typedValue(value) }));
+    select.value = value;
+    select.addEventListener('change', () => setLines(withRowValue(lines(), r.cvar, select.value)));
     return select;
   }
 
   function numberInput(r, value) {
+    const fallback = ROW_DEFAULTS[r.cvar];
     const input = el('input', {
-      type: 'text', class: 'ps-number', value: value ?? '', placeholder: S.NOT_SET, title: S.NOT_SET_TITLE,
+      type: 'text', class: 'ps-number', value, placeholder: fallback, title: S.gameDefaultTitle(fallback),
       inputMode: 'decimal', spellcheck: false, autocomplete: 'off', dataset: { field: r.cvar },
     });
     input.style.width = '84px';
@@ -176,6 +219,7 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     const [label, hint] = S.ROWS[r.id];
     const controls = rowControls(r);
     if (r.when === 'load') controls.push(el('span', { class: 'ps-state ps-state-warn', text: S.AT_LOAD, title: S.AT_LOAD_TITLE }));
+    if (SENT_ROWS.includes(r)) controls.push(configWarning(r));
     const node = row(label, hint, controls, { id: clipRowKey(r) });
     if (r.cvar) node.title = r.cvar;
     return node;
@@ -185,13 +229,19 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     return card(section.id, S.SECTIONS[section.id], S.SECTION_SUBS[section.id] || null, section.rows.map(settingRow));
   }
 
-  function ownCommandsCard() {
-    const order = el('div', { class: 'ps-chips' }, S.WHICH_WINS_ORDER.map((label, i) => el('span', {
-      class: 'ps-chip', text: `${i + 1} · ${label}`,
+  /** Which wins, as plain numbered labels: an order to read, nothing to
+   *  click. */
+  function whichWinsOrder(labels) {
+    return el('ol', { class: 'ps-order' }, labels.map((label, i) => el('li', {
+      class: 'ps-order-step', text: `${i + 1} · ${label}`,
     })));
-    return card('own-commands', S.SECTIONS['own-commands'], S.OWN_COMMANDS_SUB, [
-      row(S.WHICH_WINS, S.WHICH_WINS_HINT, [order]),
-      row(S.COMMANDS, S.COMMANDS_HINT, [ownList()], { id: 'init_commands' }),
+  }
+
+  function ownCommandsCard() {
+    const on = rowsOn();
+    return card('own-commands', S.SECTIONS['own-commands'], on ? S.OWN_COMMANDS_SUB : S.OWN_COMMANDS_SUB_OFF, [
+      row(S.WHICH_WINS, S.WHICH_WINS_HINT, [whichWinsOrder(on ? S.WHICH_WINS_ORDER : S.WHICH_WINS_ORDER_OFF)]),
+      row(S.COMMANDS, on ? S.COMMANDS_HINT : S.COMMANDS_HINT_OFF, [ownList()], { id: 'init_commands' }),
       row(S.AT_EACH_CLIP, S.AT_EACH_CLIP_HINT, [scheduledList()], { id: 'custom_commands' }),
     ]);
   }
@@ -225,12 +275,14 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
   }
 
   function ownList() {
-    const entries = ownEntries(lines());
+    const on = rowsOn();
+    const entries = ownEntries(lines(), { rowsOn: on });
     const items = entries.map(({ index, text }) => {
       const { input, note } = commandBox(text, false, `own-${index}`, (value) => setLines(withLineAt(lines(), index, value)));
-      // A line that now sets a row moves into it.
+      // A line that now sets a row moves into it (with no rows shown, it
+      // stays a line of its own).
       input.addEventListener('change', () => {
-        if (ROW_CVARS.includes(parseSetting(input.value)?.name)) setLines(withRowLinesMerged(lines()), true);
+        if (on && ROW_CVARS.includes(parseSetting(input.value)?.name)) setLines(withRowLinesMerged(lines()), true);
       });
       return el('div', { class: 'ps-command' }, [
         el('div', { class: 'ps-inline ps-grow' }, [input, removeButton(() => setLines(withoutLineAt(lines(), index), true))]),
@@ -283,7 +335,8 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
 
   /** Draws the tab into `container`, replacing what was there. */
   function render(container) {
-    container.replaceChildren(startFromCard(), ...CLIP_SETTINGS_SECTIONS.map(sectionCard), ownCommandsCard());
+    if (rowsOn()) container.replaceChildren(useRowsCard(), startFromCard(), ...CLIP_SETTINGS_SECTIONS.map(sectionCard), ownCommandsCard());
+    else container.replaceChildren(useRowsCard(), ownCommandsCard());
     const { ui } = getState();
     if (ui.focusLast) {
       const boxes = container.querySelectorAll(`[data-field^="${ui.focusLast === 'own' ? 'own-' : 'scheduled-'}"]`);

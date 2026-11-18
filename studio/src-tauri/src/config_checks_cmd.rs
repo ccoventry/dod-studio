@@ -98,6 +98,52 @@ pub async fn project_fov_sources(
     .map_err(crate::messages::config_scan_failed)
 }
 
+/// What the start-up configs leave one cvar at
+/// (`native::game_config::config_values::ConfigValue`): `file` the config's
+/// name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigValueRow {
+    pub cvar: String,
+    pub value: String,
+    pub file: String,
+    pub line: usize,
+}
+
+/// What the game's start-up configs set each of `cvars` to, for Project
+/// settings › Clip settings' rows (#1085), which warn where a config sets
+/// another value. Only the cvars a config sets; none with no game folder.
+/// Reads only.
+#[tauri::command]
+pub async fn config_cvar_values(
+    game_path: String,
+    cvars: Vec<String>,
+) -> Result<Vec<ConfigValueRow>, String> {
+    tokio::task::spawn_blocking(move || {
+        let Some(game_dir) =
+            native::shared::paths::mod_dir_for_exe(std::path::Path::new(&game_path))
+                .filter(|d| d.is_dir())
+        else {
+            return Vec::new();
+        };
+        native::game_config::config_values::start_up_values(&game_dir, &cvars)
+            .into_iter()
+            .map(|v| ConfigValueRow {
+                file: v
+                    .file
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| v.file.display().to_string()),
+                cvar: v.cvar,
+                value: v.value,
+                line: v.line,
+            })
+            .collect()
+    })
+    .await
+    .map_err(crate::messages::config_scan_failed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RollFloorReport {
