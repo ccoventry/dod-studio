@@ -1112,16 +1112,16 @@ test.describe('take checks (#1084)', () => {
   });
 });
 
-// #429: the button that copies the VEGAS nameplate script into VEGAS's script menu.
-test.describe('Add Nameplate Script to VEGAS', () => {
-  test('the click asks the backend and the toast says where the script went', async ({ page }) => {
+// #429, #1514: the button that copies the VEGAS scripts into VEGAS's script menu.
+test.describe('Add Scripts to VEGAS', () => {
+  test('the click asks the backend and the toast says where the scripts went', async ({ page }) => {
     await gotoHarness(page);
     await page.evaluate(() => {
       window.__mockInvokeHandlers['vegas_install_script'] =
-        () => 'D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs';
+        () => 'D:/OneDrive/Documents/Vegas Script Menu';
     });
     await page.locator('#vegas-script-install-btn').click();
-    await expect(page.locator('#toast-container')).toContainText('D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs');
+    await expect(page.locator('#toast-container')).toContainText('Scripts copied to D:/OneDrive/Documents/Vegas Script Menu');
     await expect(page.locator('#toast-container')).toContainText('Tools > Scripting > Rescan Script Menu Folder');
     expect(await invocationsFor(page, 'vegas_install_script')).toHaveLength(1);
     await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();
