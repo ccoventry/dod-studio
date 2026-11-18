@@ -2,7 +2,7 @@
  * DoD Studio Relink Clips (#1514), a VEGAS Pro 21 script.
  *
  * Points the clips of a VEGAS project you are already editing at their new
- * files after they were renamed, moved or rendered again, and keeps the edit:
+ * files after they were renamed or moved, and keeps the edit:
  * every event stays where it is, with its trims, speed, fades, effects and
  * Pan/Crop, and the nameplates on top stay too.
  *
@@ -38,7 +38,7 @@ using ScriptPortal.Vegas;
 public class EntryPoint
 {
     // Two lengths further apart than this, in seconds (about 3 frames at 60
-    // fps), are named in the end box: a re-render that starts or ends
+    // fps), are named in the end box: a new file that starts or ends
     // somewhere else no longer fits the edit's trims.
     const double LENGTH_TOLERANCE_SECONDS = 0.05;
 
@@ -59,9 +59,6 @@ public class EntryPoint
         public string From;
         public string To;
         public string Why;
-        // The lengths Studio read, when it did (re-renders only); NaN if not.
-        public double SecondsFrom = double.NaN;
-        public double SecondsTo = double.NaN;
     }
 
     /// What to do with one media file of the project.
@@ -133,9 +130,9 @@ public class EntryPoint
                     swapped++;
                     if (StaysUnused(old)) leftUnused++;
                     double after = SecondsOf(fresh);
-                    if (LengthDiffers(before, after) || LengthDiffers(plan.Move.SecondsFrom, plan.Move.SecondsTo))
+                    if (LengthDiffers(before, after))
                     {
-                        otherLength.Add(Path.GetFileName(plan.To) + LengthNote(before, after, plan.Move));
+                        otherLength.Add(Path.GetFileName(plan.To) + LengthNote(before, after));
                     }
                 }
                 catch (Exception e)
@@ -219,11 +216,9 @@ public class EntryPoint
         try { return m.Length.ToMilliseconds() / 1000.0; } catch (Exception) { return double.NaN; }
     }
 
-    static string LengthNote(double before, double after, Move move)
+    static string LengthNote(double before, double after)
     {
-        double a = LengthDiffers(before, after) ? before : move.SecondsFrom;
-        double b = LengthDiffers(before, after) ? after : move.SecondsTo;
-        return " (" + a.ToString("0.00", CultureInfo.InvariantCulture) + " s, now " + b.ToString("0.00", CultureInfo.InvariantCulture) + " s)";
+        return " (" + before.ToString("0.00", CultureInfo.InvariantCulture) + " s, now " + after.ToString("0.00", CultureInfo.InvariantCulture) + " s)";
     }
 
     /// The relink lists beside the project and beside each media file's (old)
@@ -342,8 +337,6 @@ public class EntryPoint
             move.From = Str(obj, "from");
             move.To = Str(obj, "to");
             move.Why = Str(obj, "why") ?? "moved";
-            if (Get(obj, "seconds_from") is double) move.SecondsFrom = (double)Get(obj, "seconds_from");
-            if (Get(obj, "seconds_to") is double) move.SecondsTo = (double)Get(obj, "seconds_to");
             moves.Add(move);
         }
         return moves;

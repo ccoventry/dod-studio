@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { recordRender, relocateRender, rendersOf } from './take_renders.js';
 import {
-  movesFromRecord, movesFromBackup, reRenderMoves, backupPathsOf, mergeMoves, addLengths,
+  movesFromRecord, movesFromBackup, mergeMoves,
   relinkMap, moveCounts, relinkDefaultPath,
 } from './vegas_relink_map.js';
 
@@ -99,57 +99,11 @@ describe('the relink list from a project backup', () => {
   });
 });
 
-describe('older renders of a highlight (opt-in)', () => {
-  function rerendered() {
-    // Take b is a recapture of take a's highlight; each was rendered.
-    const index = { a: ['u2', 'u1'], b: ['u1', 'u2'], c: ['u3'] };
-    recordRender(index, 'a', render(1, 'D:/clips/row11.mov'));
-    recordRender(index, 'a', render(1, 'D:/clips/row11_hud.mov', { stream: 'hud:hudcolor' }));
-    recordRender(index, 'b', render(7, 'D:/clips/row11_2.mov'));
-    recordRender(index, 'c', render(3, 'D:/clips/other.mov'));
-    return index;
-  }
-
-  it('maps each older render of the same highlight and stream to the newest', () => {
-    const index = rerendered();
-    expect(mergeMoves(index, reRenderMoves(index))).toEqual([
-      { from: 'D:/clips/row11.mov', to: 'D:/clips/row11_2.mov', why: 're-rendered' },
-    ]);
-  });
-
-  it('a move wins over a re-render for the same path', () => {
-    const index = rerendered();
-    move(index, 'a', 1, 'H:/row11.mov');
-    const merged = mergeMoves(index, [...movesFromRecord(index), ...reRenderMoves(index)]);
-    expect(merged).toContainEqual({ from: 'D:/clips/row11.mov', to: 'H:/row11.mov', why: 'moved' });
-    expect(merged).toContainEqual({ from: 'H:/row11.mov', to: 'D:/clips/row11_2.mov', why: 're-rendered' });
-  });
-
-  it('includes the older render\'s paths in a backup', () => {
-    const index = rerendered();
-    const text = JSON.stringify({ takeRenders: { a: [render(1, 'E:/before/row11.mov')] } });
-    const moves = mergeMoves(index, reRenderMoves(index, backupPathsOf(text)));
-    expect(moves).toContainEqual({ from: 'E:/before/row11.mov', to: 'D:/clips/row11_2.mov', why: 're-rendered' });
-  });
-
-  it('puts the lengths on and names the ones that differ', () => {
-    const moves = [
-      { from: 'a', to: 'b', why: 're-rendered' },
-      { from: 'c', to: 'd', why: 're-rendered' },
-      { from: 'e', to: 'f', why: 'moved' },
-    ];
-    const differ = addLengths(moves, new Map([['a', 4.2], ['b', 5.0], ['c', 3], ['d', 3.02], ['e', 1], ['f', 9]]));
-    expect(differ.map((m) => m.from)).toEqual(['a']);
-    expect(moves[0]).toMatchObject({ seconds_from: 4.2, seconds_to: 5 });
-    expect('seconds_from' in moves[2]).toBe(false);
-  });
-});
-
 describe('the file', () => {
-  it('has the format, version and moves, and counts each kind', () => {
-    const moves = [{ from: 'a', to: 'b', why: 'moved' }, { from: 'c', to: 'd', why: 're-rendered' }];
+  it('has the format, version and moves, and counts the moves', () => {
+    const moves = [{ from: 'a', to: 'b', why: 'moved' }, { from: 'c', to: 'd', why: 'moved' }];
     expect(relinkMap(moves)).toEqual({ format: 'dodstudio-relink-map', version: 1, moves });
-    expect(moveCounts(moves)).toEqual({ moved: 1, reRendered: 1, total: 2 });
+    expect(moveCounts(moves)).toEqual({ moved: 2 });
   });
 
   it('opens the save dialog in the folder holding most of the videos now', () => {

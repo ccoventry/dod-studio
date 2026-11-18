@@ -15,26 +15,15 @@ import { pickPath } from './pick_path.js';
 import { showToast } from './toast.js';
 import { showBar, hideBar } from './progress_view.js';
 import { STRINGS } from './strings.js';
-import { probeLengths } from './vegas_edl_export.js';
 import { PROJECT_EXTENSION } from './project_file_type.js';
 import {
-  movesFromRecord, movesFromBackup, reRenderMoves, backupPathsOf, mergeMoves, addLengths,
+  movesFromRecord, movesFromBackup, mergeMoves,
   relinkMap, moveCounts, relinkDefaultPath, RELINK_SAVE_FILTER,
 } from './vegas_relink_map.js';
 import { fileNameOf } from './path_display.js';
 
 /** The bar's view for a step that can't be counted. */
 const stepView = (text) => ({ pct: 0, indeterminate: true, text });
-
-/** The bar's view while reading lengths: `done` of `total`. */
-function lengthsView(done, total) {
-  const read = Math.max(0, Math.min(done, total));
-  return {
-    pct: total > 0 ? Math.round((read / total) * 100) : 0,
-    indeterminate: false,
-    text: STRINGS.RENDER.relinkReading(Math.min(read + 1, total), total),
-  };
-}
 
 /** Draws on the bar and line under the buttons; nothing on a page without them. */
 function createRelinkProgress(doc = globalThis.document) {
@@ -69,7 +58,6 @@ const defaultIo = {
   }),
   read: readProjectFile,
   exists: filesExist,
-  probe: probeLengths,
   pickSave: (defaultPath) => whileDialogOpens(() => save({
     defaultPath,
     filters: [RELINK_SAVE_FILTER, { name: 'All files', extensions: ['*'] }],
@@ -86,15 +74,11 @@ const defaultIo = {
 
 /**
  * @param {object} app  `getTakeIndex()` the open project's take index;
- *   `withReRenders()` whether older renders of a highlight map to its newest
- *   render too; `ffmpegPath()` the FFmpeg override, if any. `io` swaps the
- *   disk, dialogs, log, toasts and bar out in tests.
+ *   `io` swaps the disk, dialogs, log, toasts and bar out in tests.
  * @returns {{ run: ({ fromBackup }?) => Promise<boolean> }}  resolves to
  *   whether a list was saved.
  */
-export function createVegasRelinkExport({
-  getTakeIndex, withReRenders = () => false, ffmpegPath = () => null, io = defaultIo,
-}) {
+export function createVegasRelinkExport({ getTakeIndex, io = defaultIo }) {
   async function run({ fromBackup = false } = {}) {
     try {
       return await exportList(fromBackup);
@@ -106,14 +90,12 @@ export function createVegasRelinkExport({
   async function exportList(fromBackup) {
     const R = STRINGS.RENDER;
     const takeIndex = getTakeIndex() || {};
-    const reRenders = !!withReRenders();
     const started = io.now();
     const source = fromBackup ? 'backup' : 'record';
-    io.log(`[vegas-relink] export started (from the ${source === 'backup' ? 'project and a backup' : 'project'}, re-renders ${reRenders ? 'on' : 'off'})`);
+    io.log(`[vegas-relink] export started (from the ${source === 'backup' ? 'project and a backup' : 'project'})`);
     const end = (why) => io.log(`[vegas-relink] no list saved: ${why} (${io.now() - started} ms)`);
 
     let candidates = movesFromRecord(takeIndex);
-    let backupPaths = new Map();
     let backupCounts = null;
     if (fromBackup) {
       io.progress?.show(stepView(R.RELINK_PICKING_BACKUP));
@@ -127,7 +109,6 @@ export function createVegasRelinkExport({
         const text = await io.read(backupPath);
         const fromCopy = movesFromBackup(takeIndex, text);
         candidates = [...candidates, ...fromCopy.moves];
-        backupPaths = backupPathsOf(text);
         backupCounts = { matched: fromCopy.matched, unmatched: fromCopy.unmatched };
       } catch (err) {
         io.toast(R.relinkBackupFailed(backupPath, err?.message || err), 'error');
@@ -136,7 +117,6 @@ export function createVegasRelinkExport({
       }
       io.log(`[vegas-relink] backup read: ${backupCounts.matched} render(s) matched, ${backupCounts.unmatched} not in this project`);
     }
-    if (reRenders) candidates = [...candidates, ...reRenderMoves(takeIndex, backupPaths)];
     const moves = mergeMoves(takeIndex, candidates);
     if (moves.length === 0) {
       io.toast(fromBackup ? R.RELINK_NONE_BACKUP : R.RELINK_NONE, 'info');
@@ -148,17 +128,6 @@ export function createVegasRelinkExport({
     const targets = [...new Set(moves.map((m) => m.to))];
     const there = await io.exists(targets);
     const missingTargets = Array.isArray(there) ? targets.filter((_, i) => there[i] === false).length : 0;
-
-    let lengthDiffers = [];
-    const reRendered = moves.filter((m) => m.why === 're-rendered');
-    if (reRendered.length > 0) {
-      const paths = [...new Set(reRendered.flatMap((m) => [m.from, m.to]))];
-      const onDisk = await io.exists(paths);
-      const toRead = Array.isArray(onDisk) ? paths.filter((_, i) => onDisk[i]) : [];
-      io.progress?.show(lengthsView(0, toRead.length));
-      const lengths = await io.probe(toRead, ffmpegPath(), (done) => io.progress?.show(lengthsView(done, toRead.length)));
-      lengthDiffers = addLengths(moves, lengths);
-    }
 
     io.progress?.show(stepView(R.RELINK_PICKING_SAVE));
     const path = await io.pickSave(relinkDefaultPath(takeIndex));
@@ -175,21 +144,19 @@ export function createVegasRelinkExport({
       return false;
     }
     const counts = moveCounts(moves);
-    io.log(`[vegas-relink] saved ${path}: ${counts.moved} moved, ${counts.reRendered} re-rendered, ${missingTargets} new file(s) not there, ${lengthDiffers.length} re-render(s) of another length, in ${io.now() - started} ms`);
-    io.toast(R.relinkDone({ ...counts, missingTargets, lengthDiffers: lengthDiffers.length }), lengthDiffers.length > 0 || missingTargets > 0 ? 'info' : 'success');
+    io.log(`[vegas-relink] saved ${path}: ${counts.moved} moved, ${missingTargets} new file(s) not there, in ${io.now() - started} ms`);
+    io.toast(R.relinkDone({ ...counts, missingTargets }), missingTargets > 0 ? 'info' : 'success');
     return true;
   }
 
   return { run };
 }
 
-/** Wires the two buttons and the re-render tick box; the options are
- *  `createVegasRelinkExport`'s, less `withReRenders`. */
+/** Wires the two buttons; the options are `createVegasRelinkExport`'s. */
 export function startVegasRelinkExport(options) {
   const button = document.querySelector('#vegas-relink-export-btn');
   const backupButton = document.querySelector('#vegas-relink-backup-btn');
-  const tick = document.querySelector('#vegas-relink-rerenders');
-  const exporter = createVegasRelinkExport({ ...options, withReRenders: () => !!tick?.checked });
+  const exporter = createVegasRelinkExport(options);
   const wire = (el, fromBackup) => el?.addEventListener('click', async () => {
     if (button) button.disabled = true;
     if (backupButton) backupButton.disabled = true;

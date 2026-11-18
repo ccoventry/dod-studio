@@ -35,7 +35,7 @@ public static class RelinkMatchTest
   ""version"": 1,
   ""moves"": [
     { ""from"": ""E:\\Unsorted\\dyelife_row11.mov"", ""to"": ""H:\\Armory\\dyelife.mov"", ""why"": ""moved"" },
-    { ""from"": ""D:/clips/old_take.mov"", ""to"": ""D:\\clips\\old_take_2.mov"", ""why"": ""re-rendered"", ""seconds_from"": 4.2, ""seconds_to"": 5.0 },
+    { ""from"": ""D:/clips/old_take.mov"", ""to"": ""D:\\clips\\old_take_2.mov"", ""why"": ""some-future-reason"" },
     { ""from"": ""C:\\a.mov"", ""to"": ""C:\\b.mov"", ""why"": ""moved"" },
     { ""from"": ""C:\\b.mov"", ""to"": ""C:\\c.mov"", ""why"": ""moved"" },
     { ""from"": ""C:\\loop1.mov"", ""to"": ""C:\\loop2.mov"" },
@@ -60,8 +60,7 @@ public static class RelinkMatchTest
 
         plan = EntryPoint.PlanFor(@"D:\clips\old_take.mov", list, AllThere);
         Check("a forward-slash from matches a backslash path", EntryPoint.Outcome.Swap, plan.Outcome);
-        Check("a re-render keeps its lengths", 4.2, plan.Move.SecondsFrom);
-        Check("re-render lengths 4.2 and 5.0 differ", true, EntryPoint.LengthDiffers(plan.Move.SecondsFrom, plan.Move.SecondsTo));
+        Check("an unknown why is still swapped", "some-future-reason", plan.Move.Why);
 
         plan = EntryPoint.PlanFor(@"E:\Unsorted\dyelife_row11.mov", list, NoneThere);
         Check("a new file that isn't there is reported, not swapped", EntryPoint.Outcome.TargetMissing, plan.Outcome);

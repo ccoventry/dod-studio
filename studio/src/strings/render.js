@@ -94,24 +94,19 @@ export const RENDER_STRINGS = {
     RELINK_BACKUP_BUTTON: 'From a Project Backup…',
     RELINK_BACKUP_TITLE: "The same list, also comparing with an older copy of this project file saved before the videos moved (for videos moved before Studio kept track of moves). The copy is only read, never changed.",
     RELINK_BACKUP_PICK_TITLE: 'Older copy of this project file, from before the videos moved',
-    RELINK_RERENDERS_LABEL: 'Also swap older renders of a highlight for its newest render',
-    RELINK_RERENDERS_TITLE: "When a highlight was rendered again after you started editing, the edit can use the new render. A re-render can start or end somewhere else, so the list warns about each one whose length differs: check those clips' trims by eye.",
     RELINK_PICKING_BACKUP: 'Pick the older copy of the project file…',
     relinkReadingBackup: (name) => `Reading ${name}…`,
     relinkChecking: (count) => `Checking the ${count} new file${count === 1 ? '' : 's'} are there…`,
-    relinkReading: (n, total) => `Reading the length of re-render ${n} of ${total}…`,
     RELINK_PICKING_SAVE: 'Choose where to save the relink list…',
     RELINK_WRITING: 'Writing the relink list…',
     RELINK_NONE: "No video of the loaded project has been moved since Studio started keeping track (Find Moved Videos keeps each one's old place). For videos moved before that, use From a Project Backup… with a copy of the project file from before the move.",
     RELINK_NONE_BACKUP: 'The backup and the loaded project have every video in the same place: nothing to relink.',
     relinkBackupFailed: (path, err) => `Couldn't read ${path} as a project file: ${err}`,
     relinkWriteFailed: (err) => `Couldn't save the relink list: ${err}`,
-    relinkDone: ({ moved, reRendered, missingTargets = 0, lengthDiffers = 0 }) => {
+    relinkDone: ({ moved, missingTargets = 0 }) => {
       const parts = [`${moved} moved video${moved === 1 ? '' : 's'}`];
-      if (reRendered > 0) parts.push(`${reRendered} older render${reRendered === 1 ? '' : 's'} swapped for the newest`);
       const notes = [];
       if (missingTargets > 0) notes.push(` ${missingTargets} new file${missingTargets === 1 ? " isn't" : "s aren't"} there now: run Find Moved Videos first.`);
-      if (lengthDiffers > 0) notes.push(` ${lengthDiffers} re-render${lengthDiffers === 1 ? ' has' : 's have'} a different length: check ${lengthDiffers === 1 ? 'its' : 'their'} trims in VEGAS.`);
       return `Relink list saved (${parts.join(', ')}). In VEGAS, run DoD Studio Relink Clips on the project.${notes.join('')}`;
     },
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,

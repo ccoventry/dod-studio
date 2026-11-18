@@ -740,7 +740,6 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   });
   startVegasRelinkExport({
     getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
-    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
   });
   startVegasEdlExport({
     getJobs: () => jobs,

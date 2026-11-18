@@ -2,7 +2,7 @@
 
 A VEGAS project you are already editing points at each clip's file. Rename or move the clips afterwards (to sort them, or onto another drive) and VEGAS opens the project with every clip offline. Exporting a fresh EDL doesn't help: it builds a new timeline and loses the editing.
 
-This swaps every moved, renamed or re-rendered clip on the existing project for its new file and keeps the edit: every event stays where it is, with its trims, speed, fades, effects and Pan/Crop, and the nameplates above stay too. It does what **Project Media > right-click > Replace** does by hand, for every clip at once.
+This swaps every moved or renamed clip on the existing project for its new file and keeps the edit: every event stays where it is, with its trims, speed, fades, effects and Pan/Crop, and the nameplates above stay too. It does what **Project Media > right-click > Replace** does by hand, for every clip at once.
 
 ## Steps
 
@@ -20,14 +20,12 @@ This swaps every moved, renamed or re-rendered clip on the existing project for 
 
 - how many media files were swapped, and how many already pointed at their new file;
 - each new file that isn't there (its clip is left as it was): run Find Moved Videos again and export the list again;
-- each clip whose new file is a different length from the old one, with both lengths: a re-render can start or end somewhere else, so check its trims by eye;
+- each clip whose new file is a different length from the old one, with both lengths: a file that starts or ends somewhere else may no longer fit the edit's trims, so check them by eye;
 - each file VEGAS couldn't swap, with its error;
 - old entries left unused in Project Media (Project Media > Remove All Unused Media clears them);
 - the relink lists and clip lists it read, and the VEGAS version.
 
-### Re-renders (optional)
-
-**Also swap older renders of a highlight for its newest render** (unticked by default) adds a line for every older render of a highlight, to the newest render of it (same stream: a HUD pass maps to the newest HUD pass). A recapture of the same highlights counts. Studio reads both files' lengths and the toast warns about each pair whose lengths differ by more than about 3 frames, as the script's box does.
+Studio only maps a clip to the file that same render moved to. Capturing the same highlight again makes a new render, not a replacement of the older one, so Studio never swaps one for the other.
 
 ### The nameplate clip list
 
@@ -46,14 +44,13 @@ For other scripts or editors. JSON, UTF-8, written by `studio/src/vegas_relink_m
   "format": "dodstudio-relink-map",
   "version": 1,
   "moves": [
-    { "from": "E:\\Unsorted\\dyelife_row11.mov", "to": "H:\\Movie\\Armory\\dyelife.mov", "why": "moved" },
-    { "from": "D:\\Clips\\row12.mov", "to": "D:\\Clips\\row12_2.mov", "why": "re-rendered", "seconds_from": 4.2, "seconds_to": 5.0 }
+    { "from": "E:\\Unsorted\\dyelife_row11.mov", "to": "H:\\Movie\\Armory\\dyelife.mov", "why": "moved" }
   ]
 }
 ```
 
 - One line per old path: every path a render ever had maps to where it is now. Paths compare without case and with either slash.
-- `why` is `moved` or `re-rendered`. `seconds_from` and `seconds_to` are on a re-render when Studio could read the files' lengths.
+- `why` is `moved`. A reader treats a missing or unknown `why` as a move.
 - A path a newer render was saved to after the video there moved away is left out: that path holds the newer render now.
 - The format only grows: readers ignore fields they don't know, and `version` goes up only if a field changes meaning.
 
