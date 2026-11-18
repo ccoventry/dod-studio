@@ -19,16 +19,15 @@
 import { logFrontendEvent } from './ipc_bridge.js';
 import {
   resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
-  blockFov, blockWithFov, LISTS_THE_PAGE_OWNS,
+  blockFov, LISTS_THE_PAGE_OWNS,
 } from './project_settings_logic.js';
 import { DEFAULT_FOV, fovFromLines } from './clip_settings_logic.js';
-import { withFilledFov } from './project_fov.js';
+import { withFilledFov, fovTheGameUses } from './project_fov.js';
 import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import {
   projectSettingsCopiedLine, projectSettingsDifferLine, projectSettingsFollowedLine, projectSettingsFromSnapshotLine,
   projectSettingsKeptLine,
 } from './project_log.js';
-import { isNewUiOn } from './new_ui.js';
 import { snapshotInEffect, blockFromSnapshot, startSnapshot } from './project_settings_snapshot.js';
 
 // The open project's block, or null when no project is open or a new one
@@ -179,31 +178,44 @@ export function leaveProjectSettingsPage(how) {
 export function blockForPage() {
   const form = formNow();
   const base = block || (form ? blockFromForm(form, { pcId, madeWith: madeWithOf(form.hl_path) }) : null);
-  return { form, block: withFovForPage(base, form), pcId };
+  return { form, block: base, pcId };
 }
 
-/** `base` with a field of view, for the page, which never shows one unset
- *  (#1085): a session not saved yet, or a project whose fill hasn't run,
- *  takes what its lines give, else the game's 90. The lines only: the
- *  backend's read of an exec'd cfg is withFilledFov's, on open. */
-function withFovForPage(base, form) {
-  if (!base || blockFov(base) !== null) return base;
+/**
+ * The field of view the page shows for `base` (blockForPage's), which never
+ * shows one unset (#1085): `{ shown, fill }`. A block with one shows it, and
+ * `fill` is null. One without (a session not saved yet, or a project whose
+ * fill couldn't run) shows what the game would use for it, read by the same
+ * rule as the fill on open (project_fov.js), and `fill` is that value, which
+ * Apply writes with any other change. When that can't be told, it shows what
+ * its lines give, else 90, and `fill` is null: Apply writes a field of view
+ * then only when the user picks one.
+ */
+export async function pageFov(base, form) {
+  const own = blockFov(base);
+  if (own !== null) return { shown: own, fill: null };
   const lines = resolveSettings({ init_commands: form?.init_commands || [] }, base, pcId).init_commands;
-  return blockWithFov(base, fovFromLines(lines) ?? DEFAULT_FOV);
+  const rule = await fovTheGameUses({ gamePath: form?.hl_path || '', lines });
+  if (rule.fov !== null) return { shown: rule.fov, fill: rule.fov };
+  return { shown: fovFromLines(lines) ?? DEFAULT_FOV, fill: null };
 }
 
-// The open project's path, for the log line of a field of view filled in
-// when the New UI is switched on with it open.
+// The open project's path, for the log line of a field of view filled in.
 let openPath = '';
+// Whether the open project's install is settled (the "made with another
+// install" offer answered, project_session.js), so a fill reads the install
+// it will capture with. False for a quiet open (Rescan Recent Sessions).
+let fovFillReady = false;
 
 /**
  * Gives the open block a field of view when it has none and the New UI is
- * on (project_fov.js): on open, and when the switch turns on. Written with
- * the next save, like the settings snapshot. A block replaced meanwhile (a
- * project opened, New Session) is left alone.
+ * on (project_fov.js): once its install is settled, and when the switch
+ * turns on after that. Written with the next save, like the settings
+ * snapshot. A block replaced meanwhile (a project opened, New Session) is
+ * left alone.
  */
 async function fillOpenProjectFov() {
-  if (!isNewUiOn() || !block || blockFov(block) !== null) return;
+  if (!fovFillReady || !isNewUiOn() || !block || blockFov(block) !== null) return;
   const before = block;
   const form = formNow();
   const filled = await withFilledFov(before, {
@@ -238,6 +250,7 @@ export function startProjectSettingsSnapshot() {
  * The open session's side: `markDirty()` marks the project unsaved.
  * @returns {{
  *   open: (raw: object|undefined, path: string) => Promise<{ copied: boolean, snapshotTakenAt: string|null }>,
+ *   fillFov: (path: string) => Promise<void>,
  *   toSave: () => object,
  *   clear: () => void,
  *   block: () => object|null,
@@ -260,12 +273,20 @@ export function createProjectSettings({ markDirty: mark }) {
   });
 
   async function open(raw, path) {
+    fovFillReady = false;
     const opened = await openBlock(raw, path);
     openPath = path;
-    // Before the page hears of the new block, so it shows the value.
-    await fillOpenProjectFov();
     onReplaced();
     return opened;
+  }
+
+  /** The open project's install is settled: fills its field of view when
+   *  it has none (fillOpenProjectFov). `path` its file now. The session
+   *  calls it after the install offer; a quiet open never does. */
+  async function fillFov(path) {
+    if (path) openPath = path;
+    fovFillReady = true;
+    await fillOpenProjectFov();
   }
 
   /** Makes `raw` the open block, or for a file without one the snapshot
@@ -312,12 +333,14 @@ export function createProjectSettings({ markDirty: mark }) {
   function clear() {
     block = null;
     openPath = '';
+    fovFillReady = false;
     formAtLastLook = null;
     onReplaced();
   }
 
   return {
     open,
+    fillFov,
     toSave,
     clear,
     block: () => block,

@@ -15,7 +15,7 @@
 
 import { killGapsFrom } from './kill_gaps_setting.js';
 import { samePath, fileNameOf, folderOf } from './path_display.js';
-import { isUsableFov } from './clip_settings_logic.js';
+import { isUsableFov, CLIP_TAB_KEYS } from './clip_settings_logic.js';
 
 const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 
@@ -212,10 +212,12 @@ export function followFormEdits(block, before, after, pcId = '', { keep = [] } =
  * Configuration edit then leaves alone (project_settings.js's noteFormSaved).
  * A list is copied whole, so one line added in Configuration would replace
  * every row set on the page. A single value is still copied: changing it in
- * Configuration loses nothing but the value it replaces. With the New UI
- * off there is no page, and Configuration still sets them all.
+ * Configuration loses nothing but the value it replaces. The Clip settings
+ * preset goes with its lines (a profile picked in Configuration changes all
+ * three). With the New UI off there is no page, and Configuration still sets
+ * them all.
  */
-export const LISTS_THE_PAGE_OWNS = Object.freeze(PC_FIELDS.map((f) => f.key));
+export const LISTS_THE_PAGE_OWNS = Object.freeze([...PC_FIELDS.map((f) => f.key), ...CLIP_TAB_KEYS]);
 
 /** `block` saying it is made with the install at `hlExe` from now on. */
 export function withMadeWith(block, hlExe) {

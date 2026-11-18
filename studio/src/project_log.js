@@ -201,15 +201,30 @@ export function clipSettingsAppliedLine(path, { preset, initCount, scheduledCoun
   return `[project settings] Clip settings for ${pageProject(path)}: ${from}, ${initCount} line(s), ${scheduledCount} at each clip, ${view}`;
 }
 
-/** A project with no field of view of its own took one (#1085, decision
- *  3): `file` the cfg its Initial Commands exec that set it, null for a
- *  line of its own; `isDefault` when nothing did and it took the game's. */
-export function projectFovFilledLine(path, { fov, file, line, isDefault }) {
+/** A project with no field of view of its own took what the game uses for
+ *  it (#1085, decision 3; project_fov.js's fovToFill): `from` 'lines',
+ *  'exec' (`file` the cfg its Initial Commands exec), 'game' (`file` a
+ *  start-up config) or 'default'. */
+export function projectFovFilledLine(path, { fov, from, file, line }) {
   let took;
-  if (isDefault) took = `${fov}, the game's default: nothing in its Initial Commands, or a cfg they exec, sets mirv_fov`;
-  else if (file) took = `${fov} from ${file}, line ${line}, which its Initial Commands exec, so its look doesn't change`;
+  if (from === 'default') took = `${fov}, the game's default: nothing in its Initial Commands, a cfg they exec or the game's start-up configs sets it`;
+  else if (from === 'game') took = `${fov} from ${file}, line ${line}, which the game runs at start-up, so its look doesn't change`;
+  else if (from === 'exec') took = `${fov} from ${file}, line ${line}, which its Initial Commands exec, so its look doesn't change`;
   else took = `${fov} from its Initial Commands (mirv_fov ${fov}), so its look doesn't change`;
   return `[project] ${path} had no field of view of its own: took ${took}; saved with the next save`;
+}
+
+/** A project with no field of view of its own was left without one, since
+ *  what the game uses for it can't be told (fovToFill's `why`); the next
+ *  open tries again. */
+export function projectFovNotFilledLine(path, { why, missing = [] }) {
+  const because = {
+    install: 'no hl.exe is picked',
+    folder: "the picked install has no game folder to read its configs from",
+    scan: "reading the game's configs failed",
+    exec: `a cfg its Initial Commands exec isn't in the picked install (${missing.join(', ')})`,
+  }[why] || why;
+  return `[project] ${path} has no field of view of its own and keeps none for now: ${because}. It captures as before; the next open tries again`;
 }
 
 /** A Clip settings preset saved on this PC from the Project settings page. */

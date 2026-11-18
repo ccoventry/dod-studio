@@ -5,7 +5,7 @@
 // wrong with it, and the block that Apply writes. project_settings_page.js
 // draws the page and holds the pending edits.
 
-import { resolveSettings, followFormEdits, madeWithOf } from './project_settings_logic.js';
+import { resolveSettings, followFormEdits, madeWithOf, blockFov, blockWithFov } from './project_settings_logic.js';
 import { samePath } from './path_display.js';
 import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
@@ -32,7 +32,7 @@ export const PAGE_KEYS = Object.freeze([...PROJECT_TAB_KEYS, ...CLIP_TAB_KEYS]);
 export const FOV_CHOICES = Object.freeze([90, 100]);
 
 /** The Field of view chip `fov` matches, 'custom', or null for no value
- *  (the page always has one: blockForPage fills it in). */
+ *  (the page always has one: project_settings.js's pageFov gives it). */
 export function fovChoiceOf(fov) {
   if (fov === undefined || fov === null) return null;
   return FOV_CHOICES.includes(fov) ? fov : 'custom';
@@ -168,10 +168,14 @@ export function pendingProblems(pending) {
 /**
  * The block Apply writes: `block` with each pending value that differs from
  * where the page started, every other field (and any this build doesn't
- * know) left as it was. `block` itself is not changed.
+ * know) left as it was. `fillFov` (project_settings.js's pageFov `fill`) is
+ * the field of view a block with none takes with it, when the user didn't
+ * pick one: what the game uses for it today, so an Apply of anything else
+ * doesn't change its look. `block` itself is not changed.
  */
-export function blockWithPending(block, start, pending, pcId) {
-  return followFormEdits(block, start, usablePending(start, pending), pcId).block;
+export function blockWithPending(block, start, pending, pcId, { fillFov = null } = {}) {
+  const next = followFormEdits(block, start, usablePending(start, pending), pcId).block;
+  return fillFov !== null && blockFov(next) === null ? blockWithFov(next, fillFov) : next;
 }
 
 /** A clip-name template typed into the page: blank means the default, as

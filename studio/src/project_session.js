@@ -500,6 +500,10 @@ export function createProjectSession({
     if (!quiet) {
       await offerProjectInstall({ path: currentSessionPath, settings: projectSettings, markDirty: markProjectDirty })
         .catch((err) => logFrontendEvent(projectFailedLine('offer the install of', currentSessionPath, err)));
+      // After the offer, so the field of view is read from the install the
+      // project captures with. A quiet open fills none: nobody was asked.
+      await projectSettings.fillFov(currentSessionPath)
+        .catch((err) => logFrontendEvent(projectFailedLine('fill the field of view of', currentSessionPath, err)));
     }
     return true;
   }

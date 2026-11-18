@@ -28,6 +28,8 @@ test.beforeEach(async ({ page }) => {
         custom_commands: [{ command: 'cl_righthand 0', relation: 'Before', offset_seconds: 1 }],
       }),
       builtin_command_profiles: () => [{ name: 'Clean clips', init_commands: clean, custom_commands: [] }],
+      // The game's configs set no field of view: the page shows the game's 90.
+      project_fov_sources: () => ({ fromLines: null, fromGame: null, configs: [], unfollowedExecs: [], gameFolder: true }),
       calculate_export_pool_space: () => 10 * gib,
       system_memory_bytes: () => 16 * gib,
     };

@@ -67,7 +67,10 @@ impl From<&native::game_config::picture_fov::StatedFov> for StatedFovRow {
 #[serde(rename_all = "camelCase")]
 pub struct FovSourcesReport {
     pub from_lines: Option<StatedFovRow>,
+    pub from_game: Option<StatedFovRow>,
     pub configs: Vec<StatedFovRow>,
+    pub unfollowed_execs: Vec<String>,
+    pub game_folder: bool,
 }
 
 /// What `init_commands` and the game's configs set the field of view to,
@@ -85,7 +88,10 @@ pub async fn project_fov_sources(
             native::game_config::picture_fov::fov_sources(game_dir.as_deref(), &init_commands);
         FovSourcesReport {
             from_lines: sources.from_lines.as_ref().map(StatedFovRow::from),
+            from_game: sources.from_game.as_ref().map(StatedFovRow::from),
             configs: sources.configs.iter().map(StatedFovRow::from).collect(),
+            unfollowed_execs: sources.unfollowed_execs,
+            game_folder: sources.game_folder,
         }
     })
     .await

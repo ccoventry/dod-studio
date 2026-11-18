@@ -280,9 +280,10 @@ export async function scanGameConfigs(
 
 /**
  * What a project's Initial Commands and the game's configs set the field of
- * view to (#1085): `{ fromLines, configs }`, each `{ value, file, line }`
- * (`file` null for a line of Initial Commands itself). Null when the scan
- * fails: the caller then takes the lines alone.
+ * view to (#1085): `{ fromLines, fromGame, configs, unfollowedExecs,
+ * gameFolder }` (native picture_fov.rs's FovSources), each value
+ * `{ value, file, line }` (`file` null for a line of Initial Commands
+ * itself). Null when the scan fails: the caller then fills nothing.
  */
 export async function projectFovSources(gamePath, initCommands = []) {
   return invoke("project_fov_sources", { gamePath, initCommands })

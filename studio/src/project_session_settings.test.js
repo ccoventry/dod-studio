@@ -16,6 +16,7 @@ vi.mock('./ipc_bridge.js', () => ({
   takeCaptureStates: vi.fn(async () => []),
   logFrontendEvent: vi.fn(),
   findInstalls: vi.fn(async () => []),
+  projectFovSources: vi.fn(async () => null),
   getAppVersion: vi.fn(async () => '0.12.0'),
   // The backend keeps the first snapshot it is given (project_settings_snapshot.rs).
   keepProjectSettingsSnapshot: vi.fn(async (snapshot) => {
@@ -35,6 +36,16 @@ vi.mock('./queue_filters.js', () => ({ dropOtherPlayersSavedStreaks: () => false
 vi.mock('./project_open_progress.js', () => ({
   createProjectOpenProgress: () => ({ opening() {}, opened() {}, searching() {}, searched() {} }),
 }));
+// "Made with another install. Switch?" answered Switch; the switch picks it
+// in the form, as Configuration's dropdown does.
+vi.mock('./themed_confirm.js', async (original) => ({ ...(await original()), themedConfirm: vi.fn(async () => true) }));
+vi.mock('./install_picker.js', async (original) => ({
+  ...(await original()),
+  switchInstall: vi.fn(async (hlExe) => {
+    globalThis.__switchedTo = hlExe;
+    return true;
+  }),
+}));
 
 globalThis.document = { querySelector: () => null };
 
@@ -42,6 +53,7 @@ const { createProjectSession } = await import('./project_session.js');
 const snapshots = await import('./project_settings_snapshot.js');
 const settings = await import('./project_settings.js');
 const newUi = await import('./new_ui.js');
+const { startingValues, blockWithPending } = await import('./project_settings_page_logic.js');
 const ipc = await import('./ipc_bridge.js');
 const { showToast } = await import('./toast.js');
 
@@ -304,6 +316,16 @@ describe('the Project settings page (#1085, step 6)', () => {
       expect(lines).toContain('[project] Configuration change not copied into the open project, which sets it on Project Settings: target_drives, render_export_dirs');
     });
 
+    it('keeps the Clip settings set on the page when Configuration adds a line or picks a profile', async () => {
+      const clip = { ...own, clipSettings: { preset: null, initCommands: ['ds_hud_hide_scoreboard 1', 'cl_bob 0'], customCommands: [] } };
+      const session = openSession(projectText({ schema: 3, settings: clip }));
+      await session.openProject(PATH);
+      form = appForm({ init_commands: ['mirv_fov 90', 'r_decals 4096'], command_profile_active: 'Clean clips' });
+      settings.noteFormSaved(form);
+      expect(settings.effectiveSetting('init_commands', [])).toEqual(['ds_hud_hide_scoreboard 1', 'cl_bob 0']);
+      expect(settings.effectiveSetting('command_profile_active', 'x')).toBe(null);
+    });
+
     it('copies the folders as before once it is off', async () => {
       newUi.loadNewUi(false);
       const session = openSession(projectText({ schema: 3, settings: pageFolders }));
@@ -336,5 +358,102 @@ describe('the Project settings page (#1085, step 6)', () => {
     } finally {
       settings.onProjectBlockReplaced(() => {});
     }
+  });
+});
+
+describe("an older project's field of view, with the New UI on (review 1, 9, 10)", () => {
+  const POST = 'D:/Steam/steamapps/common/Half-Life - POST-Anniversary for Movies/hl.exe';
+  const INSTALLS = [
+    { hl_exe: PRE, name: 'Half-Life - PRE-Anniversary for Movies' },
+    { hl_exe: POST, name: 'Half-Life - POST-Anniversary for Movies' },
+  ];
+  const madeWithPre = { picture: { width: 1920 }, install: { madeWith: { name: INSTALLS[0].name, hlExe: PRE } } };
+  const nothingSet = { fromLines: null, fromGame: null, configs: [], unfollowedExecs: [], gameFolder: true };
+  const wsodIn = (hlExe) => (hlExe === PRE
+    ? { ...nothingSet, fromLines: { value: 110, file: 'dicewsod25.cfg', line: 4 } }
+    : { ...nothingSet, unfollowedExecs: ['exec dicewsod25.cfg'] });
+
+  beforeEach(async () => {
+    // No project left open by an earlier test for the switch to fill.
+    await openSession(projectText()).newSession({ quiet: true });
+    newUi.loadNewUi(true);
+    globalThis.__switchedTo = undefined;
+    // POST picked in Configuration; a switch picks the other one.
+    form = appForm({ hl_path: POST, init_commands: ['exec dicewsod25.cfg'] });
+    settings.setFormReader(() => ({ ...form, hl_path: globalThis.__switchedTo || form.hl_path }));
+    globalThis.document = { querySelector: (s) => (s === '#hl-path-input' ? { value: globalThis.__switchedTo || form.hl_path } : null) };
+    vi.mocked(ipc.projectFovSources).mockReset().mockImplementation(async (hlExe) => wsodIn(hlExe));
+  });
+  afterEach(() => {
+    newUi.loadNewUi(false);
+    globalThis.document = { querySelector: () => null };
+    vi.mocked(ipc.findInstalls).mockResolvedValue([]);
+  });
+
+  it('is read from the install the project switches to, after the offer, not the one picked when it opened', async () => {
+    vi.mocked(ipc.findInstalls).mockResolvedValue(INSTALLS);
+    const session = openSession(projectText({ schema: 3, settings: madeWithPre }));
+    await session.openProject(PATH);
+    expect(globalThis.__switchedTo).toBe(PRE);
+    expect(ipc.projectFovSources).toHaveBeenCalledTimes(1);
+    expect(ipc.projectFovSources).toHaveBeenCalledWith(PRE, ['exec dicewsod25.cfg']);
+    expect(settings.projectPictureFov()).toBe(110);
+  });
+
+  it("is left unset, and logged, when the cfg its lines exec isn't in the install it uses", async () => {
+    const session = openSession(projectText({ schema: 3, settings: madeWithPre }));
+    await session.openProject(PATH);
+    expect(settings.projectPictureFov()).toBe(null);
+    const lines = vi.mocked(ipc.logFrontendEvent).mock.calls.map(([line]) => line);
+    expect(lines.some((l) => l.includes("keeps none for now: a cfg its Initial Commands exec isn't in the picked install (exec dicewsod25.cfg)"))).toBe(true);
+    // Nothing to save: the next open tries again.
+    expect(session.needsSavePrompt()).toBe(false);
+  });
+
+  it('is not filled by a quiet open (Rescan Recent Sessions)', async () => {
+    const session = openSession(projectText({ schema: 3, settings: madeWithPre }));
+    await session.loadProjectFile(PATH, { quiet: true });
+    expect(ipc.projectFovSources).not.toHaveBeenCalled();
+    expect(settings.projectPictureFov()).toBe(null);
+  });
+
+  it('is not filled with no hl.exe picked', async () => {
+    form = appForm({ hl_path: '', init_commands: ['mirv_fov 100'] });
+    const session = openSession(projectText({ schema: 3, settings: { picture: { width: 1920 } } }));
+    await session.openProject(PATH);
+    expect(ipc.projectFovSources).not.toHaveBeenCalled();
+    expect(settings.projectPictureFov()).toBe(null);
+  });
+
+  it("takes the start-up configs' value when its lines set none, so its look doesn't change", async () => {
+    vi.mocked(ipc.projectFovSources).mockResolvedValue({ ...nothingSet, fromGame: { value: 105, file: 'movie.cfg', line: 1 } });
+    form = appForm({ hl_path: POST, init_commands: ['cl_bob 0'] });
+    const session = openSession(projectText({ schema: 3, settings: { picture: { width: 1920 } } }));
+    await session.openProject(PATH);
+    expect(settings.projectPictureFov()).toBe(105);
+  });
+
+  it("gives Apply on a session not saved yet what the game uses, not the lines' 90 (review 9)", async () => {
+    form = appForm({ hl_path: PRE, init_commands: ['exec dicewsod25.cfg'] });
+    const session = openSession(projectText());
+    await session.newSession({ quiet: true });
+    const { form: now, block, pcId } = settings.blockForPage();
+    const fov = await settings.pageFov(block, now);
+    expect(fov).toEqual({ shown: 110, fill: 110 });
+    const start = { ...startingValues(now, block, pcId), capture_fov: fov.shown };
+    const next = blockWithPending(block, start, { ...start, resolution_width: 2560 }, pcId, { fillFov: fov.fill });
+    settings.applyBlockFromPage(next);
+    expect(settings.effectiveCaptureSettings({ resolution_width: 1 })).toEqual({ resolution_width: 2560, picture_fov: 110 });
+  });
+
+  it("writes no field of view on Apply when what the game uses can't be told", async () => {
+    const session = openSession(projectText());
+    await session.newSession({ quiet: true });
+    const { form: now, block, pcId } = settings.blockForPage();
+    const fov = await settings.pageFov(block, now);
+    expect(fov).toEqual({ shown: 90, fill: null });
+    const start = { ...startingValues(now, block, pcId), capture_fov: fov.shown };
+    settings.applyBlockFromPage(blockWithPending(block, start, { ...start, resolution_width: 2560 }, pcId, { fillFov: fov.fill }));
+    expect(settings.projectPictureFov()).toBe(null);
   });
 });

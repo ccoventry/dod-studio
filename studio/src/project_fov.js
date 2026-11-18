@@ -1,45 +1,71 @@
 // project_fov.js
 // The project's own field of view (#1085, decisions 3 and 4): a project
 // always has one, on Project Settings › Picture. One made before it had the
-// setting takes, the first time it opens with the New UI on, the value its
-// own lines give today: a `mirv_fov <n>` in its Initial Commands, or one in
-// a cfg those lines `exec` (read by the backend's read-only scan, native
-// picture_fov.rs). With none, the game's 90. A batch then sends it after
-// every line, so its look doesn't change. The start-up configs (config.cfg,
-// a movie.cfg it execs) run before the batch's lines and are not "its own
-// lines": the cfg warnings say the project's value overrides them.
+// setting takes, the first time it opens with the New UI on, what the game
+// would use for it today, so its look doesn't change: a `mirv_fov <n>` in
+// its Initial Commands, or one in a cfg those lines `exec` (read by the
+// backend's read-only scan, native picture_fov.rs); else what the game's
+// start-up configs set (a movie.cfg's `mirv_fov`, else `default_fov`); only
+// with none of those, the game's 90. A batch then sends it after every line.
+//
+// When that can't be told (no install picked, no game folder, an `exec`'d
+// cfg this install hasn't got, or the scan failed), nothing is filled: the
+// project keeps no field of view, captures as before, and the next open tries
+// again. The session fills only once the "made with another install" offer
+// is answered, so it reads the install the project will capture with.
 
 import { projectFovSources, logFrontendEvent } from './ipc_bridge.js';
-import { DEFAULT_FOV, fovFromLines, isUsableFov } from './clip_settings_logic.js';
+import { DEFAULT_FOV, isUsableFov } from './clip_settings_logic.js';
 import { blockFov, blockWithFov } from './project_settings_logic.js';
-import { projectFovFilledLine } from './project_log.js';
+import { projectFovFilledLine, projectFovNotFilledLine } from './project_log.js';
 
 /**
- * The field of view a project with none takes, and where from, as
- * `{ fov, file, line, isDefault }`: `sources` the backend's answer
- * (`{ fromLines }`, null when the scan failed: then the lines alone decide),
- * `lines` its Initial Commands.
+ * What the game would use for a project with no field of view, from
+ * `sources` (the backend's answer, null when the scan failed). Either
+ * `{ fov, from, file, line }`, `from` one of 'lines' (a line of Initial
+ * Commands), 'exec' (a cfg they exec), 'game' (a start-up config) or
+ * 'default', or `{ fov: null, why, missing }` when it can't be told: `why`
+ * 'scan', 'exec' (`missing` the exec lines whose cfg wasn't found) or
+ * 'folder' (no game folder to read).
  */
-export function fovToFill(sources, lines) {
-  const stated = sources?.fromLines;
+export function fovToFill(sources) {
+  if (!sources) return { fov: null, why: 'scan', missing: [] };
+  if (sources.unfollowedExecs?.length) return { fov: null, why: 'exec', missing: [...sources.unfollowedExecs] };
+  const stated = sources.fromLines;
   if (stated && isUsableFov(stated.value)) {
-    return { fov: stated.value, file: stated.file ?? null, line: stated.line ?? 0, isDefault: false };
+    return { fov: stated.value, from: stated.file ? 'exec' : 'lines', file: stated.file ?? null, line: stated.line ?? 0 };
   }
-  const typed = sources ? null : fovFromLines(lines);
-  if (typed !== null) return { fov: typed, file: null, line: 0, isDefault: false };
-  return { fov: DEFAULT_FOV, file: null, line: 0, isDefault: true };
+  if (!sources.gameFolder) return { fov: null, why: 'folder', missing: [] };
+  const game = sources.fromGame;
+  if (game && isUsableFov(game.value)) {
+    return { fov: game.value, from: 'game', file: game.file ?? null, line: game.line ?? 0 };
+  }
+  return { fov: DEFAULT_FOV, from: 'default', file: null, line: 0 };
 }
 
 /**
- * `block` with a field of view, logged: the same block when it has one,
- * else one with what its `lines` give in the game at `gamePath` (an
- * hl.exe; empty reads the lines alone). `path` names the project in the
- * log. Never writes a config.
+ * fovToFill for Initial Commands `lines` in the install at `gamePath` (an
+ * hl.exe). No install picked can't be told either (`why` 'install'). Reads
+ * only, logs nothing: the Project settings page shows it.
+ */
+export async function fovTheGameUses({ gamePath, lines }) {
+  if (!gamePath) return { fov: null, why: 'install', missing: [] };
+  return fovToFill(await projectFovSources(gamePath, lines || []));
+}
+
+/**
+ * `block` with a field of view, logged: the same block when it has one, or
+ * when what the game would use can't be told (logged too, so the next open
+ * tries again), else one with fovTheGameUses's value. `path` names the
+ * project in the log. Never writes a config.
  */
 export async function withFilledFov(block, { gamePath, lines, path }) {
   if (!block || blockFov(block) !== null) return block;
-  const sources = await projectFovSources(gamePath || '', lines || []);
-  const fill = fovToFill(sources, lines);
+  const fill = await fovTheGameUses({ gamePath, lines });
+  if (fill.fov === null) {
+    logFrontendEvent(projectFovNotFilledLine(path, fill));
+    return block;
+  }
   logFrontendEvent(projectFovFilledLine(path, fill));
   return blockWithFov(block, fill.fov);
 }

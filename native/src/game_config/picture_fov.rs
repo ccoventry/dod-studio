@@ -6,9 +6,11 @@
 // game's configs set it to, for the frontend.
 //
 // A project always has a field of view. One made before it had the setting
-// takes, on first open, the value its own lines give (a `mirv_fov <n>`, or
-// one in a cfg those lines `exec`), so its look doesn't change; with none,
-// the game's 90. The batch then sends it after every line
+// takes, on first open, what the game uses for it today, so its look doesn't
+// change: its own lines' (a `mirv_fov <n>`, or one in a cfg those lines
+// `exec`), else the start-up configs' (`mirv_fov`, else `default_fov`), else
+// the game's 90. When an `exec`'d cfg can't be read, nothing is filled (the
+// frontend's project_fov.js). The batch then sends it after every line
 // (`builder::user_init_commands`), so a `mirv_fov` in a cfg no longer has the
 // last word, and Studio warns where one sets a different value.
 //
@@ -103,6 +105,16 @@ pub struct FovSources {
     /// line, or the last one in a file an `exec` line runs, where the `exec`
     /// stands. `None` when they set none.
     pub from_lines: Option<StatedFov>,
+    /// What the game's start-up configs leave it at, for when the lines set
+    /// none: their `mirv_fov`, else their `default_fov`, the order
+    /// `capture_fov_resolved` reads them in. `None` when they set neither.
+    pub from_game: Option<StatedFov>,
+    /// The `exec` lines whose file couldn't be read (no game folder, or no
+    /// such file), after the last value the lines state: each could set the
+    /// field of view, so what the lines leave it at is unknown. Trimmed.
+    pub unfollowed_execs: Vec<String>,
+    /// Whether there was a game folder to read the configs from.
+    pub game_folder: bool,
     /// Every config that sets it: the one the game's own start-up configs
     /// leave in effect (`config.cfg`, `movie.cfg` it execs, ...), then the
     /// last one in each file the lines `exec`. The project's field of view
@@ -118,10 +130,19 @@ fn parsed(value: &str) -> Option<f32> {
         .filter(|v| is_usable(*v))
 }
 
+/// The game's own field-of-view cvar, which the start-up configs may set
+/// instead of `mirv_fov`.
+const GAME_FOV_CVAR: &str = "default_fov";
+
 /// The last `mirv_fov` setting among `settings` (a file's, in run order).
 fn last_in(settings: &[cfg_scan::CvarSetting]) -> Option<StatedFov> {
+    last_of(settings, FOV_CVAR)
+}
+
+/// The last usable setting of `cvar` among `settings`.
+fn last_of(settings: &[cfg_scan::CvarSetting], cvar: &str) -> Option<StatedFov> {
     settings.iter().rev().find_map(|s| {
-        if !s.cvar.eq_ignore_ascii_case(FOV_CVAR) {
+        if !s.cvar.eq_ignore_ascii_case(cvar) {
             return None;
         }
         Some(StatedFov {
@@ -136,23 +157,35 @@ fn last_in(settings: &[cfg_scan::CvarSetting]) -> Option<StatedFov> {
 /// dir>/dod`, `None` when there is no game folder) set the field of view to.
 /// Reads only.
 pub fn fov_sources(game_dir: Option<&Path>, init_commands: &[String]) -> FovSources {
-    let mut out = FovSources::default();
+    let mut out = FovSources {
+        game_folder: game_dir.is_some(),
+        ..FovSources::default()
+    };
     // Not `scan_cached`: Studio asks this while it runs, and a config edited
     // since must show.
     let scan = game_dir.map(cfg_scan::scan).unwrap_or_default();
-    if let Some(stated) = scan
-        .effective(FOV_CVAR)
-        .and_then(|s| last_in(std::slice::from_ref(s)))
-    {
+    let start_up = |cvar: &str| {
+        scan.effective(cvar)
+            .and_then(|s| last_of(std::slice::from_ref(s), cvar))
+    };
+    if let Some(stated) = start_up(FOV_CVAR) {
         out.configs.push(stated);
     }
+    out.from_game = start_up(FOV_CVAR).or_else(|| start_up(GAME_FOV_CVAR));
     for command in init_commands {
-        if let Some(dir) = game_dir
-            && let Some(exec) = cfg_scan::follow_initial_exec(dir, command)
-        {
-            if let Some(stated) = last_in(&exec.settings) {
-                out.from_lines = Some(stated.clone());
-                out.configs.push(stated);
+        if cfg_scan::exec_target(command).is_some() {
+            let exec = game_dir
+                .and_then(|dir| cfg_scan::follow_initial_exec(dir, command))
+                .filter(|exec| exec.file.is_some());
+            match exec {
+                Some(exec) => {
+                    if let Some(stated) = last_in(&exec.settings) {
+                        out.from_lines = Some(stated.clone());
+                        out.configs.push(stated);
+                        out.unfollowed_execs.clear();
+                    }
+                }
+                None => out.unfollowed_execs.push(command.trim().to_string()),
             }
             continue;
         }
@@ -165,6 +198,7 @@ pub fn fov_sources(game_dir: Option<&Path>, init_commands: &[String]) -> FovSour
                 file: None,
                 line: 0,
             });
+            out.unfollowed_execs.clear();
         }
     }
     out
@@ -288,6 +322,48 @@ mod tests {
             sources.configs[0].file.as_deref(),
             Some(dod.join("movie.cfg").as_path())
         );
+    }
+
+    /// What the game uses when the lines set nothing: the start-up configs'
+    /// `mirv_fov` (POST's movie.cfg's 105), else their `default_fov`.
+    #[test]
+    fn the_start_up_configs_give_what_the_game_uses_when_the_lines_set_none() {
+        let (_root, dod) = fake_game("from_game");
+        let sources = fov_sources(Some(&dod), &lines(&["hud_draw 0"]));
+        assert!(sources.game_folder);
+        assert_eq!(sources.from_game.map(|s| s.value), Some(105.0));
+
+        std::fs::write(dod.join("config.cfg"), "default_fov \"100\"\n").unwrap();
+        let sources = fov_sources(Some(&dod), &lines(&["hud_draw 0"]));
+        assert_eq!(sources.from_game.map(|s| s.value), Some(100.0));
+
+        std::fs::write(dod.join("config.cfg"), "hud_draw 1\n").unwrap();
+        assert_eq!(fov_sources(Some(&dod), &[]).from_game, None);
+    }
+
+    /// An `exec` whose cfg isn't in this install (a project made with
+    /// another one) or with no game folder at all: what the lines leave the
+    /// field of view at is unknown, unless a later line sets it.
+    #[test]
+    fn an_exec_that_cant_be_followed_is_named() {
+        let (_root, dod) = fake_game("missing");
+        let missing = fov_sources(Some(&dod), &lines(&["mirv_fov 95", " exec other.cfg "]));
+        assert_eq!(missing.unfollowed_execs, ["exec other.cfg"]);
+
+        let later = fov_sources(Some(&dod), &lines(&["exec other.cfg", "mirv_fov 95"]));
+        assert!(later.unfollowed_execs.is_empty());
+        assert_eq!(later.from_lines.map(|s| s.value), Some(95.0));
+
+        let found_after = fov_sources(
+            Some(&dod),
+            &lines(&["exec other.cfg", "exec dicewsod25.cfg"]),
+        );
+        assert!(found_after.unfollowed_execs.is_empty());
+
+        let no_folder = fov_sources(None, &lines(&["exec dicewsod25.cfg"]));
+        assert!(!no_folder.game_folder);
+        assert_eq!(no_folder.unfollowed_execs, ["exec dicewsod25.cfg"]);
+        assert_eq!(no_folder.from_lines, None);
     }
 
     #[test]

@@ -17,7 +17,7 @@
 
 import './project_settings_page.css';
 import { logFrontendEvent } from './ipc_bridge.js';
-import { blockForPage, applyBlockFromPage, onProjectBlockReplaced, setProjectSettingsPageLeave } from './project_settings.js';
+import { blockForPage, pageFov, applyBlockFromPage, onProjectBlockReplaced, setProjectSettingsPageLeave } from './project_settings.js';
 import {
   startingValues, changedKeys, pendingProblems, blockWithPending,
 } from './project_settings_page_logic.js';
@@ -50,7 +50,7 @@ function isSwallowedAppKey(e) {
  *   reads the settings in effect (the capture summary, the clip names shown), after
  *   an Apply and after a project opens or closes;
  *   `isBatchRunning()` whether a capture batch runs, for the banner.
- * @returns {{ open: () => void, isOpen: () => boolean, leave: (how: string) => Promise<boolean> }}
+ * @returns {{ open: () => Promise<void>, isOpen: () => boolean, leave: (how: string) => Promise<boolean> }}
  */
 export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectChange = () => {}, isBatchRunning = () => false }) {
   const navbar = document.querySelector('#top-navbar');
@@ -63,6 +63,8 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
   // pending ones, the block and form they came from, and which Custom boxes
   // are open (`ui`).
   let state = null;
+  // While open() reads the field of view, so a second click opens nothing.
+  let opening = false;
   let leavePrompt = null;
 
   let sectionsNav = null;
@@ -192,14 +194,26 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     return !!state;
   }
 
-  function open() {
+  async function open() {
     // Hidden behind the New UI switch until the rework ships (new_ui.js).
+    if (state || opening || !isNewUiOn()) return;
+    if (!blockForPage().form) return; // settings not loaded yet: nothing to start from
+    // A block with no field of view shows what the game uses (pageFov),
+    // which reads the game's configs.
+    opening = true;
+    let fov;
+    try {
+      const { form, block } = blockForPage();
+      fov = await pageFov(block, form);
+    } finally {
+      opening = false;
+    }
     if (state || !isNewUiOn()) return;
     const { form, block, pcId } = blockForPage();
-    if (!form) return; // settings not loaded yet: nothing to start from
     if (!root) build();
     const start = startingValues(form, block, pcId);
-    state = { start, pending: structuredClone(start), block, form, pcId, ui: {}, tab: 'project' };
+    start.capture_fov ??= fov.shown;
+    state = { start, pending: structuredClone(start), block, form, pcId, fillFov: fov.fill, ui: {}, tab: 'project' };
     const path = getProjectPath();
     kicker.textContent = path ? fileNameOf(path) : S.UNTITLED;
     kicker.title = path || '';
@@ -224,7 +238,7 @@ export function createProjectSettingsPage({ getProjectPath, onSettingsInEffectCh
     // meanwhile (Configuration's, while it still follows into the project)
     // to a setting not edited here is kept.
     const { block: current, pcId } = blockForPage();
-    const next = blockWithPending(current, state.start, state.pending, pcId);
+    const next = blockWithPending(current, state.start, state.pending, pcId, { fillFov: state.fillFov });
     applyBlockFromPage(next);
     state.block = next;
     state.start = structuredClone(state.pending);
