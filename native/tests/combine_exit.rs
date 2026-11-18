@@ -75,15 +75,23 @@ async fn closing_studio_mid_combine_leaves_the_existing_output_as_it_was() {
         })
     };
     // Until the stand-in has written its unfinished file: the stop below
-    // must catch a combine that is running.
+    // must catch a combine that is running. The bound is long because a
+    // busy CI runner can take over 15 s to start cmd.exe (#1524); a combine
+    // that ends first fails here at once, with its result, instead of
+    // waiting the bound out.
     let partial = dir.join("joined.partial.mp4");
     let began = Instant::now();
-    while !partial.exists() && began.elapsed() < Duration::from_secs(15) {
+    while !partial.exists() && began.elapsed() < Duration::from_secs(90) {
+        if running.is_finished() {
+            let early = running.await.unwrap();
+            panic!("the combine ended before its FFmpeg wrote anything: {early:?}");
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(
         partial.exists(),
-        "the combine writes under its unfinished name"
+        "step 1: the stand-in FFmpeg wrote no unfinished file within {:?}",
+        began.elapsed()
     );
     assert_eq!(std::fs::read(&output).unwrap(), b"good");
 
@@ -92,7 +100,7 @@ async fn closing_studio_mid_combine_leaves_the_existing_output_as_it_was() {
         .unwrap();
     let result = tokio::time::timeout(Duration::from_secs(10), running)
         .await
-        .expect("the combine ends once Studio's way out stops its FFmpeg")
+        .expect("step 2: the combine ends once Studio's way out stops its FFmpeg")
         .unwrap();
 
     assert!(result.is_err(), "a stopped combine does not report success");
