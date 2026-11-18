@@ -31,6 +31,11 @@ const KINDS = {
   text: (v) => (typeof v === 'string' ? v : undefined),
   textOrNone: (v) => (typeof v === 'string' || v === null ? v : undefined),
   texts: (v) => (Array.isArray(v) && v.every((s) => typeof s === 'string') ? [...v] : undefined),
+  // A folder list: empty is "not set", so Configuration's folders show
+  // through. A block can't tell "no folders yet" (a project or the snapshot
+  // saved before any was picked) from "none on purpose", and a capture with
+  // no folder can't run anyway.
+  folders: (v) => (Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? [...v] : undefined),
   killGaps: (v) => (v && typeof v === 'object' ? killGapsFrom(v) : undefined),
   scheduled: (v) => (Array.isArray(v) && v.every((c) => c && typeof c.command === 'string')
     ? v.map((c) => ({ command: c.command, relation: c.relation === 'After' ? 'After' : 'Before', offset_seconds: c.offset_seconds }))
@@ -91,7 +96,7 @@ function blockValues(block, pcId) {
   if (!block || typeof block !== 'object') return [];
   const values = PROJECT_FIELDS.map((f) => [f.key, KINDS[f.kind](readPath(block, f.path))]);
   if (pcId) {
-    PC_FIELDS.forEach((f) => values.push([f.key, KINDS.texts(readPath(block, pcPath(f, pcId)))]));
+    PC_FIELDS.forEach((f) => values.push([f.key, KINDS.folders(readPath(block, pcPath(f, pcId)))]));
   }
   return values.filter(([, value]) => value !== undefined);
 }
