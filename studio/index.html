@@ -1077,8 +1077,15 @@
               <button id="export-vegas-edl-btn" data-str="RENDER.EXPORT_EDL_BUTTON" data-str-title="RENDER.EXPORT_EDL_TITLE">Export VEGAS EDL…</button>
               <button id="export-project-edl-btn" data-str="RENDER.EXPORT_PROJECT_EDL_BUTTON" data-str-title="RENDER.EXPORT_PROJECT_EDL_TITLE">Export Project to VEGAS…</button>
               <button id="find-moved-videos-btn" data-str="RENDER.FIND_MOVED_BUTTON" data-str-title="RENDER.FIND_MOVED_TITLE">Find Moved Videos</button>
-              <button id="vegas-script-install-btn" data-str="RENDER.VEGAS_SCRIPT_BUTTON" data-str-title="RENDER.VEGAS_SCRIPT_TITLE">Add Nameplate Script to VEGAS</button>
+              <button id="vegas-script-install-btn" data-str="RENDER.VEGAS_SCRIPT_BUTTON" data-str-title="RENDER.VEGAS_SCRIPT_TITLE">Add Scripts to VEGAS</button>
             </div>
+            <!-- #1514: relink a VEGAS project made before the clips moved. -->
+            <div class="action-row" style="margin-top: 4px; align-items: center; gap: 6px;">
+              <button id="vegas-relink-export-btn" data-str="RENDER.RELINK_EXPORT_BUTTON" data-str-title="RENDER.RELINK_EXPORT_TITLE">Export VEGAS Relink List…</button>
+              <button id="vegas-relink-backup-btn" data-str="RENDER.RELINK_BACKUP_BUTTON" data-str-title="RENDER.RELINK_BACKUP_TITLE">From a Project Backup…</button>
+            </div>
+            <div id="vegas-relink-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+            <p id="vegas-relink-status" class="combine-plan" aria-live="polite"></p>
             <div id="export-project-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
             <p id="export-project-status" class="combine-plan" aria-live="polite"></p>
             <div id="find-moved-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>

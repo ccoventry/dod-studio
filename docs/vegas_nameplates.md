@@ -31,7 +31,7 @@ The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Namepla
 2. **Edit > Select None.** VEGAS leaves the first imported event selected, and the script works on the selected clips only when any are selected, so skipping this gives you one nameplate.
 3. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
 
-   To have it in the Tools > Scripting menu instead, click **Add Nameplate Script to VEGAS** on the Render tab (next to **Export VEGAS EDL…**). Studio copies the script into your `Documents\Vegas Script Menu` folder (made if it is not there; your real Documents folder, so a OneDrive-redirected one works) and replaces an older copy of it; other scripts in that folder are left alone. Then in VEGAS use Tools > Scripting > Rescan Script Menu Folder. Studio tells you where it put the file.
+   To have it in the Tools > Scripting menu instead, click **Add Scripts to VEGAS** on the Render tab (next to **Export VEGAS EDL…**). Studio copies this script and the relink script ([`vegas_relink.md`](vegas_relink.md)) into your `Documents\Vegas Script Menu` folder (made if it is not there; your real Documents folder, so a OneDrive-redirected one works) and replaces older copies of them; other scripts in that folder are left alone. Then in VEGAS use Tools > Scripting > Rescan Script Menu Folder. Studio tells you where it put the file.
    By hand, the same thing: copy `vegas/DoD Studio Nameplates.cs` from the repo into that folder yourself, then rescan.
 
 With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.

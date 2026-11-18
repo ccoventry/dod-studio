@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  Minimal harness for vegas_relink_export.js (#1514), the Render tab's
+  "Export VEGAS Relink List…" and "From a Project Backup…" buttons. Carries
+  only the controls the module reads (copied from index.html) and a take index
+  with one render that Find Moved Videos moved, the way render_pane.js hands
+  it the open project's. A test controls the backend by registering handlers
+  on window.__mockInvokeHandlers before load (`files_exist`,
+  `load_project_session`, `save_project_session`, `plugin:dialog|open`,
+  `plugin:dialog|save`).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>vegas_relink_export.js test harness</title>
+</head>
+<body>
+  <button id="vegas-relink-export-btn">Export VEGAS Relink List…</button>
+  <button id="vegas-relink-backup-btn">From a Project Backup…</button>
+  <div id="vegas-relink-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+  <p id="vegas-relink-status"></p>
+  <div id="toast-container"></div>
+
+  <script type="module">
+    import { startVegasRelinkExport } from '/src/vegas_relink_export.js';
+    import { recordRender, relocateRender, rendersOf } from '/src/take_renders.js';
+
+    const index = { 'session_a/chain_00_b0': ['demo.dem#1#100#400'], 'session_a/chain_01_b0': ['demo.dem#2#500#900'] };
+    const render = (started, path) => ({ started_unix_ms: started, stream: 'all', codec: 'prores', fps: 60, outcome: 'finished', output_path: path });
+    recordRender(index, 'session_a/chain_00_b0', render(1000, 'E:\\Unsorted\\dyelife_row11.mov'));
+    recordRender(index, 'session_a/chain_01_b0', render(2000, 'E:\\Unsorted\\gskill_row12.mov'));
+    // Find Moved Videos found the first one on the external drive.
+    const [moved] = rendersOf(index, 'session_a/chain_00_b0');
+    relocateRender(index, 'session_a/chain_00_b0', moved, { output_path: 'H:\\Movie\\Armory\\dyelife.mov' });
+    window.__takeIndex = index;
+
+    startVegasRelinkExport({ getTakeIndex: () => window.__takeIndex });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
