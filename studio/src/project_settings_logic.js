@@ -15,6 +15,7 @@
 
 import { killGapsFrom } from './kill_gaps_setting.js';
 import { samePath, fileNameOf, folderOf } from './path_display.js';
+import { isUsableFov, CLIP_TAB_KEYS, linesWithRows } from './clip_settings_logic.js';
 
 const CAPTURE_MODES = ['frame_sequence', 'direct_to_video', 'obs', 'agr'];
 
@@ -37,6 +38,7 @@ const KINDS = {
   // no folder can't run anyway.
   folders: (v) => (Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? [...v] : undefined),
   killGaps: (v) => (v && typeof v === 'object' ? killGapsFrom(v) : undefined),
+  fov: (v) => (isUsableFov(v) ? v : undefined),
   scheduled: (v) => (Array.isArray(v) && v.every((c) => c && typeof c.command === 'string')
     ? v.map((c) => ({ command: c.command, relation: c.relation === 'After' ? 'After' : 'Before', offset_seconds: c.offset_seconds }))
     : undefined),
@@ -55,6 +57,9 @@ export const PROJECT_FIELDS = Object.freeze([
   { key: 'capture_fps', path: ['picture', 'captureFps'], kind: 'size' },
   { key: 'obs_capture_fps', path: ['picture', 'obsCaptureFps'], kind: 'size' },
   { key: 'agr_fps', path: ['picture', 'agrFps'], kind: 'rateOrZero' },
+  // Not a settings-file key: Configuration has no field of view of its own,
+  // so only the Project settings page sets it (build plan step 8).
+  { key: 'capture_fov', path: ['picture', 'fov'], kind: 'fov' },
   { key: 'finish_clips_after_batch', path: ['picture', 'finished', 'enabled'], kind: 'flag' },
   { key: 'finish_codec_obs', path: ['picture', 'finished', 'codecObs'], kind: 'text' },
   { key: 'finish_codec_video', path: ['picture', 'finished', 'codecVideo'], kind: 'text' },
@@ -62,6 +67,9 @@ export const PROJECT_FIELDS = Object.freeze([
   { key: 'record_start_lead', path: ['clipLength', 'beforeSeconds'], kind: 'seconds' },
   { key: 'record_stop_trail', path: ['clipLength', 'afterSeconds'], kind: 'seconds' },
   { key: 'kill_gaps', path: ['clipLength', 'killGaps'], kind: 'killGaps' },
+  // Not a settings-file key either: Use Clip settings is the page's own
+  // (clip_settings_logic.js). A block without it reads as Off.
+  { key: 'clip_rows_on', path: ['clipSettings', 'useRows'], kind: 'flag' },
   { key: 'command_profile_active', path: ['clipSettings', 'preset'], kind: 'textOrNone' },
   { key: 'init_commands', path: ['clipSettings', 'initCommands'], kind: 'texts' },
   { key: 'custom_commands', path: ['clipSettings', 'customCommands'], kind: 'scheduled' },
@@ -76,6 +84,9 @@ export const PC_FIELDS = Object.freeze([
 ]);
 
 const pcPath = (field, pcId) => ['folders', pcId, field.name];
+
+/** Where a block keeps its field of view (`capture_fov`'s path). */
+const PICTURE_FOV_PATH = PROJECT_FIELDS.find((f) => f.key === 'capture_fov').path;
 
 function readPath(block, path) {
   return path.reduce((at, part) => (at && typeof at === 'object' ? at[part] : undefined), block);
@@ -117,14 +128,52 @@ export function resolveSettings(form, block, pcId = '') {
   return resolved;
 }
 
+/** The field of view `block` sets (Picture), or null when it sets none. */
+export function blockFov(block) {
+  const fov = readPath(block, PICTURE_FOV_PATH);
+  return isUsableFov(fov) ? fov : null;
+}
+
+/** `block` with its field of view set to `fov` (project_fov.js's fill). */
+export function blockWithFov(block, fov) {
+  return writePath(block, PICTURE_FOV_PATH, fov);
+}
+
+/** Whether `block` has Use Clip settings on (`clipSettings.useRows`). */
+export function blockUsesRows(block) {
+  return readPath(block, ['clipSettings', 'useRows']) === true;
+}
+
+/**
+ * resolveCaptureSettings for what a batch sends: the same values, and with
+ * `pictureFov` (the New UI switch: the page that sets it exists) the
+ * block's field of view as `picture_fov`. The backend sends it after the
+ * Initial Commands and leaves their own `mirv_fov <n>` out (native
+ * picture_fov.rs), so it wins over every line and every cfg they exec.
+ * With `clipRows` (the same switch) and a block with Use Clip settings on,
+ * `init_commands` carries every Clip settings row after the user's own lines
+ * (linesWithRows). Without them, or with a block that sets neither, the
+ * batch sends what it did before step 8.
+ */
+export function resolveCaptureSettings(form, block, pcId = '', { pictureFov = false, clipRows = false } = {}) {
+  let resolved = resolveSettings(form, block, pcId);
+  if (clipRows && blockUsesRows(block) && 'init_commands' in resolved) {
+    resolved = { ...resolved, init_commands: linesWithRows(resolved.init_commands) };
+  }
+  const fov = pictureFov ? blockFov(block) : null;
+  return fov === null ? resolved : { ...resolved, picture_fov: fov };
+}
+
 /**
  * A whole block from the settings file's values (`form`, persistAppSettings'
  * payload): the snapshot older projects take (decision 6,
  * project_settings_snapshot.js, which builds it with no `pcId`), and what a
  * project saved for the first time starts with. The folders go under `pcId`;
  * `madeWith` is the install it was made with (madeWithOf), or null.
+ * `useRows` true gives it Use Clip settings on, as a new project starts; an
+ * older project's block (the snapshot) has none, so it reads as Off.
  */
-export function blockFromForm(form, { pcId, madeWith = null }) {
+export function blockFromForm(form, { pcId, madeWith = null, useRows = false }) {
   let block = {};
   for (const f of PROJECT_FIELDS) {
     const value = KINDS[f.kind](copyOf(form[f.key]));
@@ -133,6 +182,7 @@ export function blockFromForm(form, { pcId, madeWith = null }) {
   if (pcId) {
     for (const f of PC_FIELDS) block = writePath(block, pcPath(f, pcId), KINDS.texts(form[f.key]) || []);
   }
+  if (useRows) block = writePath(block, ['clipSettings', 'useRows'], true);
   return writePath(block, ['install', 'madeWith'], madeWith);
 }
 
@@ -178,10 +228,13 @@ export function followFormEdits(block, before, after, pcId = '', { keep = [] } =
  * Configuration edit then leaves alone (project_settings.js's noteFormSaved).
  * A list is copied whole, so one line added in Configuration would replace
  * every row set on the page. A single value is still copied: changing it in
- * Configuration loses nothing but the value it replaces. With the New UI
- * off there is no page, and Configuration still sets them all.
+ * Configuration loses nothing but the value it replaces. The Clip settings
+ * preset goes with its lines (a profile picked in Configuration changes all
+ * three), and Use Clip settings with them, which decides how those lines are
+ * sent (Configuration has no such setting, so nothing there changes it). With
+ * the New UI off there is no page, and Configuration still sets them all.
  */
-export const LISTS_THE_PAGE_OWNS = Object.freeze(PC_FIELDS.map((f) => f.key));
+export const LISTS_THE_PAGE_OWNS = Object.freeze([...PC_FIELDS.map((f) => f.key), ...CLIP_TAB_KEYS]);
 
 /** `block` saying it is made with the install at `hlExe` from now on. */
 export function withMadeWith(block, hlExe) {

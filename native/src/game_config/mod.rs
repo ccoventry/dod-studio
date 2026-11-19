@@ -10,16 +10,18 @@ pub mod capture_fov;
 pub mod cfg_report;
 pub mod cfg_scan;
 pub mod cfg_warn;
+pub mod config_values;
 pub mod console_prefix;
 pub mod decal_ring;
 pub mod init_commands;
+pub mod picture_fov;
 
 use crate::patch::types::PatcherConfig;
 
 pub use capture_fov::{capture_fov, capture_fov_from_init, capture_fov_resolved};
 pub use cfg_scan::{CfgScan, CvarSetting, WATCHED_CVARS, scan as scan_game_cfgs};
 pub use decal_ring::{ring_limit, ring_limit_from_game_config, ring_limit_from_init};
-pub use init_commands::{final_init_commands, too_long_commands};
+pub use init_commands::{final_init_commands, too_long_commands, user_init_commands};
 
 /// The mod folder holding the game's configs, for a configured `hl.exe`.
 pub(super) fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   PROJECT_FIELDS, resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm,
-  madeWithOf, installFor, installToOffer, withMadeWith, LISTS_THE_PAGE_OWNS,
+  madeWithOf, installFor, installToOffer, withMadeWith, LISTS_THE_PAGE_OWNS, resolveCaptureSettings, blockUsesRows,
 } from './project_settings_logic.js';
+import { SENT_ROWS, SENT_ONLY_WHEN_SET } from './clip_settings_rows.js';
 
 const PC = 'pc-a';
 const OTHER_PC = 'pc-b';
@@ -132,7 +133,45 @@ describe('blockFromForm', () => {
   it('has a path for every owned field', () => {
     const block = blockFromForm(appForm(), { pcId: PC });
     expect(keysDifferingFromForm(appForm(), block, PC)).toEqual([]);
-    expect(PROJECT_FIELDS.length).toBe(17);
+    // 17 with Configuration's own, plus field of view and Use Clip
+    // settings, which only the Project settings page sets (step 8).
+    expect(PROJECT_FIELDS.length).toBe(19);
+  });
+
+  it('leaves field of view out: Configuration has none, so an old project gets none', () => {
+    expect(blockFromForm(appForm(), { pcId: PC }).picture.fov).toBeUndefined();
+  });
+
+  it('leaves Use Clip settings out unless asked, so an older project reads as Off', () => {
+    expect(blockFromForm(appForm(), { pcId: PC }).clipSettings.useRows).toBeUndefined();
+    expect(blockUsesRows(blockFromForm(appForm(), { pcId: PC }))).toBe(false);
+    expect(blockUsesRows(blockFromForm(appForm(), { pcId: PC, useRows: true }))).toBe(true);
+  });
+});
+
+describe('Use Clip settings in what a batch sends', () => {
+  const ask = () => ({ init_commands: ['cl_righthand 1', 'ds_hud_hide_scoreboard 1'] });
+  const on = { clipSettings: { useRows: true, initCommands: ['cl_righthand 1', 'ds_hud_hide_scoreboard 1'] } };
+  const off = { clipSettings: { initCommands: ['cl_righthand 1', 'ds_hud_hide_scoreboard 1'] } };
+
+  it('sends every row after the own lines with it on and the New UI on', () => {
+    const sent = resolveCaptureSettings(ask(), on, PC, { clipRows: true }).init_commands;
+    expect(sent[0]).toBe('cl_righthand 1');
+    // Every row but the ones the game decides with no line of their own.
+    expect(sent).toHaveLength(1 + SENT_ROWS.length - SENT_ONLY_WHEN_SET.length);
+    expect(sent).toContain('ds_hud_hide_scoreboard 1');
+  });
+
+  it('sends the lines as they are with it off, or with the New UI off', () => {
+    expect(resolveCaptureSettings(ask(), off, PC, { clipRows: true }).init_commands).toEqual(ask().init_commands);
+    expect(resolveCaptureSettings(ask(), on, PC).init_commands).toEqual(ask().init_commands);
+  });
+
+  it('is never copied from Configuration, which has no such setting', () => {
+    expect(LISTS_THE_PAGE_OWNS).toContain('clip_rows_on');
+    const { block, changed } = followFormEdits(off, { init_commands: [] }, { init_commands: [], clip_rows_on: true }, PC, { keep: LISTS_THE_PAGE_OWNS });
+    expect(changed).toEqual([]);
+    expect(blockUsesRows(block)).toBe(false);
   });
 });
 

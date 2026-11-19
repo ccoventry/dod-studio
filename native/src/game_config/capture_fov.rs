@@ -9,9 +9,13 @@ use crate::patch::types::PatcherConfig;
 /// Read out of `init_commands` when HLAE's `mirv_fov` is among them, because
 /// that is the value the engine will be using and a separate setting could
 /// silently disagree with it. The last one wins, matching the console. Falls
-/// back to the configured default when nothing sets it.
+/// back to the configured default when nothing sets it. The project's own
+/// field of view (`picture_fov`) comes first: it is sent after every line.
 pub fn capture_fov(config: &PatcherConfig) -> f32 {
-    capture_fov_from_init(&config.init_commands).unwrap_or(config.capture_fov)
+    config
+        .picture_fov
+        .or_else(|| capture_fov_from_init(&config.init_commands))
+        .unwrap_or(config.capture_fov)
 }
 
 /// The FOV `init_commands` states, if it states one at all.
@@ -68,6 +72,11 @@ pub fn capture_fov_from_init(init_commands: &[String]) -> Option<f32> {
 ///
 /// Reads config files. Never writes one.
 pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
+    // The project's own field of view is sent after every Initial Command
+    // (`game_config::user_init_commands`), so nothing else has the last word.
+    if let Some(fov) = config.picture_fov {
+        return fov;
+    }
     // An init command is the app's own statement and outranks a config —
     // including when it states the same number the default happens to be. The
     // seeded default IS `mirv_fov 90`, so treating that as "nothing was said"
@@ -182,6 +191,19 @@ mod tests {
         // Last one wins, as at the console.
         config.init_commands.push("mirv_fov 100".to_string());
         assert_eq!(capture_fov(&config), 100.0);
+    }
+
+    /// The project's field of view (#1085) is sent after every line, so it
+    /// is the one the capture runs at, whatever the lines say.
+    #[test]
+    fn the_projects_field_of_view_wins_over_the_lines() {
+        let config = PatcherConfig {
+            init_commands: vec!["mirv_fov 105".to_string()],
+            picture_fov: Some(110.0),
+            ..PatcherConfig::default()
+        };
+        assert_eq!(capture_fov(&config), 110.0);
+        assert_eq!(capture_fov_resolved(&config), 110.0);
     }
 
     #[test]

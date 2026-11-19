@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 // belongs to another area into its own module, or raise the number with the
 // reason in the PR. Each is the size on the day it was set plus about 3%.
 const CEILINGS = {
-  'capture_pane.js': 1440, // +40: the open project's own settings go over the form's in the launch guard, the setup strip and the batch payload (#1085)
+  'capture_pane.js': 1450, // +40: the open project's own settings go over the form's in the launch guard, the setup strip and the batch payload; +10: its field of view as picture_fov (#1085)
   'hd_pane.js': 1350,
   'render_pane.js': 1200,
   'overviews_pane.js': 1150,

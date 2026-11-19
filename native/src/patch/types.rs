@@ -643,6 +643,15 @@ pub struct PatcherConfig {
     /// would be worse than one.
     #[serde(default = "default_capture_fov")]
     pub capture_fov: f32,
+    /// The project's own field of view (Project Settings › Picture, #1085),
+    /// when the frontend sends one. It wins over everything: the batch sends
+    /// `mirv_fov <n>` right after the user's Initial Commands
+    /// (`game_config::user_init_commands`), so neither a `mirv_fov` line nor a
+    /// cfg those lines `exec` has the last word, and it is the FOV
+    /// `capture_fov_resolved` gives. `None` (New UI off, or no project): the
+    /// lines and the game's configs decide, as before.
+    #[serde(default)]
+    pub picture_fov: Option<f32>,
 }
 
 fn default_decal_flush() -> bool {
@@ -983,6 +992,7 @@ impl Default for PatcherConfig {
             decal_flush: default_decal_flush(),
             decal_ring_limit: default_decal_ring_limit(),
             capture_fov: default_capture_fov(),
+            picture_fov: None,
         }
     }
 }

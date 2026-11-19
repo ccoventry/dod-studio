@@ -124,7 +124,52 @@ fn report_for(
         capture_fps,
         decal_flush,
         hook_runs_batch,
+        picture_fov: None,
     })
+}
+
+/// The project's field of view wins over a config's `mirv_fov` (#1085):
+/// the report says so once, as a conflict whose value used is the
+/// project's, and leaves the lines' own `mirv_fov <n>` out of what is
+/// sent, `handleZoom` kept.
+#[test]
+fn the_projects_field_of_view_overrides_a_configs_and_leaves_the_lines_out() {
+    let (_dir, game) = fake_game("picture_fov");
+    let r = cfg_report(CfgReportRequest {
+        game_path: game,
+        init_commands: vec![
+            "mirv_fov 100".to_string(),
+            "mirv_fov handleZoom enabled 1".to_string(),
+        ],
+        picture_fov: Some(90.0),
+        ..Default::default()
+    });
+    assert_eq!(r.project_fov, Some(90.0));
+    assert_eq!(r.project_fov_left_out, ["mirv_fov 100"]);
+    assert!(r.banned_init.is_empty(), "left out, not blocking");
+    let row = conflict(&r, "mirv_fov").expect("movie.cfg's 105 is overridden");
+    assert_eq!(values_of(row), [("105", "config"), ("90", "app")]);
+    assert_eq!(row.effective.value, "90");
+    assert!(r.unseen.iter().all(|u| u.cvar != "mirv_fov"));
+}
+
+/// Without the project's field of view nothing changes: the typed line
+/// is sent and is the one used.
+#[test]
+fn without_the_projects_field_of_view_a_typed_mirv_fov_is_used() {
+    let (_dir, game) = fake_game("no_picture_fov");
+    let r = report_for(
+        game,
+        vec!["mirv_fov 100".to_string()],
+        Vec::new(),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(r.project_fov, None);
+    assert!(r.project_fov_left_out.is_empty());
+    let row = conflict(&r, "mirv_fov").expect("movie.cfg's 105 differs");
+    assert_eq!(values_of(row), [("105", "config"), ("100", "initial")]);
 }
 
 fn report_scheduled(tag: &str, custom: Vec<CustomCommand>) -> CfgReport {

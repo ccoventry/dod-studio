@@ -18,7 +18,7 @@ use source_tree::{non_test_lines, read, relative, workspace_root};
 const CEILINGS: &[(&str, usize)] = &[
     // The Tauri managers: each wraps `native` for the UI; decisions belong in
     // `native` (docs/coding_standards.md, section 1).
-    ("studio/src-tauri/src/capture_manager.rs", 2250),
+    ("studio/src-tauri/src/capture_manager.rs", 2260), // +10: the project's field of view in the payload, the scheduled refusal and the config (#1085); the rules live in game_config::picture_fov
     ("studio/src-tauri/src/render_manager.rs", 2100),
     ("studio/src-tauri/src/scan_manager.rs", 1300),
     ("studio/src-tauri/src/audit_manager.rs", 850),

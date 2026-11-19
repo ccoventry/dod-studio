@@ -192,6 +192,59 @@ export function projectSettingsPageAppliedLine(path, how, keys) {
   return `[project settings] ${how}: ${keys.length} setting(s) changed in ${pageProject(path)}: ${keys.join(', ')}`;
 }
 
+/** What the project's Clip settings hold after an Apply that changed them
+ *  (#1085 step 8): the preset it started from and how many lines, counts
+ *  rather than the lines themselves. */
+export function clipSettingsAppliedLine(path, { preset, initCount, scheduledCount, fov }) {
+  const from = preset ? `from ${preset}` : 'no preset';
+  const view = fov === undefined || fov === null ? 'field of view not set' : `field of view ${fov}`;
+  return `[project settings] Clip settings for ${pageProject(path)}: ${from}, ${initCount} line(s), ${scheduledCount} at each clip, ${view}`;
+}
+
+/** Use Clip settings turned on or off by an Apply (#1085): on, a batch
+ *  sends every row; off, only the project's own lines. */
+export function clipRowsSwitchedLine(path, on) {
+  const what = on ? 'on: its captures send every Clip settings row' : 'off: its captures send only its own commands';
+  return `[project settings] Use Clip settings turned ${what}, in ${pageProject(path)}`;
+}
+
+/** A batch's Initial Commands carry the open project's Clip settings rows
+ *  (Use Clip settings on): how many rows, after how many lines of its own. */
+export function clipRowsSentLine({ rows, own }) {
+  return `[project] Clip settings: sending ${rows} row(s) after ${own} line(s) of the project's own commands`;
+}
+
+/** A project with no field of view of its own took what the game uses for
+ *  it (#1085, decision 3; project_fov.js's fovToFill): `from` 'lines',
+ *  'exec' (`file` the cfg its Initial Commands exec), 'game' (`file` a
+ *  start-up config) or 'default'. */
+export function projectFovFilledLine(path, { fov, from, file, line }) {
+  let took;
+  if (from === 'default') took = `${fov}, the game's default: nothing in its Initial Commands, a cfg they exec or the game's start-up configs sets it`;
+  else if (from === 'game') took = `${fov} from ${file}, line ${line}, which the game runs at start-up, so its look doesn't change`;
+  else if (from === 'exec') took = `${fov} from ${file}, line ${line}, which its Initial Commands exec, so its look doesn't change`;
+  else took = `${fov} from its Initial Commands (mirv_fov ${fov}), so its look doesn't change`;
+  return `[project] ${path} had no field of view of its own: took ${took}; saved with the next save`;
+}
+
+/** A project with no field of view of its own was left without one, since
+ *  what the game uses for it can't be told (fovToFill's `why`); the next
+ *  open tries again. */
+export function projectFovNotFilledLine(path, { why, missing = [] }) {
+  const because = {
+    install: 'no hl.exe is picked',
+    folder: "the picked install has no game folder to read its configs from",
+    scan: "reading the game's configs failed",
+    exec: `a cfg its Initial Commands exec isn't in the picked install (${missing.join(', ')})`,
+  }[why] || why;
+  return `[project] ${path} has no field of view of its own and keeps none for now: ${because}. It captures as before; the next open tries again`;
+}
+
+/** A Clip settings preset saved on this PC from the Project settings page. */
+export function clipPresetSavedLine(name, lists) {
+  return `[project settings] Saved the Clip settings preset ${name} (${(lists.init_commands || []).length} line(s), ${(lists.custom_commands || []).length} at each clip)`;
+}
+
 /** The page closed by `how` (OK, Cancel, Discard, a project opening), with
  *  how many unapplied edits it dropped. */
 export function projectSettingsPageClosedLine(path, how, dropped) {

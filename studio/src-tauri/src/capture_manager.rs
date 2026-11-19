@@ -232,6 +232,10 @@ pub struct CapturePayload {
     /// scheduled/highlight commands.
     #[serde(default)]
     pub init_commands: Vec<String>,
+    /// The project's field of view, sent after `init_commands` (#1085,
+    /// `PatcherConfig::picture_fov`); absent with New UI off or no project.
+    #[serde(default)]
+    pub picture_fov: Option<f32>,
     /// User-defined commands scheduled relative to each highlight's bounds.
     #[serde(default)]
     pub custom_commands: Vec<CustomCommandPayload>,
@@ -511,6 +515,9 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
     cfg.session_id = payload.session_id.clone();
     cfg.init_commands = payload.init_commands.clone();
+    cfg.picture_fov = payload
+        .picture_fov
+        .filter(|v| native::game_config::picture_fov::is_usable(*v));
     cfg.custom_commands = payload
         .custom_commands
         .iter()
@@ -1284,7 +1291,13 @@ pub async fn start_capture_batch_impl(
     // check is only as good as the frontend" reasoning as the separate-HUD
     // guard below: whatever reaches this command directly must be refused
     // independently, not trusted because some UI state claimed it was clean.
-    if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands)
+    // A scheduled mirv_fov <n> while the project sets one (#1085) first.
+    let fov_refusal = native::game_config::picture_fov::scheduled_refusal(
+        payload.picture_fov,
+        payload.custom_commands.iter().map(|c| c.command.as_str()),
+    );
+    if let Some(err) = fov_refusal
+        .or_else(|| first_banned_command_error(&payload.init_commands, &payload.custom_commands))
     {
         return Err(err);
     }

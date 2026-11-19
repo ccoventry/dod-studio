@@ -19,8 +19,43 @@ pub fn too_long_commands(commands: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The user's own Initial Commands, then the project's field of view
+/// (`PatcherConfig::picture_fov`, #1085) when it sets one, with the lines'
+/// own `mirv_fov <n>` left out (`picture_fov::lines_sent`): what every job
+/// starts its init lines with, the primer included.
+///
+/// The field of view goes straight after the user's lines so it wins over
+/// all of them, a cfg they `exec` included. Every way the game runs these
+/// keeps that order: a patched demo writes them as `ConsoleCommand` frames
+/// in this order right after `DemoStart` (`engine.rs`; the demo filter drops
+/// an `exec` there anyway), and the hook's batch runs each demo's `init`
+/// lines in file order through `ClientCmd` (`runtime_batch.rs`, goldsrc-hooks
+/// `batch.rs`), every demo of the batch again. An `exec` runs its file
+/// before the next line: the game's `Cmd_Exec_f` inserts the file's text at
+/// the front of the command buffer (`Cbuf_InsertText`), ahead of the lines
+/// still queued after it. One line of `mirv_fov <n>` is far under the
+/// 64-byte frame limit.
+///
+/// `mirv_fov handleZoom enabled 1` goes right before it (owner decision 10B
+/// a), so the override follows the scope zoom instead of holding while
+/// scoped, unless the user's lines already set `handleZoom` either way
+/// (`picture_fov::handle_zoom`): theirs stands.
+pub fn user_init_commands(config: &PatcherConfig) -> Vec<String> {
+    use super::picture_fov::{HANDLE_ZOOM_ON, HandleZoom, fov_line, handle_zoom, lines_sent};
+    // Its own `mirv_fov <n>` lines left out: the project's comes after them.
+    let mut out = lines_sent(config);
+    if let Some(fov) = config.picture_fov {
+        if handle_zoom(config) == Some(HandleZoom::Added) {
+            out.push(HANDLE_ZOOM_ON.to_string());
+        }
+        out.push(fov_line(fov));
+    }
+    out
+}
+
 /// Every command the engine will run at demo load: the user's own init
-/// commands, then the ones the pipeline adds for itself.
+/// commands and the project's field of view ([`user_init_commands`]), then
+/// the ones the pipeline adds for itself.
 ///
 /// Extracted so it can be asked ahead of a capture as well as during one. The
 /// app's own additions override whatever the game's configs set — `capture_fps`
@@ -28,7 +63,7 @@ pub fn too_long_commands(commands: &[String]) -> Vec<String> {
 /// `r_decals` there — and a user is entitled to know that before it happens
 /// rather than by noticing the result.
 pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
-    let mut out = config.init_commands.clone();
+    let mut out = user_init_commands(config);
     out.push("sys_autodir".to_string());
     // AGR mode's sound-only movie (#450) runs at the AGR rate: the movie
     // recorder pins the timestep to `1 / mirv_movie_fps`, and that has to be

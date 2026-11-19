@@ -457,8 +457,15 @@ export const CAPTURE_CONFIG_STRINGS = {
     SETTING_FOR_CVAR: {
       mirv_movie_fps: 'Output Format → Capture FPS',
       r_decals: 'Pipeline → Flush Decals Between Clips',
+      // Only the open project's field of view is sent for mirv_fov (#1085).
+      mirv_fov: 'Project Settings › Picture › Field of view',
     },
     UNKNOWN_SETTING: 'its own setting',
+    // #1085: the project's field of view replaces Initial Commands' own.
+    PROJECT_FOV_LEFT_OUT_TITLE: "These lines are left out, as this project sets the field of view:",
+    PROJECT_FOV_LEFT_OUT_ADVICE:
+      "A batch sends the field of view from Project Settings › Picture after your Initial Commands, so these do nothing. Change it there; the lines can go. Captures aren't blocked.",
+    PROJECT_FOV_SCHEDULED_REASON: 'set the field of view in Project Settings › Picture instead',
     BANNED_TITLE: 'These commands are not allowed:',
     BANNED_ADVICE:
       'Too dangerous to run at all — remove them. Start Capture Batch stays disabled while any are present.',
@@ -585,6 +592,8 @@ export const CAPTURE_CONFIG_STRINGS = {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
     GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
     SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
+    PROJECT_FOV: 'Refused: set the field of view in Project Settings › Picture. A batch leaves this line out.',
+    PROJECT_FOV_NAME: 'A number here is refused: set the field of view in Project Settings › Picture. handleZoom and the other sub-commands are fine.',
     droppedFromDemo: (pattern) => `Does nothing while Seek Between Clips is off: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',

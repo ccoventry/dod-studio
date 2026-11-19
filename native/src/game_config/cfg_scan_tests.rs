@@ -5,6 +5,29 @@ fn scratch(tag: &str) -> Scratch {
     Scratch::new(format_args!("cfg_scan_{tag}"))
 }
 
+/// The project owns `mirv_fov <number>` (#1085), quoted or not; HLAE's
+/// sub-commands such as `handleZoom` (the scope zoom) are not its.
+#[test]
+fn only_a_mirv_fov_number_is_the_projects() {
+    let commands: Vec<String> = [
+        "mirv_fov 105",
+        "  MIRV_FOV \"100\" ",
+        "mirv_fov handleZoom enabled 1",
+        "mirv_fov handleZoom minUnzoomedFov current",
+        "mirv_fov",
+        "mirv_fov_other 5",
+        "default_fov 100",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let owned: Vec<String> = project_owned_commands(&commands)
+        .into_iter()
+        .map(|(_, c)| c)
+        .collect();
+    assert_eq!(owned, ["mirv_fov 105", "MIRV_FOV \"100\""]);
+}
+
 /// `ds_player_change_name` (#1021) is an ordinary user command: renaming a
 /// player for a batch is what Initial Commands are for, and one scheduled
 /// mid-clip renames from that frame on, as asked. So it is in no tier.

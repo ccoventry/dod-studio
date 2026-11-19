@@ -38,7 +38,17 @@ const EMPTY = {
   fatalCvars: [],
   renamed: [],
   configCfgWritable: false,
+  projectFov: null,
+  projectFovLeftOut: [],
 };
+
+/** Why a refused command is refused: the project's field of view (#1085)
+ *  owns a scheduled `mirv_fov` when the project sets one. */
+function bannedReason(command, projectFov) {
+  const cvar = cvarOf(command);
+  if (projectFov != null && cvar.toLowerCase() === 'mirv_fov') return STRINGS.CFG.PROJECT_FOV_SCHEDULED_REASON;
+  return STRINGS.CFG.BANNED_REASONS[cvar];
+}
 
 let report = EMPTY;
 
@@ -213,6 +223,8 @@ function render() {
   const fatalCvars = report?.fatalCvars ?? [];
   const configCfgWritable = report?.configCfgWritable ?? false;
   const renamed = report?.renamed ?? [];
+  const projectFov = report?.projectFov ?? null;
+  const projectFovLeftOut = report?.projectFovLeftOut ?? [];
   // A renamed name shows under the list it was typed in; config lines go
   // with Initial Commands, like the other config findings.
   const renamedScheduled = renamed.filter((r) => r.source === 'Scheduled Commands');
@@ -255,9 +267,15 @@ function render() {
   if (tooLongInit.length > 0) {
     initParts.push(tooLongSection(tooLongInit));
   }
-  // Next, because a value somebody stated is being thrown away.
+  // Next, because a value somebody stated is being thrown away. A config's
+  // mirv_fov the project's field of view overrides shows here (#1085).
   if (initConflicts.length > 0) {
     initParts.push(conflictSection(initConflicts));
+  }
+  // Same: lines the project's field of view replaces, though nothing breaks.
+  if (projectFovLeftOut.length > 0) {
+    const rows = projectFovLeftOut.map((c) => `<li><code>${escapeHtml(c)}</code></li>`).join('');
+    initParts.push(section(STRINGS.CFG.PROJECT_FOV_LEFT_OUT_TITLE, STRINGS.CFG.PROJECT_FOV_LEFT_OUT_ADVICE, rows, 'var(--warn-salmon)'));
   }
   // A command the user typed never runs, and nothing in the game says so.
   if (filteredInit.length > 0) {
@@ -315,7 +333,7 @@ function render() {
   // First of all — this one blocks Start Capture Batch.
   if (bannedScheduled.length > 0) {
     const rows = bannedScheduled
-      .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, STRINGS.CFG.BANNED_REASONS[cvarOf(b.command)])}</code></li>`)
+      .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, bannedReason(b.command, projectFov))}</code></li>`)
       .join('');
     schedParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, 'var(--danger)'));
   }

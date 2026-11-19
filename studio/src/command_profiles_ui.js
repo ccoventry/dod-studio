@@ -130,6 +130,22 @@ export function syncCommandProfileRow() {
   }
 }
 
+/**
+ * Saves `lists` as the user's profile `name` on this PC (Project settings ›
+ * Clip settings' Save as new, #1085), replacing one of that name, and saves
+ * settings. Configuration's lists and active profile are left alone: the
+ * project page saves a copy, it doesn't switch the app to it. Returns the
+ * saved profile's name, or null for a blank or built-in name.
+ */
+export function saveCommandProfileToLibrary(name, lists) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed || isBuiltinName(profiles, trimmed)) return null;
+  setOwnProfiles(saveProfile(profiles, trimmed, lists));
+  syncCommandProfileRow();
+  onProfilesChange();
+  return profiles.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())?.name || trimmed;
+}
+
 /** Replaces the user's profiles with `list`'s, keeping the built-in ones in
  *  front. */
 function setOwnProfiles(list) {

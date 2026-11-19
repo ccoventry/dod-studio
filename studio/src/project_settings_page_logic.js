@@ -5,23 +5,38 @@
 // wrong with it, and the block that Apply writes. project_settings_page.js
 // draws the page and holds the pending edits.
 
-import { resolveSettings, followFormEdits, madeWithOf } from './project_settings_logic.js';
+import { resolveSettings, followFormEdits, madeWithOf, blockFov, blockWithFov } from './project_settings_logic.js';
 import { samePath } from './path_display.js';
 import { killGapsFrom, MAX_KILL_GAP_SPEED } from './kill_gaps_setting.js';
 import { parseTemplate, DEFAULT_TEMPLATE } from './clip_name.js';
 import { sameDriveFolders } from './setup_checklist.js';
+import { CLIP_TAB_KEYS, clipProblems, isUsableFov, rowsAreOn } from './clip_settings_logic.js';
 import { STRINGS } from './strings.js';
 
 /** Every setting the Project tab edits, by its settings-file name. The
  *  project's block holds each one (project_settings_logic.js's fields). */
 export const PROJECT_TAB_KEYS = Object.freeze([
-  'capture_mode', 'resolution_width', 'resolution_height',
+  'capture_mode', 'resolution_width', 'resolution_height', 'capture_fov',
   'capture_fps', 'obs_capture_fps', 'agr_fps',
   'finish_clips_after_batch', 'finish_codec_obs', 'finish_codec_video', 'finish_codec_frames',
   'record_start_lead', 'record_stop_trail', 'kill_gaps',
   'clip_name_template',
   'target_drives', 'render_export_dirs',
 ]);
+
+/** Every setting the page edits: the Project tab's, then the Clip settings
+ *  tab's (clip_settings_logic.js). One OK, Cancel and Apply covers both. */
+export const PAGE_KEYS = Object.freeze([...PROJECT_TAB_KEYS, ...CLIP_TAB_KEYS]);
+
+/** Field of view's chips other than Custom. */
+export const FOV_CHOICES = Object.freeze([90, 100]);
+
+/** The Field of view chip `fov` matches, 'custom', or null for no value
+ *  (the page always has one: project_settings.js's pageFov gives it). */
+export function fovChoiceOf(fov) {
+  if (fov === undefined || fov === null) return null;
+  return FOV_CHOICES.includes(fov) ? fov : 'custom';
+}
 
 /** Capture with's chips, in the page's order. */
 export const CAPTURE_MODES = Object.freeze(['frame_sequence', 'direct_to_video', 'obs', 'agr']);
@@ -79,12 +94,15 @@ const copyOf = (value) => (value === undefined ? undefined : JSON.parse(JSON.str
 /**
  * The values the Project tab starts from when the page opens: the open
  * project's (`block`) over the app's (`form`, the settings file's values),
- * for every key the tab edits. `pcId` picks this PC's folders.
+ * for every key the tab edits. `pcId` picks this PC's folders. Use Clip
+ * settings is true or false, false for a block without it (a project made
+ * before it), so turning it on and off again is no change.
  */
 export function startingValues(form, block, pcId) {
-  const asked = Object.fromEntries(PROJECT_TAB_KEYS.map((key) => [key, copyOf(form?.[key])]));
+  const asked = Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(form?.[key])]));
   const values = resolveSettings(asked, block, pcId);
-  return Object.fromEntries(PROJECT_TAB_KEYS.map((key) => [key, copyOf(values[key])]));
+  const start = Object.fromEntries(PAGE_KEYS.map((key) => [key, copyOf(values[key])]));
+  return { ...start, clip_rows_on: rowsAreOn(values) };
 }
 
 const RATE_KEYS = ['capture_fps', 'obs_capture_fps', 'agr_fps'];
@@ -109,7 +127,7 @@ export function usablePending(start, pending) {
 /** The keys whose pending value differs from the value the page started from. */
 export function changedKeys(start, pending) {
   const usable = usablePending(start, pending);
-  return PROJECT_TAB_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(usable[key]));
+  return PAGE_KEYS.filter((key) => JSON.stringify(start[key]) !== JSON.stringify(usable[key]));
 }
 
 /** Whether there is anything for Apply to do. */
@@ -136,6 +154,8 @@ export function pendingProblems(pending) {
   // Every rate the mode uses must be set, AGR's too: its blank (0) is a
   // problem of its own, since an AGR batch will not start without a rate.
   if (!isWhole(rate)) problems[rateKey] = rateKey === 'agr_fps' && !(rate > 0) ? S.AGR_RATE_REQUIRED : S.BAD_RATE;
+  // A project always has a field of view (#1085, decision 3): blank is one.
+  if (!isUsableFov(pending.capture_fov)) problems.capture_fov = S.BAD_FOV;
   if (!isSeconds(pending.record_start_lead)) problems.record_start_lead = S.BAD_SECONDS;
   if (!isSeconds(pending.record_stop_trail)) problems.record_stop_trail = S.BAD_SECONDS;
   const gaps = pending.kill_gaps || {};
@@ -145,16 +165,20 @@ export function pendingProblems(pending) {
   }
   const template = parseTemplate(pending.clip_name_template);
   if (template.errors.length > 0) problems.clip_name_template = template.errors.join(' ');
-  return problems;
+  return { ...problems, ...clipProblems(pending) };
 }
 
 /**
  * The block Apply writes: `block` with each pending value that differs from
  * where the page started, every other field (and any this build doesn't
- * know) left as it was. `block` itself is not changed.
+ * know) left as it was. `fillFov` (project_settings.js's pageFov `fill`) is
+ * the field of view a block with none takes with it, when the user didn't
+ * pick one: what the game uses for it today, so an Apply of anything else
+ * doesn't change its look. `block` itself is not changed.
  */
-export function blockWithPending(block, start, pending, pcId) {
-  return followFormEdits(block, start, usablePending(start, pending), pcId).block;
+export function blockWithPending(block, start, pending, pcId, { fillFov = null } = {}) {
+  const next = followFormEdits(block, start, usablePending(start, pending), pcId).block;
+  return fillFov !== null && blockFov(next) === null ? blockWithFov(next, fillFov) : next;
 }
 
 /** A clip-name template typed into the page: blank means the default, as

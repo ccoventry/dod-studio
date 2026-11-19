@@ -44,7 +44,7 @@ import { gigabytes } from './byte_size.js';
 import { usableCaptureBytes, windowsDriveShortWarning, readWindowsDriveKeepFree, DEFAULT_KEEP_FREE_GB } from './windows_drive_setting.js';
 import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
-import { effectiveSettings, withProjectLaunchSize } from './project_settings.js';
+import { effectiveSettings, effectiveCaptureSettings, withProjectLaunchSize, projectPictureFov } from './project_settings.js';
 import { captureModeInEffect } from './capture_in_effect.js';
 import { createBatchUntick } from './batch_untick.js';
 
@@ -168,6 +168,10 @@ function seeksBetweenClips() {
   return document.querySelector('#config-hook-runs-batch')?.checked ?? true;
 }
 
+/** Whether the open project sets the field of view (New UI on, #1085):
+ *  the type-ahead then refuses a `mirv_fov <n>`. */
+const hasProjectFov = () => projectPictureFov() !== null;
+
 export async function refreshInitCommandWarnings() {
   const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
   await refreshCfgWarnings(
@@ -188,6 +192,9 @@ export async function refreshInitCommandWarnings() {
       decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
       // Decides whether the game's demo filter applies to these commands.
       hookRunsBatch: seeksBetweenClips(),
+      // The open project's field of view (#1085): a config's mirv_fov it
+      // overrides is warned about, and the lines' own are left out.
+      pictureFov: projectPictureFov(),
     }
   );
   // A banned command appearing or disappearing has to reach Start Capture
@@ -664,7 +671,8 @@ function initImportCfgButton() {
  * settings go over the form's last (#1085, project_settings.js).
  */
 export function batchSettingsPayload(state) {
-  const own = effectiveSettings({
+  // With the New UI on, the project's field of view goes as `picture_fov`.
+  const own = effectiveCaptureSettings({
     capture_fps: numberField('#config-capture-fps', 120, { integer: true, positive: true }),
     obs_capture_fps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     // Empty is 0, which Start refuses in AGR mode (refreshLaunchGuard) and so does the backend.
@@ -785,6 +793,8 @@ export function batchSettingsPayload(state) {
     auto_clear_previews: autoClearPreviewsVal,
     auto_clear_temp_demos: autoClearTempDemosVal,
     init_commands: initCommandsPayload,
+    // Sent after init_commands, whose own mirv_fov <n> the backend leaves out.
+    picture_fov: own.picture_fov ?? null,
     custom_commands: customCommandsPayload,
   };
 }
@@ -838,7 +848,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     getItems: () => initCommands,
     fields: [{
       key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
-      enhance: (input) => attachCommandSuggest(input, { scheduled: false, seeks: seeksBetweenClips }),
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false, seeks: seeksBetweenClips, projectFov: hasProjectFov }),
     }],
     onChange: () => {
       // Before the save, so a profile this list now matches is saved as the
@@ -857,7 +867,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     fields: [
       {
         key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
-        enhance: (input) => attachCommandSuggest(input, { scheduled: true, seeks: seeksBetweenClips }),
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true, seeks: seeksBetweenClips, projectFov: hasProjectFov }),
       },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },

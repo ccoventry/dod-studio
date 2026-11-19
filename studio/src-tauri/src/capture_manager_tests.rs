@@ -285,6 +285,7 @@ fn sample_payload() -> CapturePayload {
         auto_clear_temp_demos: false,
         session_id: "session_test".to_string(),
         init_commands: vec!["exec autoexec".to_string()],
+        picture_fov: None,
         custom_commands: vec![
             CustomCommandPayload {
                 command: "say after".to_string(),

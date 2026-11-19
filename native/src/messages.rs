@@ -1963,6 +1963,46 @@ pub fn cache_could_not_analyse(demo: impl Display, why: impl Display) -> String 
 
 // ── patch/builder/mod.rs: activity log (#237) ──────────────────────────────
 
+/// A Scheduled `mirv_fov <n>` while the project sets the field of view.
+pub fn project_fov_scheduled_refused(command: &str) -> String {
+    format!(
+        "\"{command}\" is not allowed in Scheduled Commands: this project's field of view is set in Project Settings › Picture."
+    )
+}
+
+/// A batch starts with the project's field of view (#1085): sent after
+/// Initial Commands, with `mirv_fov handleZoom enabled 1` before it when
+/// `zoom_added` (the lines don't set handleZoom themselves), and the
+/// `mirv_fov <n>` lines it leaves out of them.
+pub fn project_fov_sent(fov: f32, zoom_added: bool, left_out: &[String]) -> String {
+    let zoom = if zoom_added {
+        ", with mirv_fov handleZoom enabled 1 before it so a scope still zooms"
+    } else {
+        ""
+    };
+    let left = if left_out.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; left out {} mirv_fov line(s) of Initial Commands ({})",
+            left_out.len(),
+            left_out.join(", ")
+        )
+    };
+    format!(
+        "[capture] Field of view {fov} from Project Settings › Picture, sent after Initial Commands and any cfg they exec{zoom}{left}"
+    )
+}
+
+/// The user's Initial Commands turn `mirv_fov handleZoom` off (#1085), so
+/// the batch adds no `enabled 1` and the project's field of view holds
+/// while scoped.
+pub fn project_fov_holds_while_scoped(fov: f32) -> String {
+    format!(
+        "[capture] Initial Commands set mirv_fov handleZoom enabled 0, so the field of view {fov} from Project Settings › Picture holds while scoped (a scope won't zoom in)"
+    )
+}
+
 pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Display) -> String {
     format!(
         "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{codec_args}`) instead of \

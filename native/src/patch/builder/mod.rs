@@ -392,7 +392,8 @@ fn make_session_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBu
 }
 
 /// Says in the activity log how a direct-to-video or AGR batch records,
-/// since neither writes the frame sequence the other modes do.
+/// since neither writes the frame sequence the other modes do, and the
+/// project's field of view when the batch carries one.
 fn announce_capture_mode(config: &PatcherConfig) {
     if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
         crate::log_markdown(&crate::messages::direct_to_video_capture(
@@ -403,6 +404,21 @@ fn announce_capture_mode(config: &PatcherConfig) {
 
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::log_markdown(&crate::messages::agr_capture(config.effective_agr_fps()));
+    }
+
+    // The project's field of view (#1085), the scope zoom line before it,
+    // and the lines it leaves out.
+    if let Some(fov) = config.picture_fov {
+        use crate::game_config::picture_fov::{HandleZoom, handle_zoom, lines_left_out};
+        let zoom = handle_zoom(config);
+        crate::log_markdown(&crate::messages::project_fov_sent(
+            fov,
+            zoom == Some(HandleZoom::Added),
+            &lines_left_out(config),
+        ));
+        if zoom == Some(HandleZoom::UsersOff) {
+            crate::log_markdown(&crate::messages::project_fov_holds_while_scoped(fov));
+        }
     }
 }
 
@@ -422,7 +438,7 @@ fn primer_job(
     first_source: &str,
     dod_dir: &std::path::Path,
 ) -> (PatchJob, String) {
-    let mut primer_init = config.init_commands.clone();
+    let mut primer_init = crate::game_config::user_init_commands(config);
     primer_init.push("sys_autodir".to_string());
 
     // Every patched demo lands directly in the game's own dod/ folder --
