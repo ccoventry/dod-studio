@@ -406,12 +406,19 @@ fn announce_capture_mode(config: &PatcherConfig) {
         crate::log_markdown(&crate::messages::agr_capture(config.effective_agr_fps()));
     }
 
-    // The project's field of view (#1085), and the lines it leaves out.
+    // The project's field of view (#1085), the scope zoom line before it,
+    // and the lines it leaves out.
     if let Some(fov) = config.picture_fov {
+        use crate::game_config::picture_fov::{HandleZoom, handle_zoom, lines_left_out};
+        let zoom = handle_zoom(config);
         crate::log_markdown(&crate::messages::project_fov_sent(
             fov,
-            &crate::game_config::picture_fov::lines_left_out(config),
+            zoom == Some(HandleZoom::Added),
+            &lines_left_out(config),
         ));
+        if zoom == Some(HandleZoom::UsersOff) {
+            crate::log_markdown(&crate::messages::project_fov_holds_while_scoped(fov));
+        }
     }
 }
 

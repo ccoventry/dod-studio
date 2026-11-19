@@ -42,6 +42,59 @@ pub fn fov_line(fov: f32) -> String {
     format!("{FOV_CVAR} {fov}")
 }
 
+/// HLAE's switch that scales a `mirv_fov` override with the game's own
+/// zoom, so a scope still zooms in (#1085, owner decision 10B a). Without it
+/// HLAE holds the override while scoped. Sent right before the project's
+/// field of view unless the user's lines set it themselves ([`handle_zoom`]).
+pub const HANDLE_ZOOM_ON: &str = "mirv_fov handleZoom enabled 1";
+
+/// What a batch does about `mirv_fov handleZoom` with the project's field
+/// of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleZoom {
+    /// The user's lines don't set it: the batch sends [`HANDLE_ZOOM_ON`].
+    Added,
+    /// The user's lines turn it on already: nothing added.
+    UsersOn,
+    /// The user's lines turn it off: nothing added, so the project's field
+    /// of view holds while scoped (their choice, logged at batch start).
+    UsersOff,
+}
+
+/// Whether the last `mirv_fov handleZoom enabled <0|1>` in `lines` turns it
+/// on (`Some(true)`) or off, `None` when none does. Any case, quotes
+/// stripped; a cfg the lines `exec` is not read.
+pub fn users_handle_zoom(lines: &[String]) -> Option<bool> {
+    lines.iter().rev().find_map(|line| {
+        let words: Vec<String> = line.split_whitespace().map(cfg_scan::unquote).collect();
+        match words.as_slice() {
+            [cvar, sub, enabled, value]
+                if cvar.eq_ignore_ascii_case(FOV_CVAR)
+                    && sub.eq_ignore_ascii_case("handleZoom")
+                    && enabled.eq_ignore_ascii_case("enabled") =>
+            {
+                match value.as_str() {
+                    "1" => Some(true),
+                    "0" => Some(false),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    })
+}
+
+/// What the batch does about the scope zoom: `None` without the project's
+/// field of view (the lines go as typed).
+pub fn handle_zoom(config: &PatcherConfig) -> Option<HandleZoom> {
+    config.picture_fov?;
+    Some(match users_handle_zoom(&config.init_commands) {
+        None => HandleZoom::Added,
+        Some(true) => HandleZoom::UsersOn,
+        Some(false) => HandleZoom::UsersOff,
+    })
+}
+
 /// The user's Initial Commands as a batch sends them: with the project's
 /// field of view, every `mirv_fov <n>` line left out
 /// (`cfg_scan::project_owned_commands`; Clean clips carries one, and older
@@ -257,9 +310,92 @@ mod tests {
         );
         assert_eq!(lines_left_out(&config), ["mirv_fov 105"]);
         assert_eq!(
-            crate::messages::project_fov_sent(90.0, &lines_left_out(&config)),
+            crate::messages::project_fov_sent(90.0, false, &lines_left_out(&config)),
             "[capture] Field of view 90 from Project Settings › Picture, sent after Initial Commands and any cfg they exec; left out 1 mirv_fov line(s) of Initial Commands (mirv_fov 105)"
         );
+        assert_eq!(
+            crate::messages::project_fov_sent(100.0, true, &[]),
+            "[capture] Field of view 100 from Project Settings › Picture, sent after Initial Commands and any cfg they exec, with mirv_fov handleZoom enabled 1 before it so a scope still zooms"
+        );
+    }
+
+    /// The last `mirv_fov handleZoom enabled <0|1>` in the lines is the
+    /// user's choice, any case and quoted or not; anything else is none.
+    #[test]
+    fn the_users_handle_zoom_is_the_last_line_that_sets_it() {
+        assert_eq!(
+            users_handle_zoom(&lines(&["cl_bob 0", "mirv_fov 105"])),
+            None
+        );
+        assert_eq!(
+            users_handle_zoom(&lines(&["mirv_fov handleZoom enabled 1"])),
+            Some(true)
+        );
+        assert_eq!(
+            users_handle_zoom(&lines(&[" MIRV_FOV handlezoom Enabled \"0\" "])),
+            Some(false)
+        );
+        assert_eq!(
+            users_handle_zoom(&lines(&[
+                "mirv_fov handleZoom enabled 0",
+                "mirv_fov handleZoom enabled 1"
+            ])),
+            Some(true)
+        );
+        // Other sub-commands set no switch.
+        assert_eq!(
+            users_handle_zoom(&lines(&["mirv_fov handleZoom minUnzoomedFov current"])),
+            None
+        );
+        assert_eq!(
+            users_handle_zoom(&lines(&["mirv_fov handleZoom enabled"])),
+            None
+        );
+    }
+
+    /// The batch adds `handleZoom enabled 1` once, after the user's lines and
+    /// right before the project's field of view, unless the lines set it
+    /// either way; without the project's field of view the lines go as typed.
+    #[test]
+    fn handle_zoom_goes_before_the_projects_field_of_view_unless_the_user_set_it() {
+        let sent = |init: &[&str], fov: Option<f32>| {
+            let config = PatcherConfig {
+                init_commands: lines(init),
+                picture_fov: fov,
+                ..PatcherConfig::default()
+            };
+            (
+                handle_zoom(&config),
+                crate::game_config::user_init_commands(&config),
+            )
+        };
+
+        let (zoom, out) = sent(&["cl_bob 0", "mirv_fov 105", "exec x.cfg"], Some(100.0));
+        assert_eq!(zoom, Some(HandleZoom::Added));
+        assert_eq!(
+            out,
+            ["cl_bob 0", "exec x.cfg", HANDLE_ZOOM_ON, "mirv_fov 100"]
+        );
+        assert!(HANDLE_ZOOM_ON.len() < crate::patch::MAX_CONSOLE_CMD_LEN);
+
+        let (zoom, out) = sent(&["mirv_fov handleZoom enabled 1", "cl_bob 0"], Some(100.0));
+        assert_eq!(zoom, Some(HandleZoom::UsersOn));
+        assert_eq!(
+            out,
+            ["mirv_fov handleZoom enabled 1", "cl_bob 0", "mirv_fov 100"]
+        );
+
+        let (zoom, out) = sent(&["mirv_fov handleZoom enabled 0"], Some(100.0));
+        assert_eq!(zoom, Some(HandleZoom::UsersOff));
+        assert_eq!(out, ["mirv_fov handleZoom enabled 0", "mirv_fov 100"]);
+        assert_eq!(
+            crate::messages::project_fov_holds_while_scoped(100.0),
+            "[capture] Initial Commands set mirv_fov handleZoom enabled 0, so the field of view 100 from Project Settings › Picture holds while scoped (a scope won't zoom in)"
+        );
+
+        let (zoom, out) = sent(&["mirv_fov 105"], None);
+        assert_eq!(zoom, None);
+        assert_eq!(out, ["mirv_fov 105"]);
     }
 
     #[test]

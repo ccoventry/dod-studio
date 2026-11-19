@@ -35,11 +35,20 @@ pub fn too_long_commands(commands: &[String]) -> Vec<String> {
 /// the front of the command buffer (`Cbuf_InsertText`), ahead of the lines
 /// still queued after it. One line of `mirv_fov <n>` is far under the
 /// 64-byte frame limit.
+///
+/// `mirv_fov handleZoom enabled 1` goes right before it (owner decision 10B
+/// a), so the override follows the scope zoom instead of holding while
+/// scoped, unless the user's lines already set `handleZoom` either way
+/// (`picture_fov::handle_zoom`): theirs stands.
 pub fn user_init_commands(config: &PatcherConfig) -> Vec<String> {
+    use super::picture_fov::{HANDLE_ZOOM_ON, HandleZoom, fov_line, handle_zoom, lines_sent};
     // Its own `mirv_fov <n>` lines left out: the project's comes after them.
-    let mut out = super::picture_fov::lines_sent(config);
+    let mut out = lines_sent(config);
     if let Some(fov) = config.picture_fov {
-        out.push(super::picture_fov::fov_line(fov));
+        if handle_zoom(config) == Some(HandleZoom::Added) {
+            out.push(HANDLE_ZOOM_ON.to_string());
+        }
+        out.push(fov_line(fov));
     }
     out
 }

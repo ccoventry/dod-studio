@@ -334,6 +334,68 @@ fn the_projects_field_of_view_follows_the_users_lines_in_every_job() {
     }
 }
 
+/// Lines that don't set `handleZoom` get `mirv_fov handleZoom enabled 1`
+/// once, after them and right before the project's field of view (#1085,
+/// decision 10B a), in every job (the primer too) and in the hook's batch
+/// file for every demo, so the override follows the scope zoom.
+#[test]
+fn handle_zoom_goes_right_before_the_projects_field_of_view_in_every_job() {
+    use crate::game_config::picture_fov::HANDLE_ZOOM_ON;
+    for hook_dll in [false, true] {
+        let mut config = mock_config();
+        let root = config.primary_media_dir.clone().unwrap();
+        if hook_dll {
+            let dll = root.join("dodstudio_goldsrc_hooks.dll");
+            std::fs::write(&dll, b"x").unwrap();
+            config.goldsrc_hooks_dll_path = Some(dll.to_string_lossy().to_string());
+        }
+        config.init_commands = vec![
+            "mirv_fov 105".to_string(),
+            "exec dicewsod25.cfg".to_string(),
+        ];
+        config.picture_fov = Some(110.0);
+        let mut second_demo = streak_with_kills(1000, 1200, &[1000, 1200]);
+        second_demo.source_demo = "demo2.dem".to_string();
+        let mut raw_streaks = vec![streak_with_kills(1000, 1200, &[1000, 1200]), second_demo];
+        for s in &mut raw_streaks {
+            s.viewdemo_times = s.kills.iter().map(|k| k.1).collect();
+        }
+        let (jobs, _) = build_batch_queue(
+            raw_streaks.clone(),
+            &config,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(jobs.len(), if hook_dll { 2 } else { 3 });
+        for job in &jobs {
+            let lines = &job.init_commands;
+            assert_eq!(
+                lines[..4],
+                [
+                    "exec dicewsod25.cfg",
+                    HANDLE_ZOOM_ON,
+                    "mirv_fov 110",
+                    "sys_autodir"
+                ],
+                "{:?}",
+                job.output_demo
+            );
+            assert_eq!(lines.iter().filter(|l| *l == HANDLE_ZOOM_ON).count(), 1);
+        }
+
+        if hook_dll {
+            let file = crate::patch::runtime_batch::batch_file(&jobs, &raw_streaks, false).unwrap();
+            let inits: Vec<&str> = file.lines().filter(|l| l.starts_with("init\t")).collect();
+            let zoom_line = format!("init\t{HANDLE_ZOOM_ON}");
+            for demo in inits.chunks(inits.len() / 2) {
+                let at = |line: &str| demo.iter().position(|l| *l == line).unwrap();
+                assert!(at("init\texec dicewsod25.cfg") < at(&zoom_line), "{demo:?}");
+                assert_eq!(at(&zoom_line) + 1, at("init\tmirv_fov 110"), "{demo:?}");
+            }
+        }
+    }
+}
+
 /// Without the project's field of view the lines go as typed (#1085: New
 /// UI off sends what it always did).
 #[test]
