@@ -90,6 +90,18 @@ test('every row shows a value: nothing on the page is Not set', async ({ page })
   await expect(pageRoot(page).locator('[data-field="ds_view_show_own_blood"]')).toHaveValue('0');
 });
 
+test("HD textures shows Game's own and sends nothing until On or Off is picked", async ({ page }) => {
+  await openClipTab(page);
+  // The hook starts it from the install's HD folder and the in-game Settings
+  // tab, so a fixed value would override the player's choice.
+  await expect(chip(page, 'ds_hd_enabled', 'null')).toHaveAttribute('aria-pressed', 'true');
+  expect((await withRows(page, [])).some((l) => l.startsWith('ds_hd_enabled'))).toBe(false);
+  await chip(page, 'ds_hd_enabled', '0').click();
+  await expect(chip(page, 'ds_hd_enabled', '0')).toHaveAttribute('aria-pressed', 'true');
+  await chip(page, 'ds_hd_enabled', 'null').click();
+  await expect(chip(page, 'ds_hd_enabled', 'null')).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('a row a game config sets to another value says which config', async ({ page }) => {
   await openClipTab(page);
   await expect(pageRoot(page).locator('[data-row="clip-hide_hints"]')).toContainText('config.cfg sets 0');

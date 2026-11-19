@@ -21,8 +21,7 @@ import {
   resolveSettings, resolveCaptureSettings, blockFromForm, followFormEdits, keysDifferingFromForm, madeWithOf,
   blockFov, blockUsesRows, LISTS_THE_PAGE_OWNS,
 } from './project_settings_logic.js';
-import { DEFAULT_FOV, fovFromLines } from './clip_settings_logic.js';
-import { SENT_ROWS } from './clip_settings_rows.js';
+import { DEFAULT_FOV, fovFromLines, rowsSentCount } from './clip_settings_logic.js';
 import { withFilledFov, fovTheGameUses } from './project_fov.js';
 import { isNewUiOn, onNewUiChange } from './new_ui.js';
 import {
@@ -83,7 +82,8 @@ export function effectiveCaptureSettings(form) {
   const newUi = isNewUiOn();
   const resolved = resolveCaptureSettings(form, block, pcId, { pictureFov: newUi, clipRows: newUi });
   if (newUi && blockUsesRows(block) && Array.isArray(resolved.init_commands)) {
-    logFrontendEvent(clipRowsSentLine({ rows: SENT_ROWS.length, own: resolved.init_commands.length - SENT_ROWS.length }));
+    const rows = rowsSentCount(resolved.init_commands);
+    logFrontendEvent(clipRowsSentLine({ rows, own: resolved.init_commands.length - rows }));
   }
   return resolved;
 }

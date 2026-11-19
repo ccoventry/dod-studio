@@ -7,9 +7,9 @@ import { describe, it, expect } from 'vitest';
 import {
   parseSetting, rowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
   fovFromLines, presetPick, isUsableNumber, numberRowValue, isUsableFov, clipProblems,
-  rowsAreOn, shownRowValue, linesWithRows, differsFromConfig,
+  rowsAreOn, shownRowValue, linesWithRows, rowsSentCount, differsFromConfig,
 } from './clip_settings_logic.js';
-import { CLIP_SETTINGS_ROWS, SENT_ROWS, ROW_DEFAULTS } from './clip_settings_rows.js';
+import { CLIP_SETTINGS_ROWS, SENT_ROWS, ROW_DEFAULTS, SENT_ONLY_WHEN_SET } from './clip_settings_rows.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CLIP_SETTINGS;
@@ -93,24 +93,42 @@ describe('Use Clip settings', () => {
     expect(rowsAreOn({ clip_rows_on: false })).toBe(false);
   });
 
-  it("shows a row's line, else the game's own value: never nothing", () => {
+  it("shows a row's line, else the game's own value: nothing only for a row the game decides", () => {
     expect(shownRowValue(lines, 'ds_hud_hide_scoreboard')).toBe('1');
     expect(shownRowValue(lines, 'ds_hud_show_scope')).toBe(ROW_DEFAULTS.ds_hud_show_scope);
     for (const r of SENT_ROWS) expect(shownRowValue([], r.cvar)).toBe(ROW_DEFAULTS[r.cvar]);
+    expect(shownRowValue([], 'ds_hd_enabled')).toBeNull();
+    expect(shownRowValue(['ds_hd_enabled 0'], 'ds_hd_enabled')).toBe('0');
   });
 
   it('sends the own lines in order, then one line for every row with its shown value', () => {
     const sent = linesWithRows(lines);
+    const always = SENT_ROWS.filter((r) => !SENT_ONLY_WHEN_SET.includes(r.cvar));
     expect(sent.slice(0, 3)).toEqual(['cl_righthand 1', 'exec mine.cfg', 'mirv_fov 90']);
-    expect(sent.slice(3)).toEqual(SENT_ROWS.map((r) => `${r.cvar} ${shownRowValue(lines, r.cvar)}`));
+    expect(sent.slice(3)).toEqual(always.map((r) => `${r.cvar} ${shownRowValue(lines, r.cvar)}`));
     expect(sent).toContain('r_decals 256');
     expect(sent).toContain(`ds_hud_show_scope ${ROW_DEFAULTS.ds_hud_show_scope}`);
+    expect(rowsSentCount(sent)).toBe(always.length);
   });
 
-  it('sends every row even with no lines at all, each under 64 bytes', () => {
+  it('sends every row but the ones the game decides with no lines at all, each under 64 bytes', () => {
     const sent = linesWithRows([]);
-    expect(sent).toHaveLength(SENT_ROWS.length);
+    expect(sent).toHaveLength(SENT_ROWS.length - SENT_ONLY_WHEN_SET.length);
+    expect(rowsSentCount([])).toBe(sent.length);
     for (const line of sent) expect(new TextEncoder().encode(line).length).toBeLessThan(64);
+  });
+
+  // The hook starts HD on only with a dodstudio_hd folder, and the in-game
+  // Settings tab's saved value wins over that: a batch sends ds_hd_enabled
+  // only when the project's lines set it, so it never overrides either.
+  it('sends ds_hd_enabled only when a line sets it, in its row place', () => {
+    expect(linesWithRows(['cl_righthand 1']).some((l) => l.startsWith('ds_hd_enabled'))).toBe(false);
+    for (const value of ['0', '1']) {
+      const sent = linesWithRows([`ds_hd_enabled ${value}`, 'cl_righthand 1']);
+      expect(sent.filter((l) => l.startsWith('ds_hd_enabled'))).toEqual([`ds_hd_enabled ${value}`]);
+      expect(sent[0]).toBe('cl_righthand 1');
+      expect(rowsSentCount(sent)).toBe(SENT_ROWS.length);
+    }
   });
 
   it('compares a config value as the native rules do', () => {

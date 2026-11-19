@@ -3,7 +3,7 @@ import {
   PROJECT_FIELDS, resolveSettings, blockFromForm, followFormEdits, keysDifferingFromForm,
   madeWithOf, installFor, installToOffer, withMadeWith, LISTS_THE_PAGE_OWNS, resolveCaptureSettings, blockUsesRows,
 } from './project_settings_logic.js';
-import { SENT_ROWS } from './clip_settings_rows.js';
+import { SENT_ROWS, SENT_ONLY_WHEN_SET } from './clip_settings_rows.js';
 
 const PC = 'pc-a';
 const OTHER_PC = 'pc-b';
@@ -157,7 +157,8 @@ describe('Use Clip settings in what a batch sends', () => {
   it('sends every row after the own lines with it on and the New UI on', () => {
     const sent = resolveCaptureSettings(ask(), on, PC, { clipRows: true }).init_commands;
     expect(sent[0]).toBe('cl_righthand 1');
-    expect(sent).toHaveLength(1 + SENT_ROWS.length);
+    // Every row but the ones the game decides with no line of their own.
+    expect(sent).toHaveLength(1 + SENT_ROWS.length - SENT_ONLY_WHEN_SET.length);
     expect(sent).toContain('ds_hud_hide_scoreboard 1');
   });
 

@@ -339,6 +339,8 @@ export const WORKSPACE_STRINGS = {
     OFF: 'Off',
     ON: 'On',
     typedValue: (value) => `${value} (typed)`,
+    GAME_DECIDES: "Game's own",
+    GAME_DECIDES_TITLE: "Sends nothing for this, so the game keeps what it has: on when the install has HD textures, unless you turned them off in the game's Settings tab. Off or On is sent with every capture.",
     AT_LOAD: 'At map load',
     AT_LOAD_TITLE: 'The game reads this as a map loads, and these lines run once it has loaded: a change reaches the second demo of a batch, not the first.',
     pictureValue: (fov) => `${fov}°`,

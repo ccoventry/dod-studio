@@ -8,7 +8,7 @@
 // Apply. The rows are an editor over the project's Initial Commands lines;
 // the rules are clip_settings_logic.js's.
 
-import { CLIP_SETTINGS_SECTIONS, ROW_CVARS, ROW_DEFAULTS, SENT_ROWS } from './clip_settings_rows.js';
+import { CLIP_SETTINGS_SECTIONS, ROW_CVARS, ROW_DEFAULTS, SENT_ROWS, SENT_ONLY_WHEN_SET } from './clip_settings_rows.js';
 import {
   shownRowValue, withRowValue, ownEntries, withLineAt, withoutLineAt, withRowLinesMerged,
   DEFAULT_FOV, presetPick, numberRowValue, parseSetting, clipRowKey, rowsAreOn, differsFromConfig,
@@ -94,7 +94,9 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
    *  than the row shows, or null. */
   function configWarning(r) {
     const found = configValues()?.[r.cvar.toLowerCase()];
-    if (!found || !differsFromConfig(shownRowValue(lines(), r.cvar), found.value)) return null;
+    const shown = shownRowValue(lines(), r.cvar);
+    // Game's own sends nothing, so a config's value is the one used.
+    if (!found || shown === null || !differsFromConfig(shown, found.value)) return null;
     return el('span', { class: 'ps-state ps-state-warn', text: S.configSets(found.file, found.value), title: S.CONFIG_SETS_TITLE });
   }
 
@@ -185,13 +187,16 @@ export function createClipSettingsTab({ getState, onEdit, getPresets, savePreset
     return [el('span', { class: 'ps-muted', text: S.SPRAYS_STATE, title: S.SPRAYS_TITLE })];
   }
 
-  /** Off, On; and the typed value when a line holds another. */
+  /** Off, On; and the typed value when a line holds another. A row the game
+   *  decides (SENT_ONLY_WHEN_SET) also offers Game's own, which drops its
+   *  line so nothing is sent. */
   function toggleChips(r, value) {
     const choices = [
       { value: '0', label: S.OFF },
       { value: '1', label: S.ON },
     ];
-    if (!r.values.includes(value)) choices.push({ value, label: S.typedValue(value) });
+    if (SENT_ONLY_WHEN_SET.includes(r.cvar)) choices.push({ value: null, label: S.GAME_DECIDES, title: S.GAME_DECIDES_TITLE });
+    if (value !== null && !r.values.includes(value)) choices.push({ value, label: S.typedValue(value) });
     return chips(r.cvar, choices, value, (v) => setLines(withRowValue(lines(), r.cvar, v), true));
   }
 

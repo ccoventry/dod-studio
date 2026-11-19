@@ -141,11 +141,17 @@ export const ROW_DEFAULTS = Object.freeze({
   ds_hud_overview_players: '0', // install.rs: overview_players "0"
   ds_hud_overview_team_marker: '0', // install.rs: overview_marker "0"
   ds_hud_overview_hide_speaker: '0', // install.rs: overview_speaker "0"
-  // Unverified: the hook starts it on when the install has a dodstudio_hd
-  // folder and off when it hasn't (texture_hires::starts_on), so there is no
-  // one value. 1 changes nothing for an install with HD textures, and one
-  // without has nothing to load.
-  ds_hd_enabled: '1',
+  // None (null): the game decides, and a batch sends a line only when one
+  // sets it (SENT_ONLY_WHEN_SET). The hook starts it on when the install has
+  // a dodstudio_hd folder and off when it hasn't (goldsrc-hooks
+  // texture_hires::starts_on, lib.rs), then the in-game Settings tab's saved
+  // value (dodstudio_ui\settings.cfg, applied on the first frame) wins, and
+  // a batch's Initial Commands win over both. So a fixed 1 would turn HD back
+  // on for a player who turned it off there, and on an install with no HD
+  // folder it would install the texture hook mid-session (five hw.dll
+  // detours, the raised texture size ceiling and the leftover-texture fix)
+  // that the game otherwise never installs, to load nothing.
+  ds_hd_enabled: null,
   ds_map_weather: '0', // install.rs: map_weather "0"
   ds_map_apply_lighting: '1', // install.rs: map_light "1"
   ds_map_allow_shaders: '0', // install.rs: world_shaders "0"
@@ -158,11 +164,14 @@ export const ROW_DEFAULTS = Object.freeze({
   mirv_movie_sound_volume: '0.4', // HLAE's own (AfxHookGoldSrc registers it "0.4")
 });
 
-/** The cvars whose default above is not one fixed value of the game's. */
-export const UNVERIFIED_DEFAULTS = Object.freeze(['ds_hd_enabled']);
+/** The cvars with no one value of the game's (null above): a row for one
+ *  shows "Game's own" while no line sets it, and a batch sends a line for
+ *  it only when one does. */
+export const SENT_ONLY_WHEN_SET = Object.freeze(['ds_hd_enabled']);
 
 /** The rows a batch sends a line for with Use Clip settings on, in page
- *  order: every row that is a line (not field of view, not sprays). */
+ *  order: every row that is a line (not field of view, not sprays), those in
+ *  SENT_ONLY_WHEN_SET only when a line sets them. */
 export const SENT_ROWS = Object.freeze(CLIP_SETTINGS_ROWS.filter((r) => ['toggle', 'select', 'number'].includes(r.kind)));
 
 /** The cvars the rows show, lower case: a line setting one of them belongs

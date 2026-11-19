@@ -53,7 +53,7 @@ const { createProjectSession } = await import('./project_session.js');
 const snapshots = await import('./project_settings_snapshot.js');
 const settings = await import('./project_settings.js');
 const newUi = await import('./new_ui.js');
-const { SENT_ROWS } = await import('./clip_settings_rows.js');
+const { SENT_ROWS, SENT_ONLY_WHEN_SET } = await import('./clip_settings_rows.js');
 const { startingValues, blockWithPending } = await import('./project_settings_page_logic.js');
 const ipc = await import('./ipc_bridge.js');
 const { showToast } = await import('./toast.js');
@@ -341,9 +341,11 @@ describe('the Project settings page (#1085, step 6)', () => {
       vi.mocked(ipc.logFrontendEvent).mockClear();
       settings.applyBlockFromPage(settings.blockForPage().block);
       const sent = settings.effectiveCaptureSettings({ init_commands: [] }).init_commands;
-      expect(sent).toHaveLength(1 + SENT_ROWS.length);
+      // Every row but the ones the game decides (ds_hd_enabled) with no line.
+      const rows = SENT_ROWS.length - SENT_ONLY_WHEN_SET.length;
+      expect(sent).toHaveLength(1 + rows);
       const lines = vi.mocked(ipc.logFrontendEvent).mock.calls.map(([line]) => line);
-      expect(lines).toContain(`[project] Clip settings: sending ${SENT_ROWS.length} row(s) after 1 line(s) of the project's own commands`);
+      expect(lines).toContain(`[project] Clip settings: sending ${rows} row(s) after 1 line(s) of the project's own commands`);
     });
 
     it('copies the folders as before once it is off', async () => {

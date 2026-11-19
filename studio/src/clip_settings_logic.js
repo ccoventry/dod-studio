@@ -91,20 +91,36 @@ export function rowValue(lines, cvar) {
 }
 
 /** The value a row shows, and a batch sends, with Use Clip settings on: its
- *  line's, else the game's own (ROW_DEFAULTS). */
+ *  line's, else the game's own (ROW_DEFAULTS). Null for a row the game
+ *  decides (SENT_ONLY_WHEN_SET) while no line sets it: nothing is sent. */
 export function shownRowValue(lines, cvar) {
   return rowValue(lines, cvar) ?? ROW_DEFAULTS[cvar];
 }
 
+/** The row lines a batch sends with Use Clip settings on, in page order:
+ *  one for every row with a value (shownRowValue). */
+function rowLines(lines) {
+  return SENT_ROWS.flatMap((r) => {
+    const value = shownRowValue(lines, r.cvar);
+    return value === null ? [] : [`${r.cvar} ${value}`];
+  });
+}
+
+/** How many row lines a batch sends for `lines` (linesWithRows' or the
+ *  project's own; the count is the same), for the activity log. */
+export function rowsSentCount(lines) {
+  return rowLines(lines).length;
+}
+
 /**
  * The Initial Commands a batch sends with Use Clip settings on: the lines no
- * row shows, in their order, then one line for every row (SENT_ROWS, page
- * order) with its shown value. The rows go last, as Which wins says, so a cfg
- * an own line `exec`s never has the last word over a row.
+ * row shows, in their order, then one line for every row with a value
+ * (SENT_ROWS, page order). The rows go last, as Which wins says, so a cfg an
+ * own line `exec`s never has the last word over a row.
  */
 export function linesWithRows(lines) {
   const own = (lines || []).filter((line) => !isRowLine(line));
-  return [...own, ...SENT_ROWS.map((r) => `${r.cvar} ${shownRowValue(lines, r.cvar)}`)];
+  return [...own, ...rowLines(lines)];
 }
 
 /** Whether a config's `configValue` for a row differs from the row's

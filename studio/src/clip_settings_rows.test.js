@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  CLIP_SETTINGS_SECTIONS, CLIP_SETTINGS_ROWS, ROW_CVARS, ROW_DEFAULTS, SENT_ROWS, UNVERIFIED_DEFAULTS,
+  CLIP_SETTINGS_SECTIONS, CLIP_SETTINGS_ROWS, ROW_CVARS, ROW_DEFAULTS, SENT_ROWS, SENT_ONLY_WHEN_SET,
 } from './clip_settings_rows.js';
 import { DODSTUDIO_NAMES } from './console_commands_data.js';
 import { parseSetting, isUsableNumber } from './clip_settings_logic.js';
@@ -53,15 +53,17 @@ describe('CLIP_SETTINGS_ROWS', () => {
     expect(Object.keys(ROW_DEFAULTS).sort()).toEqual(SENT_ROWS.map((r) => r.cvar).sort());
     for (const row of SENT_ROWS) {
       const value = ROW_DEFAULTS[row.cvar];
-      if (row.kind === 'number') expect(isUsableNumber(row, value), row.cvar).toBe(true);
+      // The game decides these: no value, and nothing sent unless a line sets one.
+      if (SENT_ONLY_WHEN_SET.includes(row.cvar)) expect(value, row.cvar).toBeNull();
+      else if (row.kind === 'number') expect(isUsableNumber(row, value), row.cvar).toBe(true);
       else expect(row.values, row.cvar).toContain(value);
     }
   });
 
-  it("gives every DoD Studio row the default docs/dodstudio_commands.md lists, but the unverified ones", () => {
+  it("gives every DoD Studio row the default docs/dodstudio_commands.md lists, but the ones the game decides", () => {
     const path = fileURLToPath(new URL('../../docs/dodstudio_commands.md', import.meta.url));
     const docs = readFileSync(path, 'utf8');
-    for (const row of SENT_ROWS.filter((r) => r.cvar.startsWith('ds_') && !UNVERIFIED_DEFAULTS.includes(r.cvar))) {
+    for (const row of SENT_ROWS.filter((r) => r.cvar.startsWith('ds_') && !SENT_ONLY_WHEN_SET.includes(r.cvar))) {
       const listed = new RegExp(`^\\| \`${row.cvar}\` \\| \`([^\`]+)\``, 'm').exec(docs);
       expect(listed?.[1], row.cvar).toBe(ROW_DEFAULTS[row.cvar]);
     }
