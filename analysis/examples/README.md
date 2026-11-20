@@ -43,6 +43,7 @@ documented in its own `//!` header.
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
 | `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
 | `position_data_survey` | Over many demos: field tables, origin refresh rate and step size, kill coverage POV vs HLTV, parse cost (#448; `docs/position_data_in_demos.md`) |
+| `player_path` | Where is one player, frame by frame, over a highlight's frame range? CSV for a frag-movie editor to judge whether a jump cut stays in the same part of the map |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and
