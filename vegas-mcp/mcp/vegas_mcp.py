@@ -352,6 +352,10 @@ class Instances:
             raise
 
     def launch(self, args):
+        # A VEGAS of ours that died since is cleaned up first, so its own
+        # autosave does not read as a crashed session's and block this launch.
+        for pid in [p for p, one in self.launched.items() if one.exited()]:
+            self.forget(pid)
         info, launched = vegas_instances.launch(
             args.get("work_folder"), args.get("wait_seconds", vegas_instances.DEFAULT_WAIT_SECONDS), bool(args.get("minimised", True))
         )
@@ -374,9 +378,10 @@ class Instances:
         pid = pid_argument(args) if "pid" in args else self.current
         if pid is None:
             raise BridgeUnavailable("no current bridge VEGAS: pass pid (instances lists them)")
-        launched = self.launched.pop(pid, None)
+        launched = self.launched.get(pid)
         if launched is not None:
-            result = launched.end()
+            result = launched.end()  # raises while it still runs: the record stays, so end_all retries it
+            del self.launched[pid]
         else:
             # Checked while this server's connection still holds the pipe, so
             # the listing cannot miss it between clients.
@@ -486,14 +491,17 @@ def serve_lines(instances, lines=None):
     names = {t["name"] for t in TOOLS}
     # MCP clients send UTF-8; Python reads a piped stdin in the ANSI code page
     # (before 3.15), which mangles any non-ASCII path.
-    for raw in lines if lines is not None else io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8"):
+    # errors="replace": a stray invalid byte spoils one line, never the server.
+    for raw in lines if lines is not None else io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace"):
         raw = raw.strip()
         if not raw:
             continue
         try:
             msg = json.loads(raw)
         except ValueError:
-            send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}})
+            msg = None
+        if not isinstance(msg, dict):
+            send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error: not a JSON-RPC object"}})
             continue
         method = msg.get("method")
         mid = msg.get("id")

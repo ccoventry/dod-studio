@@ -199,7 +199,10 @@ public sealed class DialogAnswerer {
         string lower = text.ToLowerInvariant();
         IntPtr b;
 
-        if (lower.Contains("autosave") || lower.Contains("restore")) {
+        // Only the prompt's own sentences: "restore" alone also matches a
+        // plug-in's "default settings have been restored" box, a path, or
+        // restored.veg, which then would hang unanswered.
+        if (lower.Contains("restore the autosaved project") || lower.Contains("did not complete properly")) {
             leftAlone.Add(h);
             Record("left VEGAS's restore prompt for the user ('" + Short(text) + "')");
             return false;

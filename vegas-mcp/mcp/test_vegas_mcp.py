@@ -45,11 +45,13 @@ class Autosave(unittest.TestCase):
 
     def test_an_orphan_autosave_is_one_whose_vegas_is_not_running(self):
         with tempfile.TemporaryDirectory() as folder:
-            mine = "%08x.autosave.veg" % os.getpid()  # a running process: not an orphan
-            for name in (mine, "7ffffff0.autosave.veg", "7ffffff0.autosave.veg.bak", "notapid.autosave.veg"):
+            # This python's PID is running but is not VEGAS (a crashed VEGAS's
+            # PID reused after a reboot, say): still an orphan.
+            reused = "%08x.autosave.veg" % os.getpid()
+            for name in (reused, "7ffffff0.autosave.veg", "7ffffff0.autosave.veg.bak", "notapid.autosave.veg"):
                 open(os.path.join(folder, name), "w").close()
             found = [os.path.basename(p) for p in vegas_instances.orphan_autosaves(folder)]
-            self.assertEqual(found, ["7ffffff0.autosave.veg"])
+            self.assertEqual(found, sorted([reused, "7ffffff0.autosave.veg"]))
 
 
 class WorkFolder(unittest.TestCase):
@@ -72,9 +74,17 @@ class WorkFolder(unittest.TestCase):
         os.environ[vegas_instances.ROOT_VARIABLE] = "D:\\tests\\vegas"
         self.assertEqual(vegas_instances.checked_work_folder("D:\\tests\\vegas\\run1"), "D:\\tests\\vegas\\run1")
         self.assertEqual(vegas_instances.checked_work_folder(None), "D:\\tests\\vegas")
-        for outside in ("D:\\tests\\vegas2", "D:\\tests", "D:\\tests\\vegas\\..\\other", "C:\\Users\\name\\Videos"):
+        for outside in ("D:\\tests\\vegas2", "D:\\tests", "D:\\tests\\vegas\\..\\other", "C:\\Users\\name\\Videos",
+                        "D:\\tests\\vegas\\.. \\other", "D:\\tests\\vegas\\run. "):
             with self.assertRaises(vegas_instances.VegasError, msg=outside):
                 vegas_instances.checked_work_folder(outside)
+
+    def test_without_a_server_root_only_the_default_folder_is_allowed(self):
+        os.environ.pop(vegas_instances.ROOT_VARIABLE, None)
+        default = vegas_instances.default_root()
+        self.assertEqual(vegas_instances.checked_work_folder(os.path.join(default, "run1")), os.path.join(default, "run1"))
+        with self.assertRaises(vegas_instances.VegasError):
+            vegas_instances.checked_work_folder("C:\\Users\\name\\Documents\\project")
 
 
 @unittest.skipUnless(os.name == "nt", "Windows processes")
@@ -94,9 +104,11 @@ class EndRefusesOtherProcesses(unittest.TestCase):
 
     def test_a_launched_vegas_is_ended_through_its_own_handle(self):
         # A stand-in child: Launched.end must end exactly this process, by its handle.
+        # Clean-up looks in an empty folder, never the real VEGAS autosave folder.
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         launched = vegas_instances.Launched(child)
-        self.assertIn("ended VEGAS PID %d" % child.pid, launched.end())
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertIn("ended VEGAS PID %d" % child.pid, launched.end(folder))
         self.assertTrue(launched.exited())
 
     def test_a_launched_vegas_that_died_is_cleaned_up_by_its_handle_not_its_pid(self):
@@ -107,13 +119,16 @@ class EndRefusesOtherProcesses(unittest.TestCase):
         instances = vegas_mcp.Instances()
         instances.launched[child.pid] = vegas_instances.Launched(child)
         instances.current = child.pid
-        real = vegas_instances.end_bridge_pid
+        real_end, real_cleanup = vegas_instances.end_bridge_pid, vegas_instances.cleanup
         vegas_instances.end_bridge_pid = lambda pid: self.fail("a launched VEGAS must not be ended by PID")
+        cleaned = []
+        vegas_instances.cleanup = lambda pid, folder=None: cleaned.append(pid) or "stubbed"
         try:
             instances.end_all()
         finally:
-            vegas_instances.end_bridge_pid = real
+            vegas_instances.end_bridge_pid, vegas_instances.cleanup = real_end, real_cleanup
         self.assertEqual(instances.launched, {})
+        self.assertEqual(cleaned, [child.pid])
 
 
 class Tools(unittest.TestCase):
@@ -171,6 +186,16 @@ class Tools(unittest.TestCase):
             result = vegas_mcp.call_tool(instances, name, args)
             self.assertTrue(result["isError"], (name, args))
         self.assertEqual(instances.launched, {})
+
+    def test_a_line_that_is_not_an_object_is_an_error_reply(self):
+        sent = []
+        real = vegas_mcp.send
+        vegas_mcp.send = sent.append
+        try:
+            vegas_mcp.serve_lines(vegas_mcp.Instances(), ["[1, 2]\n", "\"text\"\n"])
+        finally:
+            vegas_mcp.send = real
+        self.assertEqual([m["error"]["code"] for m in sent], [-32700, -32700])
 
     def test_non_ascii_arguments_arrive_intact(self):
         sent = []

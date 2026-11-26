@@ -92,10 +92,15 @@ def bridge_pids():
     return sorted(p for p in (pid_from_pipe_name(n) for n in names) if p is not None)
 
 
+def autosave_folder():
+    """Where VEGAS 21 keeps its autosaves (the default; a custom autosave
+    folder set in VEGAS's preferences is not followed)."""
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "VEGAS Pro", "21.0")
+
+
 def autosave_files(pid, folder=None):
     """VEGAS's autosave files for one process: <pid as 8 hex digits>.autosave.veg and its .bak."""
-    folder = folder or os.path.join(os.environ.get("LOCALAPPDATA", ""), "VEGAS Pro", "21.0")
-    return sorted(glob.glob(os.path.join(folder, "%08x.autosave.veg*" % pid)))
+    return sorted(glob.glob(os.path.join(folder or autosave_folder(), "%08x.autosave.veg*" % pid)))
 
 
 def _open(pid, access):
@@ -114,23 +119,28 @@ def is_running(pid):
         _k32.CloseHandle(h)
 
 
-def image_path(pid):
-    h = _open(pid, PROCESS_QUERY_LIMITED_INFORMATION)
-    if not h:
-        return None
-    try:
-        buf = ctypes.create_unicode_buffer(1024)
-        size = wt.DWORD(len(buf))
-        if not _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-            return None
-        return buf.value
-    finally:
-        _k32.CloseHandle(h)
+def _image_of(handle):
+    """The program file a process handle runs, or ''."""
+    buf = ctypes.create_unicode_buffer(1024)
+    size = wt.DWORD(len(buf))
+    return buf.value if _k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)) else ""
+
+
+def _is_vegas_image(image):
+    return os.path.basename(image).lower().startswith("vegas") and image.lower().endswith(".exe")
 
 
 def is_vegas(pid):
-    path = image_path(pid)
-    return bool(path) and os.path.basename(path).lower().startswith("vegas") and path.lower().endswith(".exe")
+    """Whether a running process with this PID is VEGAS."""
+    h = _open(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+    if not h:
+        return False
+    try:
+        code = wt.DWORD()
+        running = bool(_k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == STILL_ACTIVE
+        return running and _is_vegas_image(_image_of(h))
+    finally:
+        _k32.CloseHandle(h)
 
 
 def vegas_pids():
@@ -159,12 +169,20 @@ def checked_work_folder(requested):
     """The work folder launch may give a VEGAS: never a drive root, and inside
     DODSTUDIO_VEGAS_ROOT when the server has one, so a caller cannot widen the
     folder the bridge writes and opens projects in to the user's own files."""
-    allowed = os.environ.get(ROOT_VARIABLE)
-    root = os.path.abspath(requested or default_root())
+    # Without DODSTUDIO_VEGAS_ROOT only the default folder (and below) is
+    # allowed, so a missing -e at registration cannot open the user's folders.
+    allowed = default_root()
+    # The extension resolves the folder with .NET's path rules, which differ
+    # from Python's on odd names (a ".. " segment); a folder named with a
+    # trailing space or dot is refused before either side rewrites it.
+    if requested and any(p not in (".", "..") and p != p.rstrip(" .") for p in requested.replace("/", os.sep).split(os.sep)[1:]):
+        raise VegasError("the work folder %s has a name ending in a space or dot" % requested)
+    root = os.path.abspath(requested or allowed)
     if os.path.dirname(root.rstrip(os.sep)) == root.rstrip(os.sep) or os.path.splitdrive(root)[1] in ("", os.sep):
         raise VegasError("the work folder cannot be a drive root (%s)" % root)
-    if allowed and not is_inside(root, allowed):
-        raise VegasError("the work folder %s is outside this server's %s %s" % (root, ROOT_VARIABLE, os.path.abspath(allowed)))
+    if not is_inside(root, allowed):
+        raise VegasError("the work folder %s is outside %s (%s; set %s to allow another)"
+                         % (root, os.path.abspath(allowed), ROOT_VARIABLE + " " + ("is set" if os.environ.get(ROOT_VARIABLE) else "is not set"), ROOT_VARIABLE))
     return root
 
 
@@ -172,8 +190,9 @@ def orphan_autosaves(folder=None):
     """Autosaves left by a VEGAS that is no longer running: a crashed session's
     recovery file. A new VEGAS offers to restore it, and the bridge's dialog
     answerer must never be the one to answer that, so launch refuses while
-    one exists."""
-    folder = folder or os.path.join(os.environ.get("LOCALAPPDATA", ""), "VEGAS Pro", "21.0")
+    one exists. Its PID may since belong to another program (after a reboot),
+    so only a running VEGAS on that PID makes it not an orphan."""
+    folder = folder or autosave_folder()
     found = []
     for path in glob.glob(os.path.join(folder, "*.autosave.veg")):
         stem = os.path.basename(path).split(".")[0]
@@ -181,9 +200,17 @@ def orphan_autosaves(folder=None):
             pid = int(stem, 16)
         except ValueError:
             continue
-        if not is_running(pid):
+        if not is_vegas(pid):
             found.append(path)
     return sorted(found)
+
+
+END_WAIT_SECONDS = 15
+# VEGAS takes 7-14 s to open its pipe on this PC; this allows a slow disk.
+DEFAULT_WAIT_SECONDS = 120
+STARTUP_POLL_SECONDS = 0.25
+SW_SHOWMINNOACTIVE = 7
+SW_SHOWNOACTIVATE = 4
 
 
 class Launched:
@@ -198,8 +225,9 @@ class Launched:
     def exited(self):
         return self.proc.poll() is not None
 
-    def end(self):
-        """Terminate it through its own handle, then clean up after it."""
+    def end(self, folder=None):
+        """Terminate it through its own handle, then clean up after it
+        (folder: where its autosave is, for tests)."""
         if not self.exited():
             self.proc.kill()  # TerminateProcess on the handle Popen holds
             try:
@@ -209,15 +237,7 @@ class Launched:
             what = "ended VEGAS PID %d" % self.pid
         else:
             what = "VEGAS PID %d had already exited" % self.pid
-        return what + "; " + cleanup(self.pid)
-
-
-END_WAIT_SECONDS = 15
-# VEGAS takes 7-14 s to open its pipe on this PC; this allows a slow disk.
-DEFAULT_WAIT_SECONDS = 120
-STARTUP_POLL_SECONDS = 0.25
-SW_SHOWMINNOACTIVE = 7
-SW_SHOWNOACTIVATE = 4
+        return what + "; " + cleanup(self.pid, folder)
 
 
 def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True):
@@ -303,18 +323,23 @@ def close_problem_reports(pid):
     return [int(x) for x in out.split() if x.isdigit()]
 
 
-def cleanup(pid):
-    """After a bridge VEGAS is gone: its Problem Report box and its autosave. Returns what it did."""
+HANDLE_RELEASE_SECONDS = 0.5
+
+
+def cleanup(pid, folder=None):
+    """After a bridge VEGAS is gone: its autosave, then its Problem Report box.
+    The autosave goes first: a shutdown cut short after it leaves at most a
+    box, not a file that blocks every later launch. Returns what it did."""
     done = []
-    for report in close_problem_reports(pid):
-        done.append("closed its Problem Report (PID %d) unsent" % report)
-    time.sleep(0.5)  # let VEGAS's file handles go
-    for path in autosave_files(pid):
+    time.sleep(HANDLE_RELEASE_SECONDS)  # let VEGAS's file handles go
+    for path in autosave_files(pid, folder):
         try:
             os.remove(path)
             done.append("removed its autosave %s" % os.path.basename(path))
         except OSError as e:
             done.append("could not remove its autosave %s: %s" % (path, e))
+    for report in close_problem_reports(pid):
+        done.append("closed its Problem Report (PID %d) unsent" % report)
     return "; ".join(done) or "nothing left behind"
 
 
@@ -331,10 +356,8 @@ def end_bridge_pid(pid):
         code = wt.DWORD()
         if not _k32.GetExitCodeProcess(h, ctypes.byref(code)) or code.value != STILL_ACTIVE:
             return "VEGAS PID %d has already exited; nothing done" % pid
-        buf = ctypes.create_unicode_buffer(1024)
-        size = wt.DWORD(len(buf))
-        image = buf.value if _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)) else ""
-        if not (os.path.basename(image).lower().startswith("vegas") and image.lower().endswith(".exe")):
+        image = _image_of(h)
+        if not _is_vegas_image(image):
             raise VegasError("PID %d is not VEGAS (%s): left alone" % (pid, image or "unknown"))
         if pid not in bridge_pids():
             raise VegasError("PID %d has no bridge pipe: not a VEGAS started for the bridge, so it is left alone" % pid)

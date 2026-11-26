@@ -41,6 +41,13 @@ public static class Session {
         if (flag != "1") { WhyOff = FlagVariable + " is not 1"; return; }
         if (string.IsNullOrEmpty(root) || !Path.IsPathRooted(root)) { WhyOff = RootVariable + " is not a full path"; return; }
         string full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        // The launcher passes an absolute, normalised path; one that .NET's
+        // path rules would rewrite (a ".. " segment) may not mean the folder
+        // the launcher checked, so it is refused.
+        if (!string.Equals(full, root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) {
+            WhyOff = RootVariable + " " + root + " is not a normalised full path";
+            return;
+        }
         // A drive root would let every path on the drive through.
         string driveRoot = Path.GetPathRoot(full).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (full.Length <= driveRoot.Length) { WhyOff = RootVariable + " " + full + " is a drive root"; return; }
