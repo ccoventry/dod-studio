@@ -255,8 +255,8 @@ TOOLS = LOCAL_TOOLS + [
             "time": SECONDS,
             "times": {"type": "array", "items": {"type": "number"}, "description": "several times (up to 10), one PNG each, instead of time"},
             "width": {"type": "integer", "description": "scale down to this width, aspect kept; default 1280, 0 = the project's full size; never scaled up"},
-            "folder": {"type": "string", "description": "inside the work folder; default <work folder>\\snapshots"},
-            "inline": {"type": "boolean", "description": "default true: also return each frame as an image (the PNG under 1 MB, else a JPEG of it; 4 MB a call)"},
+            "folder": {"type": "string", "description": "the work folder or a folder inside it; default <work folder>\\snapshots"},
+            "inline": {"type": "boolean", "description": "default true: also return each frame as an image (the PNG under 1 MB, else a JPEG of it; at most 2000 px wide; 4 MB a call)"},
         },
     ),
     tool(

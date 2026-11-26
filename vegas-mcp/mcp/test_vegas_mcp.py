@@ -458,6 +458,17 @@ class SnapshotImages(unittest.TestCase):
         self.assertIn("fewer times", shots[2]["not_inline"])
         self.assertNotIn("inline", shots[2])
 
+    def test_a_copy_narrower_than_its_frame_says_its_width(self):
+        wide = shot(100)
+        wide["width"] = 3840
+        wide["inline"]["width"] = 2000
+        same = shot(100)
+        same["width"] = 1280
+        same["inline"]["width"] = 1280
+        snapshot_content.image_blocks([wide, same])
+        self.assertEqual(wide.get("inline_width"), 2000)
+        self.assertNotIn("inline_width", same)
+
     def test_a_copy_the_bridge_left_out_keeps_its_reason(self):
         shots = [{"path": "x.png", "inline": {"left_out": "over 1000000 bytes even as a JPEG"}}]
         self.assertEqual(snapshot_content.image_blocks(shots), [])
