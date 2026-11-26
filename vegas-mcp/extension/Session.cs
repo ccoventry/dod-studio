@@ -10,8 +10,10 @@
 //
 // Every file the bridge writes (save_as, render) and every project or script
 // it opens lives under DODSTUDIO_VEGAS_ROOT. A project outside it is copied
-// in and the copy opened, so the user's own .veg files are never opened or
-// saved.
+// in and the copy opened, and import_edl refuses a project, so the user's own
+// .veg files are never opened or saved. A guard rail, not a sandbox: a
+// script run_script runs can still write anywhere, VEGAS writes its peak
+// files beside imported media, and a junction inside the folder leads out.
 using System;
 using System.IO;
 
@@ -31,9 +33,17 @@ public static class Session {
     static Session() {
         string flag = Environment.GetEnvironmentVariable(FlagVariable);
         string root = Environment.GetEnvironmentVariable(RootVariable);
+        // Read once, then gone from this process: anything VEGAS starts (a
+        // restarted VEGAS after a crash, say) must not inherit the mark and
+        // listen too, opening its last project, often the user's.
+        Environment.SetEnvironmentVariable(FlagVariable, null);
+        Environment.SetEnvironmentVariable(RootVariable, null);
         if (flag != "1") { WhyOff = FlagVariable + " is not 1"; return; }
         if (string.IsNullOrEmpty(root) || !Path.IsPathRooted(root)) { WhyOff = RootVariable + " is not a full path"; return; }
         string full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        // A drive root would let every path on the drive through.
+        string driveRoot = Path.GetPathRoot(full).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (full.Length <= driveRoot.Length) { WhyOff = RootVariable + " " + full + " is a drive root"; return; }
         if (!Directory.Exists(full)) { WhyOff = RootVariable + " " + full + " does not exist"; return; }
         Root = full;
     }

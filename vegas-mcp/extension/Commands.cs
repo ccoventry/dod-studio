@@ -6,7 +6,8 @@
 // Safety: these run only in a VEGAS started for the bridge (Session). Every
 // file they write, and every project or script they open, is inside its work
 // folder: open_project copies a project from anywhere else into it and opens
-// the copy, so the user's own .veg files are never opened or saved. Nothing
+// the copy, and import_edl takes only EDL text files, so the user's own .veg
+// files are never opened or saved. Nothing
 // saves in place: save_as writes only a path that does not exist yet, unless
 // this session wrote it; new_project and open_project refuse to drop unsaved
 // changes unless told to; render refuses to overwrite a file.
@@ -41,17 +42,29 @@ public class Commands {
         }
         // An extension's project edits must sit in an undo block: outside
         // one, every change fails with E_UNEXPECTED. One block per command,
-        // so Edit > Undo takes back one bridge call.
-        using (new UndoBlock(P, "DoD Studio bridge: " + cmd)) {
-            switch (cmd) {
-                case "add_media": return AddMedia(a);
-                case "set_event": return SetEvent(a);
-                case "create_subclip": return CreateSubclip(a);
-                case "add_effect": return AddEffect(a);
-                case "set_effect_params": return SetEffectParams(a);
-                case "blend_by_speed": return BlendBySpeed(a);
-                default: throw new BridgeError("unknown command \"" + cmd + "\"");
-            }
+        // so Edit > Undo takes back one bridge call. A command that fails
+        // part-way is rolled back whole, so an error never leaves half an edit.
+        Func<Args, object> edit = EditCommand(cmd);
+        UndoBlock block = new UndoBlock(P, "DoD Studio bridge: " + cmd);
+        try {
+            return edit(a);
+        } catch {
+            block.Cancel = true;
+            throw;
+        } finally {
+            block.Dispose();
+        }
+    }
+
+    Func<Args, object> EditCommand(string cmd) {
+        switch (cmd) {
+            case "add_media": return AddMedia;
+            case "set_event": return SetEvent;
+            case "create_subclip": return CreateSubclip;
+            case "add_effect": return AddEffect;
+            case "set_effect_params": return SetEffectParams;
+            case "blend_by_speed": return BlendBySpeed;
+            default: throw new BridgeError("unknown command \"" + cmd + "\"");
         }
     }
 
@@ -139,6 +152,12 @@ public class Commands {
     object ImportEdl(Args a) {
         string path = Path.GetFullPath(a.Str("path"));
         if (!File.Exists(path)) throw new BridgeError("no EDL at " + path);
+        // OpenFile opens anything VEGAS can, a .veg in place too, so only an
+        // EDL text file goes through: the user's project is opened only as a
+        // copy, by open_project.
+        string ext = Path.GetExtension(path);
+        if (!ext.Equals(".txt", StringComparison.OrdinalIgnoreCase) && !ext.Equals(".edl", StringComparison.OrdinalIgnoreCase))
+            throw new BridgeError("import_edl takes an EDL text file (.txt or .edl), got " + path + "; open_project opens a .veg");
         RefuseUnsaved(a);
         // Clear the dirty state first so OpenFile never asks to save.
         vegas.NewProject(false, false);

@@ -1,9 +1,11 @@
 // Compiles a VEGAS C# script the way VEGAS's own script compiler does, so
 // run_script can refuse one that would fail there: VEGAS shows a compile
 // error as a modal box. VEGAS compiles C# 5 (the .NET Framework csc) against
-// a fixed set of assemblies, without System.Core (no LINQ, no HashSet), as
-// frag-editor found. CodeDom runs that same csc with /noconfig, so nothing
-// outside this list is referenced.
+// a fixed set of assemblies, without System.Core (no LINQ, no HashSet;
+// measured on build 315). CodeDom runs that same csc with /noconfig, so
+// nothing outside this list is referenced. A script whose .config adds
+// references, or a VEGAS build that references more, is refused here
+// although VEGAS would run it.
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;

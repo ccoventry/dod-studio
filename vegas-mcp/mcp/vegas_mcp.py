@@ -6,15 +6,15 @@ those VEGAS processes; the bridge never listens in a VEGAS it did not start.
 
 Standard library only. Speaks MCP's stdio transport (newline-delimited
 JSON-RPC 2.0), so no `mcp` package is needed. When Claude Code closes the
-server, it ends every VEGAS it started, so none is left on the user's screen.
+server's stdin, it ends every VEGAS it started, so none is left on the
+user's screen; a server killed outright cannot, and neither can one stuck
+waiting on a command (a long render), until that command returns.
 
-    python vegas_mcp.py                                  # MCP server on stdin/stdout
-    python vegas_mcp.py launch [work-folder]             # start a bridge VEGAS; prints its pid
-    python vegas_mcp.py instances                        # every VEGAS, and which have a bridge
-    python vegas_mcp.py call [--pid N] <cmd> [json-args] # one bridge command, for scripts and checks
-    python vegas_mcp.py end <pid>                        # end a bridge VEGAS and remove its autosave
+The shell commands are in USAGE below.
 """
 
+import errno
+import io
 import json
 import os
 import sys
@@ -244,7 +244,9 @@ class Bridge:
         try:
             self.pipe = open(self.path, "r+b", buffering=0)
         except OSError as e:
-            raise BridgeUnavailable("the bridge VEGAS (PID %d) is not reachable at %s (%s)" % (self.pid, self.path, e))
+            # The pipe takes one client at a time; a second one gets EINVAL (pipe busy).
+            why = "another client is connected to it" if e.errno == errno.EINVAL else str(e)
+            raise BridgeUnavailable("the bridge VEGAS (PID %d) is not reachable at %s: %s" % (self.pid, self.path, why))
 
     def close(self):
         if self.pipe is not None:
@@ -263,9 +265,13 @@ class Bridge:
             self.pipe.write(line.encode("utf-8"))
             reply = self.pipe.readline()
         except OSError:
-            reply = b""
+            reply = b""  # a write or read on a pipe VEGAS has closed: handled as closed below
         if reply:
-            return json.loads(reply.decode("utf-8"))
+            try:
+                return json.loads(reply.decode("utf-8"))
+            except ValueError:
+                self.close()
+                raise BridgeUnavailable("the bridge VEGAS (PID %d) sent an unreadable reply: %r" % (self.pid, reply[:200]))
         # The pipe closed: that VEGAS has gone (crashed, or ended elsewhere).
         # No reconnect to another VEGAS: a command meant for this one never
         # goes anywhere else.
@@ -277,9 +283,15 @@ class Instances:
     """The bridge VEGAS processes: the ones this server started, and which one tools go to."""
 
     def __init__(self):
-        self.launched = set()
+        # pid -> vegas_instances.Launched: the VEGAS this server started. Their
+        # open process handles keep those PIDs from going to another process.
+        self.launched = {}
         self.current = None
         self.bridges = {}
+        # Set when the current VEGAS went away: the next bridge call is refused
+        # until launch or use picks one, so a retried command never lands in
+        # another VEGAS's project.
+        self.lost = None
 
     def bridge(self, pid):
         if pid not in self.bridges:
@@ -287,14 +299,15 @@ class Instances:
         return self.bridges[pid]
 
     def target(self):
+        """The PID tools go to now. Raises when there is none to pick safely."""
+        if self.lost is not None:
+            raise BridgeUnavailable("the bridge VEGAS (PID %d) has gone: call launch, or use to pick another" % self.lost)
         live = vegas_instances.bridge_pids()
         if self.current in live:
             return self.current
         if self.current is not None:
-            raise BridgeUnavailable(
-                "the bridge VEGAS (PID %d) is gone (%s); call launch for a new one"
-                % (self.current, self.forget(self.current))
-            )
+            gone = self.current
+            raise BridgeUnavailable("the bridge VEGAS (PID %d) is gone (%s); call launch for a new one" % (gone, self.forget(gone)))
         # Only a VEGAS this server started is picked without asking: another
         # bridge VEGAS belongs to another session or script, and its project
         # is theirs, so reaching it takes an explicit use.
@@ -312,14 +325,18 @@ class Instances:
         raise BridgeUnavailable("no bridge VEGAS is running: call launch first")
 
     def forget(self, pid):
-        """Drop a VEGAS that has gone; clean up after it (autosave, crash box) when it was ours."""
+        """Drop a VEGAS that has gone and mark it lost; when this server started
+        it, clean up after it (autosave, crash box), going by its own handle.
+        Returns what it did."""
         b = self.bridges.pop(pid, None)
         if b:
             b.close()
         if self.current == pid:
             self.current = None
-        if pid in self.launched and not vegas_instances.is_running(pid):
-            self.launched.discard(pid)
+            self.lost = pid
+        launched = self.launched.get(pid)
+        if launched is not None and launched.exited():
+            del self.launched[pid]
             return vegas_instances.cleanup(pid)
         return "nothing to clean up"
 
@@ -328,14 +345,19 @@ class Instances:
         try:
             return self.bridge(pid).call(cmd, args)
         except BridgeUnavailable as e:
-            if not vegas_instances.is_running(pid):
+            launched = self.launched.get(pid)
+            exited = launched.exited() if launched is not None else not vegas_instances.is_running(pid)
+            if exited:
                 raise BridgeUnavailable("%s; it has exited (%s)" % (e, self.forget(pid)))
             raise
 
     def launch(self, args):
-        info = vegas_instances.launch(args.get("work_folder"), args.get("wait_seconds", 120), args.get("minimised", True))
-        self.launched.add(info["pid"])
-        self.current = info["pid"]
+        info, launched = vegas_instances.launch(
+            args.get("work_folder"), args.get("wait_seconds", vegas_instances.DEFAULT_WAIT_SECONDS), bool(args.get("minimised", True))
+        )
+        self.launched[launched.pid] = launched
+        self.current = launched.pid
+        self.lost = None
         beside = []
         if info["users_vegas"]:
             beside.append("the user's VEGAS (PID %s)" % ", ".join(str(p) for p in info["users_vegas"]))
@@ -349,19 +371,24 @@ class Instances:
         return info
 
     def end(self, args):
-        pid = args.get("pid") or self.current
+        pid = pid_argument(args) if "pid" in args else self.current
         if pid is None:
             raise BridgeUnavailable("no current bridge VEGAS: pass pid (instances lists them)")
+        launched = self.launched.pop(pid, None)
+        if launched is not None:
+            result = launched.end()
+        else:
+            # Checked while this server's connection still holds the pipe, so
+            # the listing cannot miss it between clients.
+            result = vegas_instances.end_bridge_pid(pid)
         b = self.bridges.pop(pid, None)
         if b:
             b.close()
-        result = vegas_instances.end(pid, launched=pid in self.launched)
-        self.launched.discard(pid)
         if self.current == pid:
             self.current = None
         return result
 
-    def list(self):
+    def describe(self):
         bridged = vegas_instances.bridge_pids()
         return {
             "bridge_vegas": bridged,
@@ -371,20 +398,30 @@ class Instances:
         }
 
     def use(self, args):
-        pid = int(args["pid"])
+        pid = pid_argument(args)
         if pid not in vegas_instances.bridge_pids():
             raise BridgeUnavailable("PID %d has no bridge pipe (instances lists the bridge VEGAS)" % pid)
         self.current = pid
+        self.lost = None
         return {"current": pid}
 
     def end_all(self):
-        """On shutdown: end every VEGAS this server started, so none stays on the user's screen."""
-        for pid in sorted(self.launched):
-            try:
-                vegas_instances.end(pid, launched=True)
-            except Exception:  # noqa: BLE001 - best effort on the way out
-                pass
+        """On shutdown: end every VEGAS this server started, so none stays on
+        the user's screen. All are terminated first and cleaned up after, so a
+        shutdown cut short leaves as few running as possible."""
+        launched = list(self.launched.values())
         self.launched.clear()
+        for one in launched:
+            try:
+                if not one.exited():
+                    one.proc.kill()
+            except OSError:
+                pass  # already gone: the clean-up below still runs
+        for one in launched:
+            try:
+                one.end()
+            except Exception:  # noqa: BLE001 - best effort on the way out; the next one still gets ended
+                pass
 
     def run_local(self, name, args):
         if name == "launch":
@@ -392,13 +429,22 @@ class Instances:
         if name == "end":
             return self.end(args)
         if name == "instances":
-            return self.list()
+            return self.describe()
         if name == "use":
             return self.use(args)
         raise KeyError(name)
 
 
+def pid_argument(args):
+    """The pid argument as an int, or an error naming it."""
+    try:
+        return int(args["pid"])
+    except (KeyError, TypeError, ValueError):
+        raise BridgeUnavailable("pid must be a process id (instances lists them), got %r" % args.get("pid"))
+
+
 def send(msg):
+    # ASCII-only JSON (json.dumps escapes the rest), so stdout's code page never matters.
     sys.stdout.write(json.dumps(msg) + "\n")
     sys.stdout.flush()
 
@@ -429,14 +475,18 @@ def call_tool(instances, name, arguments):
         return tool_result(body, ok)
     except (BridgeUnavailable, vegas_instances.VegasError) as e:
         return tool_result(str(e), False)
+    except Exception as e:  # noqa: BLE001 - one bad call must not end the server, which ends every VEGAS it started
+        return tool_result("%s failed: %s: %s" % (name, type(e).__name__, e), False)
 
 
 LOCAL_NAMES = {t["name"] for t in LOCAL_TOOLS}
 
 
-def serve_lines(instances):
+def serve_lines(instances, lines=None):
     names = {t["name"] for t in TOOLS}
-    for raw in sys.stdin:
+    # MCP clients send UTF-8; Python reads a piped stdin in the ANSI code page
+    # (before 3.15), which mangles any non-ASCII path.
+    for raw in lines if lines is not None else io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8"):
         raw = raw.strip()
         if not raw:
             continue
@@ -473,41 +523,47 @@ def serve_lines(instances):
         send({"jsonrpc": "2.0", "id": mid, "result": result})
 
 
+USAGE = """usage:
+    vegas_mcp.py                               MCP server on stdin/stdout
+    vegas_mcp.py launch [work-folder]          start a bridge VEGAS; prints its pid
+    vegas_mcp.py instances                     every VEGAS, and which have a bridge
+    vegas_mcp.py call --pid N <cmd> [json]     one bridge command
+    vegas_mcp.py end <pid>                     end a bridge VEGAS and remove its autosave"""
+
+
 def main(argv):
     """The shell commands. A VEGAS started with `launch` here keeps running until `end`."""
-    verb = argv[1] if len(argv) >= 2 else None
+    if len(argv) < 2:
+        serve()
+        return 0
+    verb, rest = argv[1], argv[2:]
     try:
-        if verb == "launch":
-            print(json.dumps(vegas_instances.launch(argv[2] if len(argv) > 2 else None), indent=1))
+        if verb == "launch" and len(rest) <= 1:
+            info, _ = vegas_instances.launch(rest[0] if rest else None)
+            print(json.dumps(info, indent=1))
             return 0
-        if verb == "end":
-            print(vegas_instances.end(int(argv[2])))
+        if verb == "end" and len(rest) == 1:
+            print(vegas_instances.end_bridge_pid(pid_argument({"pid": rest[0]})))
             return 0
-        if verb == "instances":
-            print(json.dumps(Instances().list(), indent=1))
+        if verb == "instances" and not rest:
+            print(json.dumps(Instances().describe(), indent=1))
             return 0
-        if verb == "call":
-            rest = argv[2:]
+        if verb == "call" and len(rest) in (3, 4) and rest[0] == "--pid":
+            # A shell call names its VEGAS: no guessing which bridge VEGAS is meant.
             instances = Instances()
-            if len(rest) >= 2 and rest[0] == "--pid":
-                instances.current = int(rest[1])
-                rest = rest[2:]
-            else:
-                # A one-off shell call starts nothing, so it takes the only
-                # bridge VEGAS when there is exactly one.
-                live = vegas_instances.bridge_pids()
-                if len(live) != 1:
-                    raise BridgeUnavailable("%d bridge VEGAS running (PIDs %s): pass --pid" % (len(live), live))
-                instances.current = live[0]
-            args = json.loads(rest[1]) if len(rest) > 1 else {}
-            reply = instances.call(rest[0], args)
+            instances.current = pid_argument({"pid": rest[1]})
+            try:
+                args = json.loads(rest[3]) if len(rest) == 4 else {}
+            except ValueError as e:
+                raise BridgeUnavailable("the arguments are not JSON (%s): %s" % (e, rest[3]))
+            reply = instances.call(rest[2], args)
             print(json.dumps(reply, indent=1))
             return 0 if reply.get("ok") else 1
     except (BridgeUnavailable, vegas_instances.VegasError) as e:
         print(str(e), file=sys.stderr)
         return 2
-    serve()
-    return 0
+    print(USAGE, file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

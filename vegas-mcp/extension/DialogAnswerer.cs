@@ -4,15 +4,22 @@
 // the user's own VEGAS beside it is never touched.
 //
 //   Missing media ("... could not be found"): "Ignore all missing files and
-//     leave them offline", then OK (as frag-editor's vegas/dump_veg.cs does).
+//     leave them offline", then OK.
 //   The first-render "Hint" box (OK only): OK.
 //   "Save changes?": No. The bridge never saves in place.
 //   Any other modal box still open after a few seconds: Cancel, else No,
 //     else OK, else Close. Its text goes to the log and to the reply of the
 //     command that raised it, so the next run can answer it properly.
 //
-// A dialog with a progress bar (a render's) is left alone: closing it would
-// cancel the work it shows.
+// Left alone: a dialog with a progress bar (a render's: closing it would
+// cancel the work it shows), and VEGAS's offer to restore an autosaved
+// project, which may be the user's crashed session (launch refuses to start
+// a bridge VEGAS while such an autosave exists, so it should never appear).
+// Only the dialog that is active counts: enabled itself, its owner disabled,
+// and the owner's enabled popup, so neither the lower box of two nested
+// ones nor a hidden box VEGAS keeps for reuse is pressed. A box that ignores
+// its button is given up on after a few presses. English VEGAS only: on
+// another language the rules miss and the fallback answers.
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -46,18 +53,30 @@ public sealed class DialogAnswerer {
     const uint BM_CLICK = 0x00F5;
     const uint WM_CLOSE = 0x0010;
     const uint GW_OWNER = 4;
+    const uint GW_ENABLEDPOPUP = 6;
     const uint SMTO_ABORTIFHUNG = 0x0002;
+    const uint SEND_TIMEOUT_MS = 2000;
+    const string DialogClass = "#32770";
     // How long an unknown modal box stays before it is closed: long enough
     // that a box VEGAS closes on its own is not touched.
     static readonly TimeSpan UnknownGrace = TimeSpan.FromSeconds(4);
+    // A box just answered takes a moment to close; it is not pressed again sooner.
+    static readonly TimeSpan AnswerHoldOff = TimeSpan.FromSeconds(3);
+    const int ScanIntervalMs = 300;
+    // Presses before a box that ignores them is given up on and reported.
+    const int MaxPresses = 3;
 
     readonly uint pid = (uint)Session.Pid;
     readonly object gate = new object();
     readonly List<string> answered = new List<string>();
-    // When each still-open unknown box was first seen, and boxes already
-    // answered (a window takes a moment to close after its button).
-    readonly Dictionary<IntPtr, DateTime> firstSeen = new Dictionary<IntPtr, DateTime>();
-    readonly Dictionary<IntPtr, DateTime> done = new Dictionary<IntPtr, DateTime>();
+    // When each still-open unknown box was first seen, boxes already answered
+    // and how often, and boxes left alone (reported once). Clock-change safe:
+    // times come from a Stopwatch, not the wall clock.
+    readonly Dictionary<IntPtr, TimeSpan> firstSeen = new Dictionary<IntPtr, TimeSpan>();
+    readonly Dictionary<IntPtr, TimeSpan> done = new Dictionary<IntPtr, TimeSpan>();
+    readonly Dictionary<IntPtr, int> presses = new Dictionary<IntPtr, int>();
+    readonly HashSet<IntPtr> leftAlone = new HashSet<IntPtr>();
+    readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
     public DialogAnswerer() {
         Thread t = new Thread(Watch);
@@ -94,7 +113,7 @@ public sealed class DialogAnswerer {
         if (kind == BS_PUSHBUTTON || kind == BS_DEFPUSHBUTTON) {
             if (dialog != IntPtr.Zero && !IsWindowVisible(dialog)) {
                 IntPtr wParam = (IntPtr)((GetDlgCtrlID(button) & 0xFFFF) | (BN_CLICKED << 16));
-                SendMessageTimeout(dialog, WM_COMMAND, wParam, button, SMTO_ABORTIFHUNG, 2000, out unused);
+                SendMessageTimeout(dialog, WM_COMMAND, wParam, button, SMTO_ABORTIFHUNG, SEND_TIMEOUT_MS, out unused);
                 // EndDialog only marks the box done; its message loop leaves
                 // on the next posted message, and a hidden box in a minimised
                 // VEGAS gets none (a sent message does not count), so the
@@ -103,7 +122,17 @@ public sealed class DialogAnswerer {
                 return;
             }
         }
-        SendMessageTimeout(button, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out unused);
+        SendMessageTimeout(button, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, SEND_TIMEOUT_MS, out unused);
+    }
+
+    // The box a user would be looking at: enabled, its owner disabled (it is
+    // modal), and the owner's enabled popup. Hidden or not: a minimised
+    // VEGAS's dialogs are hidden, since Windows hides what a minimised window owns.
+    static bool IsActiveModal(IntPtr h) {
+        if (!IsWindowEnabled(h)) return false;
+        IntPtr owner = GetWindow(h, GW_OWNER);
+        if (owner == IntPtr.Zero || IsWindowEnabled(owner)) return false;
+        return GetWindow(owner, GW_ENABLEDPOPUP) == h;
     }
 
     void Record(string what) {
@@ -114,38 +143,40 @@ public sealed class DialogAnswerer {
     void Watch() {
         while (true) {
             try { Scan(); } catch (Exception e) { Log.Write("dialog watcher: " + e.Message); }
-            Thread.Sleep(300);
+            Thread.Sleep(ScanIntervalMs);
         }
     }
 
     void Scan() {
-        DateTime now = DateTime.Now;
+        TimeSpan now = clock.Elapsed;
         HashSet<IntPtr> open = new HashSet<IntPtr>();
         EnumWindows(delegate(IntPtr h, IntPtr l) {
             uint owner;
             GetWindowThreadProcessId(h, out owner);
-            if (owner != pid || Cls(h) != "#32770") return true;
-            // The bridge VEGAS runs minimised, and Windows hides the windows a
-            // minimised window owns, so its dialogs are hidden. A hidden one
-            // counts while it is modal (its owner disabled); a hidden dialog
-            // whose owner is enabled has ended or is kept for reuse.
-            if (!IsWindowVisible(h)) {
-                IntPtr o = GetWindow(h, GW_OWNER);
-                if (o == IntPtr.Zero || IsWindowEnabled(o)) return true;
-            }
+            if (owner != pid || Cls(h) != DialogClass || !IsActiveModal(h)) return true;
             open.Add(h);
-            DateTime when;
-            if (done.TryGetValue(h, out when) && now - when < TimeSpan.FromSeconds(3)) return true;
-            if (Answer(h, now)) done[h] = now;
+            if (leftAlone.Contains(h)) return true;
+            TimeSpan when;
+            if (done.TryGetValue(h, out when) && now - when < AnswerHoldOff) return true;
+            int count;
+            presses.TryGetValue(h, out count);
+            if (count >= MaxPresses) {
+                leftAlone.Add(h);
+                Record("box '" + Text(h) + "' stayed open after " + count + " presses: left it");
+                return true;
+            }
+            if (Answer(h, now)) { done[h] = now; presses[h] = count + 1; }
             return true;
         }, IntPtr.Zero);
         // Forget windows that have closed (handles are reused).
         foreach (IntPtr h in new List<IntPtr>(firstSeen.Keys)) if (!open.Contains(h)) firstSeen.Remove(h);
         foreach (IntPtr h in new List<IntPtr>(done.Keys)) if (!open.Contains(h)) done.Remove(h);
+        foreach (IntPtr h in new List<IntPtr>(presses.Keys)) if (!open.Contains(h)) presses.Remove(h);
+        leftAlone.IntersectWith(open);
     }
 
     // True when it pressed something.
-    bool Answer(IntPtr h, DateTime now) {
+    bool Answer(IntPtr h, TimeSpan now) {
         string title = Text(h);
         StringBuilder body = new StringBuilder();
         Dictionary<string, IntPtr> buttons = new Dictionary<string, IntPtr>();
@@ -168,6 +199,11 @@ public sealed class DialogAnswerer {
         string lower = text.ToLowerInvariant();
         IntPtr b;
 
+        if (lower.Contains("autosave") || lower.Contains("restore")) {
+            leftAlone.Add(h);
+            Record("left VEGAS's restore prompt for the user ('" + Short(text) + "')");
+            return false;
+        }
         if (lower.Contains("could not be found") && ignoreAll != IntPtr.Zero && buttons.TryGetValue("ok", out b)) {
             Click(ignoreAll);
             Click(b);
@@ -185,11 +221,9 @@ public sealed class DialogAnswerer {
             return true;
         }
         if (progress) return false;
-        // Anything else only when it is modal (its owner is disabled), so a
-        // floating tool window is never closed, and only once it has stayed.
-        IntPtr ownerWindow = GetWindow(h, GW_OWNER);
-        if (ownerWindow == IntPtr.Zero || IsWindowEnabled(ownerWindow)) return false;
-        DateTime seen;
+        // Anything else only once it has stayed (Scan passes only the active
+        // modal box, so a floating tool window is never closed).
+        TimeSpan seen;
         if (!firstSeen.TryGetValue(h, out seen)) { firstSeen[h] = now; return false; }
         if (now - seen < UnknownGrace) return false;
         foreach (string word in new string[] { "cancel", "no", "ok", "close" }) {
