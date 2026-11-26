@@ -21,6 +21,10 @@ a clean exit, and a leftover one makes the next VEGAS ask to recover it, so
 end() deletes that PID's autosave, and closes a crash's Problem Report box for
 that PID, which would otherwise stay on screen.
 
+A VEGAS the MCP server launches is owned by it (DODSTUDIO_VEGAS_OWNER_PID and
+_START): the bridge ends it by itself, autosave removed, once the server has
+gone, so a server killed outright leaves no VEGAS behind.
+
 Standard library only.
 """
 
@@ -32,10 +36,16 @@ import subprocess
 import tempfile
 import time
 
+import desktops
+
 PIPE_DIR = "\\\\.\\pipe\\"
 PIPE_PREFIX = "dodstudio-vegas-"
 FLAG_VARIABLE = "DODSTUDIO_VEGAS_BRIDGE"
 ROOT_VARIABLE = "DODSTUDIO_VEGAS_ROOT"
+# The process that owns a bridge VEGAS (the MCP server) and its start time:
+# the bridge ends its VEGAS when that process has gone (extension/OwnerWatch.cs).
+OWNER_PID_VARIABLE = "DODSTUDIO_VEGAS_OWNER_PID"
+OWNER_START_VARIABLE = "DODSTUDIO_VEGAS_OWNER_START"
 DEFAULT_EXE = "C:\\Program Files\\VEGAS\\VEGAS Pro 21.0\\vegas210.exe"
 START_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_vegas.cs")
 
@@ -57,6 +67,8 @@ if _k32 is not None:
     _k32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
     _k32.WaitForSingleObject.restype = wt.DWORD
     _k32.QueryFullProcessImageNameW.argtypes = [wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD)]
+    _k32.GetCurrentProcess.restype = wt.HANDLE
+    _k32.GetProcessTimes.argtypes = [wt.HANDLE] + [ctypes.POINTER(wt.FILETIME)] * 4
 
 
 class VegasError(Exception):
@@ -143,6 +155,24 @@ def is_vegas(pid):
         _k32.CloseHandle(h)
 
 
+def current_process_start():
+    """This process's creation time (FILETIME ticks), which the bridge checks
+    with the PID so a later process given the same PID is not taken for it."""
+    times = [wt.FILETIME() for _ in range(4)]
+    if not _k32.GetProcessTimes(_k32.GetCurrentProcess(), *[ctypes.byref(t) for t in times]):
+        raise VegasError("cannot read this process's start time (error %d)" % ctypes.get_last_error())
+    return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+
+def open_windows_note(pid):
+    """'; windows open in it: ...' for an error text, or ''."""
+    try:
+        found = desktops.dialog_windows(pid)
+    except (OSError, ValueError):
+        return ""
+    return "; windows open in it: " + ", ".join(found) if found else ""
+
+
 def vegas_pids():
     """Every running VEGAS (the user's included), from tasklist."""
     out = subprocess.run(
@@ -214,13 +244,16 @@ SW_SHOWNOACTIVATE = 4
 
 
 class Launched:
-    """A VEGAS this process started. Holding its Popen keeps the process handle
-    open, so Windows cannot give its PID to another process (the user's next
-    VEGAS) while this record exists, and ending it goes through that handle."""
+    """A VEGAS this process started. Holding its process (a Popen or a
+    desktops.Process) keeps the process handle open, so Windows cannot give
+    its PID to another process (the user's next VEGAS) while this record
+    exists, and ending it goes through that handle. `desktop` is the hidden
+    desktop it runs on, closed once it has ended."""
 
-    def __init__(self, proc):
+    def __init__(self, proc, desktop=None):
         self.proc = proc
         self.pid = proc.pid
+        self.desktop = desktop
 
     def exited(self):
         return self.proc.poll() is not None
@@ -229,7 +262,7 @@ class Launched:
         """Terminate it through its own handle, then clean up after it
         (folder: where its autosave is, for tests)."""
         if not self.exited():
-            self.proc.kill()  # TerminateProcess on the handle Popen holds
+            self.proc.kill()  # TerminateProcess on the handle it holds
             try:
                 self.proc.wait(END_WAIT_SECONDS)
             except subprocess.TimeoutExpired:
@@ -237,13 +270,39 @@ class Launched:
             what = "ended VEGAS PID %d" % self.pid
         else:
             what = "VEGAS PID %d had already exited" % self.pid
-        return what + "; " + cleanup(self.pid, folder)
+        # The Problem Report box of a crash runs on that desktop too, so the
+        # clean-up comes before the desktop handle goes.
+        done = what + "; " + cleanup(self.pid, folder)
+        self.close_desktop()
+        return done
+
+    def close_desktop(self):
+        if self.desktop is not None:
+            self.desktop.close()
+            self.desktop = None
 
 
-def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True):
+def new_desktop():
+    """A fresh hidden desktop for one VEGAS, named after this process."""
+    global _desktops_made
+    _desktops_made += 1
+    return desktops.Desktop("dodstudio-vegas-%d-%d" % (os.getpid(), _desktops_made))
+
+
+_desktops_made = 0
+
+
+def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=False):
     """Start a VEGAS for the bridge and wait for its pipe. Returns (info dict, Launched).
 
-    minimised=False shows it (still without taking focus), to watch it work."""
+    It runs on a desktop of its own, which is never shown, so no window of
+    it (the start-up splash, a render's progress, a dialog) reaches the
+    user's screen (desktops.py). minimised=False starts it on the user's
+    desktop instead, shown without taking focus, to watch it work.
+    owned=True makes this process its owner: the bridge ends that VEGAS
+    (and removes its autosave) when this process has gone, however it went.
+    The shell's launch leaves it off, since it exits at once and the VEGAS
+    runs on until `end`."""
     wait_seconds = float(wait_seconds)
     root = checked_work_folder(root)
     exe = vegas_exe()
@@ -264,14 +323,24 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True):
     env = dict(os.environ)
     env[FLAG_VARIABLE] = "1"
     env[ROOT_VARIABLE] = root
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    # Never take focus from the user's window.
-    si.wShowWindow = SW_SHOWMINNOACTIVE if minimised else SW_SHOWNOACTIVATE
+    env.pop(OWNER_PID_VARIABLE, None)
+    env.pop(OWNER_START_VARIABLE, None)
+    if owned:
+        env[OWNER_PID_VARIABLE] = str(os.getpid())
+        env[OWNER_START_VARIABLE] = str(current_process_start())
     # A command-line string, so the script path is quoted after the colon the
     # way VEGAS reads it (-SCRIPT:"C:\a b\start_vegas.cs").
     command = '"%s" -SCRIPT:"%s"' % (exe, START_SCRIPT)
-    launched = Launched(subprocess.Popen(command, env=env, startupinfo=si, close_fds=True))
+    desktop = new_desktop() if minimised else None
+    try:
+        # Minimised on its hidden desktop too: snapshot and the dialog
+        # answerer were measured on a minimised VEGAS. Never takes focus.
+        proc = desktops.start(command, env, SW_SHOWMINNOACTIVE if minimised else SW_SHOWNOACTIVATE, desktop)
+    except OSError as e:
+        if desktop is not None:
+            desktop.close()
+        raise VegasError("cannot start VEGAS: %s" % e)
+    launched = Launched(proc, desktop)
     try:
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
@@ -285,6 +354,8 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True):
                     "pid": launched.pid,
                     "pipe": pipe_path(launched.pid),
                     "work_folder": root,
+                    "desktop": desktop.name if desktop is not None else "the user's (shown, to watch it)",
+                    "ends_with_pid": os.getpid() if owned else None,
                     "other_vegas": others,
                     "users_vegas": [p for p in others if p not in bridged],
                     "other_bridge_vegas": [p for p in others if p in bridged],

@@ -22,6 +22,10 @@ namespace DodStudio.VegasBridge {
 public static class Session {
     public const string FlagVariable = "DODSTUDIO_VEGAS_BRIDGE";
     public const string RootVariable = "DODSTUDIO_VEGAS_ROOT";
+    // The process that launched this VEGAS for the bridge (the MCP server) and
+    // its creation time; OwnerWatch ends this VEGAS once that process is gone.
+    public const string OwnerPidVariable = "DODSTUDIO_VEGAS_OWNER_PID";
+    public const string OwnerStartVariable = "DODSTUDIO_VEGAS_OWNER_START";
 
     public static readonly int Pid = System.Diagnostics.Process.GetCurrentProcess().Id;
     // One pipe per VEGAS process, so several bridge VEGAS can run at once;
@@ -29,15 +33,28 @@ public static class Session {
     public static readonly string PipeName = "dodstudio-vegas-" + Pid;
     public static readonly string Root;
     public static readonly string WhyOff;
+    // 0 when no owner was given (the shell's launch): runs until ended.
+    public static readonly int OwnerPid;
+    public static readonly long OwnerStart;
 
     static Session() {
         string flag = Environment.GetEnvironmentVariable(FlagVariable);
         string root = Environment.GetEnvironmentVariable(RootVariable);
+        string ownerPid = Environment.GetEnvironmentVariable(OwnerPidVariable);
+        string ownerStart = Environment.GetEnvironmentVariable(OwnerStartVariable);
         // Read once, then gone from this process: anything VEGAS starts (a
         // restarted VEGAS after a crash, say) must not inherit the mark and
         // listen too, opening its last project, often the user's.
         Environment.SetEnvironmentVariable(FlagVariable, null);
         Environment.SetEnvironmentVariable(RootVariable, null);
+        Environment.SetEnvironmentVariable(OwnerPidVariable, null);
+        Environment.SetEnvironmentVariable(OwnerStartVariable, null);
+        int pid;
+        long start;
+        if (int.TryParse(ownerPid, out pid) && pid > 0 && long.TryParse(ownerStart, out start)) {
+            OwnerPid = pid;
+            OwnerStart = start;
+        }
         if (flag != "1") { WhyOff = FlagVariable + " is not 1"; return; }
         if (string.IsNullOrEmpty(root) || !Path.IsPathRooted(root)) { WhyOff = RootVariable + " is not a full path"; return; }
         string full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

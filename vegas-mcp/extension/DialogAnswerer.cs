@@ -15,16 +15,29 @@
 // cancel the work it shows), and VEGAS's offer to restore an autosaved
 // project, which may be the user's crashed session (launch refuses to start
 // a bridge VEGAS while such an autosave exists, so it should never appear).
-// Only the dialog that is active counts: enabled itself, its owner disabled,
-// and the owner's enabled popup, so neither the lower box of two nested
-// ones nor a hidden box VEGAS keeps for reuse is pressed. A box that ignores
-// its button is given up on after a few presses. English VEGAS only: on
-// another language the rules miss and the fallback answers.
+// Only the dialog that is active counts, so neither the lower box of two
+// nested ones nor a hidden box VEGAS keeps for reuse is pressed:
+//   a Windows dialog box (#32770) that is enabled, with its owner disabled
+//     and the box the owner's enabled popup (a modal box);
+//   one with no owner (a script's MessageBox(NULL, ...)), enabled and
+//     visible: a hidden one waits on nobody, and may be kept for reuse;
+//   a WinForms form, enabled, inside its ShowDialog. One of VEGAS's own
+//     (this AppDomain) says so itself (Form.Modal). A script's runs in
+//     VEGAS's "Script Domain", where Control.FromHandle cannot reach
+//     (measured), so it counts when its owner is disabled (ShowDialog
+//     disables the owner), or, with no owner, while it is shown.
+// WPF windows are left alone: VEGAS 21's render progress window is one
+// (unowned, and visible even in a minimised VEGAS), and nothing outside a
+// WPF window tells a modal box from it. A call held up by one runs into
+// its time limit on the MCP side, and `end` ends that VEGAS.
+// A box that ignores its button is given up on after a few presses. English
+// VEGAS only: on another language the rules miss and the fallback answers.
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace DodStudio.VegasBridge {
 
@@ -43,6 +56,7 @@ public sealed class DialogAnswerer {
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
     [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr h);
     [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     const int GWL_STYLE = -16;
     const int BS_TYPEMASK = 0x0F;
     const int BS_PUSHBUTTON = 0x00;
@@ -57,6 +71,8 @@ public sealed class DialogAnswerer {
     const uint SMTO_ABORTIFHUNG = 0x0002;
     const uint SEND_TIMEOUT_MS = 2000;
     const string DialogClass = "#32770";
+    const string FormClassPrefix = "WindowsForms10.Window";
+    const string FormButtonClassPrefix = "WindowsForms10.BUTTON";
     // How long an unknown modal box stays before it is closed: long enough
     // that a box VEGAS closes on its own is not touched.
     static readonly TimeSpan UnknownGrace = TimeSpan.FromSeconds(4);
@@ -103,15 +119,21 @@ public sealed class DialogAnswerer {
     }
 
     // A radio button or check box takes BM_CLICK, hidden or not. A push
-    // button in a hidden (inactive) dialog ignores BM_CLICK, so the dialog
-    // gets the WM_COMMAND the button would send (measured on the missing-media
-    // box of a minimised VEGAS).
+    // button ignores BM_CLICK in a dialog that is not active (Windows says
+    // so; measured on the missing-media box of a minimised VEGAS, whose
+    // dialogs are hidden), and a bridge VEGAS's never is, so the dialog gets
+    // the WM_COMMAND the button would send. A WinForms button always does:
+    // it clicks on a mouse-up only with the mouse over it, so BM_CLICK
+    // misses in a hidden form, but its form hands a WM_COMMAND back to it
+    // as a click, from any AppDomain.
     static void Click(IntPtr button) {
         IntPtr unused;
         int kind = GetWindowLong(button, GWL_STYLE) & BS_TYPEMASK;
+        bool push = kind == BS_PUSHBUTTON || kind == BS_DEFPUSHBUTTON;
+        bool winForms = Cls(button).StartsWith(FormButtonClassPrefix, StringComparison.Ordinal);
         IntPtr dialog = GetParent(button);
-        if (kind == BS_PUSHBUTTON || kind == BS_DEFPUSHBUTTON) {
-            if (dialog != IntPtr.Zero && !IsWindowVisible(dialog)) {
+        if (push || winForms) {
+            if (dialog != IntPtr.Zero && (winForms || dialog != GetForegroundWindow())) {
                 IntPtr wParam = (IntPtr)((GetDlgCtrlID(button) & 0xFFFF) | (BN_CLICKED << 16));
                 SendMessageTimeout(dialog, WM_COMMAND, wParam, button, SMTO_ABORTIFHUNG, SEND_TIMEOUT_MS, out unused);
                 // EndDialog only marks the box done; its message loop leaves
@@ -135,6 +157,35 @@ public sealed class DialogAnswerer {
         return GetWindow(owner, GW_ENABLEDPOPUP) == h;
     }
 
+    // A box with no owner (MessageBox(NULL, ...) from a script, or one shown
+    // from a thread with no window): nothing is disabled under it, so it
+    // counts while it is enabled and visible.
+    static bool IsUnownedBox(IntPtr h) {
+        return GetWindow(h, GW_OWNER) == IntPtr.Zero && IsWindowEnabled(h) && IsWindowVisible(h);
+    }
+
+    // A WinForms form inside its ShowDialog, owned or not, and not under a
+    // box of its own (that disables it). Form.Modal is a plain flag, safe to
+    // read from this thread.
+    static bool IsModalForm(IntPtr h) {
+        if (!IsWindowEnabled(h)) return false;
+        Form form = Control.FromHandle(h) as Form;
+        if (form != null) return form.Modal;
+        IntPtr owner = GetWindow(h, GW_OWNER);
+        return owner != IntPtr.Zero ? !IsWindowEnabled(owner) : IsWindowVisible(h);
+    }
+
+    static bool IsAnswerable(IntPtr h) {
+        string cls = Cls(h);
+        if (cls == DialogClass) return IsActiveModal(h) || IsUnownedBox(h);
+        if (cls.StartsWith(FormClassPrefix, StringComparison.Ordinal)) return IsModalForm(h);
+        return false;
+    }
+
+    static bool IsButton(string cls) {
+        return cls == "Button" || cls.StartsWith(FormButtonClassPrefix, StringComparison.Ordinal);
+    }
+
     void Record(string what) {
         lock (gate) answered.Add(what);
         Log.Write("dialog: " + what);
@@ -153,7 +204,7 @@ public sealed class DialogAnswerer {
         EnumWindows(delegate(IntPtr h, IntPtr l) {
             uint owner;
             GetWindowThreadProcessId(h, out owner);
-            if (owner != pid || Cls(h) != DialogClass || !IsActiveModal(h)) return true;
+            if (owner != pid || !IsAnswerable(h)) return true;
             open.Add(h);
             if (leftAlone.Contains(h)) return true;
             TimeSpan when;
@@ -186,7 +237,7 @@ public sealed class DialogAnswerer {
             string cls = Cls(c);
             string t = Text(c);
             if (cls.IndexOf("progress", StringComparison.OrdinalIgnoreCase) >= 0) progress = true;
-            if (cls == "Button") {
+            if (IsButton(cls)) {
                 string word = ButtonWord(t);
                 if (word.StartsWith("ignore all missing files")) ignoreAll = c;
                 else if (!buttons.ContainsKey(word)) buttons[word] = c;

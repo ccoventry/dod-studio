@@ -4,16 +4,22 @@
 """
 
 import base64
+import ctypes
 import io
 import json
 import os
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import bridge_pipe  # noqa: E402
+import desktops  # noqa: E402
 import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 import vegas_mcp  # noqa: E402
@@ -210,6 +216,224 @@ class Tools(unittest.TestCase):
         finally:
             vegas_mcp.send = real
         self.assertIn("café", sent[0]["result"]["content"][0]["text"])
+
+
+class Protocol(unittest.TestCase):
+    def test_a_supported_version_is_answered_as_asked(self):
+        for v in vegas_mcp.SUPPORTED_PROTOCOLS:
+            self.assertEqual(vegas_mcp.negotiated_protocol(v), v)
+
+    def test_an_unknown_version_gets_the_servers_own(self):
+        for v in ("1999-01-01", "2099-12-31", None, 5):
+            self.assertEqual(vegas_mcp.negotiated_protocol(v), vegas_mcp.PROTOCOL)
+
+    def test_initialize_over_json_rpc(self):
+        sent = []
+        real = vegas_mcp.send
+        vegas_mcp.send = sent.append
+        try:
+            vegas_mcp.serve_lines(vegas_mcp.Instances(), [json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                                                      "params": {"protocolVersion": "2031-01-01"}})])
+        finally:
+            vegas_mcp.send = real
+        self.assertEqual(sent[0]["result"]["protocolVersion"], vegas_mcp.PROTOCOL)
+
+
+class TimeLimits(unittest.TestCase):
+    def test_defaults(self):
+        self.assertEqual(vegas_mcp.time_limit("ping", {}), vegas_mcp.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(vegas_mcp.time_limit("render", {}), 3600)
+        self.assertEqual(vegas_mcp.time_limit("open_project", {}), 600)
+
+    def test_timeout_seconds_wins(self):
+        self.assertEqual(vegas_mcp.time_limit("render", {"timeout_seconds": 5}), 5)
+        self.assertEqual(vegas_mcp.time_limit("ping", {"timeout_seconds": "2.5"}), 2.5)
+
+    def test_import_edl_waits_longer_than_its_own_wait(self):
+        self.assertEqual(vegas_mcp.time_limit("import_edl", {"wait_seconds": 900}), 900 + vegas_mcp.IMPORT_EDL_MARGIN_SECONDS)
+
+    def test_a_bad_limit_is_an_error(self):
+        for bad in (0, -1, "soon", float("nan")):
+            with self.assertRaises(vegas_mcp.BridgeUnavailable, msg=bad):
+                vegas_mcp.time_limit("ping", {"timeout_seconds": bad})
+
+    def test_every_bridge_tool_takes_timeout_seconds_and_no_local_one_does(self):
+        for t in vegas_mcp.TOOLS:
+            has = "timeout_seconds" in t["inputSchema"]["properties"]
+            self.assertEqual(has, t["name"] not in vegas_mcp.LOCAL_NAMES, t["name"])
+
+
+class FakePipe:
+    """Stands in for a bridge pipe: records what is written, and readline
+    blocks until a reply is pushed, the way a pipe waits on VEGAS."""
+
+    CLOSED = object()
+
+    def __init__(self):
+        self.written = []
+        self.replies = queue.Queue()
+
+    def write(self, data):
+        self.written.append(json.loads(data.decode("utf-8")))
+
+    def readline(self):
+        line = self.replies.get()
+        if line is FakePipe.CLOSED:
+            raise ValueError("I/O operation on closed file")
+        return line
+
+    def reply(self, request_id, ok=True):
+        self.replies.put(json.dumps({"id": request_id, "ok": ok, "result": "done"}).encode("utf-8") + b"\n")
+
+    def close(self):
+        self.replies.put(FakePipe.CLOSED)
+
+
+def fake_bridge():
+    b = bridge_pipe.Bridge(4242)
+    pipe = FakePipe()
+
+    def reopen():
+        b.pipe = pipe
+
+    b._open = reopen
+    return b, pipe
+
+
+class TimedCalls(unittest.TestCase):
+    def test_a_call_that_replies_in_time(self):
+        b, pipe = fake_bridge()
+        threading.Timer(0.05, lambda: pipe.reply(1)).start()
+        self.assertEqual(b.call("ping", {}, 5)["result"], "done")
+        self.assertIsNone(b.busy())
+
+    def test_past_its_limit_the_call_is_an_error_and_the_vegas_busy(self):
+        b, pipe = fake_bridge()
+        t = time.monotonic()
+        with self.assertRaises(bridge_pipe.BridgeTimeout) as caught:
+            b.call("run_script", {"path": "x.cs"}, 0.2)
+        self.assertLess(time.monotonic() - t, 2)
+        self.assertIn("run_script", str(caught.exception))
+        self.assertIn("run_script", b.busy())
+        # The next call is refused, not sent: its reply would be read as the old one's.
+        with self.assertRaises(bridge_pipe.BridgeBusy) as caught:
+            b.call("ping", {}, 5)
+        self.assertIn("still running run_script", str(caught.exception))
+        self.assertEqual([w["cmd"] for w in pipe.written], ["run_script"])
+
+    def test_the_late_reply_clears_the_mark_and_is_reported_once(self):
+        b, pipe = fake_bridge()
+        with self.assertRaises(bridge_pipe.BridgeTimeout):
+            b.call("run_script", {}, 0.1)
+        pipe.reply(1)
+        deadline = time.monotonic() + 2
+        while b.busy() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIsNone(b.busy())
+        threading.Timer(0.05, lambda: pipe.reply(2)).start()
+        self.assertTrue(b.call("ping", {}, 5)["ok"])
+        self.assertEqual([w["id"] for w in pipe.written], [1, 2])
+        late = b.take_late()
+        self.assertIn("run_script", late)
+        self.assertIn("ok", late)
+        self.assertIsNone(b.take_late())
+
+    def test_ending_the_vegas_clears_the_mark(self):
+        b, pipe = fake_bridge()
+        with self.assertRaises(bridge_pipe.BridgeTimeout):
+            b.call("render", {}, 0.1)
+        b.close()  # what end does once that VEGAS is gone
+        self.assertIsNone(b.busy())
+        self.assertIsNone(b.pipe)
+
+    def test_a_second_caller_waits_its_turn(self):
+        b, pipe = fake_bridge()
+        results = []
+        first = threading.Thread(target=lambda: results.append(b.call("snapshot", {}, 5)))
+        first.start()
+        while not pipe.written:
+            time.sleep(0.01)
+        second = threading.Thread(target=lambda: results.append(b.call("ping", {}, 5)))
+        second.start()
+        time.sleep(0.1)
+        self.assertEqual(len(pipe.written), 1)  # not sent while the first is out
+        pipe.reply(1)
+        while len(pipe.written) < 2:
+            time.sleep(0.01)
+        pipe.reply(2)
+        first.join(5)
+        second.join(5)
+        self.assertEqual([r["id"] for r in results], [1, 2])
+
+    def test_a_reply_for_another_request_is_not_taken_for_this_ones(self):
+        b, pipe = fake_bridge()
+        threading.Timer(0.05, lambda: pipe.reply(99)).start()
+        with self.assertRaises(bridge_pipe.BridgeUnavailable) as caught:
+            b.call("ping", {}, 5)
+        self.assertIn("unreadable", str(caught.exception))
+
+    def test_the_timeout_argument_never_reaches_vegas(self):
+        instances = vegas_mcp.Instances()
+        b, pipe = fake_bridge()
+        instances.bridges[4242] = b
+        instances.launched[4242] = object()
+        instances.current = 4242
+        real = vegas_mcp.vegas_instances.bridge_pids
+        vegas_mcp.vegas_instances.bridge_pids = lambda: [4242]
+        try:
+            threading.Timer(0.05, lambda: pipe.reply(1)).start()
+            instances.call("ping", {"timeout_seconds": 3})
+        finally:
+            vegas_mcp.vegas_instances.bridge_pids = real
+        self.assertEqual(pipe.written[0]["args"], {})
+
+
+class ServerKeepsReading(unittest.TestCase):
+    def test_a_local_tool_is_answered_while_a_bridge_call_is_stuck(self):
+        sent = []
+        stuck = threading.Event()
+        instances = vegas_mcp.Instances()
+
+        def slow_call(cmd, args):
+            stuck.wait(5)
+            return {"ok": True, "result": "late"}
+
+        def record(msg):
+            sent.append(msg)
+            if msg.get("id") == 2:
+                stuck.set()  # the second answer came while the first call was still waiting
+
+        instances.call = slow_call
+        instances.describe = lambda: {"bridge_vegas": []}
+        real = vegas_mcp.send
+        vegas_mcp.send = record
+        try:
+            vegas_mcp.serve_lines(instances, [
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "ping", "arguments": {}}}),
+                json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "instances", "arguments": {}}}),
+            ])
+        finally:
+            vegas_mcp.send = real
+        self.assertEqual([m["id"] for m in sent], [2, 1])
+
+
+@unittest.skipUnless(os.name == "nt", "Windows processes and desktops")
+class HiddenDesktop(unittest.TestCase):
+    def test_a_process_on_a_hidden_desktop_is_ended_by_its_handle_and_the_desktop_closed(self):
+        desk = vegas_instances.new_desktop()
+        self.assertIn(desk.name, desktops.desktop_names())
+        proc = desktops.start('"%s" -c "import time; time.sleep(30)"' % sys.executable, dict(os.environ),
+                              vegas_instances.SW_SHOWMINNOACTIVE, desk)
+        launched = vegas_instances.Launched(proc, desk)
+        proc.kill()
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertIn("PID %d" % proc.pid, launched.end(folder))  # a second kill of a dying process is no error
+        self.assertTrue(launched.exited())
+        self.assertIsNone(desk.handle)
+
+    def test_the_environment_block_is_sorted_and_double_terminated(self):
+        block = desktops.environment_block({"b": "2", "A": "1"})
+        self.assertEqual(ctypes.wstring_at(ctypes.addressof(block), 9), "A=1\0b=2\0\0")
 
 
 def shot(n_bytes, mime_type="image/jpeg", path="D:\\work\\snapshots\\a.png"):

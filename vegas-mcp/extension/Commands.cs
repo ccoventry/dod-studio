@@ -15,6 +15,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using ScriptPortal.Vegas;
 
 namespace DodStudio.VegasBridge {
@@ -318,7 +319,14 @@ public class Commands {
             track = TrackAt(a.Int("track")) as VideoTrack;
             if (track == null) throw new BridgeError("track " + a.Int("track") + " is not a video track");
         } else {
-            track = P.AddVideoTrack();
+            // Project.AddVideoTrack inserts at index 0, which moves every
+            // existing track down one, so a later track index from an earlier
+            // reply would reach the wrong track (measured on build 315;
+            // AddAudioTrack appends). The new track goes after all of them
+            // instead: no index changes. VEGAS draws track 0 in front, so it
+            // is behind the others.
+            track = new VideoTrack(P, P.Tracks.Count, null);
+            P.Tracks.Add(track);
         }
         VideoEvent ev = track.AddVideoEvent(Tc(start), Tc(length));
         Take take = ev.AddTake(vs);
@@ -328,6 +336,7 @@ public class Commands {
         if (a.Has("name")) ev.Name = a.Str("name");
         Dictionary<string, object> r = new Dictionary<string, object>();
         r["track"] = track.Index;
+        r["new_track"] = !a.Has("track");
         r["event"] = EventInfo(ev);
         if (a.Bool("with_audio", false)) {
             AudioStream aus = m.GetAudioStreamByIndex(0);
@@ -605,6 +614,10 @@ public class Commands {
     object Render(Args a) {
         string path = Session.RequireUnderRoot(a.Str("path"), "render's path");
         if (File.Exists(path)) throw new BridgeError(path + " exists; render never overwrites");
+        List<string> numbered = NumberedFiles(path);
+        if (numbered.Count > 0)
+            throw new BridgeError(numbered[0] + " exists, and an Image Sequence render to " + path +
+                                  " would write over it; render never overwrites");
         if (!a.Has("template")) throw new BridgeError("missing argument \"template\" (a name or part of one, see list_render_templates)");
         KeyValuePair<Renderer, RenderTemplate> pick = new KeyValuePair<Renderer, RenderTemplate>();
         bool found = false;
@@ -636,8 +649,31 @@ public class Commands {
         r["status"] = st.ToString();
         r["path"] = path;
         r["seconds"] = (DateTime.Now - t0).TotalSeconds;
-        r["exists"] = File.Exists(path);
+        // What was written: the file itself, or an Image Sequence's numbered
+        // files (VEGAS writes name_000000.png and on, never name.png).
+        List<string> written = File.Exists(path) ? new List<string>(new string[] { path }) : NumberedFiles(path);
+        r["exists"] = written.Count > 0;
+        r["file_count"] = written.Count;
+        r["files"] = written.Count <= MaxFilesListed ? written : written.GetRange(0, MaxFilesListed);
         return r;
+    }
+
+    const int MaxFilesListed = 20;
+
+    // The files an Image Sequence render to `path` writes: the name, an
+    // underscore and a frame number (measured: f.png gives f_000000.png,
+    // f_000001.png ...), in name order.
+    static List<string> NumberedFiles(string path) {
+        List<string> found = new List<string>();
+        string dir = Path.GetDirectoryName(path);
+        if (!Directory.Exists(dir)) return found;
+        string stem = Path.GetFileNameWithoutExtension(path);
+        string ext = Path.GetExtension(path);
+        Regex numbered = new Regex("^" + Regex.Escape(stem) + "_[0-9]+" + Regex.Escape(ext) + "$", RegexOptions.IgnoreCase);
+        foreach (string f in Directory.GetFiles(dir, stem + "_*" + ext))
+            if (numbered.IsMatch(Path.GetFileName(f))) found.Add(f);
+        found.Sort(StringComparer.OrdinalIgnoreCase);
+        return found;
     }
 
     // Escape hatch for anything the commands above do not cover: a C# VEGAS
