@@ -23,6 +23,7 @@ import desktops  # noqa: E402
 import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 import vegas_mcp  # noqa: E402
+import webview_folders  # noqa: E402
 
 
 class PipeNames(unittest.TestCase):
@@ -480,6 +481,50 @@ class FakeLaunched:
 
     def close_desktop(self):
         pass
+
+    def remove_webview_folder(self):
+        return ""
+
+
+class WebViewFolders(unittest.TestCase):
+    def test_each_launch_gets_a_fresh_folder(self):
+        with tempfile.TemporaryDirectory() as root:
+            a, b = webview_folders.new_folder(root), webview_folders.new_folder(root)
+            self.assertNotEqual(a, b)
+            self.assertTrue(os.path.isdir(a) and os.path.isdir(b))
+
+    def test_the_sweep_removes_only_folders_whose_vegas_has_gone(self):
+        with tempfile.TemporaryDirectory() as root:
+            gone, live, fresh, stale = (webview_folders.new_folder(root) for _ in range(4))
+            webview_folders.claim(gone, 1111)
+            webview_folders.claim(live, 2222)
+            old = time.time() - webview_folders.UNCLAIMED_GRACE_SECONDS - 60
+            os.utime(stale, (old, old))  # never claimed: a launch that died long ago
+            removed = webview_folders.sweep(lambda pid: pid == 2222, root)
+            self.assertEqual(sorted(removed), sorted([gone, stale]))
+            self.assertTrue(os.path.isdir(live) and os.path.isdir(fresh))
+
+    def test_a_launched_vegas_removes_its_folder_once_it_has_exited(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = webview_folders.new_folder(root)
+
+            class Proc:
+                pid = 4242
+                returncode = None
+
+                def poll(self):
+                    return self.returncode
+
+            proc = Proc()
+            launched = vegas_instances.Launched(proc, webview_folder=folder)
+            self.assertEqual(launched.remove_webview_folder(), "")  # still running: kept
+            proc.returncode = 1
+            self.assertIn("removed its WebView2 folder", launched.remove_webview_folder())
+            self.assertFalse(os.path.exists(folder))
+
+    def test_launch_sets_the_webview2_variable(self):
+        self.assertEqual(webview_folders.VARIABLE, "WEBVIEW2_USER_DATA_FOLDER")
+        self.assertTrue(webview_folders.parent().startswith(tempfile.gettempdir()))
 
 
 class FakeVegasState:

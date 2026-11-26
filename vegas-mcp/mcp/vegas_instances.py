@@ -39,6 +39,7 @@ import threading
 import time
 
 import desktops
+import webview_folders
 
 PIPE_DIR = "\\\\.\\pipe\\"
 PIPE_PREFIX = "dodstudio-vegas-"
@@ -252,12 +253,14 @@ class Launched:
     desktops.Process) keeps the process handle open, so Windows cannot give
     its PID to another process (the user's next VEGAS) while this record
     exists, and ending it goes through that handle. `desktop` is the hidden
-    desktop it runs on, closed once it has ended."""
+    desktop it runs on, closed once it has ended; `webview_folder` its own
+    WebView2 data (webview_folders.py), removed then too."""
 
-    def __init__(self, proc, desktop=None):
+    def __init__(self, proc, desktop=None, webview_folder=None):
         self.proc = proc
         self.pid = proc.pid
         self.desktop = desktop
+        self.webview_folder = webview_folder
 
     def exited(self):
         return self.proc.poll() is not None
@@ -283,12 +286,21 @@ class Launched:
         # clean-up comes before the desktop handle goes.
         done = what + "; " + cleanup(self.pid, folder)
         self.close_desktop()
-        return done
+        return done + self.remove_webview_folder()
 
     def close_desktop(self):
         if self.desktop is not None:
             self.desktop.close()
             self.desktop = None
+
+    def remove_webview_folder(self):
+        """'; <what happened to its WebView2 folder>', or '' when it had none.
+        Only once it has exited."""
+        if self.webview_folder is None or not self.exited():
+            return ""
+        done = webview_folders.remove(self.webview_folder)
+        self.webview_folder = None
+        return "; " + done
 
 
 def new_desktop():
@@ -350,6 +362,14 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
     # A command-line string, so the script path is quoted after the colon the
     # way VEGAS reads it (-SCRIPT:"C:\a b\start_vegas.cs").
     command = '"%s" -SCRIPT:"%s"' % (exe, START_SCRIPT)
+    # Its own WebView2 folder: sharing the user's from another desktop makes
+    # their VEGAS's Hub fail on their screen (webview_folders.py).
+    webview_folders.sweep(is_vegas)
+    try:
+        webview = webview_folders.new_folder()
+    except OSError as e:
+        raise VegasError("cannot create a WebView2 folder for VEGAS: %s" % e)
+    env[webview_folders.VARIABLE] = webview
     desktop = new_desktop() if minimised else None
     try:
         # Minimised on its hidden desktop too: snapshot and the dialog
@@ -358,8 +378,10 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
     except OSError as e:
         if desktop is not None:
             desktop.close()
+        webview_folders.remove(webview, wait_seconds=0)
         raise VegasError("cannot start VEGAS: %s" % e)
-    launched = Launched(proc, desktop)
+    launched = Launched(proc, desktop, webview)
+    webview_folders.claim(webview, launched.pid)
     try:
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:

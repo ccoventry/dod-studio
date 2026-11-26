@@ -417,7 +417,7 @@ class Instances:
                 return "nothing to clean up"
             done = vegas_instances.cleanup(pid)
             launched.close_desktop()
-            return done
+            return done + launched.remove_webview_folder()
 
         return clean_up
 
