@@ -15,17 +15,19 @@
 // cancel the work it shows), and VEGAS's offer to restore an autosaved
 // project, which may be the user's crashed session (launch refuses to start
 // a bridge VEGAS while such an autosave exists, so it should never appear).
-// Only the dialog that is active counts, so neither the lower box of two
-// nested ones nor a hidden box VEGAS keeps for reuse is pressed:
+// Only a modal dialog that is active counts, so neither the lower box of two
+// nested ones, a hidden box VEGAS keeps for reuse, nor a modeless box is
+// pressed:
 //   a Windows dialog box (#32770) that is enabled, with its owner disabled
 //     and the box the owner's enabled popup (a modal box);
-//   one with no owner (a script's MessageBox(NULL, ...)), enabled and
-//     visible: a hidden one waits on nobody, and may be kept for reuse;
+//   one with no owner, enabled and visible, while every other shown window
+//     of its thread is disabled (a modal loop's doing; a hidden one waits on
+//     nobody, and may be kept for reuse);
 //   a WinForms form, enabled, inside its ShowDialog. One of VEGAS's own
 //     (this AppDomain) says so itself (Form.Modal). A script's runs in
 //     VEGAS's "Script Domain", where Control.FromHandle cannot reach
-//     (measured), so it counts when its owner is disabled (ShowDialog
-//     disables the owner), or, with no owner, while it is shown.
+//     (measured), so it counts when every other shown window of its thread
+//     is disabled, as ShowDialog leaves them.
 // WPF windows are left alone: VEGAS 21's render progress window is one
 // (unowned, and visible even in a minimised VEGAS), and nothing outside a
 // WPF window tells a modal box from it. A call held up by one runs into
@@ -45,6 +47,7 @@ public sealed class DialogAnswerer {
     delegate bool EnumProc(IntPtr h, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumThreadWindows(uint thread, EnumProc f, IntPtr l);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
@@ -157,27 +160,49 @@ public sealed class DialogAnswerer {
         return GetWindow(owner, GW_ENABLEDPOPUP) == h;
     }
 
-    // A box with no owner (MessageBox(NULL, ...) from a script, or one shown
-    // from a thread with no window): nothing is disabled under it, so it
-    // counts while it is enabled and visible.
-    static bool IsUnownedBox(IntPtr h) {
-        return GetWindow(h, GW_OWNER) == IntPtr.Zero && IsWindowEnabled(h) && IsWindowVisible(h);
+    // A box with no owner that is modal all the same: enabled and visible,
+    // with every other shown window of its thread disabled. A modal loop does
+    // that (WinForms' MessageBox.Show and ShowDialog disable every enabled
+    // top-level window of the thread, MB_TASKMODAL too), and a box alone on a
+    // thread of its own has nothing to disable. A modeless unowned box leaves
+    // VEGAS's main window enabled, so it is left alone, and so is a bare
+    // MessageBox(NULL, ...) on VEGAS's UI thread, which disables nothing: a
+    // call waiting on one runs into its time limit, and `end` ends that VEGAS.
+    static bool IsUnownedModalBox(IntPtr h) {
+        return GetWindow(h, GW_OWNER) == IntPtr.Zero && IsWindowEnabled(h) && IsWindowVisible(h) && OnlyEnabledOfThread(h);
     }
 
     // A WinForms form inside its ShowDialog, owned or not, and not under a
-    // box of its own (that disables it). Form.Modal is a plain flag, safe to
-    // read from this thread.
+    // box of its own (that disables it). One of VEGAS's own (this AppDomain)
+    // says so itself: Form.Modal, a plain flag, safe to read from this
+    // thread; any other control of this AppDomain is not a dialog. A script's
+    // form (Control.FromHandle cannot reach its AppDomain) counts when every
+    // other shown window of its thread is disabled, as ShowDialog leaves them.
     static bool IsModalForm(IntPtr h) {
         if (!IsWindowEnabled(h)) return false;
-        Form form = Control.FromHandle(h) as Form;
-        if (form != null) return form.Modal;
-        IntPtr owner = GetWindow(h, GW_OWNER);
-        return owner != IntPtr.Zero ? !IsWindowEnabled(owner) : IsWindowVisible(h);
+        Control mine = Control.FromHandle(h);
+        if (mine != null) {
+            Form form = mine as Form;
+            return form != null && form.Modal;
+        }
+        return IsWindowVisible(h) && OnlyEnabledOfThread(h);
+    }
+
+    // Whether h is the only enabled, visible top-level window of its thread.
+    static bool OnlyEnabledOfThread(IntPtr h) {
+        uint unused;
+        uint thread = GetWindowThreadProcessId(h, out unused);
+        bool alone = true;
+        EnumThreadWindows(thread, delegate(IntPtr w, IntPtr l) {
+            if (w != h && IsWindowVisible(w) && IsWindowEnabled(w)) { alone = false; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return alone;
     }
 
     static bool IsAnswerable(IntPtr h) {
         string cls = Cls(h);
-        if (cls == DialogClass) return IsActiveModal(h) || IsUnownedBox(h);
+        if (cls == DialogClass) return IsActiveModal(h) || IsUnownedModalBox(h);
         if (cls.StartsWith(FormClassPrefix, StringComparison.Ordinal)) return IsModalForm(h);
         return false;
     }
@@ -275,8 +300,9 @@ public sealed class DialogAnswerer {
             return true;
         }
         if (progress) return false;
-        // Anything else only once it has stayed (Scan passes only the active
-        // modal box, so a floating tool window is never closed).
+        // Anything else only once it has stayed. Scan passes only a modal box
+        // (IsAnswerable), so a modeless box, form or tool window is never
+        // pressed or closed.
         TimeSpan seen;
         if (!firstSeen.TryGetValue(h, out seen)) { firstSeen[h] = now; return false; }
         if (now - seen < UnknownGrace) return false;

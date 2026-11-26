@@ -59,8 +59,10 @@ class PROCESS_INFORMATION(ctypes.Structure):
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True) if os.name == "nt" else None
 _u32 = ctypes.WinDLL("user32", use_last_error=True) if os.name == "nt" else None
-_ENUM_WINDOWS = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
-_ENUM_DESKTOPS = ctypes.WINFUNCTYPE(wt.BOOL, wt.LPWSTR, wt.LPARAM)
+# WINFUNCTYPE exists only on Windows; elsewhere the module still imports, so
+# the unit tests that need no Windows run and the rest skip.
+_ENUM_WINDOWS = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM) if os.name == "nt" else None
+_ENUM_DESKTOPS = ctypes.WINFUNCTYPE(wt.BOOL, wt.LPWSTR, wt.LPARAM) if os.name == "nt" else None
 if _k32 is not None:
     _k32.CreateProcessW.argtypes = [wt.LPCWSTR, wt.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wt.BOOL, wt.DWORD,
                                     ctypes.c_void_p, wt.LPCWSTR, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]

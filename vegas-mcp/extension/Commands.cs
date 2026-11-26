@@ -169,11 +169,20 @@ public class Commands {
         RefuseUnsaved(a);
         // Clear the dirty state first so OpenFile never asks to save.
         vegas.NewProject(false, false);
-        vegas.OpenFile(path);
         DateTime until = DateTime.Now.AddSeconds(a.Num("wait_seconds", 60));
-        while (DateTime.Now < until && (vegas.Project == null || vegas.Project.Tracks.Count == 0)) {
-            System.Windows.Forms.Application.DoEvents();
-            System.Threading.Thread.Sleep(50);
+        // A file that is not an EDL VEGAS can read fails inside VEGAS's
+        // reader with a bare ArgumentOutOfRangeException, which names
+        // neither the file nor the reason.
+        try {
+            vegas.OpenFile(path);
+            while (DateTime.Now < until && (vegas.Project == null || vegas.Project.Tracks.Count == 0)) {
+                System.Windows.Forms.Application.DoEvents();
+                System.Threading.Thread.Sleep(50);
+            }
+        } catch (Exception e) {
+            if (e is BridgeError) throw;
+            throw new BridgeError("VEGAS could not read " + path + " as an EDL (" + e.GetType().Name + ": " + e.Message +
+                                  "); import_edl takes VEGAS's own EDL text format");
         }
         Project p = P;
         if (p.Tracks.Count == 0) throw new BridgeError("VEGAS put nothing on the timeline from " + path + " within wait_seconds");
@@ -346,6 +355,7 @@ public class Commands {
                 Take atake = ae.AddTake(aus);
                 atake.Offset = Tc(offset);
                 ae.PlaybackRate = rate;
+                if (a.Has("name")) ae.Name = a.Str("name");
                 TrackEventGroup g = new TrackEventGroup(P);
                 P.TrackEventGroups.Add(g);
                 g.Add(ev);

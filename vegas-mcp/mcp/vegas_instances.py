@@ -32,8 +32,10 @@ import ctypes
 import ctypes.wintypes as wt
 import glob
 import os
+import secrets
 import subprocess
 import tempfile
+import threading
 import time
 
 import desktops
@@ -283,13 +285,23 @@ class Launched:
 
 
 def new_desktop():
-    """A fresh hidden desktop for one VEGAS, named after this process."""
+    """A fresh hidden desktop for one VEGAS, named after this process: its PID,
+    a count (taken under a lock, as launches run on tool-call threads) and a
+    random suffix, so no two launches, here or in another process with the
+    same PID later, ask for one name. Raises VegasError when Windows refuses."""
     global _desktops_made
-    _desktops_made += 1
-    return desktops.Desktop("dodstudio-vegas-%d-%d" % (os.getpid(), _desktops_made))
+    with _desktops_lock:
+        _desktops_made += 1
+        n = _desktops_made
+    name = "dodstudio-vegas-%d-%d-%s" % (os.getpid(), n, secrets.token_hex(4))
+    try:
+        return desktops.Desktop(name)
+    except desktops.DesktopError as e:
+        raise VegasError("cannot start VEGAS on a hidden desktop: %s" % e)
 
 
 _desktops_made = 0
+_desktops_lock = threading.Lock()
 
 
 def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=False):

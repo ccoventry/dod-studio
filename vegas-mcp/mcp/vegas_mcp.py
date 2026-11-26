@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import threading
+import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also under python -I
 
@@ -46,6 +47,10 @@ TIMEOUT_SECONDS = {"render": 3600, "open_project": 600, "import_edl": 600}
 # import_edl waits up to its own wait_seconds for the timeline to fill; the
 # limit is at least that plus this.
 IMPORT_EDL_MARGIN_SECONDS = 60
+# The longest limit a call may ask for: longer than any render, and far
+# under threading.TIMEOUT_MAX, past which a wait raises OverflowError after
+# the request has been sent.
+MAX_TIMEOUT_SECONDS = 7 * 24 * 3600
 
 SECONDS = {"type": "number", "description": "seconds"}
 TRACK = {"type": "integer", "description": "0-based track index (project_info)"}
@@ -280,23 +285,34 @@ for _t in TOOLS[len(LOCAL_TOOLS):]:
 
 
 def time_limit(cmd, args):
-    """How many seconds a bridge call may take: timeout_seconds, else the
-    command's default. Raises on a value that is not a positive number."""
+    """How many seconds a bridge call may take: timeout_seconds (at most
+    MAX_TIMEOUT_SECONDS), else the command's default. Raises on a value that
+    is not a finite number above 0."""
     if args.get(TIMEOUT_ARGUMENT) is not None:
         try:
             limit = float(args[TIMEOUT_ARGUMENT])
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             limit = 0
-        if not limit > 0:
+        if not 0 < limit < float("inf"):
             raise BridgeUnavailable("%s must be a number of seconds above 0, got %r" % (TIMEOUT_ARGUMENT, args[TIMEOUT_ARGUMENT]))
-        return limit
+        return min(limit, MAX_TIMEOUT_SECONDS)
     limit = float(TIMEOUT_SECONDS.get(cmd, DEFAULT_TIMEOUT_SECONDS))
     if cmd == "import_edl":
         try:
             limit = max(limit, float(args.get("wait_seconds") or 0) + IMPORT_EDL_MARGIN_SECONDS)
         except (TypeError, ValueError):
             pass  # the bridge reports a bad wait_seconds itself
-    return limit
+    return min(limit, MAX_TIMEOUT_SECONDS)
+
+
+class CurrentGone(BridgeUnavailable):
+    """The current VEGAS has gone. `clean_up` (slow: the pipe, its autosave, a
+    crash box) is left to the caller, to run without holding Instances.lock."""
+
+    def __init__(self, pid, clean_up):
+        BridgeUnavailable.__init__(self, "the bridge VEGAS (PID %d) is gone; call launch for a new one" % pid)
+        self.pid = pid
+        self.clean_up = clean_up
 
 
 class Instances:
@@ -317,6 +333,11 @@ class Instances:
         # until launch or use picks one, so a retried command never lands in
         # another VEGAS's project.
         self.lost = None
+        # What end is ending right now (PIDs), and the connections it has
+        # ended: a call that fails because end ended its VEGAS says so, and
+        # neither cleans up after it again nor marks it lost.
+        self.ending = set()
+        self.ended_bridges = weakref.WeakSet()
 
     def bridge(self, pid):
         with self.lock:
@@ -325,7 +346,9 @@ class Instances:
             return self.bridges[pid]
 
     def target(self):
-        """The PID tools go to now. Raises when there is none to pick safely."""
+        """The PID tools go to now. Raises when there is none to pick safely;
+        CurrentGone when the current one has gone, leaving its clean-up to the
+        caller. Call holding lock."""
         if self.lost is not None:
             raise BridgeUnavailable("the bridge VEGAS (PID %d) has gone: call launch, or use to pick another" % self.lost)
         live = vegas_instances.bridge_pids()
@@ -333,11 +356,11 @@ class Instances:
             return self.current
         if self.current is not None:
             gone = self.current
-            raise BridgeUnavailable("the bridge VEGAS (PID %d) is gone (%s); call launch for a new one" % (gone, self.forget(gone)))
+            raise CurrentGone(gone, self._forget_later(gone))
         # Only a VEGAS this server started is picked without asking: another
         # bridge VEGAS belongs to another session or script, and its project
         # is theirs, so reaching it takes an explicit use.
-        ours = [p for p in live if p in self.launched]
+        ours = [p for p in live if p in self.launched and p not in self.ending]
         if len(ours) == 1:
             self.current = ours[0]
             return self.current
@@ -354,7 +377,16 @@ class Instances:
         """Drop a VEGAS that has gone and mark it lost; when this server started
         it, clean up after it (autosave, crash box), going by its own handle.
         Returns what it did."""
+        return self._forget_later(pid)()
+
+    def _forget_later(self, pid):
+        """forget's bookkeeping, done now under the lock, and its slow part
+        (closing the pipe, the autosave, PowerShell for a crash box) returned
+        as a function to run outside it, so other calls and end do not wait
+        on that. A VEGAS that end is ending is end's to clean up."""
         with self.lock:
+            if pid in self.ending:
+                return lambda: "end is ending it"
             b = self.bridges.pop(pid, None)
             if self.current == pid:
                 self.current = None
@@ -363,28 +395,38 @@ class Instances:
             ours_gone = launched is not None and launched.exited()
             if ours_gone:
                 del self.launched[pid]
-        if b:
-            b.close()
-        if not ours_gone:
-            return "nothing to clean up"
-        done = vegas_instances.cleanup(pid)
-        launched.close_desktop()
-        return done
+
+        def clean_up():
+            if b:
+                b.close()
+            if not ours_gone:
+                return "nothing to clean up"
+            done = vegas_instances.cleanup(pid)
+            launched.close_desktop()
+            return done
+
+        return clean_up
 
     def call(self, cmd, args):
         args = dict(args or {})
         limit = time_limit(cmd, args)
         args.pop(TIMEOUT_ARGUMENT, None)
-        with self.lock:
-            pid = self.target()
-            bridge = self.bridge(pid)
+        try:
+            with self.lock:
+                pid = self.target()
+                bridge = self.bridge(pid)
+        except CurrentGone as gone:
+            raise BridgeUnavailable("the bridge VEGAS (PID %d) is gone (%s); call launch for a new one" % (gone.pid, gone.clean_up()))
         try:
             reply = bridge.call(cmd, args, limit)
         except BridgeUnavailable as e:
             if isinstance(e, BridgeTimeoutOrBusy):
                 raise  # still running: nothing to clean up
             with self.lock:
+                ended = bridge in self.ended_bridges or pid in self.ending
                 launched = self.launched.get(pid)
+            if ended:
+                raise BridgeUnavailable("%s: end ended that VEGAS while %s ran" % (e, cmd))
             exited = launched.exited() if launched is not None else not vegas_instances.is_running(pid)
             if exited:
                 raise BridgeUnavailable("%s; it has exited (%s)" % (e, self.forget(pid)))
@@ -430,20 +472,37 @@ class Instances:
                 raise BridgeUnavailable("no current bridge VEGAS: pass pid (instances lists them)")
             launched = self.launched.get(pid)
             b = self.bridges.get(pid)
+            # end wins over a call it cuts short: that call neither cleans up
+            # again nor marks the VEGAS lost, and no call picks it meanwhile,
+            # so the next one goes to another VEGAS this server started.
+            self.ending.add(pid)
+            if b is not None:
+                self.ended_bridges.add(b)
+            was_current = self.current == pid
+            if was_current:
+                self.current = None
         # Not under the lock, and never waiting on the pipe: a call stuck in
         # that VEGAS ends with it (its pipe closes and the read returns).
-        if launched is not None:
-            result = launched.end()  # raises while it still runs: the record stays, so end_all retries it
-        else:
-            # Checked while this server's connection still holds the pipe, so
-            # the listing cannot miss it between clients.
-            result = vegas_instances.end_bridge_pid(pid)
+        try:
+            if launched is not None:
+                result = launched.end()  # raises while it still runs: the record stays, so end_all retries it
+            else:
+                # Checked while this server's connection still holds the pipe, so
+                # the listing cannot miss it between clients.
+                result = vegas_instances.end_bridge_pid(pid)
+        except BaseException:
+            with self.lock:
+                self.ending.discard(pid)
+                if b is not None:
+                    self.ended_bridges.discard(b)
+                if was_current and self.current is None:
+                    self.current = pid
+            raise
         with self.lock:
             self.launched.pop(pid, None)
             if self.bridges.get(pid) is b:
                 self.bridges.pop(pid, None)
-            if self.current == pid:
-                self.current = None
+            self.ending.discard(pid)
         if b:
             b.close()
         return result
@@ -482,13 +541,14 @@ class Instances:
             try:
                 if not one.exited():
                     one.proc.kill()
-            except OSError:
-                pass  # already gone: the clean-up below still runs
+            except OSError as e:
+                # Already gone, or going: one.end() below tries again and reports.
+                log("end_all: terminating VEGAS PID %d: %s" % (one.pid, e))
         for one in launched:
             try:
-                one.end()
-            except Exception:  # noqa: BLE001 - best effort on the way out; the next one still gets ended
-                pass
+                log("end_all: %s" % one.end())
+            except Exception as e:  # noqa: BLE001 - best effort on the way out; the next one still gets ended
+                log("end_all: ending VEGAS PID %d failed: %s: %s" % (one.pid, type(e).__name__, e))
 
     def run_local(self, name, args):
         if name == "launch":
@@ -519,6 +579,16 @@ def send(msg):
     with _send_lock:
         sys.stdout.write(json.dumps(msg) + "\n")
         sys.stdout.flush()
+
+
+def log(line):
+    """A line for whoever reads the server's stderr (Claude Code's MCP log);
+    stdout carries only JSON-RPC."""
+    try:
+        sys.stderr.write("dodstudio-vegas: %s\n" % line)
+        sys.stderr.flush()
+    except (OSError, ValueError, AttributeError):
+        pass  # no stderr (closed, or pythonw): nothing to tell
 
 
 def serve():

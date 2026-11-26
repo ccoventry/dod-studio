@@ -40,6 +40,14 @@ class BridgeTimeout(BridgeUnavailable):
     """No reply within the call's time limit; the call goes on in VEGAS."""
 
 
+def _close_quietly(pipe):
+    if pipe is not None:
+        try:
+            pipe.close()
+        except OSError:
+            pass
+
+
 class Pending:
     """A call whose reply has not been read yet."""
 
@@ -80,19 +88,23 @@ class Bridge:
             raise BridgeUnavailable("the bridge VEGAS (PID %d) is not reachable at %s: %s" % (self.pid, self.path, why))
 
     def close(self):
-        """Drop the connection. Called after its VEGAS has been ended, so a
-        pending read has returned or is about to."""
+        """Drop the connection. Every caller closes it once its VEGAS has gone
+        (or after a reply, with no read pending), so a pending read has
+        returned or is about to. Should a read still be pending, closing the
+        handle could wait on it (a synchronous pipe handle runs one operation
+        at a time), so the close is left to a thread of its own and this
+        never blocks."""
         with self.cond:
             pending, pipe = self.pending, self.pipe
             self.pending, self.pipe = None, None
             self.cond.notify_all()
         if pending is not None and pending.reader is not None:
             pending.reader.join(READER_EXIT_SECONDS)
-        if pipe is not None:
-            try:
-                pipe.close()
-            except OSError:
-                pass
+            if pending.reader.is_alive() and pipe is not None:
+                threading.Thread(target=_close_quietly, args=(pipe,), daemon=True,
+                                 name="vegas %d close" % self.pid).start()
+                return
+        _close_quietly(pipe)
 
     def busy(self):
         """What the VEGAS is still running past its limit, or None."""
@@ -130,12 +142,8 @@ class Bridge:
         self.late = "%s, which ran past its %g s limit, finished %.0f s after it was sent: %s" % (p.cmd, p.limit, p.age(), outcome)
 
     def _drop_pipe(self):
-        if self.pipe is not None:
-            try:
-                self.pipe.close()
-            except OSError:
-                pass
-            self.pipe = None
+        _close_quietly(self.pipe)
+        self.pipe = None
 
     def _read(self, pending, pipe):
         try:
@@ -190,6 +198,9 @@ class Bridge:
                 self.cond.wait(left)
             if not pending.done.is_set():
                 pending.timed_out = True
+                # A caller queued behind this one is refused now (busy), not
+                # left asleep until its own deadline.
+                self.cond.notify_all()
                 raise BridgeTimeout(
                     "%s got no reply from the bridge VEGAS (PID %d) within its %g s limit (%s) and is still running there. "
                     "That VEGAS is marked busy: later calls to it are refused until the reply comes, or until end ends it%s"
