@@ -2,6 +2,7 @@
 // OBS from Configuration: Test OBS Connection, stopping a recording a crashed
 // batch left running, and Launch OBS.
 
+use lock_recover::lock_or_recover;
 use std::path::Path;
 
 use serde::Serialize;
@@ -253,10 +254,7 @@ const OBS_LAUNCH_ARGS: &[&str] = &["--disable-updater"];
 pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
     let settings_state = app.state::<crate::settings_manager::SettingsManager>();
     let obs_exe_path = {
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&settings_state.inner);
         guard.obs_exe_path.clone()
     };
 

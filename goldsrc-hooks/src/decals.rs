@@ -7,7 +7,7 @@
 //! That is why the pipeline's decal hygiene has to be baked into the demo: pin
 //! the ring small at load time, then inject a full revolution's worth of
 //! synthetic decals into the gap before each clip so the index walks past every
-//! real one (`native/src/patch/decal_strip.rs`). It works, and it costs a
+//! real one (`native/src/decals/decal_strip.rs`). It works, and it costs a
 //! demo rewrite, a load-time-only constraint on `r_decals`, and a standing rule
 //! that the cvar must never be injected mid-demo because an extra
 //! `ConsoleCommand` frame shifts every later frame ordinal by +1.
@@ -27,7 +27,7 @@
 //!   hw+0x49da0  R_DecalInit()              memset the whole pool, gDecalCount
 //!                                          = 0, and reset the 256-entry decal
 //!                                          texture table
-//!   hw+0x4a000  R_DecalRemoveAll<by flag>  the pattern this copies: for each
+//!   hw+0x4a000  R_DecalRemoveWithFlag      the pattern this copies: for each
 //!                                          slot, unlink then zero 28 bytes
 //! ```
 //!

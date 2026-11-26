@@ -6,6 +6,7 @@
 
 use crate::render_manager::{HistoryEntry, history_for};
 use crate::settings_manager::SettingsManager;
+use lock_recover::lock_or_recover;
 use native::log_markdown;
 use serde::Serialize;
 use std::path::Path;
@@ -50,7 +51,7 @@ pub fn take_capture_states(take_folders: Vec<String>) -> Vec<TakeCaptureState> {
 pub fn locate_rendered_videos(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
     let export_dirs = {
         let settings = app.state::<SettingsManager>();
-        let s = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let s = lock_or_recover(&settings.inner);
         s.render_export_dirs.clone()
     };
     let started = Instant::now();

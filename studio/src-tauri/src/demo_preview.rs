@@ -3,6 +3,7 @@
 // the game (or sent to a game already running), and the Clear Previews sweep
 // of the preview files left behind.
 
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -158,10 +159,7 @@ pub async fn launch_demo_preview(
     // config otherwise keeps PatcherConfig's 1280x720 default.
     let resolution = {
         let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&settings_state.inner);
         (guard.resolution_width, guard.resolution_height)
     };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -212,6 +210,7 @@ pub async fn launch_demo_preview(
             format!("+{line}")
         };
         let mut cmd = patcher_config.build_hlae_process(&extra);
+        native::tool_versions::log_hlae_launch(&patcher_config);
         let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
         watch_for_error_dialogs(app, launcher);

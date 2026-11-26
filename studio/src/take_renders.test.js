@@ -4,8 +4,9 @@ import { pruneTakeIndex, markBlockCaptured, resolveTake } from './take_index.js'
 import { attachCaptures, capturesToSave, recordCapture } from './take_record.js';
 import {
   rendersOf, recordRender, recordTakeFolderRenders, attachRenders, rendersToSave, carryRenders,
-  projectRenderedVideos, existingVideos,
+  projectRenderedVideos, existingVideos, relocateRender, movedFromOf,
 } from './take_renders.js';
+import * as before1085Renders from './test_fixtures/take_renders_before_1085.js';
 import * as before1264Index from './test_fixtures/take_index_before_1264.js';
 import * as before1264Record from './test_fixtures/take_record_before_1264.js';
 
@@ -182,6 +183,28 @@ describe('projectRenderedVideos (the whole-project export list)', () => {
     expect(projectRenderedVideos(index)[0].uids).toEqual(['b']);
   });
 
+  it('orders an undated take by the time in its folder name, among the dated ones', () => {
+    const at = (...parts) => new Date(parts[0], parts[1] - 1, ...parts.slice(2)).getTime();
+    const index = { evening: ['a'], morning: ['b'], none: ['c'], 'session_20261107_050000/chain_00_b0': ['d'] };
+    recordCapture(index, 'evening', { captured_at: at(2026, 11, 7, 17, 39, 0) });
+    recordCapture(index, 'morning', { take_folder: 'D:/caps/session_20261107_043108/chain_00_b0' });
+    recordRender(index, 'evening', finished(1));
+    recordRender(index, 'morning', finished(2));
+    recordRender(index, 'none', finished(3));
+    recordRender(index, 'session_20261107_050000/chain_00_b0', finished(4));
+    expect(projectRenderedVideos(index).map((v) => v.started_unix_ms)).toEqual([2, 4, 1, 3]);
+  });
+
+  it('keeps a take with neither a time nor a dated folder where it was, after the dated', () => {
+    const index = { b: ['a'], a: ['b'], dated: ['c'] };
+    recordCapture(index, 'b', { take_folder: 'D:/caps/misc/chain_00' });
+    recordCapture(index, 'dated', { captured_at: 5 });
+    recordRender(index, 'b', finished(1));
+    recordRender(index, 'a', finished(2));
+    recordRender(index, 'dated', finished(3));
+    expect(projectRenderedVideos(index).map((v) => v.takeKey)).toEqual(['dated', 'a', 'b']);
+  });
+
   it('existingVideos keeps the found ones at their current paths', () => {
     const videos = [{ output_path: 'a' }, { output_path: 'b' }, { output_path: 'c' }];
     expect(existingVideos(videos, ['a', null, 'E:/moved/c'])).toEqual([{ output_path: 'a' }, { output_path: 'E:/moved/c' }]);
@@ -191,5 +214,72 @@ describe('projectRenderedVideos (the whole-project export list)', () => {
   it('nothing for an index with no renders', () => {
     expect(projectRenderedVideos({ k: ['u'] })).toEqual([]);
     expect(projectRenderedVideos(undefined)).toEqual([]);
+  });
+});
+
+describe('relocateRender (#1442)', () => {
+  it('points a recorded render at where a scan found it, from a copy of the entry', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    expect(relocateRender(index, KEY, copy, { output_path: 'E:/sorted/best.mov', output_size_bytes: null, content_hash: 'abc' })).toBe(true);
+    expect(rendersOf(index, KEY)[0]).toMatchObject({ output_path: 'E:/sorted/best.mov', output_size_bytes: 10, content_hash: 'abc' });
+    expect(relocateRender(index, KEY, copy, { output_path: 'E:/sorted/best.mov', content_hash: 'abc' })).toBe(false);
+  });
+
+  it('changes nothing for a render the project does not have', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    expect(relocateRender(index, KEY, finished(2), { output_path: 'E:/x.mov' })).toBe(false);
+    expect(relocateRender(index, 'other/key', finished(1), { output_path: 'E:/x.mov' })).toBe(false);
+  });
+
+  it('keeps each path a render moved away from, once, oldest first (#1514)', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'E:/sorted/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'H:/movie/a.mov' });
+    // Found again where it already is, then a case-only spelling of it.
+    relocateRender(index, KEY, copy, { output_path: 'H:/movie/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'H:/Movie/A.mov' });
+    expect(movedFromOf(rendersOf(index, KEY)[0])).toEqual(['D:/exports/clip_1.mov', 'E:/sorted/a.mov']);
+  });
+
+  it('drops a moved-from path the video was moved back to', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'E:/sorted/a.mov' });
+    relocateRender(index, KEY, copy, { output_path: 'D:\\exports\\clip_1.mov' });
+    expect(movedFromOf(rendersOf(index, KEY)[0])).toEqual(['E:/sorted/a.mov']);
+  });
+
+  it('a fingerprint taken in place adds no moved-from path', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    const [copy] = projectRenderedVideos(index);
+    relocateRender(index, KEY, copy, { output_path: 'D:/exports/clip_1.mov', content_hash: 'ab' });
+    expect('moved_from' in rendersOf(index, KEY)[0]).toBe(false);
+  });
+
+  it('moved_from survives a save and load here and in a build from before it', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1));
+    relocateRender(index, KEY, projectRenderedVideos(index)[0], { output_path: 'E:/sorted/a.mov' });
+    const json = saveProject(index, new Set([FIRST]));
+    expect(movedFromOf(rendersOf(loadProject(json), KEY)[0])).toEqual(['D:/exports/clip_1.mov']);
+    // A build from before #1514 keeps a render's entry whole: it reads the
+    // path it knows and saves the field it doesn't back unchanged.
+    const old = { [KEY]: [FIRST] };
+    before1085Renders.attachRenders(old, JSON.parse(json).takeRenders);
+    expect(before1085Renders.rendersOf(old, KEY)[0].output_path).toBe('E:/sorted/a.mov');
+    expect(before1085Renders.rendersToSave(old)[KEY][0].moved_from).toEqual(['D:/exports/clip_1.mov']);
+  });
+
+  it('keeps a fingerprint the render recorded through a save and load', () => {
+    const index = { [KEY]: [FIRST] };
+    recordRender(index, KEY, finished(1, { content_hash: 'f00d' }));
+    expect(rendersOf(loadProject(saveProject(index, new Set([FIRST]))), KEY)[0].content_hash).toBe('f00d');
   });
 });

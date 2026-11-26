@@ -132,7 +132,6 @@ pub struct RunningGame {
 }
 
 /// Whether a game is running now, and whether it was started with `want`.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn check_running_game(want: &LaunchSettings) -> RunningGameCheck {
     // Both sides resolved on disk, so a junction or short name in one
     // spelling does not read as another install.

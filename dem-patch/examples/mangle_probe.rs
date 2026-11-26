@@ -21,6 +21,11 @@
 //! splice a valid header/signon onto a tail slice taken at an arbitrary byte
 //! offset, truncate mid-frame, and flip bytes in the frame headers (where a
 //! length or a frame type lives) rather than uniformly across the file.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -172,7 +177,14 @@ fn roundtrip_dir(dir: &str) {
     for p in &paths {
         match dem::open_demo(p) {
             Ok(demo) => {
-                let bytes = demo.write_to_bytes();
+                let bytes = match demo.write_to_bytes() {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        println!("WRITE-ERR {} -- {e}", p.display());
+                        refused += 1;
+                        continue;
+                    }
+                };
                 println!("{:016x} {:>12} {}", fnv1a(&bytes), bytes.len(), p.display());
                 total_bytes += bytes.len() as u64;
                 done += 1;

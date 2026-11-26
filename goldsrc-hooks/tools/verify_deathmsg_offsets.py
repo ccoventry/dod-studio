@@ -63,6 +63,10 @@ FUNCTIONS = {
     "Draw": (0x2AE90, 0x2B198),
     "MsgFunc_DeathMsg": (0x2B1A0, 0x2B4D2),
 }
+# `CHudDoDCommon::MsgFunc_GameRules`, which sets the British flag butt.rs
+# reads (#1089).
+GAME_RULES = (0x2C650, 0x2C6CB)
+BUTT = RUST.parent / "deathmsg" / "butt.rs"
 # The two whose instruction sequence must survive the patch unchanged.
 PATCHED_FUNCTIONS = ("Draw", "MsgFunc_DeathMsg")
 
@@ -159,6 +163,24 @@ def encoded_operands(md, image: bytes, base: int) -> dict[int, tuple[int, int, s
                 raw = image[address : address + size]
                 found[address] = (size, int.from_bytes(raw, "little"), text)
     return found
+
+
+def check_british_flag(md, image: bytes, base: int) -> bool:
+    """`deathmsg/butt.rs`'s BRITISH_RVA (#1089) must be the byte
+    `MsgFunc_GameRules` sets from its first byte's `& 4`: a store of `cl`
+    there, after the `test bl, 4` whose `seta cl` fills it."""
+    print("british flag:")
+    flag = rust_scalar(BUTT.read_text(encoding="utf-8"), "BRITISH_RVA")
+    start, end = GAME_RULES
+    tested = False
+    for ins in md.disasm(bytes(image[start:end]), base + start):
+        if ins.mnemonic == "test" and ins.op_str == "bl, 4":
+            tested = True
+        if tested and ins.mnemonic == "mov" and ins.op_str == f"byte ptr [{base + flag:#x}], cl":
+            print(f"  OK   +{ins.address - base:#x} stores the GameRules British bit at +{flag:#x}")
+            return True
+    print(f"  FAIL no store of the British bit (`test bl, 4`) at +{flag:#x} in MsgFunc_GameRules")
+    return False
 
 
 def main() -> int:
@@ -347,6 +369,7 @@ def main() -> int:
             print(f"  OK   {len(stolen)} bytes leaves room for the 5-byte jump")
 
     print("")
+    ok &= check_british_flag(md, image, base)
 
     print("\nTABLES VERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

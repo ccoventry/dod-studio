@@ -25,8 +25,10 @@ download `DoD.Studio_<version>_x64-setup.exe` and run it. Windows 10 or 11, 64-b
 
 - **Day of Defeat on Steam.** Pre-Anniversary and 25th Anniversary are both
   supported.
-- **A separate copy of Half-Life just for movies** is recommended. It keeps your
-  movie configs, models and sounds away from the game you play online.
+- **A movie copy of your `dod` folder** is recommended. It keeps your
+  movie configs, models and sounds away from the game you play online. Setup's
+  **Make a movie copy...** button makes one for you; copying the whole
+  Half-Life folder by hand works too.
 - **[HLAE](https://www.advancedfx.org/)**, which records the game. Required.
 - **[FFmpeg](https://ffmpeg.org/)** for video capture and for rendering clips.
   Optional, but you'll want it.
@@ -74,9 +76,9 @@ memory, which is exactly what VAC looks for. So:
 - **Never load the hook DLL by hand** (with HLAE or any injector) into a game
   you then play online with.
 - **To play online, start Day of Defeat from Steam, without DoD Studio.** A
-  separate copy of Half-Life for movies is recommended but never required: it
-  keeps your movie configs, models, sprites and sounds out of the game you
-  play online. It protects those files, not your account.
+  movie copy of your `dod` folder (or of the whole Half-Life folder) is
+  recommended but never required: it keeps your movie configs, models, sprites
+  and sounds out of the game you play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 
@@ -228,6 +230,14 @@ error**, which kills the whole process mid-batch. The fork falls back to the
 library's built-in initial delta table where one exists and returns a graceful
 parse failure otherwise. As of upstream v0.3.0 all 29 of those call sites are
 still present, so the patch is still required.
+
+The write path is hardened the same way (#1510): re-encoding a frame whose
+deltas do not fit the demo's own delta tables (a field the table lacks or
+describes twice, a value narrower than its type, an unwritable width) returns a
+`dem::write_error::WriteError` naming the frame, table and field, where upstream
+unwrapped. `Demo::write_to_bytes` and the cancellable writers return a `Result`
+for it, and a field whose name is not UTF-8 is written back by its parse-time
+key.
 
 ## Licensing
 

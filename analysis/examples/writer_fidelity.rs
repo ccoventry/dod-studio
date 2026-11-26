@@ -3,7 +3,7 @@
 //!
 //! A demo that parses via `dem::open_demo_from_bytes` after `write_to_bytes`
 //! only proves the writer and reader agree with EACH OTHER -- not that either
-//! agrees with the real GoldSrc wire format. `snapshot_inject` hand-constructs
+//! agrees with the real GoldSrc wire format. The repair (`analysis::repair`, once `snapshot_inject`) hand-constructs
 //! a brand new `SvcPacketEntities` (absolute indexing on every entity, fields
 //! assembled from scratch) rather than editing an existing message's fields in
 //! place, which is a code path nothing has verified against real bytes.
@@ -14,6 +14,11 @@
 //! disagreeing with the real GoldSrc server that produced the original bytes.
 //!
 //!     cargo run --release -p analysis --example writer_fidelity -- <healthy.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::open_demo_from_bytes;
 
@@ -23,7 +28,7 @@ fn main() {
         .expect("usage: writer_fidelity <healthy.dem>");
     let original = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&original).expect("parse");
-    let rewritten = demo.write_to_bytes();
+    let rewritten = demo.write_to_bytes().expect("re-encode");
 
     println!("{path}");
     println!("  original:  {} bytes", original.len());

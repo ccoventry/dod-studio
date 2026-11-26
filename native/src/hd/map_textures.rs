@@ -367,6 +367,7 @@ impl WadCache {
         Some((file, wad_entries(&dir, count)))
     }
 
+    #[expect(clippy::expect_used, reason = "the entry was inserted just above")]
     fn directory(
         &mut self,
         wad: &str,

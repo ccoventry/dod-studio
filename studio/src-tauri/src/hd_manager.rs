@@ -3,6 +3,7 @@
 //! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,7 +68,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
     // gl_max_size (#680).
     let init_commands = {
         let settings = app.state::<crate::settings_manager::SettingsManager>();
-        let guard = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = lock_or_recover(&settings.inner);
         guard.init_commands.clone()
     };
     // A big HD folder is tens of thousands of files, and finding Python runs
@@ -88,7 +89,8 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         // Read fresh, not scan_cached: the user may have just edited movie.cfg.
         if let Some(game) = exe.parent() {
-            let configs = native::patch::cfg_scan::scan(&native::shared::paths::mod_dir(game));
+            let configs =
+                native::game_config::cfg_scan::scan(&native::shared::paths::mod_dir(game));
             status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
         }
         status

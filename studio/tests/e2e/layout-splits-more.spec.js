@@ -1,0 +1,112 @@
+// Draggable splits beyond Capture Studio and the Analyzer (#46): the Overviews
+// side panels and the Render / Auditor table heights. Drives the real app shell
+// against mocked IPC, like layout-splits.spec.js.
+import { test, expect } from './fixtures.js';
+
+test.use({ viewport: { width: 1600, height: 900 } });
+
+async function boot(page, savedSettings = {}) {
+  await page.addInitScript((saved) => {
+    window.__mockInvokeHandlers = {
+      get_settings: () => ({ setup_dismissed: true, pinned_folders: [], ...saved }),
+      scan_demo_folders: () => [],
+    };
+  }, savedSettings);
+  await page.goto('/index.html');
+  await expect(page.locator('#capture-split-handle')).toBeVisible();
+  // The nav buttons get their click handlers when main.js's boot (which awaits
+  // the settings) ends, so a click before then lands on nothing (#1511).
+  await page.waitForFunction(() => window.dodStudioBoot?.state() === 'started');
+}
+
+const size = (page, sel, dim) => page.locator(sel).evaluate((el, d) => el.getBoundingClientRect()[d], dim);
+
+async function drag(page, sel, dx, dy) {
+  const box = await page.locator(sel).boundingBox();
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx / 2, y + dy / 2);
+  await page.mouse.move(x + dx, y + dy);
+  await page.mouse.up();
+}
+
+const lastSavedSettings = (page) => page.evaluate(() => {
+  const saves = window.__mockInvocations.filter((c) => c.cmd === 'save_settings');
+  return saves.length ? saves[saves.length - 1].args.settings : null;
+});
+
+// Each split: where to go, the handle, the pane it resizes, the settings key,
+// which way a positive drag moves the pane's size, and the size the saved value
+// should give back.
+const SPLITS = [
+  { name: 'Overviews Maps panel', nav: 'overviews', handle: '#ov-maps-resize-handle', pane: '#ov-maps-panel', dim: 'width', field: 'overviews_maps_width_px', dx: 80, dy: 0, sign: 1, saved: 330, defaultMax: 252 },
+  { name: 'Overviews Edit panel', nav: 'overviews', handle: '#ov-edit-resize-handle', pane: '#ov-edit-panel', dim: 'width', field: 'overviews_edit_width_px', dx: -80, dy: 0, sign: 1, saved: 330, defaultMax: 252 },
+  { name: 'Render queue table', nav: 'workspace', sub: 'render', handle: '#render-jobs-resize-handle', pane: '#render-jobs-wrap', dim: 'height', field: 'render_table_height_px', dx: 0, dy: 150, sign: 1, saved: 500, defaultMax: 460 },
+  { name: 'Auditor results table', nav: 'demo-auditor', handle: '#audit-results-resize-handle', pane: '#audit-results-wrap', dim: 'height', field: 'auditor_table_height_px', dx: 0, dy: 150, sign: 1, saved: 500, defaultMax: 460 },
+];
+
+async function open(page, s) {
+  await page.locator(`[data-nav="${s.nav}"]`).click();
+  if (s.sub) await page.locator(`.capture-detail-subtab-btn[data-capture-subtab="${s.sub}"]`).click();
+  await expect(page.locator(s.handle)).toBeVisible();
+}
+
+for (const s of SPLITS) {
+  test(`dragging the ${s.name} handle resizes it and saves the size`, async ({ page }) => {
+    await boot(page);
+    await open(page, s);
+    const before = await size(page, s.pane, s.dim);
+    await drag(page, s.handle, s.dx, s.dy);
+    const after = await size(page, s.pane, s.dim);
+    expect(after).toBeGreaterThan(before + 70);
+    await expect.poll(async () => (await lastSavedSettings(page))?.[s.field]).toBeGreaterThan(before + 70);
+  });
+
+  test(`a saved ${s.name} size is restored, and double-click resets it`, async ({ page }) => {
+    await boot(page, { [s.field]: s.saved });
+    await open(page, s);
+    expect(Math.round(await size(page, s.pane, s.dim))).toBe(s.saved);
+    await page.locator(s.handle).dblclick();
+    expect(await size(page, s.pane, s.dim)).toBeLessThan(s.saved);
+    await expect.poll(async () => (await lastSavedSettings(page))?.[s.field]).toBeNull();
+  });
+}
+
+test('an Overviews side panel stops short of the other panel and the map', async ({ page }) => {
+  await boot(page);
+  await open(page, SPLITS[0]);
+  await drag(page, '#ov-maps-resize-handle', 3000, 0);
+  expect(await size(page, '#ov-maps-panel', 'width')).toBeLessThan(1600 - 250 - 300 - 20);
+  expect(await size(page, '.ov-main', 'width')).toBeGreaterThanOrEqual(299);
+  await drag(page, '#ov-maps-resize-handle', -3000, 0);
+  expect(await size(page, '#ov-maps-panel', 'width')).toBeGreaterThanOrEqual(179);
+});
+
+// The panels default to 250 px; a drag narrower than that must show, and the
+// saved size must be what is on screen (a panel stuck at its default while
+// saving the dragged number would reopen at a different width).
+for (const [panel, handle, field, dx] of [
+  ['#ov-maps-panel', '#ov-maps-resize-handle', 'overviews_maps_width_px', -60],
+  ['#ov-edit-panel', '#ov-edit-resize-handle', 'overviews_edit_width_px', 60],
+]) {
+  test(`${panel} drags narrower than its default and saves what is shown`, async ({ page }) => {
+    await boot(page);
+    await open(page, SPLITS[0]);
+    await drag(page, handle, dx, 0);
+    const shown = Math.round(await size(page, panel, 'width'));
+    expect(shown).toBeLessThan(240);
+    expect(await page.locator(panel).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await expect.poll(async () => (await lastSavedSettings(page))?.[field]).toBe(shown);
+    await drag(page, handle, dx * 50, 0);
+    expect(Math.round(await size(page, panel, 'width'))).toBe(180);
+  });
+}
+
+test('a table never drags below its minimum height', async ({ page }) => {
+  await boot(page);
+  await open(page, SPLITS[3]);
+  await drag(page, '#audit-results-resize-handle', 0, -2000);
+  expect(await size(page, '#audit-results-wrap', 'height')).toBeGreaterThanOrEqual(119);
+});

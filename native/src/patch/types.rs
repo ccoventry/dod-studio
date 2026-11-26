@@ -1,8 +1,8 @@
 // patch/types.rs
 // Pure data layer: structs, enums, and their direct impl blocks.
-// No file I/O, no thread spawning. All types except PatchEvent and
-// CaptureWorker are WASM-safe.
+// No file I/O, no thread spawning.
 
+use crate::shared::paths::default_goldsrc_hooks_dll_path;
 use std::sync::{Arc, atomic::AtomicBool};
 
 pub const MAX_PAYLOAD_LIMIT_BYTES: usize = 2_097_152;
@@ -191,6 +191,7 @@ impl CaptureStreak {
         self.end_tick = slice[slice.len() - 1].0;
         self.kill_count = slice.len();
 
+        #[expect(clippy::unwrap_used, reason = "the slice has at least one kill")]
         let total_secs = (slice.last().unwrap().1 - slice[0].1).max(0.0).round() as i32;
         self.duration_string = format!("{}:{:02}", total_secs / 60, total_secs % 60);
 
@@ -422,9 +423,16 @@ impl KillGaps {
 /// container, the cost of being wrong is a lost take, and the cost of being
 /// generous is a second of connective footage inside a merged clip.
 ///
-/// Lives here rather than beside the client so the patcher can read it on every
-/// target — `patch` compiles for wasm32, `obs` does not.
+/// Lives here rather than beside the client so the patcher can read it without
+/// depending on the `obs` module.
 pub const OBS_TAKE_SEPARATION_SECONDS: f32 = 2.0;
+
+/// The rate AGR mode records at when `PatcherConfig::agr_fps` is 0 or absent.
+/// AGR's own rate rather than Capture FPS: an AGR take is rebuilt in Blender,
+/// and a high recorded rate makes those renders far slower, so following a
+/// 300 fps Capture FPS was the wrong default for it. Studio's
+/// `DEFAULT_AGR_FPS` in `studio/src/agr_rate.js` mirrors it (a test checks).
+pub const DEFAULT_AGR_FPS: i32 = 30;
 
 /// Where OBS is and how to talk to it.
 ///
@@ -531,7 +539,7 @@ pub struct PatcherConfig {
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
     /// AGR mode's recorded rate, in frames per game second. `0` (the default)
-    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// means `DEFAULT_AGR_FPS` — see `effective_agr_fps`. Its own
     /// setting because the cost is different: an AGR frame is a few KB, so a
     /// preview can drop to 30 while a slow-motion take wants 300.
     #[serde(default)]
@@ -606,7 +614,7 @@ pub struct PatcherConfig {
     /// workspace crate's companion DLL for DoD/GoldSrc-specific fixes --
     /// sound/animation corrections while spectating; see that crate's
     /// README). Falls back to `<install dir>/goldsrc-hooks/dodstudio_goldsrc_hooks.dll`
-    /// (see `default_goldsrc_hooks_dll_path`) when unset, mirroring
+    /// (see `shared::paths::default_goldsrc_hooks_dll_path`) when unset, mirroring
     /// `ffmpeg_override_path`'s "override, else bundled" shape. Injected
     /// alongside `AfxHookGoldSrc.dll` by `build_hlae_process` only if the
     /// resolved file actually exists, so its absence never breaks a capture.
@@ -616,7 +624,7 @@ pub struct PatcherConfig {
     pub auto_clear_temp_demos: bool,
     /// Clear accumulated wall decals ahead of every recorded clip, so the
     /// second and later takes cut from one demo don't start dirty. Runs as a
-    /// pre-pass inside `StreamPatcher::patch` — see `patch::decal_strip`.
+    /// pre-pass inside `StreamPatcher::patch` — see `decals::decal_strip`.
     #[serde(default = "default_decal_flush")]
     pub decal_flush: bool,
     /// Decal ring size the flush pins `r_decals` to. A sweep costs one injected
@@ -655,41 +663,6 @@ fn default_decal_ring_limit() -> u32 {
 
 fn default_capture_fov() -> f32 {
     90.0
-}
-
-/// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it:
-/// `studio/src-tauri/tauri.conf.json` maps this crate's release build to
-/// `goldsrc-hooks/dodstudio_goldsrc_hooks.dll` among `bundle.resources`, and
-/// Tauri v2's NSIS installer puts those beside the app's own executable
-/// (Tauri's `resource_dir`). Installs made before that kept them under a
-/// `resources` folder there, so that spot is checked second. Looking only
-/// in `resources` found no DLL in a current install, which went unnoticed
-/// while the override was set; once installed releases ignored the override
-/// (#912) the game launched without the hook. In a dev build
-/// (`npm run tauri dev`) neither exists -- Studio -> Configuration -> Paths'
-/// override points at `target/i686-pc-windows-msvc/release/` there. Either
-/// way, `build_hlae_process` treats a missing file as "not installed" and
-/// doesn't inject it, same as any other optional path.
-pub fn default_goldsrc_hooks_dll_path() -> Option<std::path::PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    Some(bundled_hooks_dll_in(&dir))
-}
-
-/// The bundled DLL under an install folder: the first spot that has it, else
-/// the current layout's (so a message names where it should be).
-fn bundled_hooks_dll_in(install_dir: &std::path::Path) -> std::path::PathBuf {
-    let current = install_dir
-        .join("goldsrc-hooks")
-        .join("dodstudio_goldsrc_hooks.dll");
-    let older = install_dir
-        .join("resources")
-        .join("goldsrc-hooks")
-        .join("dodstudio_goldsrc_hooks.dll");
-    if !current.exists() && older.exists() {
-        older
-    } else {
-        current
-    }
 }
 
 impl PatcherConfig {
@@ -732,13 +705,14 @@ impl PatcherConfig {
             })
     }
 
-    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
-    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise
+    /// `DEFAULT_AGR_FPS`. Never `capture_fps`: AGR's rate is its own, and
+    /// following a 300 fps Capture FPS made Blender renders far slower.
     pub fn effective_agr_fps(&self) -> i32 {
         if self.agr_fps > 0 {
             self.agr_fps
         } else {
-            self.capture_fps.max(1)
+            DEFAULT_AGR_FPS
         }
     }
 
@@ -887,9 +861,29 @@ impl PatcherConfig {
         // was on the command line once and fell off when the launchers were
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
+        //
+        // `-noborder` only on the pre-Anniversary build, and only when the
+        // window wouldn't fit the screen with its title bar: its client area
+        // then loses the caption's rows and every frame gets a black band on
+        // top (#1337). The Anniversary build's window isn't capped, and this
+        // line also serves Launch Game, Review and Launch Preview, where a
+        // borderless window would only lose its title bar.
+        let window_args =
+            if !crate::sys::packet_limit::is_anniversary(std::path::Path::new(&hl_exe))
+                && crate::sys::screen::needs_borderless_window(
+                    (width, height),
+                    crate::sys::screen::primary_screen_size(),
+                )
+            {
+                crate::log_markdown(&crate::messages::game_window_borderless(width, height));
+                "-windowed -noborder"
+            } else {
+                "-windowed"
+            };
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
+            "-game {} -insecure -addons -demoedit {} -w {} -h {} -afxForceAlpha8 1 -condebug {} {}",
             game_folder,
+            window_args,
             width,
             height,
             crate::sys::studio_pipe::launch_arg(),
@@ -1002,7 +996,6 @@ pub struct HighlightRules {
 
 // ── Worker event channel types (native-only: require std threading) ───────────
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub enum PatchEvent {
     Starting(usize),
@@ -1012,7 +1005,6 @@ pub enum PatchEvent {
     Error(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct CaptureWorker {
     pub receiver: std::sync::mpsc::Receiver<PatchEvent>,
     pub is_running: bool,
@@ -1021,270 +1013,9 @@ pub struct CaptureWorker {
 }
 
 #[cfg(test)]
-mod capture_codec_tests {
-    use super::CaptureCodec;
-
-    const ALL: [CaptureCodec; 4] = [
-        CaptureCodec::UtVideo,
-        CaptureCodec::Ffv1,
-        CaptureCodec::X264Lossless,
-        CaptureCodec::RawVideo,
-    ];
-
-    #[test]
-    fn test_str_id_round_trips_through_every_codec() {
-        // Settings persist the string id, so these must stay inverses or a
-        // saved choice silently reverts to the default on next launch.
-        for codec in ALL {
-            assert_eq!(CaptureCodec::from_str_id(codec.to_str_id()), codec);
-        }
-    }
-
-    #[test]
-    fn test_unknown_id_falls_back_to_default() {
-        // A settings file naming a codec this build does not have must not
-        // stop a capture.
-        assert_eq!(CaptureCodec::from_str_id("h265"), CaptureCodec::default());
-        assert_eq!(CaptureCodec::from_str_id(""), CaptureCodec::default());
-    }
-
-    #[test]
-    fn test_every_codec_pins_an_explicit_pixel_format() {
-        // hudAlpha carries the HUD matte in its red channel and the renderer
-        // reads it with extractplanes=r. Leaving pix_fmt to FFmpeg's
-        // negotiation is what would silently destroy that.
-        for codec in ALL {
-            assert!(
-                codec.args().contains("-pix_fmt"),
-                "{:?} must pin a pixel format",
-                codec
-            );
-        }
-    }
-
-    #[test]
-    fn test_no_codec_uses_chroma_subsampling() {
-        // Any yuv420p/yuv422p entry would wreck the HUD alpha with no error
-        // anywhere — the failure would only show up in a finished render.
-        for codec in ALL {
-            let args = codec.args();
-            assert!(
-                !args.contains("yuv420") && !args.contains("yuv422"),
-                "{:?} must stay RGB/4:4:4, got {}",
-                codec,
-                args
-            );
-        }
-    }
-
-    #[test]
-    fn test_no_codec_is_lossy() {
-        // The render pass always re-encodes, so a lossy capture codec costs
-        // quality for no benefit. x264 is admitted only at -qp 0.
-        for codec in ALL {
-            let args = codec.args();
-            if args.contains("libx264") {
-                assert!(args.contains("-qp 0"), "x264 must be lossless: {}", args);
-            }
-        }
-    }
-
-    #[test]
-    fn test_default_is_the_one_proven_in_a_real_capture() {
-        assert_eq!(CaptureCodec::default(), CaptureCodec::UtVideo);
-    }
-}
+#[path = "types_capture_codec_tests.rs"]
+mod capture_codec_tests;
 
 #[cfg(test)]
-mod bundled_hooks_dll_tests {
-    use super::bundled_hooks_dll_in;
-
-    fn install(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "dodstudio_bundled_dll_{name}_{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("install dir");
-        dir
-    }
-
-    fn put(dir: &std::path::Path, rel: &[&str]) -> std::path::PathBuf {
-        let path = rel.iter().fold(dir.to_path_buf(), |p, part| p.join(part));
-        std::fs::create_dir_all(path.parent().unwrap()).expect("folders");
-        std::fs::write(&path, b"").expect("dll");
-        path
-    }
-
-    #[test]
-    fn a_current_install_finds_the_dll_beside_the_exe() {
-        // Tauri v2's installer: resources beside the exe, no `resources` folder.
-        let dir = install("current");
-        let dll = put(&dir, &["goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"]);
-        assert_eq!(bundled_hooks_dll_in(&dir), dll);
-    }
-
-    #[test]
-    fn an_older_install_finds_it_under_resources() {
-        let dir = install("older");
-        let dll = put(
-            &dir,
-            &["resources", "goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"],
-        );
-        assert_eq!(bundled_hooks_dll_in(&dir), dll);
-    }
-
-    #[test]
-    fn with_neither_it_names_the_current_spot() {
-        let dir = install("neither");
-        assert_eq!(
-            bundled_hooks_dll_in(&dir),
-            dir.join("goldsrc-hooks")
-                .join("dodstudio_goldsrc_hooks.dll")
-        );
-    }
-}
-
-#[cfg(test)]
-mod launch_args_tests {
-    use super::PatcherConfig;
-
-    /// The `-cmdLine` string `build_hlae_process` hands to HLAE.
-    ///
-    /// Read back off the built `Command` rather than reconstructed, so the test
-    /// fails if the flag stops reaching the argument that actually carries it.
-    fn cmd_line_of(cfg: &PatcherConfig, extra: &str) -> String {
-        let cmd = cfg.build_hlae_process(extra);
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        let at = args
-            .iter()
-            .position(|a| a == "-cmdLine")
-            .expect("build_hlae_process must pass -cmdLine");
-        args[at + 1].clone()
-    }
-
-    #[test]
-    fn test_alpha_flags_are_sent_on_every_launch_shape() {
-        // The three call sites, by their `extra_engine_args`: a capture batch,
-        // Launch Preview, and the standalone "Launch Game (HLAE)" button. The
-        // last two used to get no alpha flags at all, so a hand-driven session
-        // that enabled separate HUD in the console wrote an all-white
-        // `hudalpha` — an opaque matte, silently unusable. Pin all three.
-        for extra in [
-            "-condebug +exec dodstudio_helper.cfg +playdemo dodstudio_primer",
-            "+viewdemo stem",
-            "",
-        ] {
-            let line = cmd_line_of(&PatcherConfig::default(), extra);
-            assert!(
-                line.contains("-afxForceAlpha8 1"),
-                "alpha flag missing for extra={extra:?}: {line}"
-            );
-            // The flags #69's bisect showed change nothing stay off.
-            for unneeded in ["-gl", "-32bpp", "-afxRenderMode"] {
-                assert!(
-                    !line.split(' ').any(|token| token == unneeded),
-                    "{unneeded} is sent again for extra={extra:?}: {line}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_condebug_is_passed_on_every_launch() {
-        // The Studio reads the engine's console log for per-demo progress,
-        // fast-forward-to-clip progress, crash detection and OBS markers, and
-        // none of those fail loudly without it — they silently never fire. It
-        // used to be a checkbox; there is deliberately no longer any way to
-        // launch without it. See #226.
-        let cfg = PatcherConfig::default();
-        for extra in [
-            "",
-            "+viewdemo foo",
-            "+exec dodstudio_helper.cfg +playdemo dodstudio_primer",
-        ] {
-            let line = cmd_line_of(&cfg, extra);
-            assert!(
-                line.contains("-condebug"),
-                "launch args must carry -condebug, got: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_addons_is_passed_on_every_launch() {
-        // DoD Studio's UI files live in dod_addon, which the engine only
-        // searches with -addons; without it they silently don't load.
-        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
-            let line = cmd_line_of(&PatcherConfig::default(), extra);
-            let addons = line.find("-addons").expect("-addons present");
-            assert!(
-                line.find('+').is_none_or(|plus| addons < plus),
-                "-addons must precede any +command: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_demoedit_is_passed_on_every_launch() {
-        // Without it the demo player's Master/Events/Save row is hidden on any
-        // install lacking a custom DemoPlayerDialog.res, which is how it went
-        // missing unnoticed once before.
-        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
-            let line = cmd_line_of(&PatcherConfig::default(), extra);
-            let demoedit = line.find("-demoedit").expect("-demoedit present");
-            assert!(
-                line.find('+').is_none_or(|plus| demoedit < plus),
-                "-demoedit must precede any +command: {line}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_engine_flags_precede_console_commands() {
-        // GoldSrc parses `-` switches off the command line and queues `+`
-        // commands after; an alpha flag landing after a `+` would be read as
-        // an argument to that command instead of a switch.
-        let line = cmd_line_of(&PatcherConfig::default(), "+playdemo dodstudio_primer");
-        let first_plus = line.find('+').expect("the console command is present");
-        let alpha = line
-            .find("-afxForceAlpha8")
-            .expect("the alpha flag is present");
-        assert!(
-            alpha < first_plus,
-            "alpha flag must precede any +command: {line}"
-        );
-    }
-
-    #[test]
-    fn test_condebug_precedes_the_callers_own_args() {
-        // `+exec`/`+playdemo` are commands the engine runs at startup, so a
-        // switch placed after them is parsed as their argument rather than as a
-        // switch. Keeping -condebug ahead of `extra_engine_args` is what stops
-        // that, and nothing else in the process would report it.
-        let line = cmd_line_of(&PatcherConfig::default(), "+playdemo dodstudio_primer");
-        let condebug = line.find("-condebug").expect("-condebug present");
-        let playdemo = line.find("+playdemo").expect("+playdemo present");
-        assert!(
-            condebug < playdemo,
-            "-condebug must come before the caller's own args, got: {line}"
-        );
-    }
-
-    #[test]
-    fn every_launch_names_this_studios_pipe_ahead_of_any_command() {
-        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
-            let line = cmd_line_of(&PatcherConfig::default(), extra);
-            let at = line
-                .find(&crate::sys::studio_pipe::launch_arg())
-                .unwrap_or_else(|| panic!("no -dodstudio_pipe in {line}"));
-            assert!(
-                line.find('+').is_none_or(|plus| at < plus),
-                "-dodstudio_pipe must precede any +command: {line}"
-            );
-        }
-    }
-}
+#[path = "types_launch_args_tests.rs"]
+mod launch_args_tests;

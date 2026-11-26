@@ -39,9 +39,9 @@
 //! entity list, so an intact map predicts two more than a mid-match demo shows.
 //! Check a trimmed map against a fresh recording with the probe regardless.
 
-use native::patch::bsp::Bsp;
-use native::patch::bsp::map_checksum;
-use native::patch::bsp_entities::{
+use native::maps::bsp::Bsp;
+use native::maps::bsp::map_checksum;
+use native::maps::bsp_entities::{
     MapEntity, parse_entities, rewrite_entity_lump, serialize_entities,
 };
 
@@ -186,8 +186,8 @@ fn main() {
     };
 
     let bytes = std::fs::read(&map_path).unwrap_or_else(|e| fail(&format!("{map_path}: {e}")));
-    let checksum = map_checksum(&bytes).unwrap_or_else(|e| fail(&e));
-    let bsp = Bsp::parse(&bytes).unwrap_or_else(|e| fail(&e));
+    let checksum = map_checksum(&bytes).unwrap_or_else(|e| fail(&e.to_string()));
+    let bsp = Bsp::parse(&bytes).unwrap_or_else(|e| fail(&e.to_string()));
     let entities = parse_entities(&bytes).unwrap_or_else(|e| fail(&e));
 
     // Where players have actually been, harvested from real demos of the map --
@@ -200,7 +200,7 @@ fn main() {
         .unwrap_or_else(|| fail("map path has no usable file name"))
         .to_string();
     let reach = demos_dir.as_deref().map(|dir| {
-        native::patch::reachability::harvest_directory(
+        native::maps::player_origins::harvest_directory(
             std::path::Path::new(dir),
             checksum,
             &map_name,
@@ -209,7 +209,7 @@ fn main() {
     });
     if let Some(cloud) = &reach {
         eprintln!(
-            "reachability: {} proven player positions harvested from {}",
+            "player_origins: {} proven player positions harvested from {}",
             cloud.len(),
             demos_dir.as_deref().unwrap_or("")
         );
@@ -339,10 +339,10 @@ fn illusionary_rows(
             let texture = dominant_texture(bsp, s);
             let (distance, background) = match (reach, submodel_bounds(bsp, s)) {
                 (Some(cloud), Some((lo, hi))) => {
-                    let d = native::patch::reachability::distance_to_nearest_player(cloud, lo, hi);
+                    let d = native::maps::player_origins::distance_to_nearest_player(cloud, lo, hi);
                     (
                         Some(d),
-                        native::patch::reachability::reads_as_background(d, lo, hi),
+                        native::maps::player_origins::reads_as_background(d, lo, hi),
                     )
                 }
                 _ => (None, false),
@@ -564,7 +564,7 @@ fn apply(
 
     let trimmed =
         rewrite_entity_lump(bytes, &serialize_entities(&kept)).unwrap_or_else(|e| fail(&e));
-    let after = map_checksum(&trimmed).unwrap_or_else(|e| fail(&e));
+    let after = map_checksum(&trimmed).unwrap_or_else(|e| fail(&e.to_string()));
     if after != checksum {
         fail(&format!(
             "map checksum moved (0x{checksum:08X} -> 0x{after:08X}); refusing to write, \
@@ -595,7 +595,7 @@ fn fail(message: &str) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use native::patch::bsp_entities::parse_entity_text;
+    use native::maps::bsp_entities::parse_entity_text;
 
     fn one(text: &str) -> MapEntity {
         parse_entity_text(text).unwrap().pop().unwrap()

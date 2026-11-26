@@ -28,10 +28,37 @@ pub struct SplitStatus {
 /// scan lists them), was already split next to it. `min_seconds` is the
 /// shortest map an auto split keeps (Studio's `SHORT_MAP_SECONDS`).
 ///
+/// A damaged demo is repaired first and its repair split (#15), so the pieces
+/// of its repair (`<name>_repaired.dem`, named after that) count too: once
+/// they are all there, the original needs neither.
+///
 /// Reads only the folder, unless some maps have a piece and others don't:
 /// then the demo's frame headers, for the maps' lengths. Fails only when
 /// that read fails.
 pub fn split_status(demo: &Path, maps: &[String], min_seconds: f32) -> Result<SplitStatus, String> {
+    let own = pieces_status(demo, maps, min_seconds)?;
+    if own.split {
+        return Ok(own);
+    }
+    match repaired_copy(demo) {
+        Some(repaired) => {
+            let via_repair = pieces_status(&repaired, maps, min_seconds)?;
+            Ok(if via_repair.split { via_repair } else { own })
+        }
+        None => Ok(own),
+    }
+}
+
+/// The repair written next to `demo` under the first name a repair takes
+/// (`hl_demo_auditor::repair::repaired_path`), when it is there.
+fn repaired_copy(demo: &Path) -> Option<std::path::PathBuf> {
+    let stem = demo.file_stem()?.to_string_lossy();
+    let path = demo.with_file_name(format!("{stem}_repaired.dem"));
+    path.is_file().then_some(path)
+}
+
+/// [`split_status`] for the pieces named after `demo` alone.
+fn pieces_status(demo: &Path, maps: &[String], min_seconds: f32) -> Result<SplitStatus, String> {
     let found = split_files(demo, maps);
     let files: Vec<String> = found.iter().flatten().cloned().collect();
     let split = if files.is_empty() {
@@ -93,6 +120,28 @@ mod tests {
                     "m_split2_anzio.dem".to_string()
                 ],
             }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_damaged_demo_whose_repair_was_split_is_split() {
+        let dir = folder_with(
+            "repaired",
+            &[
+                "m_repaired.dem",
+                "m_repaired_split1_armory.dem",
+                "m_repaired_split2_anzio.dem",
+            ],
+        );
+        let status = split_status(&dir.join("m.dem"), &maps(), 60.0).unwrap();
+        assert!(status.split);
+        assert_eq!(
+            status.files,
+            [
+                "m_repaired_split1_armory.dem",
+                "m_repaired_split2_anzio.dem"
+            ]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

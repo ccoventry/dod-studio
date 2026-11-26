@@ -9,12 +9,15 @@
 //!
 //! Read-only. This never writes, edits or removes a config file.
 
+use native::game_config::cfg_scan;
 use native::messages;
-use native::patch::cfg_scan;
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let dir = std::path::PathBuf::from(args.next().expect(messages::CHECK_CFGS_USAGE));
+    let Some(dir) = args.next().map(std::path::PathBuf::from) else {
+        eprintln!("{}", messages::CHECK_CFGS_USAGE);
+        std::process::exit(1);
+    };
     let init_commands: Vec<String> = args.collect();
 
     let scan = cfg_scan::scan(&dir);

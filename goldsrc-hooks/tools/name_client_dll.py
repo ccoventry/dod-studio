@@ -174,7 +174,9 @@ class LinuxLibrary(Binary):
             if start not in self.functions:
                 self.functions[start] = Function(start, start + max(size, 1))
             self.names.setdefault(start, []).append(mangled)
-        self.engine_base = self.lib.objects["gEngfuncs"][0]
+        # Only a client library has `gEngfuncs`; the engine's own libraries
+        # (`name_hw_dll.py`) have no table to name slots from.
+        self.engine_base = self.lib.objects.get("gEngfuncs", (None,))[0]
         self._rodata = self.lib.sections[".rodata"]
 
     def name(self, start):
@@ -193,6 +195,8 @@ class LinuxLibrary(Binary):
         return addr in self.functions
 
     def engine_slot(self, addr):
+        if self.engine_base is None:
+            return None
         offset = addr - self.engine_base
         return offset // 4 if 0 <= offset < GENGFUNCS_FIELDS * 4 else None
 

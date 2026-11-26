@@ -30,7 +30,7 @@ cvar mid-demo strands every decal sitting above the new limit — the index can
 no longer reach them, so they stay on the wall permanently while new decals
 churn through the small surviving window.
 
-That is the whole reason for `native/src/patch/decal_strip/`: pin the ring
+That is the whole reason for `native/src/decals/decal_strip/`: pin the ring
 small at demo load, then inject a full revolution's worth of synthetic decals
 into the gap before each clip so the index walks past every real one. It works.
 It also costs a demo rewrite per capture, forces `r_decals` to be set exactly
@@ -89,7 +89,7 @@ gDecalCount = 0;
 
 Nothing is invented — it is byte-for-byte what `hw+0x4a000` does, minus
 `if (flags & mask)`. Dropping that test is deliberate: a decal whose flags are
-zero would survive `R_DecalRemoveAll(0xffff)`, and "clear all" that leaves some
+zero would survive `R_DecalRemoveWithFlag(0xffff)`, and "clear all" that leaves some
 behind is worse than not having it.
 
 The flag test being dropped also means **permanent decals go too**

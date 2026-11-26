@@ -1,5 +1,5 @@
 // messages/decal_probe.rs
-// Errors of the decal probe's options and demo (`patch/decal_probe.rs`, #237).
+// Errors of the decal probe's options and demo (`decals/decal_probe.rs`, #237).
 // Each function returns the text only.
 
 use std::fmt::Display;

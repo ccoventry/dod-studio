@@ -69,6 +69,7 @@ impl Clock<'_> {
                 return (at + offsets[offsets.len() / 2]).max(0.0);
             }
         }
+        #[expect(clippy::expect_used, reason = "anchors is non-empty on this path")]
         let anchor = self
             .anchors
             .iter()

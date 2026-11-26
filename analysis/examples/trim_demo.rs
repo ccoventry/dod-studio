@@ -14,6 +14,11 @@
 //! its start up to a chosen time, and every reference still resolves.
 //!
 //!     cargo run --release -p analysis --example trim_demo -- <in.dem> <seconds> <out.dem>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 
 fn main() {
@@ -65,7 +70,7 @@ fn main() {
         entry.track_time = entry.frames.last().map(|f| f.time).unwrap_or(0.0);
     }
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write output");
 
     let after: usize = demo.directory.entries.iter().map(|e| e.frames.len()).sum();

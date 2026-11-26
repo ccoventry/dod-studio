@@ -33,9 +33,10 @@
 //! leaves it stale for at most that long, and the crouch ease lets go of a
 //! looked-ahead flip the file stops promising (`spectator_eye::crouch`).
 
-mod frames;
+pub(crate) mod frames;
 pub mod timeline;
 
+use lock_recover::write_or_recover;
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -182,11 +183,21 @@ enum Outcome {
 /// publishes its timeline unless another demo was asked for meanwhile.
 fn start_read(name: String) {
     let ticket = LATEST_READ.fetch_add(1, Ordering::AcqRel) + 1;
-    let path = crate::streaks::demo_path(&crate::texture_hires::game_dir(), &name);
     let spawned = std::thread::Builder::new()
         .name("ds_lookahead".into())
         .spawn(move || {
             lower_priority();
+            // Off the engine thread: each miss is a file-system lookup.
+            let path = match crate::demo_locate::locate(&name) {
+                Ok(path) => path,
+                Err(tried) => {
+                    let why = format!("can't find {name}: {}", tried_list(&tried));
+                    set_status(ticket, why.clone());
+                    report(&why);
+                    return;
+                }
+            };
+            report(&format!("reading {}", path.display()));
             set_status(ticket, format!("reading {}", path.display()));
             let start = std::time::Instant::now();
             match read_demo(&path, ticket) {
@@ -215,6 +226,12 @@ fn start_read(name: String) {
     }
 }
 
+/// The paths a demo was looked for at, for a log line.
+fn tried_list(tried: &[std::path::PathBuf]) -> String {
+    let tried: Vec<String> = tried.iter().map(|p| p.display().to_string()).collect();
+    format!("not in {}", tried.join(", "))
+}
+
 /// Reads the demo at `path` into a timeline, giving up once `ticket` is no
 /// longer the newest read.
 fn read_demo(path: &Path, ticket: u64) -> Outcome {
@@ -236,7 +253,7 @@ fn read_demo(path: &Path, ticket: u64) -> Outcome {
 /// read. Checked under the write lock, so a read that finishes late can't
 /// publish over a newer one.
 fn publish(ticket: u64, name: String, found: Timeline) -> bool {
-    let mut published = PUBLISHED.write().unwrap_or_else(|e| e.into_inner());
+    let mut published = write_or_recover(&PUBLISHED);
     if LATEST_READ.load(Ordering::Acquire) != ticket {
         return false;
     }
@@ -247,7 +264,7 @@ fn publish(ticket: u64, name: String, found: Timeline) -> bool {
 
 /// Sets the status line, unless a newer read than `ticket` owns it.
 fn set_status(ticket: u64, line: String) {
-    let mut status = STATUS.write().unwrap_or_else(|e| e.into_inner());
+    let mut status = write_or_recover(&STATUS);
     if LATEST_READ.load(Ordering::Acquire) == ticket {
         *status = line;
     }
@@ -259,7 +276,7 @@ fn report(message: &str) {
 }
 
 /// The read must not take frames from the game.
-fn lower_priority() {
+pub(crate) fn lower_priority() {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Threading::{

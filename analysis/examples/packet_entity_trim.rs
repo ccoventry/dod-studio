@@ -34,15 +34,18 @@
 //! declared count against the carried-forward set and the target.
 //!
 //!     cargo run --release -p analysis --example packet_entity_trim -- <in.dem> <out.dem> [target] [map.bsp]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
 use dem::types::{Delta, Demo, EngineMessage, FrameData, MessageData, NetMessage};
 use std::collections::{HashMap, HashSet};
 
-#[path = "shared/entity_carry.rs"]
-mod entity_carry;
-use entity_carry::Carry;
+use analysis::repair::entity_carry::Carry;
 
 /// Pre-Anniversary `MAX_PACKET_ENTITIES`.
 const LEGACY_LIMIT: usize = 256;
@@ -538,7 +541,7 @@ fn main() {
         "  trimmed: {} entries dropped, peak {} -> {}",
         trim.entries_dropped, trim.peak_before, trim.peak_after
     );
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write output");
     println!("wrote {output} ({} -> {} bytes)", bytes.len(), out.len());
 

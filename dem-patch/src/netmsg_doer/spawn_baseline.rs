@@ -118,24 +118,12 @@ impl Doer for SvcSpawnBaseline {
 
             if entity.type_.to_u8() & 1 != 0 {
                 if between {
-                    write_delta(
-                        &entity.delta,
-                        aux.delta_decoders.get("entity_state_player_t\0").unwrap(),
-                        &mut bw,
-                    )
+                    write_delta_with(&aux, "entity_state_player_t\0", &entity.delta, &mut bw)
                 } else {
-                    write_delta(
-                        &entity.delta,
-                        aux.delta_decoders.get("entity_state_t\0").unwrap(),
-                        &mut bw,
-                    )
+                    write_delta_with(&aux, "entity_state_t\0", &entity.delta, &mut bw)
                 }
             } else {
-                write_delta(
-                    &entity.delta,
-                    aux.delta_decoders.get("custom_entity_state_t\0").unwrap(),
-                    &mut bw,
-                )
+                write_delta_with(&aux, "custom_entity_state_t\0", &entity.delta, &mut bw)
             }
         }
 
@@ -145,9 +133,8 @@ impl Doer for SvcSpawnBaseline {
 
         bw.append_vec(&self.total_extra_data);
 
-        let extra_data_description = aux.delta_decoders.get("entity_state_t\0").unwrap();
         for data in &self.extra_data {
-            write_delta(data, extra_data_description, &mut bw)
+            write_delta_with(&aux, "entity_state_t\0", data, &mut bw)
         }
 
         writer.append_u8_slice(&bw.get_u8_vec());

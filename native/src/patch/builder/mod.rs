@@ -1,7 +1,9 @@
 // patch/builder/mod.rs
 // Batch job construction: `build_batch_queue`, the steps it runs in order,
 // and the init commands it adds. The helpers it uses live beside it —
-// `blocks` (highlights into chain jobs and recording blocks), `schedule`
+// `passes` (the batch planner: which demo loads and blocks a batch makes,
+// with no side effects), `blocks` (highlights into chain jobs and recording
+// blocks), `schedule`
 // (each job's scheduled commands and director events), `helper_cfg` (the
 // helper cfg's aliases), `timing` (tick walks, roll floors, block merging),
 // `speed` (the fast-forward and normal-speed aliases), `kill_gaps` (long
@@ -10,6 +12,7 @@
 // `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
+use crate::game_config::final_init_commands;
 use crate::patch::engine::StreamPatcher;
 use crate::patch::types::{
     CaptureStreak, CaptureWorker, CommandRelation, PatchEvent, PatchJob, PatcherConfig,
@@ -21,6 +24,7 @@ mod alloc;
 mod blocks;
 mod helper_cfg;
 pub mod kill_gaps;
+mod passes;
 mod preview;
 mod schedule;
 mod speed;
@@ -38,6 +42,7 @@ use helper_cfg::{
     helper_cfg_preamble, next_alias_line, remove_previous_batch_cfgs, route_alias_line,
     write_helper_cfg,
 };
+use passes::{Pass, plan_batch};
 pub use preview::*;
 use schedule::{
     ChainJob, ClipWindow, JobSchedule, clip_window, director_events, frame_times_for,
@@ -108,91 +113,6 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
     )
 }
 
-/// Every command the engine will run at demo load: the user's own init
-/// commands, then the ones the pipeline adds for itself.
-///
-/// Extracted so it can be asked ahead of a capture as well as during one. The
-/// app's own additions override whatever the game's configs set — `capture_fps`
-/// beats a `mirv_movie_fps` in `movie.cfg`, and the decal pin beats an
-/// `r_decals` there — and a user is entitled to know that before it happens
-/// rather than by noticing the result.
-pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
-    let mut out = config.init_commands.clone();
-    out.push("sys_autodir".to_string());
-    // AGR mode's sound-only movie (#450) runs at the AGR rate: the movie
-    // recorder pins the timestep to `1 / mirv_movie_fps`, and that has to be
-    // the timestep the `.agr` is stamped with.
-    let movie_fps = if config.capture_mode == crate::patch::CaptureMode::Agr {
-        config.effective_agr_fps()
-    } else {
-        config.capture_fps
-    };
-    out.push(format!("mirv_movie_fps {movie_fps}"));
-
-    // A batch runs at full speed with another window in front: without it the
-    // engine waits up to 20 ms for input every frame while it isn't the active
-    // app, which slows the fast-forward between clips 5-8x (measured on both
-    // builds). The hook DLL's setting; without the hook it is an unknown
-    // command and does nothing. Whether the window stays behind is a separate
-    // setting, sent as 0 too when the user wants to watch, so a game left
-    // running from an earlier batch (#666) drops it.
-    out.push(format!("{RUN_IN_BACKGROUND} 1"));
-    out.push(format!(
-        "{STAY_BEHIND} {}",
-        u8::from(config.keep_game_behind)
-    ));
-
-    // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
-    // `mirv_movie_fps` above is inert on this path — nothing reads it. OBS
-    // samples whatever frame the game last drew, once per frame of its own
-    // `obs_capture_fps` (obs::provision::ensure_dod_studio_setup), so the
-    // game has to draw faster than that: at exactly OBS's rate the two beat
-    // against each other and OBS repeats a frame every time the game is a
-    // little late. Measured (#645, POST, 120 fps): 1.5-2.1% repeated frames
-    // with `fps_max` at OBS's rate, 0.2-0.8% with the game drawing faster.
-    // Hence twice OBS's rate, and `gl_vsync 0`, since vsync would cap the
-    // game at the monitor's refresh, below OBS's rate on a 60 Hz screen.
-    // `fps_override 1` first: GoldSrc's default `fps_max` ceiling (~100) is
-    // below these, and `fps_max` alone is silently clamped under it.
-    if config.capture_mode == crate::patch::CaptureMode::Obs {
-        out.push("fps_override 1".to_string());
-        out.push(format!("fps_max {}", obs_game_fps_max(config)));
-        out.push("gl_vsync 0".to_string());
-    }
-
-    // The decal flush needs the ring set once, at demo load, and never again.
-    // r_decals bounds how far the rotating index may travel before it wraps; it
-    // does not evict anything, so lowering it once decals have accumulated
-    // strands every one sitting above the new limit.
-    //
-    // The sweep is sized to that same number, so there is only one number here
-    // and `r_decals` is where the engine reads it, at the same precedence
-    // `ring_limit` itself resolves (see that function): Initial Commands, then
-    // an executed config, then the app's own default. When either of the first
-    // two states it, that line is already the pin — appending a second one
-    // here would either silently overrule what Initial Commands asked for, or
-    // be a no-op duplicate of what the config already set. Only the true
-    // "nothing anywhere states it" case needs one appended, to replace the
-    // engine's own uncontrolled standing value with a known one.
-    //
-    // Not at the maximum, though. r_decals is clamped to MAX_RENDER_DECALS, so a
-    // sweep that size turns a full revolution whatever the cvar happens to be —
-    // any smaller ring simply gets swept several times over. Pinning then buys
-    // nothing and costs the precondition the rest of this design works around:
-    // that nothing else may touch r_decals.
-    if config.decal_flush
-        && crate::patch::ring_limit_from_init(&config.init_commands).is_none()
-        && crate::patch::ring_limit_from_game_config(config).is_none()
-    {
-        let ring = config.decal_ring_limit.min(crate::patch::MAX_RENDER_DECALS);
-        if ring > 0 && ring < crate::patch::MAX_RENDER_DECALS {
-            out.push(format!("r_decals {}", ring));
-        }
-    }
-
-    out
-}
-
 /// The hook DLL's camera follow for HLTV demos (goldsrc-hooks
 /// `spectator_follow.rs`, #206): the command that puts the camera on a
 /// player by number, and the setting that keeps it there through their death.
@@ -256,53 +176,26 @@ pub fn estimate_batch_capture_bytes(streaks: &[CaptureStreak], config: &PatcherC
 /// What each recording block of a batch is expected to need on the one
 /// capture drive it is written to, before `build_batch_queue` runs: the
 /// pieces the automatic take cleanup (#644) makes room for, drive by drive.
-/// Highlights of one demo and player whose recordings would merge
-/// (`blocks_merge`, as `build_batch_queue` decides it) count as one block,
-/// billed at the sum of their own estimates, so a block is never
-/// under-counted.
+/// The blocks are the batch planner's ([`plan_batch`]), the ones
+/// `build_batch_queue` records, in play order. A block that merges several
+/// highlights is billed at the sum of their own estimates, so a block is
+/// never under-counted for the footage its highlights share.
 pub fn estimate_batch_capture_blocks(
     streaks: &[CaptureStreak],
     config: &PatcherConfig,
 ) -> Vec<u64> {
-    let fps_of = |streak: &CaptureStreak| {
-        Some(streak.demo_fps)
-            .filter(|&fps| fps > 0.0)
-            .unwrap_or(30.0)
-    };
-    let mut order: Vec<&CaptureStreak> = streaks.iter().collect();
-    order.sort_by(|a, b| {
-        (&a.source_demo, a.player_index, first_kill_frame(a)).cmp(&(
-            &b.source_demo,
-            b.player_index,
-            first_kill_frame(b),
-        ))
-    });
-    let mut blocks: Vec<u64> = Vec::new();
-    let mut prev: Option<(&str, usize, i32)> = None;
-    for streak in order {
-        let demo_fps = fps_of(streak);
-        let bytes = block_byte_estimate(config, streak, demo_fps);
-        let lead = (config.record_start_lead * demo_fps) as i32;
-        let trail =
-            ((config.record_stop_trail + take_separation_seconds(config)) * demo_fps) as i32;
-        let merges = prev.is_some_and(|(demo, player, prev_end)| {
-            demo == streak.source_demo
-                && player == streak.player_index
-                && blocks_merge(prev_end, first_kill_frame(streak), lead, trail)
-        });
-        let end = last_kill_frame(streak);
-        match (merges, blocks.last_mut(), prev.as_mut()) {
-            (true, Some(last), Some(p)) => {
-                *last = last.saturating_add(bytes);
-                p.2 = p.2.max(end);
-            }
-            _ => {
-                blocks.push(bytes);
-                prev = Some((&streak.source_demo, streak.player_index, end));
-            }
-        }
-    }
-    blocks
+    plan_batch(streaks, config)
+        .iter()
+        .flat_map(|pass| {
+            pass.blocks.sources.iter().map(|sources| {
+                sources
+                    .iter()
+                    // A block's sources index `streaks`, the plan's own input.
+                    .map(|&i| block_byte_estimate(config, &streaks[i], pass.demo_fps))
+                    .fold(0u64, u64::saturating_add)
+            })
+        })
+        .collect()
 }
 
 /// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),
@@ -355,20 +248,45 @@ pub fn build_batch_queue(
     config: &PatcherConfig,
     global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
 ) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
-    let groups = group_highlights(&raw_streaks);
+    build_batch_queue_with(
+        raw_streaks,
+        config,
+        global_arrays,
+        alloc::plannable_free_bytes,
+    )
+}
+
+/// [`build_batch_queue`] with each capture directory's free bytes read from
+/// `free_of`, so the golden tests plan against a drive of a known size and
+/// don't depend on the free space of the machine running them.
+pub(super) fn build_batch_queue_with(
+    raw_streaks: Vec<CaptureStreak>,
+    config: &PatcherConfig,
+    global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
+    free_of: impl FnMut(&std::path::Path) -> Option<u64>,
+) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
+    let passes = plan_batch(&raw_streaks, config);
     warn_short_rolls(config);
 
     let dod_dir = game_mod_dir(config)?;
     remove_previous_batch_cfgs(&dod_dir);
     // Snapshot every capture directory's free bytes so each clip is routed
     // to a drive with room for it at build time.
-    let mut drives = DriveBudget::snapshot(&config.capture_directories);
+    let mut drives = DriveBudget::snapshot(&config.capture_directories, free_of);
+    let windows_keep_free = crate::sys::windows_drive::raised_on_any(
+        &config.capture_directories,
+        alloc::FAILOVER_THRESHOLD,
+    );
+    if let Some(keep_free) = windows_keep_free {
+        alloc::log_windows_drive_folders(&config.capture_directories, keep_free);
+    }
+    drives.note_windows_drive(windows_keep_free);
     let session_dir = make_session_dir(config)?;
 
     let mut helper_cfg = helper_cfg_preamble(config, &dod_dir);
     announce_capture_mode(config);
 
-    let total_jobs = groups.len();
+    let total_jobs = passes.len();
     let mut jobs = Vec::new();
     if total_jobs > 0 {
         helper_cfg.push_str("# Demo specific next demos\n");
@@ -377,10 +295,10 @@ pub fn build_batch_queue(
     // #365). It is then first, so a test asserting on this queue gets one job
     // more than the streak groups it passed in; with the DLL the game starts
     // on dodstudio_chain_01 directly.
-    if let Some(first_group) = groups.first()
+    if let Some(first_pass) = passes.first()
         && plays_primer(config.goldsrc_hooks_dll().is_some())
     {
-        let (primer, alias_line) = primer_job(config, first_group.source_demo, &dod_dir);
+        let (primer, alias_line) = primer_job(config, first_pass.group.source_demo, &dod_dir);
         helper_cfg.push_str(&alias_line);
         jobs.push(primer);
     }
@@ -393,11 +311,11 @@ pub fn build_batch_queue(
         session_dir: &session_dir,
         total_jobs,
     };
-    for (job_idx, group) in groups.into_iter().enumerate() {
+    for (job_idx, pass) in passes.into_iter().enumerate() {
         jobs.push(chain_job(
             &batch,
             job_idx,
-            group,
+            pass,
             &mut drives,
             &mut helper_cfg,
         )?);
@@ -413,6 +331,14 @@ pub fn build_batch_queue(
     make_agr_take_folders(config, &jobs)?;
     write_helper_cfg(&dod_dir, &helper_cfg)?;
 
+    let planned = drives.one_at_a_time;
+    if planned.blocks > 0 {
+        crate::log_markdown(&crate::messages::room_plan(
+            planned.blocks,
+            planned.waits,
+            alloc::TAKES_STILL_ON_DISK,
+        ));
+    }
     let drive_headroom = drives.headroom(utilized_drives, &config.capture_directories);
     Ok((jobs, drive_headroom))
 }
@@ -529,19 +455,25 @@ fn primer_job(
     (job, alias_line)
 }
 
-/// Builds chain job `job_idx` from one demo and player's highlights: cuts
-/// them into blocks, routes each block to a drive in `drives`, schedules
-/// every clip, and appends the job's route and `_next` aliases to
-/// `helper_cfg`. Errors when a block fits on no drive or a capture
-/// directory's path can't be made absolute.
+/// Builds chain job `job_idx` from one planned pass (one demo and player's
+/// highlights, already cut into blocks): routes each block to a drive in
+/// `drives`, schedules every clip, and appends the job's route and `_next`
+/// aliases to `helper_cfg`. Errors when a block fits on no drive or a
+/// capture directory's path can't be made absolute.
 fn chain_job(
     batch: &BatchContext,
     job_idx: usize,
-    group: HighlightGroup,
+    pass: Pass,
     drives: &mut DriveBudget,
     helper_cfg: &mut String,
 ) -> std::io::Result<PatchJob> {
     let config = batch.config;
+    let Pass {
+        group,
+        demo_fps,
+        blocks: cut,
+        block_bytes,
+    } = pass;
     let first = group.first();
 
     // An HLTV demo's camera follows no one by itself (#247): every clip
@@ -552,22 +484,13 @@ fn chain_job(
         .spectated
         .then(|| format!("{SPEC_TARGET} {}", first.player_index + 1));
     let director_events = director_events(&group);
-    let demo_fps = Some(first.demo_fps)
-        .filter(|&fps| fps > 0.0)
-        .unwrap_or(30.0);
     let total_demo_frames = first.total_demo_frames;
 
     let demo_name = chain_demo_name(job_idx);
     // Lands directly in dod/ -- see `primer_job` for why.
     let output_demo = batch.dod_dir.join(format!("{}.dem", demo_name));
 
-    let cut = cut_blocks(&group.highlights, config, demo_fps);
-    let block_estimates: Vec<u64> = cut
-        .streaks
-        .iter()
-        .map(|streak| block_byte_estimate(config, streak, demo_fps))
-        .collect();
-    let assignments = drives.allocate(&block_estimates, config)?;
+    let assignments = drives.allocate(&block_bytes, config)?;
     let (mut blocks, block_routes) =
         capture_blocks(batch, &demo_name, &cut, &assignments, helper_cfg)?;
     helper_cfg.push_str(&next_alias_line(&demo_name, job_idx, batch.total_jobs));
@@ -796,3 +719,15 @@ mod tests;
 
 #[cfg(test)]
 mod grouping_tests;
+
+#[cfg(test)]
+mod blocks_tests;
+
+#[cfg(test)]
+mod golden_tests;
+
+#[cfg(test)]
+mod rule_tests;
+
+#[cfg(test)]
+mod preview_tests;

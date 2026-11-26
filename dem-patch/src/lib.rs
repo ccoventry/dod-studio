@@ -23,6 +23,11 @@
 //! demo.write_to_file("./src/tests/demo2test.dem").unwrap();
 //! ```
 #![allow(mismatched_lifetime_syntaxes)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "vendored fork of the `dem` crate (LGPL): its diff from upstream stays small (#1179)"
+)]
 
 use nom::{
     Parser,
@@ -46,7 +51,9 @@ pub mod demo_writer;
 pub mod netmsg_doer;
 pub mod prelude;
 pub mod progress;
+pub mod protocol;
 pub mod types;
+pub mod write_error;
 
 pub use utils::bitslice_to_string;
 
@@ -77,14 +84,17 @@ pub fn parse_netmsg_without_sounds(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetM
 }
 
 /// Should be used for replacing `data.msg` of each frame.
-pub fn write_netmsg(i: &Vec<NetMessage>, aux: AuxRefCell) -> ByteVec {
+pub fn write_netmsg(
+    i: &Vec<NetMessage>,
+    aux: AuxRefCell,
+) -> std::result::Result<ByteVec, write_error::WriteErrorKind> {
     let mut res: ByteVec = vec![];
 
     for message in i {
-        res.append(&mut message.write(aux.clone()))
+        res.append(&mut message.try_write(aux.clone())?)
     }
 
-    res
+    Ok(res)
 }
 
 /// Opens a demo
@@ -308,7 +318,7 @@ mod test {
 
         // Directory included: the frame counts are the engine's own.
         assert_eq!(
-            first_difference(&demo.write_to_bytes(), &bytes),
+            first_difference(&demo.write_to_bytes().unwrap(), &bytes),
             None,
             "re-encoding the parsed demo changed its bytes"
         );
@@ -422,7 +432,9 @@ mod test {
             let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             let demo =
                 open_demo_from_bytes(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            let written = demo.write_to_bytes();
+            let written = demo
+                .write_to_bytes()
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             let engine_counts = demo
                 .directory
                 .entries
@@ -620,7 +632,10 @@ mod test {
             let (demo, damage) = tolerant(&bytes);
             assert_eq!(damage, None);
             assert_eq!(frame_counts(&demo), frame_counts(&strict));
-            assert_eq!(demo.write_to_bytes(), strict.write_to_bytes());
+            assert_eq!(
+                demo.write_to_bytes().unwrap(),
+                strict.write_to_bytes().unwrap()
+            );
         }
 
         #[test]

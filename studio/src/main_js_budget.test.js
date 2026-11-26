@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 526; // +1: project_session's onStatusChange, so renders found on open redraw the tables (#1345)
+const BUDGET = 558; // +1: the Render tab gets the project's markDirty, so Find Moved Videos can save the clips' new paths (#1442); +4: Review asking about a demo whose file is missing (review_missing_demos.js), one import and a factory call over three lines (#1376); +5: demo_file_recheck.js's import and call, and the two project_demos.js functions it takes, so a demo renamed while Studio is open shows as missing; +2: startDamagedDemoToasts import and call (#1373)
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {

@@ -1,11 +1,16 @@
 //! Does the full-file re-encode change *content*, not just cosmetic bit
-//! choices, in the untouched real tail? `snapshot_inject` reserializes every
+//! choices, in the untouched real tail? `snapshot_inject` (now `analysis::repair`) reserializes every
 //! message in the file via `write_to_bytes`, not just the ones it constructs.
 //! Diff a pure `multi_bridge` splice (raw bytes, zero re-encoding) against the
 //! same logical frames after `snapshot_inject`'s round-trip, restricted to a
 //! narrow real-time window, and report which message TYPES actually differ in
 //! byte length (a value change alone wouldn't show here, but a length change
 //! means the encoded bit-width itself moved).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 
@@ -37,7 +42,7 @@ fn main() {
     let t_hi: f32 = a.next().expect("t_hi").parse().unwrap();
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
-    let rewritten = demo.write_to_bytes();
+    let rewritten = demo.write_to_bytes().expect("re-encode");
     let redone = open_demo_from_bytes(&rewritten).expect("reparse");
 
     // Walk both in lockstep by (time window), comparing serialized message

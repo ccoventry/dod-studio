@@ -63,7 +63,7 @@ pub(super) fn helper_cfg_preamble(config: &PatcherConfig, dod_dir: &std::path::P
     helper_cfg_content.push_str(&speed_alias_lines(
         config,
         &final_init_commands(config),
-        Some(&crate::patch::cfg_scan::scan_cached(dod_dir)),
+        Some(&crate::game_config::cfg_scan::scan_cached(dod_dir)),
     ));
     helper_cfg_content.push_str(&ramp_alias_lines(config));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");

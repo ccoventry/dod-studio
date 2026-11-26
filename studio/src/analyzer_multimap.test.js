@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('./ipc_bridge.js', () => ({ demoSplitStatus: vi.fn() }));
+vi.mock('./ipc_bridge.js', () => ({ demoSplitStatus: vi.fn(), demoRepairable: vi.fn(), logFrontendEvent: vi.fn() }));
 vi.mock('./split_pane.js', () => ({ SHORT_MAP_SECONDS: 60 }));
 
 const { multiMapList, multiMapNotice } = await import('./analyzer_multimap.js');

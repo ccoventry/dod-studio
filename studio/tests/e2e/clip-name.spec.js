@@ -5,7 +5,7 @@
 // chips inserting at the cursor (a modifier going inside the placeholder just
 // before it); Default putting the default template back; and the chips laid
 // out in the same rows as Rename Demos' (#751).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function loadHarness(page) {
   await page.goto('/tests/e2e/clip-name.html');

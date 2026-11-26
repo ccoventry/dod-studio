@@ -13,9 +13,10 @@
 //!
 //! or, less often, an access violation at `hw.dll+0x6c8d1` reading an address
 //! nowhere near any map data. Both are inside `PM_RecursiveHullCheck`
-//! (`hw.dll+0x6c830`), the recursive clip-hull trace that `PM_PlayerTraceEx`
-//! (`+0x6bf00`) runs once per physent. It happens in the plain game with
-//! nothing injected, and on the stock 25th Anniversary engine too.
+//! (`hw.dll+0x6c830`), the recursive clip-hull trace that `_PM_PlayerTrace`
+//! (`+0x6bf00`, the shared worker behind `PM_PlayerTrace` and
+//! `PM_PlayerTraceEx`) runs once per physent. It happens in the plain game
+//! with nothing injected, and on the stock 25th Anniversary engine too.
 //!
 //! The hull it is handed is not the new map's. Both crash records' hull
 //! pointers (`hw.dll+0xefb140`, `+0xf123d0`) sit exactly 242 `model_t`s
@@ -58,7 +59,7 @@
 //! leaf never gets past `eax`.
 //!
 //! A refused trace reports whatever it had found so far -- usually "start
-//! solid", which `PM_PlayerTraceEx` starts every trace as. That is one bad
+//! solid", which `_PM_PlayerTrace` starts every trace as. That is one bad
 //! trace against a model that isn't really there, during a load.
 //!
 //! It is on by default, like `tempent_fix`, because it only acts where the

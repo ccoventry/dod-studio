@@ -12,6 +12,11 @@
 //! by `time`, `frame: 0`, well under the demo format's 64-byte `char command[64]` field.
 //!
 //!     cargo run --release -p analysis --example inject_breadcrumbs -- <in.dem> <out.dem> [interval_secs]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{ByteString, ConsoleCommand, Frame, FrameData};
 
@@ -63,7 +68,7 @@ fn main() {
         "injected {n} breadcrumbs every {interval:.1}s across {first_time:.1}s..{last_time:.1}s"
     );
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
 

@@ -4,6 +4,11 @@
 //! (and failing) to reach a host that no longer resolves (#15).
 //!
 //!     cargo run --release -p analysis --example patch_resource_url -- <in.dem> <out.dem> <new_url>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 
@@ -51,7 +56,7 @@ fn main() {
         return;
     }
 
-    let out = demo.write_to_bytes();
+    let out = demo.write_to_bytes().expect("re-encode");
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
 

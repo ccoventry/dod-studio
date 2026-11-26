@@ -8,7 +8,7 @@
 import { STRINGS } from './strings.js';
 
 let pendingResolve = null;
-let modal, titleEl, messageEl, okBtn, cancelBtn, detailsEl, footerEl;
+let modal, titleEl, messageEl, okBtn, cancelBtn, detailsEl, footerEl, choicesEl;
 
 export function initThemedConfirm() {
   modal = document.querySelector('#themed-confirm-modal');
@@ -27,7 +27,11 @@ export function initThemedConfirm() {
     footerEl = document.createElement('p');
     footerEl.id = 'themed-confirm-footer';
     footerEl.style.display = 'none';
-    messageEl.after(detailsEl, footerEl);
+    // Extra answers for a question with more than yes and no (`choices`).
+    choicesEl = document.createElement('div');
+    choicesEl.id = 'themed-confirm-choices';
+    choicesEl.style.cssText = 'display: none; flex-wrap: wrap; gap: 8px; margin-top: 12px;';
+    messageEl.after(detailsEl, footerEl, choicesEl);
   }
 
   okBtn?.addEventListener('click', () => resolveAndClose(true));
@@ -49,11 +53,15 @@ function resolveAndClose(result) {
  * and a hover text). `footer`: an optional line after the list.
  * `focusConfirm`: the confirm button takes focus, so Enter picks it; only for
  * a question whose yes loses nothing.
+ * `choices`: more answers than yes and no, `[{ id, label, destructive? }]`,
+ * shown as buttons under the message. The promise then resolves to the
+ * clicked one's `id`, or false for the cancel button; the confirm button is
+ * not shown. (Review's missing-demo question, #1376.)
  * `destructive`: the confirm button is red, for a yes that deletes, recycles,
  * overwrites or throws work away; every other confirm uses the accent colour
  * (#880).
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, hideConfirm = false, focusConfirm = false, destructive = false } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, hideConfirm = false, focusConfirm = false, destructive = false, choices = null } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -79,10 +87,21 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
     footerEl.textContent = footer || '';
     footerEl.style.display = footer ? '' : 'none';
   }
+  if (choicesEl) {
+    choicesEl.replaceChildren(...(choices || []).map((choice) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = choice.label;
+      button.className = choice.destructive ? 'danger-btn' : '';
+      button.addEventListener('click', () => resolveAndClose(choice.id));
+      return button;
+    }));
+    choicesEl.style.display = choices && choices.length ? 'flex' : 'none';
+  }
   if (okBtn) {
     okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
     // `hideConfirm`: a wait the code ends (dismissThemedConfirm), not a question.
-    okBtn.style.display = hideConfirm ? 'none' : '';
+    okBtn.style.display = hideConfirm || choices ? 'none' : '';
     okBtn.classList.toggle('danger-btn', !!destructive);
     okBtn.classList.toggle('primary-btn', !destructive);
   }

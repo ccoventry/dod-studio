@@ -49,10 +49,8 @@
 //! `tools/verify_map_weather_offsets.py` checks the pattern is unique and its
 //! operand is `g_iWeatherType` in both installs' `client.dll`.
 //!
-//! Wind is not part of it yet: the map's `detect_wind_velocity_x/y` go to
-//! `CDoDParticle::m_vGlobalWind` (`client+0x196c60`, a vec3 written only by
-//! `client+0x4d340`, which the same BSP parse calls), so a forced rain falls
-//! straight on a map with no wind of its own.
+//! A forced rain falls in the map's own wind, none on most maps;
+//! `ds_map_wind` (`map_wind.rs`) sets it.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 

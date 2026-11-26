@@ -1,6 +1,6 @@
 // Highlight Details' capture history (#439) -- driven against
 // tests/e2e/capture-history.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/capture-history.html');
@@ -40,6 +40,16 @@ test.describe('Highlight Details capture history', () => {
     const old = lines(page).nth(2);
     await expect(old).toContainText('Captured earlier (date not recorded)');
     await expect(old).toContainText('folder not recorded');
+  });
+
+  test('each take says what it was captured with; one from before that says not recorded', async ({ page }) => {
+    await gotoHarness(page);
+    await toggles(page).first().click();
+    const settingsOf = (i) => lines(page).nth(i).locator('.capture-history-settings');
+    await expect(settingsOf(0)).toHaveText('Captured with: 1920×1080 · FOV 90 · Half-Life - POST-Anniversary for Movies · hook bundled · 5 s before, 1 s after · 1 Initial Command, 0 Scheduled');
+    await expect(settingsOf(0)).toHaveAttribute('title', /mirv_fov 90[\s\S]*Settings hash v1-0123456789abcdef/);
+    await expect(settingsOf(1)).toHaveText('Captured with: not recorded');
+    await expect(settingsOf(2)).toHaveText('Captured with: not recorded');
   });
 
   test('the renders of a take sit under it, with a button only for a video that is there', async ({ page }) => {

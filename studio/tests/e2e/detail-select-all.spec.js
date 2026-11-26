@@ -1,7 +1,7 @@
 // Highlight Details' header checkbox: ticking or unticking every row marks
 // the project unsaved, as a row's own checkbox does. Driven against
 // tests/e2e/detail-notes.html (one demo, two highlights). See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 async function gotoHarness(page) {
   await page.goto('/tests/e2e/detail-notes.html');

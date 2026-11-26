@@ -15,13 +15,16 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
 - [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: the settings Studio gives OBS, OBS measured against HLAE, how it is driven, failure modes, open questions.
 - [vegas_nameplates.md](vegas_nameplates.md) — each player's nameplate picture on its own track above their clips in VEGAS Pro: setting it on the Players tab, the clip list the EDL export saves, and the VEGAS script (#429).
+- [vegas_relink.md](vegas_relink.md) — relinking a VEGAS project you are already editing after its clips were renamed or moved, keeping the edit: the relink list Studio saves, the VEGAS script, and its format (#1514).
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
 - [position_data_in_demos.md](position_data_in_demos.md) — what player position data demos carry (fields, rates, POV vs HLTV coverage) and what stats it allows (#448).
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
 - [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
-- [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
+- [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, how Studio repairs damaged ones (`analysis::repair`) and the R&D behind it, and the engine's entity-packet flush rule (#15).
+- [goldsrc_demo_editing.md](goldsrc_demo_editing.md) — rewriting what happens in a demo: moving a player, filling seconds the demo never had, moving the recorder's view, and edit-the-file versus fake-it-in-the-hook (#1469).
+- [goldsrc_protocol_47.md](goldsrc_protocol_47.md) — protocol-47 demos (2004 and a little after): what the game does with one (an outdated-protocol warning, never a refusal; plain hl.exe doesn't survive these old demos, Studio's launch plays them), what differs from protocol 48 (only the protocol number), how they are read, and converting one to drop the warning (#239).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.
@@ -31,12 +34,14 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, how the engine reads a `playdemo` demo, and what is left.
 - [goldsrc_viewdemo.md](goldsrc_viewdemo.md) — how `viewdemo` plays and seeks a demo.
 - [goldsrc_linux_debug_symbols.md](goldsrc_linux_debug_symbols.md) — Valve's own names from DoD's unstripped Linux builds: the `client.dll` name map, user message layouts, and how far to trust them (#1127).
+- [goldsrc_linux_symbols.md](goldsrc_linux_symbols.md) — Valve's unstripped Linux engine (`sw.so`, `engine_i486.so`, `demoplayer.so`): how to fetch them anonymously and name `hw.dll`'s functions from them (#1133).
 
 ### Per feature
 - [goldsrc_death_notices.md](goldsrc_death_notices.md) — the kill feed (`ds_hud_deathmsg`).
 - [goldsrc_decals.md](goldsrc_decals.md) — clearing decals at runtime.
 - [goldsrc_ex_interp.md](goldsrc_ex_interp.md) — raising the interpolation ceiling.
 - [goldsrc_hltv_animation_fix.md](goldsrc_hltv_animation_fix.md) — gun animations in HLTV demos.
+- [goldsrc_forcehltv_pov.md](goldsrc_forcehltv_pov.md) — watching another player in a POV demo with `dem_forcehltv 1`: what the demo holds, what the in-eye view lacks and why (#1452).
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
@@ -50,8 +55,10 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
-- [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files).
+- [housekeeping.md](housekeeping.md) — the routine pass that keeps PRs, issues, branches, docs, CLAUDE.md, the coding-standards trend, CI, dependencies and the agents' notes current: what each part checks, and the report-first rule.
+- [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files), and the MIT code our work derives from (HLAE's DemoTools, for converting protocol-47 demos).
+- [../tools/agent-kit/](../tools/agent-kit/README.md) — dev-only helpers for testing the app: the shared game lock, playing demos to the end on PRE and POST, a throwaway Studio driven over CDP, frame checks and the comparison-video stopwatch, the activity log, the open-PR board, issue audits, open PRs by file, demos and kill moments from the analyzer cache, the hook log by game run, and HLAE's command names.
 
 ## Folders
 - [wiki/](wiki/) — source for the GitHub wiki, published when `main` changes.
-- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes). History, not current state.
+- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes), the #1107 codebase audit findings (`archive/codebase_audit_1107.md`). History, not current state.

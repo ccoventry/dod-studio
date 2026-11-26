@@ -11,7 +11,7 @@ import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { watchPreviewTrim } from './preview_trim_status.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
-import { clockFloor, clockRound, durationText } from './time_format.js';
+import { clockFloor, durationText } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
@@ -20,6 +20,7 @@ import { headshotsCell } from './headshots.js';
 import { flagTagChips } from './flag_tags.js';
 import { fileNameOf } from './path_display.js';
 import { createCaptureHistory } from './capture_history.js';
+import { updateStreakVisuals } from './streak_visuals.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -44,13 +45,17 @@ let currentOnDirty = null;
 let currentGetProjectTeams = () => null;
 // Each row's capture history (#439), made once the project's take index is known.
 let captureHistory = null;
+// demo_file_recheck.js's ensurePresent: Launch Preview and the analyzer button
+// look at the demo's file first, so one renamed away says so (#21).
+let currentEnsureDemoFiles = async () => true;
 
 // The first argument (every demo) names the highlights a take is shared with
 // (capture_history.js).
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex } = {}) {
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex, ensureDemoFiles } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
+  if (ensureDemoFiles) currentEnsureDemoFiles = ensureDemoFiles;
   captureHistory = getTakeIndex
     ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, locateVideos: locateRenderedVideos, reveal: revealInExplorer })
     : null;
@@ -132,46 +137,8 @@ function updatePreviewButtonStates() {
   if (currentOnSelectionChange) currentOnSelectionChange();
 }
 
-/**
- * Recomputes start_tick/end_tick/kill_count/duration_string/timeline_string
- * from streak.kills[start_index..=end_index]. Mirrors
- * `CaptureStreak::update_visuals` in native/src/patch/types.rs — must be
- * called after any mutation of start_index/end_index so the display and the
- * eventual capture payload (which is built from these same fields) agree.
- */
-export function updateStreakVisuals(streak) {
-  if (!streak.kills || streak.kills.length === 0) return;
-
-  // A session saved before start_index/end_index existed (or a streak never
-  // touched by the range editor) may have either as undefined.
-  if (streak.end_index === undefined) streak.end_index = streak.kills.length - 1;
-  if (streak.start_index === undefined) streak.start_index = 0;
-
-  const end = Math.min(streak.end_index, streak.kills.length - 1);
-  const start = Math.min(streak.start_index, end);
-  streak.start_index = start;
-  streak.end_index = end;
-
-  const slice = streak.kills.slice(start, end + 1);
-  streak.start_tick = slice[0][0];
-  streak.end_tick = slice[slice.length - 1][0];
-  streak.kill_count = slice.length;
-
-  const totalSecs = Math.round(Math.max(slice[slice.length - 1][1] - slice[0][1], 0));
-  streak.duration_string = clockRound(totalSecs);
-
-  const parts = slice.map(([, absTime, weapon], i) => {
-    // Falls back to a labelled placeholder rather than an empty string so an
-    // unresolved weapon name (e.g. a missing localization key) can never
-    // leave a blank array element — `Array.prototype.join` would otherwise
-    // render that as an orphaned leading/embedded separator with no name.
-    const weaponClean = String(weapon || '').replace(/^Weapon::/, '').trim() || STRINGS.ANALYZER.WEAPON_UNKNOWN;
-    if (i === 0) return weaponClean;
-    const gapSec = Math.round(Math.max(absTime - slice[i - 1][1], 0));
-    return `(+${clockRound(gapSec)}) ${weaponClean}`;
-  });
-  streak.timeline_string = parts.join(', ');
-}
+// Re-exported: the recompute lives in streak_visuals.js so the pure Review code can call it too.
+export { updateStreakVisuals };
 
 /** Selects every currently-visible (Player filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
@@ -272,6 +239,11 @@ window.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (!currentDemo || !currentDemo.streaks) return;
+      // Disabled while it looks: a file on a sleeping drive can take a while.
+      btnLaunchPreview.disabled = true;
+      const present = await currentEnsureDemoFiles([currentDemo]);
+      updatePreviewButtonStates();
+      if (!present) return;
       const highlights = allPreviewableStreaks(currentDemo);
       // A demo with no camera data plays as a frozen view (#920).
       if (!(await confirmNoCameraData([currentDemo], { preview: true }))) return;
@@ -397,7 +369,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
       telemetryBtn.onclick = null;
     } else {
       telemetryBtn.disabled = false;
-      telemetryBtn.onclick = () => {
+      telemetryBtn.onclick = async () => {
+        if (!(await currentEnsureDemoFiles([demo]))) return;
         switchNavTab('demo-analyzer');
         openAnalyzerDemo(demo.path);
       };
@@ -443,14 +416,15 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_HEADSHOTS_TITLE}">${STRINGS.HIGHLIGHTS.COL_HEADSHOTS}</th>
-        ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
-        <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
+        ${showPlayer ? `<th class="col-wide" title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
+        <th class="col-wide">${STRINGS.HIGHLIGHTS.COL_TIME}</th>
+        <th class="col-wide">${STRINGS.HIGHLIGHTS.COL_DUR}</th>
+        <th class="col-stack">${showPlayer ? STRINGS.HIGHLIGHTS.COL_STACK_PLAYER : STRINGS.HIGHLIGHTS.COL_STACK}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
         <th class="col-clip-name">${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
         <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
+        <th class="col-details">${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -520,11 +494,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       : '';
 
     tr.innerHTML = `
-      <td style="padding: 8px;">${rowNum}</td>
-      <td style="padding: 8px;">
+      <td>${rowNum}</td>
+      <td>
         <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
-      <td style="padding: 8px;">
+      <td>
         <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:var(--warn-deep);' : ''}">
           <input type="number" class="kr-start-input" min="1" max="${maxKillIdx + 1}"
                  value="${streak.start_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
@@ -534,12 +508,16 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid var(--border-accent);border-radius:2px;color:var(--text-subtle);cursor:pointer;">↺</button>` : ''}
         </div>
       </td>
-      <td class="streak-kills" style="padding: 8px;"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
-      <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
-      ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
-      <td style="padding: 8px;">${timeStr}</td>
-      <td class="streak-duration" style="padding: 8px;">${durationText(durSecs)}</td>
-      <td style="padding: 8px;">
+      <td class="streak-kills"><span style="font-weight: bold;">${streak.kill_count}</span>${flagTagChips(streak)}</td>
+      <td class="streak-headshots">${headshotsCell(streak)}</td>
+      ${showPlayer ? `<td class="streak-player col-wide">${escapeHtml(streak.target_player || '')}</td>` : ''}
+      <td class="col-wide">${timeStr}</td>
+      <td class="streak-duration col-wide">${durationText(durSecs)}</td>
+      <td class="col-stack streak-stack" title="${escapeHtml(timelineText)}">
+        ${showPlayer ? `<div class="streak-stack-player" title="${escapeHtml(STRINGS.HIGHLIGHTS.stackedPlayerTitle(streak.target_player || '', timelineText))}">${escapeHtml(streak.target_player || '')}</div>` : ''}
+        <div class="streak-stack-when">${STRINGS.HIGHLIGHTS.stackedWhen(timeStr, durationText(durSecs))}</div>
+      </td>
+      <td>
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
             // Each option in its own colour, not the selected one's (#527).
@@ -547,10 +525,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ).join('')}
         </select>${byHandMark}${mergedBadge}
       </td>
-      <td style="padding: 8px;">
-        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+      <td>
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%;" />
       </td>
-      <td style="padding: 8px;">
+      <td>
         <select class="streak-curation-select" style="font-size: 0.85em;">
           <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
           <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
@@ -558,10 +536,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
           <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
         </select>
       </td>
-      <td style="padding: 8px;">
+      <td>
         <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
-      <td class="details-cell" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
+      <td class="details-cell col-details" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
     `;
 
     const cb = tr.querySelector('.streak-select-cb');

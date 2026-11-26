@@ -1,6 +1,6 @@
 // Nothing pulls the rug during a batch (#1085): the real app shell, with a
 // batch's capture_status reports sent by hand.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const GIB = 1024 ** 3;
 const HELD_TITLE = 'A capture batch is running. Wait for it to finish, or cancel it.';
@@ -8,7 +8,7 @@ const HELD_TITLE = 'A capture batch is running. Wait for it to finish, or cancel
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((gib) => {
     window.__mockInvokeHandlers = {
-      get_settings: () => ({ pinned_folders: [], target_drives: [], render_export_dirs: [], recent_projects: ['D:/p/monday.dodstudio'] }),
+      get_settings: () => ({ setup_dismissed: true, pinned_folders: [], target_drives: [], render_export_dirs: [], recent_projects: ['D:/p/monday.dodstudio'] }),
       calculate_export_pool_space: () => 10 * gib,
       system_memory_bytes: () => 16 * gib,
       files_exist: ({ paths }) => paths.map(() => true),
@@ -17,7 +17,9 @@ test.beforeEach(async ({ page }) => {
   }, GIB);
   await page.goto('/index.html');
   await expect(page.locator('#load-project-btn')).toBeAttached();
-  await page.waitForFunction(() => (window.__mockEventListeners.capture_status || []).length >= 2);
+  // main.js's boot awaits the settings and more after the page loads; its
+  // listeners, menus and buttons exist only once it reports started (#1511).
+  await page.waitForFunction(() => window.dodStudioBoot?.state() === 'started');
 });
 
 const batch = (page, running) => page.evaluate((r) => window.__mockEmit('capture_status', { running: r }), running);

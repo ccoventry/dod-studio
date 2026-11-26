@@ -308,7 +308,7 @@ def composites():
     return killfeed_composites
 
 
-# â”€â”€ hud.txt and the stock icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── hud.txt and the stock icon ───────────────────────────────────────────────
 
 
 def hud_entries(dod):
@@ -397,7 +397,7 @@ def bleed(rgba):
     return out
 
 
-# â”€â”€ geometry and view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── geometry and view ────────────────────────────────────────────────────────
 
 
 def model_triangles(path):
@@ -844,7 +844,7 @@ def cut_columns(rgba, x0, x1, row):
     return out
 
 
-# â”€â”€ rasterizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── rasterizer ───────────────────────────────────────────────────────────────
 
 
 def sample_bilinear(tex, u, v):
@@ -1409,7 +1409,7 @@ def soft_finish(lit, col_hi, cov_hi, ss=SS, radius=OUTLINE, colour=OUTLINE_COLOU
     return bleed(out)
 
 
-# â”€â”€ skins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── skins ────────────────────────────────────────────────────────────────────
 
 
 def esrgan_path():
@@ -1485,7 +1485,7 @@ def hd_skins(textures, style, models_dir):
         shutil.rmtree(work, ignore_errors=True)
 
 
-# â”€â”€ one icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── one icon ─────────────────────────────────────────────────────────────────
 
 
 def candidates(dod, icon):
@@ -1710,7 +1710,7 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     return img, info
 
 
-# â”€â”€ the sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── the sheet ────────────────────────────────────────────────────────────────
 
 
 def paint(sheet4, rect, stock_alpha, icon4):
@@ -1901,7 +1901,7 @@ EVEN_HEIGHT = 26
 EVEN_BARREL_ROW = 8
 # Bump when the even atlas's look or rule changes: a style's atlas built by
 # an older one is built again.
-EVEN_VERSION = 3  # 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
+EVEN_VERSION = 4  # 4: British heads in the butt stroke (#1089); 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
 ATLAS_NAME = "dodstudio_killfeed"
 ATLAS_TABLE_VERSION = 1
 ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs
@@ -2203,7 +2203,7 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
     return len(rects)
 
 
-# â”€â”€ engine simulation, for the review sheets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── engine simulation, for the review sheets ─────────────────────────────────
 
 
 def gl_bilinear(img, out_w, out_h):

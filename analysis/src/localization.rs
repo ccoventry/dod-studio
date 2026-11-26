@@ -1,3 +1,6 @@
+// Locks go through the `lock-recover` crate (#1377).
+
+use lock_recover::{read_or_recover, write_or_recover};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -13,15 +16,17 @@ static EXTRA_SEARCH_PATHS: RwLock<Vec<std::path::PathBuf>> = RwLock::new(Vec::ne
 include!(concat!(env!("OUT_DIR"), "/embedded_localizations.rs"));
 
 pub fn get_active_language() -> &'static str {
-    *ACTIVE_LANGUAGE.read().unwrap()
+    *read_or_recover(&ACTIVE_LANGUAGE)
 }
 
+/// Takes ACTIVE_LANGUAGE before LOCALIZATIONS, as `translate_key` does: one
+/// order everywhere, so the two can't deadlock.
 pub fn set_active_language(lang: &'static str) {
-    if *ACTIVE_LANGUAGE.read().unwrap() != lang {
-        let mut active_lock = ACTIVE_LANGUAGE.write().unwrap();
+    if *read_or_recover(&ACTIVE_LANGUAGE) != lang {
+        let mut active_lock = write_or_recover(&ACTIVE_LANGUAGE);
         if *active_lock != lang {
             *active_lock = lang;
-            let mut loc_lock = LOCALIZATIONS.write().unwrap();
+            let mut loc_lock = write_or_recover(&LOCALIZATIONS);
             *loc_lock = None; // clear cache to force reload
         }
     }
@@ -50,8 +55,8 @@ fn normalize_key(key: &str) -> String {
 /// `translate_key` call reloads.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn add_localization_search_path(dir: std::path::PathBuf) {
-    EXTRA_SEARCH_PATHS.write().unwrap().push(dir);
-    *LOCALIZATIONS.write().unwrap() = None;
+    write_or_recover(&EXTRA_SEARCH_PATHS).push(dir);
+    *write_or_recover(&LOCALIZATIONS) = None;
 }
 
 pub fn translate_key(key: &str) -> Option<String> {
@@ -59,19 +64,23 @@ pub fn translate_key(key: &str) -> Option<String> {
 
     // 1. Try to read from cache first with a read lock
     {
-        let read_lock = LOCALIZATIONS.read().unwrap();
+        let read_lock = read_or_recover(&LOCALIZATIONS);
         if let Some(ref map) = *read_lock {
             return map.get(&lookup_key).cloned();
         }
     }
 
-    // 2. If it is None, acquire write lock to initialize it
-    let mut write_lock = LOCALIZATIONS.write().unwrap();
-    if write_lock.is_none() {
-        let active = *ACTIVE_LANGUAGE.read().unwrap();
-        *write_lock = Some(load_localizations_from_disk(active));
-    }
-    write_lock.as_ref().unwrap().get(&lookup_key).cloned()
+    // 2. If it is None, acquire write lock to initialize it. ACTIVE_LANGUAGE
+    // is taken first, the order set_active_language takes the two in:
+    // reading it under the LOCALIZATIONS lock instead could deadlock against
+    // a language change. It stays held so a change can't clear the cache
+    // between reading the language and loading it.
+    let active = read_or_recover(&ACTIVE_LANGUAGE);
+    let mut write_lock = write_or_recover(&LOCALIZATIONS);
+    write_lock
+        .get_or_insert_with(|| load_localizations_from_disk(*active))
+        .get(&lookup_key)
+        .cloned()
 }
 
 fn get_amxx_code(lang: &str) -> &str {
@@ -245,7 +254,7 @@ fn load_pass(map: &mut HashMap<String, String>, filter_lang: &str, amxx_code: &s
         std::path::PathBuf::from("localizations"),
         std::path::PathBuf::from("../localizations"),
     ];
-    paths.extend(EXTRA_SEARCH_PATHS.read().unwrap().iter().cloned());
+    paths.extend(read_or_recover(&EXTRA_SEARCH_PATHS).iter().cloned());
 
     if let Ok(exe_path) = std::env::current_exe() {
         // A single `.parent()` hop only finds a sibling `localizations/`

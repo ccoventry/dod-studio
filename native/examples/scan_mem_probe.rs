@@ -32,6 +32,11 @@
 //! Usage:
 //!
 //!     cargo run --release -p native --example scan_mem_probe -- <folder> <workers>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

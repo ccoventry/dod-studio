@@ -12,12 +12,12 @@
 /// (4), network protocol (4), map name (260).
 const HEADER_GAME_DIR: std::ops::Range<usize> = 276..536;
 /// The header's network protocol (48 for DoD 1.3).
-const HEADER_NETWORK_PROTOCOL: std::ops::Range<usize> = 12..16;
-const SVC_SERVERINFO: u8 = 11;
+pub(crate) const HEADER_NETWORK_PROTOCOL: std::ops::Range<usize> = 12..16;
+pub(crate) const SVC_SERVERINFO: u8 = 11;
 /// From the message id to the game folder string: protocol, spawn count,
 /// map checksum (4 each), client.dll hash (16), max players, player index,
 /// deathmatch (1 each). Mirrors `demo_split::TO_GAME_DIR`.
-const TO_GAME_DIR: usize = 1 + 4 + 4 + 4 + 16 + 3;
+pub(crate) const TO_GAME_DIR: usize = 1 + 4 + 4 + 4 + 16 + 3;
 /// A game folder is a plain folder name; the engine's own buffer is 260.
 const MAX_GAME_DIR: usize = 64;
 

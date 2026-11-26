@@ -10,7 +10,7 @@
 //!
 //! ## The camera mode name
 //!
-//! `CHudSpectator::SetMode` (`+0x38850`), after a real mode change, builds
+//! `CHudSpectator::SetModes` (`+0x38850`), after a real mode change, builds
 //! `"%c%s"` with `HUD_PRINTCENTER` and `#Spec_Mode1`..`4`, then calls
 //! `CHudTextMessage::MsgFunc_TextMsg` (`+0x4c250`) **directly**, not through
 //! the engine's user-message dispatcher -- which is why a `TextMsg` hook
@@ -35,7 +35,7 @@
 //! A demo also carries the mode name as an ordinary `TextMsg` from the
 //! server: destination 4 with the key `#Spec_Mode1`..`4`, at every POV death
 //! and HLTV mode change. That one goes through the engine's message
-//! dispatcher, not `SetMode`, so the patch above never sees it, and in game it
+//! dispatcher, not `SetModes`, so the patch above never sees it, and in game it
 //! showed with the patch in place. `clan_text`'s `TextMsg` filter asks
 //! [`hide_text_msg`] for it, the same way it asks `center_text`.
 //!
@@ -80,7 +80,7 @@ struct Site {
     hidden: &'static [u8],
 }
 
-/// `CHudSpectator::SetMode`, from `push 4` (`HUD_PRINTCENTER`) to the
+/// `CHudSpectator::SetModes`, from `push 4` (`HUD_PRINTCENTER`) to the
 /// instruction after the call to `MsgFunc_TextMsg`.
 const MODE_NAME: Site = Site {
     what: "the camera mode name",

@@ -432,14 +432,14 @@ fn every_injected_command_fits_a_console_command_frame_and_passes_the_demo_filte
     for job in &jobs {
         for cmd in &job.init_commands {
             assert_eq!(
-                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                crate::game_config::cfg_scan::demo_filter_rule(cmd),
                 None,
                 "init command {cmd:?} is dropped by the demo filter"
             );
         }
         for (tick, cmd) in &job.scheduled_commands {
             assert_eq!(
-                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                crate::game_config::cfg_scan::demo_filter_rule(cmd),
                 None,
                 "scheduled command {cmd:?} at tick {tick} is dropped by the demo filter"
             );
@@ -827,18 +827,29 @@ fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
 }
 
 #[test]
-fn agr_fps_follows_the_capture_fps_until_it_is_set() {
+fn agr_fps_is_30_until_it_is_set_whatever_the_capture_fps() {
     let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
     config.capture_fps = 300;
     config.agr_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 300);
-    assert_eq!(agr_host_framerate(&config), 1.0 / 300.0);
+    assert_eq!(crate::patch::DEFAULT_AGR_FPS, 30);
+    assert_eq!(config.effective_agr_fps(), 30);
+    assert_eq!(agr_host_framerate(&config), 1.0 / 30.0);
     config.agr_fps = 120;
     assert_eq!(config.effective_agr_fps(), 120);
     // Never a division by zero, whatever the settings say.
     config.agr_fps = -5;
     config.capture_fps = 0;
-    assert_eq!(config.effective_agr_fps(), 1);
+    assert_eq!(config.effective_agr_fps(), 30);
+}
+
+#[test]
+fn agr_fps_absent_from_saved_settings_reads_as_30() {
+    let mut value = serde_json::to_value(config_in_mode(crate::patch::CaptureMode::Agr)).unwrap();
+    value.as_object_mut().unwrap().remove("agr_fps");
+    value["capture_fps"] = serde_json::json!(300);
+    let config: crate::patch::PatcherConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(config.agr_fps, 0);
+    assert_eq!(config.effective_agr_fps(), 30);
 }
 
 #[test]
@@ -1154,7 +1165,7 @@ fn turning_the_flush_off_drops_its_term_from_the_floor() {
     config.decal_flush = true;
     assert_eq!(
         roll_floors(&config).flush_lead,
-        crate::patch::DEFAULT_LEAD_SECONDS
+        crate::decals::DEFAULT_LEAD_SECONDS
     );
 
     config.decal_flush = false;
@@ -1609,7 +1620,7 @@ fn test_a_maximum_ring_sweep_stops_pinning_the_cvar() {
     // costs the precondition the rest of the design works around — that
     // nothing else may set r_decals.
     let mut config = mock_config();
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1659,7 +1670,7 @@ fn test_a_game_config_setting_the_cvar_to_zero_is_now_left_alone() {
     // (`decal_flush_is_noop` / `prepare_flushed_source`'s own zero-check)
     // rather than silently patched away.
     let mut config = mock_config_with_game_cfg("zero", "r_decals 0\nfps_max 999\n");
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1677,7 +1688,7 @@ fn test_a_game_config_setting_the_cvar_to_zero_is_now_left_alone() {
         jobs[1].init_commands
     );
     assert_eq!(
-        crate::patch::ring_limit(&config),
+        crate::game_config::ring_limit(&config),
         0,
         "and ring_limit agrees"
     );
@@ -1706,7 +1717,7 @@ fn test_a_nonzero_game_config_value_is_adopted_without_a_pin() {
         "the config's own line is already the pin, nothing to append: {:?}",
         jobs[1].init_commands
     );
-    assert_eq!(crate::patch::ring_limit(&config), 512);
+    assert_eq!(crate::game_config::ring_limit(&config), 512);
 }
 
 #[test]
@@ -1714,7 +1725,7 @@ fn test_a_maximum_ring_leaves_the_cvar_alone_when_no_config_touches_it() {
     // The other half of the rule, against a game folder proven empty rather
     // than one that merely happens to be.
     let mut config = mock_config_with_game_cfg("clean", "");
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -1766,7 +1777,7 @@ fn test_anything_below_the_maximum_still_pins() {
     // Below the ceiling the sweep only covers the ring it was sized for, so
     // the cvar has to be held there or the sweep under-clears.
     let mut config = mock_config();
-    config.decal_ring_limit = crate::patch::MAX_RENDER_DECALS - 1;
+    config.decal_ring_limit = crate::decals::MAX_RENDER_DECALS - 1;
 
     let (jobs, _) = build_batch_queue(
         vec![streak_with_kills(1000, 1200, &[1000, 1200])],
@@ -2203,8 +2214,11 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
         estimate_batch_capture_blocks(&streaks, &config),
         vec![2 * one]
     );
+    // Another player is another job: `build_batch_queue` groups by the
+    // player's name, and the estimate now asks the same planner.
     let mut other_player = streak(1000, 1200);
     other_player.player_index = 1;
+    other_player.target_player = Some("Nifty".to_string());
     let spread = vec![
         streak(2500, 2700),
         streak(1000, 1200),
@@ -2220,10 +2234,26 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
 #[test]
 fn a_batch_with_no_room_is_refused_in_plain_words() {
     let gib = 1_073_741_824;
-    let message = no_room_message(31 * gib, 22 * gib);
+    let message = no_room_message(31 * gib, 22 * gib, None);
     assert_eq!(
         message,
         "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
+    );
+}
+
+/// #1430: when a capture folder is on the Windows drive, the refusal says the
+/// drive counts only above "Keep free on the Windows drive".
+#[test]
+fn a_refusal_with_a_capture_folder_on_the_windows_drive_names_the_setting() {
+    let gib = 1_073_741_824;
+    let message = no_room_message(31 * gib, 22 * gib, Some(50 * gib));
+    assert!(
+        message.starts_with("Not enough free space on any capture drive"),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(&crate::messages::windows_drive::kept_free_note(50 * gib)),
+        "{message}"
     );
 }
 

@@ -5,6 +5,8 @@
 mod clip_summary;
 mod killfeed_layout;
 
+pub use clip_summary::ClipSummary;
+
 use super::EngineEvent;
 use crate::log_markdown;
 use std::path::Path;
@@ -12,16 +14,17 @@ use std::sync::{Arc, atomic::AtomicBool, mpsc::Sender};
 
 /// The listener's event for one console marker, if it has one: progress,
 /// clip recordings, holds, the kill feed's layout. The hook's per-clip
-/// summary (#1221) has none: it goes straight to the activity log, here,
-/// since every marker the batch reads, late ones too, passes through; so
-/// does the kill feed's layout (#1339), before its warning goes on.
+/// summary (#1221) goes to the activity log here, since every marker the
+/// batch reads, late ones too, passes through, and then to the listener,
+/// which judges each clip's take by it (#1401); so does the kill feed's
+/// layout (#1339), before its warning goes on.
 pub(super) fn marker_event(marker: &crate::obs::Marker) -> Option<EngineEvent> {
     use crate::obs::MarkerKind;
     if marker.kind == MarkerKind::Other
         && let Some(clip) = clip_summary::parse(&marker.label)
     {
         log_markdown(&clip.log_line());
-        return None;
+        return Some(EngineEvent::ClipReported(clip));
     }
     if marker.kind == MarkerKind::Other
         && let Some(layout) = killfeed_layout::parse(&marker.label)
@@ -117,7 +120,6 @@ impl RecordingGoAhead {
 /// file's directory entry is not necessarily updated while a handle to it is
 /// open, and the engine holds this one open for the whole session. `LogTailer`
 /// reads its length the same way, for the same reason.
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn console_log_len(path: &Path) -> u64 {
     std::fs::File::open(path)
         .and_then(|f| f.metadata())

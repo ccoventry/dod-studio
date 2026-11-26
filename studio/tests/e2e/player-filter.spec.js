@@ -4,7 +4,7 @@
 // (`recorder_id`), or looked up through the player index for a demo from a
 // project saved before scans stored one. An HLTV demo (null recorder) must
 // drop out as soon as a player is picked, and must never be looked up.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 const ME = '76561197977930126';
 

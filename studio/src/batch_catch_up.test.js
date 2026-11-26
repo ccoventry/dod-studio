@@ -43,6 +43,25 @@ describe('capturedTakes', () => {
     ]);
   });
 
+  it('records the settings the manifest captured with, and their rate', () => {
+    const d = demos();
+    const settings = { hash: 'v1-0123456789abcdef', fps: 60, width: 1920, lines: ['mirv_fov 90'] };
+    const takeIndex = {};
+    applyCaughtUpBatch(batch(d, { capture_mode: 'obs', capture_fps: 300, capture_settings: settings }), d, takeIndex);
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
+    expect(record.settings).toEqual(settings);
+    expect(record.capture_fps).toBe(60);
+  });
+
+  it('a manifest from before the settings records none', () => {
+    const d = demos();
+    const takeIndex = {};
+    applyCaughtUpBatch(batch(d, { capture_mode: 'frame_sequence', capture_fps: 300, capture_settings: null }), d, takeIndex);
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
+    expect(record.settings).toBeUndefined();
+    expect(record.capture_fps).toBe(300);
+  });
+
   it('skips a block whose indices are out of range', () => {
     const b = { streak_uids: ['u0'], blocks: [{ take_key: 'k', captured: true, source_streak_indices: [5] }] };
     expect(capturedTakes(b)).toEqual([]);
@@ -114,6 +133,16 @@ describe('createBatchCatchUp', () => {
     expect(onStatusChange).toHaveBeenCalledTimes(1);
     expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('1 of 2 clips'), 'info');
     expect(io.listen).toHaveBeenCalledWith('batch_catch_up', expect.any(Function));
+  });
+
+  it('unticks the captured highlights in the open queue and leaves the missing one ticked', async () => {
+    const d = demos();
+    d.forEach((demo) => demo.streaks.forEach((s) => { s.selected = true; }));
+    const io = fakeIo({ catchUp: vi.fn(async () => ({ batches: [batch(d)], waiting_for_game: false })) });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.start();
+    expect(d[0].streaks.map((s) => s.selected)).toEqual([false, false, true]);
+    expect(d[1].streaks[0].selected).toBe(true);
   });
 
   it('keeps keys this build does not know, backing a schema 1 file up first', async () => {

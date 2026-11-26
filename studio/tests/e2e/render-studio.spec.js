@@ -1,7 +1,7 @@
 // Render Studio frontend behavior, driven against tests/e2e/render-studio.html
 // (a minimal harness — see the comment at the top of that file and
 // tests/e2e/README.md for what this suite covers and what it doesn't).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 /** A RenderJobView-shaped fixture with sane defaults, overridable per test. */
 function job(overrides = {}) {
@@ -592,6 +592,25 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([{ jobIds: ['0', '1'] }]);
   });
 
+  test('Cancel Queued cancels every queued row and never a rendering one', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Rendering' }),
+      job({ id: '1', status: 'Queued', take_folder: 'D:/captures/demo1/chain_02_b0/take0000' }),
+      job({ id: '2', status: 'Queued', take_folder: 'D:/captures/demo1/chain_03_b0/take0000' }),
+    ]);
+    await expect(page.locator('#cancel-queued-render-btn')).toHaveText('Cancel Queued (2)');
+    await page.locator('#cancel-queued-render-btn').click();
+    expect(await invocationsFor(page, 'cancel_queued_render_jobs')).toHaveLength(1);
+    expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([]);
+  });
+
+  test('Cancel Queued is off with nothing queued', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering' })]);
+    await expect(page.locator('#cancel-queued-render-btn')).toBeDisabled();
+  });
+
   test('Delete Take folders lists each ticked take once and skips a busy one', async ({ page }) => {
     const A = 'D:/captures/s1/chain_01_b0/take0000';
     const B = 'D:/captures/s1/chain_02_b0/take0000';
@@ -1093,16 +1112,16 @@ test.describe('take checks (#1084)', () => {
   });
 });
 
-// #429: the button that copies the VEGAS nameplate script into VEGAS's script menu.
-test.describe('Add Nameplate Script to VEGAS', () => {
-  test('the click asks the backend and the toast says where the script went', async ({ page }) => {
+// #429, #1514: the button that copies the VEGAS scripts into VEGAS's script menu.
+test.describe('Add Scripts to VEGAS', () => {
+  test('the click asks the backend and the toast says where the scripts went', async ({ page }) => {
     await gotoHarness(page);
     await page.evaluate(() => {
       window.__mockInvokeHandlers['vegas_install_script'] =
-        () => 'D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs';
+        () => 'D:/OneDrive/Documents/Vegas Script Menu';
     });
     await page.locator('#vegas-script-install-btn').click();
-    await expect(page.locator('#toast-container')).toContainText('D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs');
+    await expect(page.locator('#toast-container')).toContainText('Scripts copied to D:/OneDrive/Documents/Vegas Script Menu');
     await expect(page.locator('#toast-container')).toContainText('Tools > Scripting > Rescan Script Menu Folder');
     expect(await invocationsFor(page, 'vegas_install_script')).toHaveLength(1);
     await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();

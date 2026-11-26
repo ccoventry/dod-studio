@@ -8,6 +8,7 @@
 //! still matches. Each highlight entry is the frontend's (`review_library.js`):
 //! this module stores it as it comes and never reads inside it.
 
+use lock_recover::lock_or_recover;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -108,7 +109,7 @@ pub async fn review_library_get(
     keys: Vec<String>,
 ) -> Result<BTreeMap<String, LibraryDemo>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_or_recover(&LOCK);
         Ok(entries_for(&read(&library_path())?, &keys))
     }))
     .await
@@ -122,7 +123,7 @@ pub async fn review_library_update(
     changes: BTreeMap<String, Option<Value>>,
 ) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_or_recover(&LOCK);
         let path = library_path();
         let mut library = read(&path)?;
         apply_update(&mut library, &key, &name, changes);

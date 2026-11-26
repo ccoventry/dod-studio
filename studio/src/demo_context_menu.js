@@ -37,8 +37,12 @@ async function copyText(text, what, demo) {
  * Hooks the menu onto the queue's rows.
  * @param {object} app
  * @param {Function} app.startReview  review_mode.js's startReview(paths, opts)
+ * @param {Function} app.ensureDemoFiles  demo_file_recheck.js's ensurePresent:
+ *   Open in Demo Analyzer and Open Folder look at the file first (Preview and
+ *   Review look through their own paths)
  */
-export function startDemoContextMenu({ startReview }) {
+export function startDemoContextMenu({ startReview, ensureDemoFiles = async () => true }) {
+  const whenPresent = (demo, run) => () => ensureDemoFiles([demo]).then((ok) => { if (ok) run(); });
   const menu = createContextMenu();
   setDemoRowMenuHandler(({ demo, row, select, at, fromKeyboard }) => {
     const actions = {
@@ -48,11 +52,11 @@ export function startDemoContextMenu({ startReview }) {
       review: () => startReview([demo.path], {
         covers: document.querySelector('#review-covers-select')?.value,
       }),
-      openInAnalyzer: () => { switchNavTab('demo-analyzer'); openAnalyzerDemo(demo.path); },
-      openFolder: () => {
+      openInAnalyzer: whenPresent(demo, () => { switchNavTab('demo-analyzer'); openAnalyzerDemo(demo.path); }),
+      openFolder: whenPresent(demo, () => {
         logFrontendEvent(STRINGS.CONTEXT_MENU.openFolderLog(demo.path));
         revealInExplorer(demo.path).catch(() => {});
-      },
+      }),
       split: rowButton(row, '.multimap-split-btn'),
       splitBlocked: splitBlockedReason(row),
       useFound: rowButton(row, '.use-found-copy-btn'),

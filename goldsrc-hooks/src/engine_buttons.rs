@@ -82,7 +82,7 @@ pub const GAMEUI_BUILDS: [GameUiBuild; 2] = [
     },
 ];
 
-/// `pfnClientCmd`'s slot in `cl_enginefunc_t` (`engine.rs` has the same).
+/// `pfnClientCmd`'s slot in `cl_enginefunc_t` (`engine/client_cmd.rs` has the same).
 const ENGFUNCS_SLOT_CLIENT_CMD: usize = 20;
 
 /// The console command in `command`, if it is `engine <something>`.
@@ -116,7 +116,7 @@ mod hook {
         let Ok(line) = CString::new(line) else {
             return;
         };
-        // Safety: a slot of the engine's function table, as engine.rs reads it.
+        // Safety: a slot of the engine's function table, as engine/client_cmd.rs reads it.
         unsafe {
             let slot = *(engfuncs as *const _ as *const usize).add(ENGFUNCS_SLOT_CLIENT_CMD);
             if slot == 0 {

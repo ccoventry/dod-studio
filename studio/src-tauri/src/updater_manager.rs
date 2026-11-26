@@ -1,4 +1,5 @@
 use crate::download_progress::DownloadMeter;
+use lock_recover::lock_or_recover;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -81,13 +82,13 @@ pub async fn check_for_update(
                 pub_date: update.date.map(|d| d.to_string()),
             };
             let pending = Arc::clone(&state.pending);
-            let mut guard = pending.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&pending);
             *guard = Some(update);
             Ok(Some(info))
         }
         None => {
             let pending = Arc::clone(&state.pending);
-            let mut guard = pending.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&pending);
             *guard = None;
             Ok(None)
         }
@@ -98,7 +99,7 @@ pub async fn check_for_update(
 /// Download & Install (`updater_pane.js`), and a retry needs it still there.
 /// Taking it out made every retry fail with "no update available".
 fn pending_update<T: Clone>(slot: &Mutex<Option<T>>) -> Option<T> {
-    slot.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    lock_or_recover(slot).clone()
 }
 
 #[tauri::command]

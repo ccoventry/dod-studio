@@ -9,6 +9,7 @@
 // seconds, enough to spare the backend while the queue redraws.
 
 import { demoSplitStatus } from './ipc_bridge.js';
+import { createCachedCheck } from './cached_check.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 
 /** How long an answer is reused before the folder is looked at again. */
@@ -25,31 +26,7 @@ export const RECHECK_AFTER_MS = 3000;
  *   a split, which is harmless. Two checks of one demo at once share a call.
  */
 export function createSplitStatusCheck({ ask, now = () => Date.now() }) {
-  const known = new Map(); // path -> { status, at }
-  const pending = new Map(); // path -> Promise
-
-  function last(path) {
-    return known.get(path)?.status ?? null;
-  }
-
-  function check(path, maps) {
-    if (pending.has(path)) return pending.get(path);
-    const entry = known.get(path);
-    if (entry && now() - entry.at < RECHECK_AFTER_MS) return Promise.resolve(entry.status);
-    const call = Promise.resolve()
-      .then(() => ask(path, maps))
-      .then((status) => {
-        known.set(path, { status, at: now() });
-        return status;
-      })
-      // A demo that can't be read now keeps its hint; nothing to remember.
-      .catch(() => null)
-      .finally(() => pending.delete(path));
-    pending.set(path, call);
-    return call;
-  }
-
-  return { last, check };
+  return createCachedCheck({ ask, keepMs: RECHECK_AFTER_MS, now });
 }
 
 /** Studio's one checker, over IPC, with the auto split's shortest map. */

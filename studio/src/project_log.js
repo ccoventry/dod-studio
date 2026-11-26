@@ -42,6 +42,28 @@ export function missingDemosLine(checked, missing, foundElsewhere) {
   return `[project] ${missing} of ${checked} demo(s) are missing, ${foundElsewhere} found elsewhere`;
 }
 
+/**
+ * What a look at the queue's demo files found when something changed
+ * (demo_file_recheck.js): `gone` and `back` are the names of the rows whose
+ * files went or came back, `found` how many gone ones turned up under another
+ * name or folder. Counts always; the names only when there are few.
+ */
+export function demoFilesRecheckedLine({ checked, gone, back, found, elapsedMs }) {
+  const few = (names) => (names.length > 0 && names.length <= 3 ? ` (${names.join(', ')})` : '');
+  return `[project] looked at ${checked} demo file(s) again in ${elapsedMs} ms: `
+    + `${gone.length} gone${few(gone)}, ${found} of them found elsewhere; ${back.length} back${few(back)}`;
+}
+
+/** Review reached a demo whose file is missing and the user skipped it. */
+export function reviewSkippedMissingLine(name, remaining) {
+  return `[review] skipped ${name}: its file is missing; reviewing the other ${remaining} demo(s)`;
+}
+
+/** What the user chose for a missing demo when Review reached it. */
+export function reviewMissingChoiceLine(name, choice) {
+  return `[review] ${name} is missing: ${choice}`;
+}
+
 /** Demos replaced on disk since they were scanned. */
 export function changedDemosLine(count, willRescan) {
   return `[project] ${count} demo(s) changed since they were scanned${willRescan ? ', rescanning' : ', left as they are'}`;
@@ -66,6 +88,28 @@ export function rendersSavedOnOpenLine(path, added, marked) {
 /** The take folders' render histories could not be read. */
 export function rendersPickUpFailedLine(takes) {
   return `[project] could not read the render history of ${takes} take folder(s)`;
+}
+
+/** The whole-project VEGAS export began (#1264). */
+export function projectEdlStartLine(total, chosen, scope) {
+  return `[project] exporting VEGAS EDL: ${chosen} of ${total} recorded video(s) (${scope})`;
+}
+
+/** The whole-project VEGAS export finished. */
+export function projectEdlExportedLine(count, scope, missing, skipped, ms) {
+  return `[project] exported VEGAS EDL of ${count} video(s) (${scope}): ${missing} missing, ${skipped} left out, ${ms} ms`;
+}
+
+/** The whole-project VEGAS export ended without writing an EDL: `why` is
+ *  `missing` (no video found), `unreadable` (FFmpeg read no length) or
+ *  `cancelled` (the save dialog). */
+export function projectEdlNotWrittenLine(why, chosen, scope, ms) {
+  const reason = {
+    missing: `none of the ${chosen} video(s) found`,
+    unreadable: `FFmpeg could not read the length of any video found`,
+    cancelled: 'the save dialog was cancelled',
+  }[why] || why;
+  return `[project] VEGAS export (${scope}) wrote no EDL: ${reason}, ${ms} ms`;
 }
 
 /** A save is about to raise a project's format: the backup comes first. */

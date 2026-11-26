@@ -14,10 +14,9 @@ import { groupPlayers, steamIdText } from './player_filter.js';
 import { steamIdForms } from './steam_ids.js';
 import { cleanUseAs, cleanNameplate } from './player_alias.js';
 
-/** Spray fallbacks offered for POV demos, and HLTV's: an HLTV demo records
- *  that a player sprayed, never the image, so "their own" isn't one. */
-export const POV_FALLBACKS = ['own', 'png', 'none'];
-export const HLTV_FALLBACKS = ['png', 'none'];
+/** The fallback sprays offered, for POV and HLTV demos alike: one picture or
+ *  no spray (#1322). */
+export const SPRAY_FALLBACKS = ['png', 'none'];
 export const CROSSHAIR_FALLBACKS = ['game', 'sprite'];
 
 /** The sprite DoD ships, whose tile `cl_xhair_style` picks. */
@@ -38,7 +37,7 @@ export function defaultPlayers() {
   return {
     use_in_game: true,
     players: [],
-    pov_fallback: 'own',
+    pov_fallback: 'png',
     pov_fallback_png: '',
     hltv_fallback: 'png',
     hltv_fallback_png: '',
@@ -91,10 +90,9 @@ export function normalizePlayers(raw) {
   return {
     use_in_game: raw.use_in_game !== false,
     players,
-    pov_fallback: POV_FALLBACKS.includes(raw.pov_fallback) ? raw.pov_fallback : d.pov_fallback,
+    pov_fallback: SPRAY_FALLBACKS.includes(raw.pov_fallback) ? raw.pov_fallback : d.pov_fallback,
     pov_fallback_png: text(raw.pov_fallback_png),
-    // `own` from a hand-edited file reads as the HLTV default.
-    hltv_fallback: HLTV_FALLBACKS.includes(raw.hltv_fallback) ? raw.hltv_fallback : d.hltv_fallback,
+    hltv_fallback: SPRAY_FALLBACKS.includes(raw.hltv_fallback) ? raw.hltv_fallback : d.hltv_fallback,
     hltv_fallback_png: text(raw.hltv_fallback_png),
     crosshair_fallback: CROSSHAIR_FALLBACKS.includes(raw.crosshair_fallback)
       ? raw.crosshair_fallback : d.crosshair_fallback,

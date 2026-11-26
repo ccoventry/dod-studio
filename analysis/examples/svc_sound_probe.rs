@@ -22,6 +22,11 @@
 //! Pass a filter to narrow the listing to sounds worth looking at:
 //!
 //!     cargo run --release -p analysis --example svc_sound_probe -- <demo> [substring]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;

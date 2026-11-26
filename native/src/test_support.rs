@@ -95,6 +95,87 @@ impl AsRef<Path> for Scratch {
     }
 }
 
+/// A game folder laid out as the engine expects: `hl.exe` with `dod/`
+/// beside it. Returns the path to the exe, and the guard the caller must
+/// hold -- dropping it here would delete the folder before it was read.
+pub(crate) fn fake_game(
+    tag: &str,
+    config_cfg: &str,
+    movie_cfg: Option<&str>,
+) -> (Scratch, std::path::PathBuf) {
+    let root = Scratch::new(format_args!("fov_cfg_{tag}"));
+    let dod = root.join("dod");
+    std::fs::create_dir_all(&dod).unwrap();
+    std::fs::write(dod.join("config.cfg"), config_cfg).unwrap();
+    if let Some(movie) = movie_cfg {
+        std::fs::write(dod.join("movie.cfg"), movie).unwrap();
+    }
+    let exe = root.join("hl.exe");
+    std::fs::write(&exe, b"").unwrap();
+    (root, exe)
+}
+
+/// `test-fixtures/ci_fixture.dem`, a real recording CI carries.
+pub(crate) fn ci_fixture() -> Vec<u8> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-fixtures/ci_fixture.dem"
+    );
+    std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// `ci_fixture.dem` with a second `entity_state_t` description in its last
+/// network frame, carrying `weapon_data_t`'s fields: a demo whose table for one
+/// struct changes mid-file. It parses, but every entity delta re-encoded with
+/// the table the parse ended on lacks its fields, so writing it fails (#1510).
+/// `dem`'s own tests build the same file (`write_error.rs`).
+pub(crate) fn ci_fixture_with_a_table_changed_at_the_end() -> Vec<u8> {
+    use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
+
+    let mut demo = dem::open_demo_from_bytes(&ci_fixture()).unwrap();
+    let described = |m: &NetMessage| match m {
+        NetMessage::EngineMessage(e) => match &**e {
+            EngineMessage::SvcDeltaDescription(d) if d.name == b"weapon_data_t\0" => {
+                Some(d.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let mut entity_state = demo
+        .directory
+        .entries
+        .iter()
+        .flat_map(|e| &e.frames)
+        .find_map(|frame| match &frame.frame_data {
+            FrameData::NetworkMessage(network) => match &network.1.messages {
+                MessageData::Parsed(messages) => messages.iter().find_map(described),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("the fixture describes weapon_data_t");
+    entity_state.name = b"entity_state_t\0".to_vec();
+
+    let last = demo
+        .directory
+        .entries
+        .iter_mut()
+        .flat_map(|e| e.frames.iter_mut())
+        .filter_map(|frame| match &mut frame.frame_data {
+            FrameData::NetworkMessage(network) => Some(&mut network.1),
+            _ => None,
+        })
+        .last()
+        .expect("the fixture has network frames");
+    if let MessageData::Parsed(messages) = last.messages_mut() {
+        messages.push(NetMessage::EngineMessage(Box::new(
+            EngineMessage::SvcDeltaDescription(entity_state),
+        )));
+    }
+    demo.write_to_bytes().unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

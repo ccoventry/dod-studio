@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { recordCapture } from './take_record.js';
 import { recordRender } from './take_renders.js';
-import { capturesOf, folderList, describeCapture, renderEntriesOf, videoPathList } from './capture_history_logic.js';
+import { capturesOf, folderList, describeCapture, renderEntriesOf, videoPathList, capturedWithText } from './capture_history_logic.js';
 
 const ME = 'd.dem#1#10#20';
 const OTHER = 'd.dem#2#12#30';
@@ -122,5 +122,39 @@ describe('the renders the project recorded (#1264)', () => {
     const entries = renderEntriesOf(capture, state);
     expect(entries.map((e) => e.started_unix_ms)).toEqual([1_700_000_100_000, 1_700_000_200_000, 1_700_000_300_000]);
     expect(videoPathList([capture], [state])).toEqual(['D:/out/1700000100000.mov', 'D:/out/1700000200000.mov']);
+  });
+});
+
+describe('capturedWithText (part of #1085)', () => {
+  const settings = {
+    hash: 'v1-0123456789abcdef', mode: 'frame_sequence', fps: 300, width: 1920, height: 1080, fov: 90,
+    install: 'Half-Life - POST-Anniversary for Movies', hook: 'bundled',
+    lines: ['mirv_fov 90', 'hud_draw 0'],
+    commands: [{ command: 'slowmo', offset_seconds: 1, relation: 'Before' }],
+    before: 5, after: 1, kill_gaps: { mode: 'keep', over_seconds: 8, speed: 4 }, decal_flush: true, app_version: '0.2.5',
+  };
+
+  it('a take with full settings shows them on one line and every command in the tooltip', () => {
+    const { text, title } = capturedWithText({ settings });
+    expect(text).toBe('Captured with: 1920×1080 · FOV 90 · Half-Life - POST-Anniversary for Movies · hook bundled · 5 s before, 1 s after · 2 Initial Commands, 1 Scheduled');
+    expect(title).toContain('  mirv_fov 90');
+    expect(title).toContain('  1 s before the clip: slowmo');
+    expect(title).toContain('Settings hash v1-0123456789abcdef · DoD Studio 0.2.5');
+  });
+
+  it('fast-forwarded gaps are named; kept ones are not', () => {
+    const fast = { ...settings, kill_gaps: { mode: 'fast_forward', over_seconds: 8, speed: 4 } };
+    expect(capturedWithText({ settings: fast }).text).toContain('gaps over 8 s at 4x');
+    expect(capturedWithText({ settings }).text).not.toContain('gaps');
+  });
+
+  it('a take without a record says not recorded, and nothing more', () => {
+    expect(capturedWithText({}).text).toBe('Captured with: not recorded');
+    expect(capturedWithText(undefined).text).toBe('Captured with: not recorded');
+  });
+
+  it('describeCapture carries the line for every take, old ones included', () => {
+    const [, , old] = capturesOf(index, ME);
+    expect(describeCapture(old, ME, undefined, context).capturedWith.text).toBe('Captured with: not recorded');
   });
 });

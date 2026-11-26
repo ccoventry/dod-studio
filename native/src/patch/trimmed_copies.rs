@@ -25,6 +25,7 @@
 //! read the copy again. The entry keeps the original's file info, so Studio's
 //! list of analysed demos shows the demo once, by its own name.
 
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
@@ -64,7 +65,7 @@ impl Engine {
         Self {
             limit: crate::sys::packet_limit::packet_entity_limit(game_exe)
                 .unwrap_or(crate::sys::packet_limit::PRE_ANNIVERSARY_PACKET_ENTITIES),
-            maps_dir: crate::patch::map_check::maps_dir_for_exe(game_exe),
+            maps_dir: crate::maps::map_check::maps_dir_for_exe(game_exe),
         }
     }
 
@@ -120,7 +121,7 @@ static PINNED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 fn pinned() -> MutexGuard<'static, Vec<PathBuf>> {
     // The list stays whole if a holder panicked: each push or remove is one call.
-    PINNED.lock().unwrap_or_else(|p| p.into_inner())
+    lock_or_recover(&PINNED)
 }
 
 /// Keeps copies from being pruned while it lives. A batch holds one from the
@@ -323,11 +324,11 @@ fn read_map(demo: &Path, engine: &Engine) -> MapFile {
 /// Where `demo`'s map's `.bsp` would be, or `None` when its map name can't be
 /// read or used, or the engine has no maps folder.
 fn map_file(demo: &Path, engine: &Engine) -> Option<PathBuf> {
-    let name = crate::patch::map_check::map_reference(demo).ok()?.map_name;
-    if !crate::patch::map_check::is_safe_map_name(&name) {
+    let name = crate::maps::map_check::map_reference(demo).ok()?.map_name;
+    if !crate::maps::map_check::is_safe_map_name(&name) {
         return None;
     }
-    Some(crate::patch::map_check::map_path(
+    Some(crate::maps::map_check::map_path(
         engine.maps_dir.as_ref()?,
         &name,
     ))

@@ -19,6 +19,12 @@ const VIDEO_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi'];
 
 const $ = (selector) => document.querySelector(selector);
 
+/** Whether a combine is joining now, for the close prompt (#1496). */
+let combineRunning = false;
+export function isCombineRunning() {
+  return combineRunning;
+}
+
 /** Adds `paths` to `list`, leaving out any already in it (case-insensitive). */
 export function addClips(list, paths) {
   const seen = new Set(list.map((p) => p.toLowerCase()));
@@ -84,6 +90,7 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
 
   function setRunning(value) {
     running = value;
+    combineRunning = value;
     cancelBtn.disabled = !running;
     progress.hidden = !running;
     if (!running) fill.style.width = '0%';

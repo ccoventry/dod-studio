@@ -68,18 +68,15 @@
 //! would play on for tens of seconds after the landing. A stepped seek drops
 //! them and lets go of the keys once it lands (`filtered_commands.rs`, #702).
 //!
-//! ## A backward seek in an HLTV demo starts over (#830)
+//! ## A backward seek starts over (#830, #1085)
 //!
 //! Going back replays nothing, so the client keeps what the later position
-//! left it. In an HLTV demo that includes each player's zoom, which only the
-//! `HLTV` user message carries (`hltv_fov.rs`): a sniper scoped in at the
-//! landing showed unzoomed after Review's Replay. So a backward seek in an
-//! HLTV demo ([`rewinds`]) clears the client's zoom table, sets the clock to
-//! the demo's start, waits for that frame to be sent, and steps forward to
-//! the target like a long forward seek. Every message before the landing
-//! arrives in order, so teams, scores and names are right too. It costs a
-//! step per 5 s of the demo before the landing. POV demos, which record the
-//! zoom in every frame, and skip seeks still jump back at once.
+//! left it: zoom in an HLTV demo, flags and scores in a POV one. So every
+//! backward seek but a `ds_demo_seek_skip_between` one sets the clock back and
+//! steps forward to the target; `rewind.rs` says why, where it starts over
+//! and how it empties the kill feed on the way, as every stepped seek does. A
+//! seek made while another is on its way counts from that one's target
+//! (`chain.rs`).
 //!
 //! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
@@ -113,8 +110,9 @@
 //! often minutes later (median 103 s over 469 POV demos). The player's clock
 //! starts at the LOADING frames, so the first stretch of it has no frames.
 //!
-//! The player means to jump such a gap: `RunClocks` (PRE `DemoPlayer.dll`
-//! `+0x42e0`, Anniversary `+0x3c40`) moves the clock to 0.01 s before the next
+//! The player means to jump such a gap: `DemoPlayer::RunClocks` (PRE
+//! `DemoPlayer.dll+0x42b0`; inlined into `DemoPlayer::RunFrame`, `+0x3c00`, in
+//! the Anniversary build) moves the clock to 0.01 s before the next
 //! frame when the frame after the last one sent is more than 2 s on. But it
 //! looks only from the last frame *sent*, and `WriteDatagram` sends the first
 //! frame at or after the clock. The LOADING frames span about 14 ms of server
@@ -153,6 +151,7 @@
 // for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use lock_recover::lock_or_recover;
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::Ordering;
 
@@ -160,6 +159,9 @@ use crate::commands::console_print;
 use crate::engine::{self};
 use crate::names::console_name;
 use crate::setting::Setting;
+
+mod chain;
+mod rewind;
 
 pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
 pub const SEEK_BY_NAME: &str = console_name!("demo_seek_by");
@@ -181,10 +183,12 @@ struct Pending {
     landed: bool,
     /// The clock value the last step set.
     last_set: f64,
-    /// A backward seek in an HLTV demo first goes back to the start
-    /// ([`rewinds`]): `m_LastFrameTime` before it, until the player has sent
-    /// the start frame.
+    /// A backward seek first goes back to the start ([`rewinds`](rewind::rewinds)):
+    /// `m_LastFrameTime` before it, until the player has sent the start
+    /// frame.
     rewind_from: Option<f64>,
+    /// How a stepped seek empties the kill feed on its way ([`chain::Feed`]).
+    feed: chain::Feed,
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
     steps: u32,
@@ -214,6 +218,7 @@ static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
 /// moving on to another demo can land inside one. `try_lock`: only `poll` and
 /// a seek starting hold it, both on this thread and never across this call.
 fn cancel_pending() -> Option<f64> {
+    crate::deathmsg::seek_restamp::cancel();
     PENDING
         .try_lock()
         .ok()
@@ -227,6 +232,8 @@ fn cancel_pending() -> Option<f64> {
 enum Step {
     To(f64),
     Land(f64),
+    /// Empty the kill feed before stepping on (`chain.rs`).
+    ClearFeed,
 }
 
 fn next_step(now: f64, target: f64) -> Step {
@@ -242,15 +249,22 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
     !skip_between && to - now > STEP_SECONDS
 }
 
-/// Whether a seek from `now` to `to` goes back to the demo's start first and
-/// steps forward from there (#830): a backward seek in an HLTV demo, whose
-/// zoom per player comes only from the `HLTV` messages a backward jump never
-/// replays (`hltv_fov.rs`). Stepping from the start replays them all, in
-/// order, along with every team, score and name change before the landing.
-/// A POV demo carries its zoom in every frame, and a
-/// `ds_demo_seek_skip_between` seek skips the in-between on purpose.
-fn rewinds(now: f64, to: f64, skip_between: bool, hltv: bool) -> bool {
-    hltv && !skip_between && to < now
+impl Pending {
+    /// A seek to `target` whose clock was last set to `last_set`.
+    fn new(target: f64, then: Option<String>, last_set: f64) -> Self {
+        Pending {
+            target,
+            then,
+            landed: false,
+            last_set,
+            rewind_from: None,
+            feed: chain::Feed::default(),
+            waited: 0,
+            steps: 0,
+            dropped: 0,
+            started: std::time::Instant::now(),
+        }
+    }
 }
 
 /// Whether the player has sent the frame a rewind set the clock to: it
@@ -392,7 +406,7 @@ fn split_time(words: &[String]) -> Option<(String, &[String])> {
 
 /// A time as the demo bar shows it: `m:ss`, `h:mm:ss` from an hour, with
 /// hundredths when it has them, and a minus when negative.
-fn clock_text(seconds: f64) -> String {
+pub(crate) fn clock_text(seconds: f64) -> String {
     let sign = if seconds < 0.0 { "-" } else { "" };
     let hundredths = (seconds.abs() * 100.0).round() as u64;
     let (h, m, s, cs) = (
@@ -490,7 +504,7 @@ fn start(
                 if relative { "by" } else { "to" },
                 clock_text(seconds)
             );
-            *QUEUED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Queued {
+            *lock_or_recover(&QUEUED) = Some(Queued {
                 name,
                 seconds,
                 relative,
@@ -567,7 +581,7 @@ static QUEUED: std::sync::Mutex<Option<Queued>> = std::sync::Mutex::new(None);
 
 /// Drops a waiting seek, saying why.
 fn cancel_queued(why: &str) {
-    let queued = QUEUED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let queued = lock_or_recover(&QUEUED).take();
     if let Some(q) = queued {
         say(&cancelled_line(&q, why));
     }
@@ -785,9 +799,11 @@ fn poll_pending() {
                 crate::review_lock::let_through(then);
                 engine::client_cmd(&line);
             }
+            let redated = crate::deathmsg::seek_restamp::land(seek.target);
             format!(
-                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
+                "{SEEK_TO_NAME}: at {:.2} s{} after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
                 seek.target,
+                chain::feed_note(seek, redated),
                 seek.steps,
                 seek.started.elapsed().as_millis(),
                 seek.dropped,
@@ -797,6 +813,7 @@ fn poll_pending() {
         Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),
     };
     *pending = None;
+    crate::deathmsg::seek_restamp::cancel();
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
 }
 
@@ -902,12 +919,23 @@ pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
 /// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
 /// landed, as `ds_demo_seek_to <seconds> <command>` does.
 pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
+    seek_with(seconds, skip_between(), then)
+}
+
+/// A capture batch's `back` line (#1085): lands on `seconds` the way
+/// [`rewinds`](rewind::rewinds) goes back, whatever `ds_demo_seek_skip_between` says, since
+/// the take after it must look as if the demo had played up to there.
+pub fn rewind_to_seconds(seconds: f64) -> Result<String, String> {
+    seek_with(seconds, false, None)
+}
+
+fn seek_with(seconds: f64, skip_between: bool, then: Option<String>) -> Result<String, String> {
     cancel_queued("you started another seek");
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between(), then);
+    return player::seek(seconds, false, skip_between, then);
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = (seconds, then);
+        let _ = (seconds, skip_between, then);
         Err("only the 32-bit build has a demo player".to_string())
     }
 }
@@ -929,6 +957,10 @@ mod player {
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
+    use super::chain::{counted_from, in_flight, stepped_seek, steps};
+    use super::rewind::{
+        FEED_CLEAR_FRAMES, feed_clear_at, recording_start, rewind_base, rewind_step, rewinds,
+    };
     use super::*;
 
     type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;
@@ -1149,18 +1181,53 @@ mod player {
             }
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let t = match next_step(get_now(player), seek.target) {
+            let cleared = seek.feed.cleared >= FEED_CLEAR_FRAMES;
+            let t = match rewind_step(get_now(player), seek.target, seek.feed.at, cleared) {
                 Step::To(t) => t,
+                Step::ClearFeed => {
+                    // The kills the steps replayed too early to still be up
+                    // at the target (module doc).
+                    seek.feed.cleared += 1;
+                    if let Err(why) =
+                        crate::deathmsg::clear_for_rewind(seek.last_set, seek.feed.keep)
+                    {
+                        crate::debug::report(&format!(
+                            "demo_seek: could not empty the kill feed before the seek lands: {why}"
+                        ));
+                    }
+                    return Ok(false);
+                }
                 Step::Land(t) => {
                     seek.landed = true;
                     t
                 }
             };
+            crate::deathmsg::seek_restamp::step_to(t);
             set_world_time(player, t, 0);
             seek.last_set = t;
         }
         seek.steps += 1;
         Ok(false)
+    }
+
+    /// [`recording_start`] in `player`'s world, or `None` with no world.
+    ///
+    /// # Safety
+    /// `player` is the demo player [`find`] handed out.
+    unsafe fn recording_start_in(player: *mut c_void, start: f64) -> Option<f64> {
+        // Safety: the field and slot `skip_gap` reads, checked against both
+        // builds by tools/verify_demo_seek_offsets.py.
+        unsafe {
+            let world = *((player as *const u8).add(FIELD_WORLD) as *const *mut c_void);
+            if world.is_null() {
+                return None;
+            }
+            let frame_by_time: FrameByTimeFn = slot(world, WORLD_SLOT_GET_FRAME_BY_TIME);
+            recording_start(start, |t| {
+                let frame = frame_by_time(world, t);
+                (!frame.is_null()).then(|| (frame as *const f32).read_unaligned())
+            })
+        }
     }
 
     pub(super) fn seek(
@@ -1189,63 +1256,54 @@ mod player {
             let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
             let get_start: TimeFn = slot(player, SLOT_GET_START_TIME);
             let (now, start, end) = (get_now(player), get_start(player), get_end(player));
-            let to = landing(now, arg, relative, start, end);
-
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
-            let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-            let hltv = engine::engfuncs().is_some_and(|e| (e.is_spectate_only)() != 0);
-            if rewinds(now, to, skip_between, hltv) {
+            let mut pending = lock_or_recover(&PENDING);
+            crate::deathmsg::seek_restamp::cancel(); // a stepped one notes anew from its clear
+            // A seek on its way: count from where it is heading (`chain.rs`).
+            let chain = in_flight(pending.as_ref());
+            let to = landing(counted_from(now, chain), arg, relative, start, end);
+            if rewinds(now, to, skip_between) {
                 // Cleared first: a player with no `HLTV` message before the
                 // landing has no zoom there.
                 crate::hltv_fov::clear_logged("a backward seek");
+                let hltv = engine::engfuncs().is_some_and(|e| (e.is_spectate_only)() != 0);
+                let recording = if hltv {
+                    None
+                } else {
+                    recording_start_in(player, start)
+                };
+                let base = rewind_base(start, recording, to);
                 let from = ((player as *const u8).add(FIELD_LAST_FRAME_TIME) as *const f64)
                     .read_unaligned();
-                set_world_time(player, start, 0);
-                *pending = Some(Pending {
-                    target: to,
-                    then,
-                    landed: false,
-                    last_set: start,
-                    rewind_from: Some(from),
-                    waited: 0,
-                    steps: 0,
-                    dropped: 0,
-                    started: std::time::Instant::now(),
-                });
+                set_world_time(player, base, 0);
+                let mut seek = Pending::new(to, then, base);
+                seek.rewind_from = Some(from);
+                seek.feed.at = Some(feed_clear_at(to, crate::deathmsg::notice_lifetime()));
+                *pending = Some(seek);
+                let from_where = if recording.is_some() {
+                    "the first recorded frame"
+                } else {
+                    "the start"
+                };
                 return Ok(format!(
-                    "{now:.2} -> {to:.2} s, an HLTV demo going back: from the start ({start:.2}) in steps of {STEP_SECONDS} s, so each player's zoom is right (demo runs {start:.2} to {end:.2})"
+                    "{now:.2} -> {to:.2} s, going back: from {from_where} ({base:.2}) in steps of {STEP_SECONDS} s, so flags, scores and zoom are right (demo runs {start:.2} to {end:.2})"
                 ));
             }
-            if stepped(now, to, skip_between) {
+            if steps(now, to, skip_between, chain) {
                 // Each frame from here moves the clock one step (`step`).
-                *pending = Some(Pending {
-                    target: to,
-                    then,
-                    landed: false,
-                    last_set: now,
-                    rewind_from: None,
-                    waited: 0,
-                    steps: 0,
-                    dropped: 0,
-                    started: std::time::Instant::now(),
-                });
+                let lifetime = crate::deathmsg::notice_lifetime();
+                *pending = Some(stepped_seek(to, then, now, chain, lifetime));
                 return Ok(format!(
-                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s (demo runs {start:.2} to {end:.2})"
+                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s, emptying the kill feed on the way (demo runs {start:.2} to {end:.2})"
                 ));
             }
             set_world_time(player, to, 0);
             // A follow-up still waits a frame, for the landing frame to reach
             // the client; a seek that was stepping is replaced by this one.
-            *pending = then.map(|then| Pending {
-                target: to,
-                then: Some(then),
-                landed: true,
-                last_set: to,
-                rewind_from: None,
-                waited: 0,
-                steps: 0,
-                dropped: 0,
-                started: std::time::Instant::now(),
+            *pending = then.map(|then| {
+                let mut seek = Pending::new(to, Some(then), to);
+                seek.landed = true;
+                seek
             });
             drop(pending);
 
@@ -1287,324 +1345,5 @@ mod player {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn seconds_parse_as_numbers() {
-        assert_eq!(parse_time("610"), Ok(610.0));
-        assert_eq!(parse_time("1234.5"), Ok(1234.5));
-        assert_eq!(parse_time(" -30 "), Ok(-30.0));
-        assert!(parse_time("inf").is_err());
-        assert!(parse_time("NaN").is_err());
-        assert!(parse_time("").is_err());
-    }
-
-    #[test]
-    fn minutes_and_hours_parse_as_the_demo_bar_shows_them() {
-        assert_eq!(parse_time("10:10"), Ok(610.0));
-        assert_eq!(parse_time("0:30"), Ok(30.0));
-        assert_eq!(parse_time("-0:30"), Ok(-30.0));
-        assert_eq!(parse_time("75:00"), Ok(4500.0));
-        assert_eq!(parse_time("10:05.5"), Ok(605.5));
-        assert_eq!(parse_time("1:02:03"), Ok(3723.0));
-        assert_eq!(parse_time("0:00:05"), Ok(5.0));
-    }
-
-    #[test]
-    fn malformed_times_are_refused_with_the_forms_expected() {
-        for bad in [
-            "10:", ":10", "10:60", "1:60:00", "1:2:3:4", "a:10", "10:b", "1e1:00", "10:1e1",
-            "10:-5", "--1:00", "+1:00", "10::10", "10:05.", "1.5:00",
-        ] {
-            let err = parse_time(bad).expect_err(bad);
-            assert!(err.contains("m:ss (10:10)"), "{bad}: {err}");
-        }
-    }
-
-    #[test]
-    fn the_console_s_split_at_colons_is_joined_back() {
-        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let unquoted = words(&["10", ":", "10"]);
-        assert_eq!(split_time(&unquoted), Some(("10:10".to_string(), &[][..])));
-        let hours = words(&["1", ":", "02", ":", "03", "ds_spec_target", "13"]);
-        let (time, rest) = split_time(&hours).unwrap();
-        assert_eq!(time, "1:02:03");
-        assert_eq!(follow_up(rest), Some("ds_spec_target 13".to_string()));
-        let quoted = words(&["10:10"]);
-        assert_eq!(split_time(&quoted).unwrap().0, "10:10");
-        let plain = words(&["610", "ds_spec_target", "13"]);
-        assert_eq!(split_time(&plain).unwrap().0, "610");
-        // A trailing colon has nothing to join: it is left for the parser.
-        let dangling = words(&["10", ":"]);
-        assert_eq!(split_time(&dangling).unwrap().0, "10");
-        assert_eq!(split_time(&[]), None);
-    }
-
-    #[test]
-    fn times_print_as_the_demo_bar_shows_them() {
-        assert_eq!(clock_text(605.0), "10:05");
-        assert_eq!(clock_text(-30.0), "-0:30");
-        assert_eq!(clock_text(605.5), "10:05.50");
-        assert_eq!(clock_text(3723.0), "1:02:03");
-        assert_eq!(clock_text(59.999), "1:00");
-    }
-
-    fn look(now: f64, loading: bool) -> Option<Look> {
-        Some(Look {
-            active: true,
-            loading,
-            paused: false,
-            now,
-            scale: 1.0,
-            before_frame: false,
-        })
-    }
-
-    #[test]
-    fn a_queued_seek_waits_for_the_load_then_fires() {
-        let mut w = Watch::default();
-        // The player not up yet, then loading while it plays.
-        assert_eq!(judge(&mut w, None, 0.01, 0.0), Verdict::Wait);
-        assert_eq!(judge(&mut w, look(726.0, true), 0.01, 0.1), Verdict::Wait);
-        assert_eq!(judge(&mut w, look(726.02, true), 0.02, 0.2), Verdict::Wait);
-        // A long frame lets the clock run on further.
-        assert_eq!(judge(&mut w, look(727.5, true), 1.0, 1.2), Verdict::Wait);
-        assert_eq!(judge(&mut w, look(727.52, false), 0.02, 1.3), Verdict::Fire);
-    }
-
-    #[test]
-    fn a_queued_seek_is_cancelled_by_what_the_user_does() {
-        // Settled: the first frames' jumps are let through.
-        let loading = |w: &mut Watch| {
-            assert_eq!(judge(w, look(368.5, true), 0.01, 0.0), Verdict::Wait);
-            assert_eq!(judge(w, look(375.4, true), 0.01, 0.0), Verdict::Wait);
-            for _ in 0..SETTLE_FRAMES {
-                assert_eq!(judge(w, look(100.0, true), 0.01, 0.0), Verdict::Wait);
-            }
-        };
-        let mut w = Watch::default();
-        loading(&mut w);
-        let paused = look(100.01, true).map(|l| Look { paused: true, ..l });
-        assert_eq!(
-            judge(&mut w, paused, 0.01, 0.1),
-            Verdict::Cancel("you paused")
-        );
-
-        let mut w = Watch::default();
-        loading(&mut w);
-        let faster = look(100.01, true).map(|l| Look { scale: 2.0, ..l });
-        assert_eq!(
-            judge(&mut w, faster, 0.01, 0.1),
-            Verdict::Cancel("you changed the speed")
-        );
-
-        let mut w = Watch::default();
-        loading(&mut w);
-        assert_eq!(
-            judge(&mut w, look(40.0, true), 0.01, 0.1),
-            Verdict::Cancel("you moved the demo's clock")
-        );
-
-        let mut w = Watch::default();
-        loading(&mut w);
-        assert_eq!(
-            judge(&mut w, look(160.0, true), 0.01, 0.1),
-            Verdict::Cancel("you moved the demo's clock")
-        );
-
-        let mut w = Watch::default();
-        loading(&mut w);
-        assert_eq!(
-            judge(&mut w, None, 0.01, 0.1),
-            Verdict::Cancel("you closed the demo")
-        );
-    }
-
-    /// The player's own gap jump and `skip_gap` land just before a frame;
-    /// neither is the user.
-    #[test]
-    fn a_gap_jump_does_not_cancel_a_queued_seek() {
-        let mut w = Watch::default();
-        for _ in 0..=SETTLE_FRAMES {
-            assert_eq!(judge(&mut w, look(8.5, true), 0.01, 0.0), Verdict::Wait);
-        }
-        let jumped = look(71.378, true).map(|l| Look {
-            before_frame: true,
-            ..l
-        });
-        assert_eq!(judge(&mut w, jumped, 0.01, 0.1), Verdict::Wait);
-    }
-
-    #[test]
-    fn a_demo_that_never_starts_or_loads_unseen_is_not_waited_on_forever() {
-        let mut w = Watch::default();
-        assert_eq!(judge(&mut w, None, 0.01, 10.0), Verdict::Wait);
-        assert_eq!(
-            judge(&mut w, None, 0.01, GIVE_UP_SECONDS + 1.0),
-            Verdict::Cancel("the demo never started")
-        );
-        // Loaded between two looks: never seen loading, then fires.
-        let mut w = Watch::default();
-        for _ in 0..UNSEEN_LOAD_FRAMES {
-            assert_eq!(judge(&mut w, look(50.0, false), 0.01, 0.1), Verdict::Wait);
-        }
-        assert_eq!(judge(&mut w, look(50.0, false), 0.01, 3.0), Verdict::Fire);
-    }
-
-    #[test]
-    fn a_seek_lands_inside_what_is_loaded() {
-        assert_eq!(landing(100.0, 250.0, false, 50.0, 900.0), 250.0);
-        assert_eq!(landing(100.0, -30.0, true, 50.0, 900.0), 70.0);
-        assert_eq!(landing(100.0, 5000.0, false, 50.0, 900.0), 900.0);
-        assert_eq!(landing(100.0, -500.0, true, 50.0, 900.0), 50.0);
-        // An empty world reports 0..0 or worse; leave the engine to clamp.
-        assert_eq!(landing(0.0, 42.0, false, 0.0, -1.0), 42.0);
-    }
-
-    /// The mark sits one frame before the landing, so `ReadDemoMessage`'s
-    /// "run every frame after the last one sent" runs the landing frame alone.
-    #[test]
-    fn a_clean_landing_runs_the_landing_frame_and_nothing_before_it() {
-        assert_eq!(skip_mark(100, 5000), Some(4999));
-        assert_eq!(skip_mark(5000, 100), Some(99));
-        assert_eq!(skip_mark(0, 1), Some(0));
-        assert_eq!(skip_mark(5000, 5000), None);
-    }
-
-    /// A long forward seek moves the clock one step per frame, then lands on
-    /// the target exactly, however the clock ran in between.
-    #[test]
-    fn a_long_forward_seek_steps_then_lands() {
-        assert_eq!(next_step(90.0, 1335.3), Step::To(95.0));
-        assert_eq!(next_step(1331.0, 1335.3), Step::Land(1335.3));
-        assert_eq!(next_step(1335.3, 1335.3), Step::Land(1335.3));
-        // The clock ran past the target while stepping: land anyway.
-        assert_eq!(next_step(1336.0, 1335.3), Step::Land(1335.3));
-        let (mut now, mut frames) = (90.1, 0);
-        while let Step::To(t) = next_step(now, 1335.3) {
-            now = t + 0.01; // the clock also runs a little each frame
-            frames += 1;
-        }
-        assert_eq!(frames, 248);
-    }
-
-    /// The player records the clock it sent at, which has run on a little
-    /// past what the step set.
-    #[test]
-    fn a_step_counts_as_sent_once_the_player_sent_at_or_after_it() {
-        assert!(sent(95.004, 95.0));
-        assert!(sent(95.0, 95.0));
-        assert!(!sent(90.1, 95.0));
-    }
-
-    #[test]
-    fn only_long_forward_seeks_without_the_skip_go_in_steps() {
-        assert!(stepped(90.0, 1335.3, false));
-        assert!(!stepped(90.0, 94.0, false), "a short hop fits in one frame");
-        assert!(
-            !stepped(1335.3, 90.0, false),
-            "backward runs nothing in between"
-        );
-        assert!(
-            !stepped(90.0, 1335.3, true),
-            "the skip jumps at once on purpose"
-        );
-    }
-
-    /// #830: stealth scoped at 940 s of `wsod25_grp2_h1_hltv`, seeked back to
-    /// from 1000 s.
-    #[test]
-    fn only_backward_seeks_in_hltv_demos_go_back_to_the_start() {
-        assert!(rewinds(1000.0, 940.0, false, true));
-        assert!(
-            !rewinds(1000.0, 940.0, false, false),
-            "a POV demo records its zoom"
-        );
-        assert!(
-            !rewinds(1000.0, 940.0, true, true),
-            "the skip lands at once on purpose"
-        );
-        assert!(
-            !rewinds(900.0, 940.0, false, true),
-            "forward replays the messages"
-        );
-        assert!(!rewinds(940.0, 940.0, false, true));
-    }
-
-    /// The player records the clock it sent at: once the start frame is out,
-    /// it is far below where playback was.
-    #[test]
-    fn a_rewind_counts_as_sent_once_the_clock_it_sent_at_falls() {
-        assert!(rewound(0.02, 1000.0));
-        assert!(
-            !rewound(1000.0, 1000.0),
-            "still the frame before the rewind"
-        );
-        assert!(
-            !rewound(1000.3, 1000.0),
-            "a frame sent before the rewind took"
-        );
-    }
-
-    /// A review moving on to another demo mid-rewind: the new demo gets none
-    /// of the old seek's steps or follow-up.
-    #[test]
-    fn loading_another_demo_drops_a_seek_still_on_its_way() {
-        *PENDING.lock().unwrap() = Some(Pending {
-            target: 939.0,
-            then: Some("spec_mode 4".into()),
-            landed: false,
-            last_set: 300.0,
-            rewind_from: None,
-            waited: 0,
-            steps: 60,
-            dropped: 0,
-            started: std::time::Instant::now(),
-        });
-        assert_eq!(cancel_pending(), Some(939.0));
-        assert!(!seeking());
-        assert_eq!(cancel_pending(), None);
-    }
-
-    /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the
-    /// clock at 8.52 s, the first playback frame (71.388 s) already sent.
-    #[test]
-    fn a_clock_stuck_behind_a_sent_frame_jumps_to_just_before_it() {
-        let to = gap_landing(8.522, 71.388, 3, 3).expect("a gap");
-        assert!((to - 71.378).abs() < 1e-3, "{to}");
-        // Not sent yet: the player's own check still has its chance.
-        assert_eq!(gap_landing(8.522, 71.388, 3, 2), None);
-        // Normal playback: the next frame is a few milliseconds on.
-        assert_eq!(gap_landing(226.663, 226.664, 14075, 14075), None);
-        // A short gap the player plays through.
-        assert_eq!(gap_landing(100.0, 101.5, 7, 7), None);
-    }
-
-    #[test]
-    fn the_words_after_the_time_are_one_command() {
-        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(follow_up(&words(&[])), None);
-        assert_eq!(
-            follow_up(&words(&["ds_spec_target", "13"])),
-            Some("ds_spec_target 13".to_string())
-        );
-    }
-
-    /// No name may be the whole start of another: the console's autocomplete
-    /// swaps the shorter one for the longer when space is pressed.
-    #[test]
-    fn no_name_is_the_start_of_another() {
-        let names = [SEEK_TO_NAME, SEEK_BY_NAME, SKIP_BETWEEN_NAME];
-        for a in names {
-            for b in names {
-                assert!(a == b || !b.starts_with(a), "{a} is the start of {b}");
-            }
-        }
-    }
-
-    #[test]
-    fn the_builds_are_told_apart() {
-        assert_ne!(BUILDS[0].time_date_stamp, BUILDS[1].time_date_stamp);
-    }
-}
+#[path = "demo_seek_tests.rs"]
+mod tests;

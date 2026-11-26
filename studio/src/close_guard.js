@@ -1,11 +1,15 @@
 // close_guard.js
 // What stands between the user and losing work when the window closes or the
-// page reloads: a running batch (#545), an unsaved project, and a settings
-// edit still in a focused field. Kept out of main.js, which only wires (#683).
+// page reloads: a running batch (#545), running renders (#1439) or a combine
+// (#1496), an unsaved
+// project, and a settings edit still in a focused field. Kept out of main.js,
+// which only wires (#683).
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { isCaptureRunning } from './capture_pane.js';
+import { confirmCloseDuringRenders } from './render_close_prompt.js';
+import { isCombineRunning } from './combine_clips.js';
 
 /**
  * @param {object} app  needsSavePrompt() and requestUnsavedChangesConfirmation()
@@ -22,6 +26,9 @@ export function startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirma
     event.preventDefault();
     // A running batch first: closing leaves it unwatched (#545).
     if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning }))) return;
+    // Renders and a combine can't go on without Studio: closing stops them
+    // (#1439, #1496).
+    if (!(await confirmCloseDuringRenders({ isCombining: isCombineRunning }))) return;
     // Project state changed since the last save: offer save, discard or cancel.
     if (needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();

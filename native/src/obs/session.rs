@@ -16,6 +16,7 @@
 //! drive and only its name changes. That is also what preserves the per-block
 //! export-pool routing across drives.
 
+use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -320,7 +321,7 @@ impl ObsSession {
         // before: a slow/failed stats fetch must never delay or block the
         // actual recording starting.
         self.frame_stats_baseline = {
-            let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&self.client);
             guard.as_mut().and_then(|c| c.output_frame_stats())
         };
     }
@@ -328,7 +329,7 @@ impl ObsSession {
     // Split out so `begin_block` can run it twice around a reconnect without
     // holding the client lock across the retry.
     fn try_begin(&self, dest: &Path) -> Result<std::time::Instant, ObsError> {
-        let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = lock_or_recover(&self.client);
         let client = guard
             .as_mut()
             .ok_or_else(|| ObsError::Transport(crate::messages::NOT_CONNECTED_TO_OBS.into()))?;
@@ -437,7 +438,7 @@ impl ObsSession {
             return;
         };
         let current = {
-            let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&self.client);
             guard.as_mut().and_then(|c| c.output_frame_stats())
         };
         let Some((total, skipped)) = current else {
@@ -471,7 +472,7 @@ impl ObsSession {
     }
 
     fn try_stop(&self) -> Result<String, ObsError> {
-        let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = lock_or_recover(&self.client);
         let client = guard
             .as_mut()
             .ok_or_else(|| ObsError::Transport(crate::messages::NOT_CONNECTED_TO_OBS.into()))?;
@@ -527,7 +528,7 @@ impl ObsSession {
     fn reconnect(&mut self) -> bool {
         let fresh = ObsClient::connect(&self.cfg.address(), &self.cfg.password);
         let ok = {
-            let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock_or_recover(&self.client);
             match fresh {
                 Ok(client) => {
                     *guard = Some(client);
@@ -552,7 +553,7 @@ impl ObsSession {
     /// Stops anything still recording and restores the previous scene/profile.
     pub fn finish(&mut self) {
         self.end_block();
-        let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = lock_or_recover(&self.client);
         if let Some(client) = guard.as_mut() {
             if let Some(scene) = self.previous_scene.take()
                 && !scene.is_empty()

@@ -1,6 +1,6 @@
 // The Master Demo Queue row's right-click menu (#1111) — driven against
 // tests/e2e/master-pane-menu.html. See tests/e2e/README.md.
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
@@ -91,6 +91,32 @@ test.describe('queue row context menu', () => {
     await row(page, 'two.dem').click({ button: 'right' });
     await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
     await expect(item(page, 'Split Maps')).toHaveAttribute('title', /two_split1_harrington\.dem/);
+  });
+
+  const DAMAGE = { damage: { read_up_to_secs: 600, frame_index: 1, byte_offset: 1, bytes_unread: 1, reason: 'x' } };
+
+  test('Split Maps is dimmed with "Repair it first" on a damaged demo the repair can fix', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => ({ repairable: true, maps: [] }) };
+    });
+    await gotoHarness(page);
+    await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);
+    await expect(row(page, 'two.dem').locator('.multimap-split-btn')).toBeDisabled();
+    await row(page, 'two.dem').click({ button: 'right' });
+    await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
+    await expect(item(page, 'Split Maps')).toHaveAttribute('title', /Repair it first/);
+  });
+
+  test('Split Maps is dimmed with its own reason on a damaged demo the repair finds no break in', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__mockInvokeHandlers = { demo_split_status: () => ({ split: false, files: [] }), demo_repairable: () => ({ repairable: false, maps: [] }) };
+    });
+    await gotoHarness(page);
+    await page.evaluate((extra) => window.__renderTwoMaps(extra), DAMAGE);
+    await expect(row(page, 'two.dem').locator('.multimap-split-btn')).toHaveAttribute('title', /Repair can't cut it out/);
+    await row(page, 'two.dem').click({ button: 'right' });
+    await expect(item(page, 'Split Maps')).toHaveAttribute('aria-disabled', 'true');
+    await expect(item(page, 'Split Maps')).toHaveAttribute('title', "The damage stops a split, and Repair can't cut it out.");
   });
 
   test('Split Maps runs on a demo not split yet, and is dimmed while that split runs', async ({ page }) => {

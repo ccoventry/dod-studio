@@ -12,6 +12,11 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 `autobins = false` and lists the real binaries explicitly (see
 [`../README.md`](../README.md)), so they are not built by every workspace build.
 
+A probe that unwraps starts with `#![allow(clippy::unwrap_used,
+clippy::expect_used, reason = "...")]`: Clippy refuses both everywhere else
+outside tests (#1179, `docs/coding_standards.md` section 4), and in a probe run
+by hand a panic is its error report.
+
 ## Running one
 
     cargo run --release -p native --example probe_decals -- path/to/demo.dem
@@ -24,6 +29,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | --- | --- |
 | `frame_inspector` | What frames are in this demo, in what order, at what ordinal? |
 | `debug_cmds` | Which `ConsoleCommand` frames does a demo already carry? |
+| `map_command_probe` | When does a POV demo replay the recorder's `+map`/`+mapzoom` presses, on the viewdemo clock? (#1441) |
 | `stufftext_probe` | Which injected commands does the engine's demo command filter drop? Writes a demo for the in-game check (#679) |
 | `schedule_timing_probe` | How close `ds_capture_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
 | `debug_scanner` | What does the highlight scanner see in this demo? |
@@ -33,6 +39,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
 | `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
+| `demo_gaps` | Where does this demo's clock jump, where do its frames stop, which maps does it sign on to, and does a strict parse read it? A raw frame walk that gets past damage (#15) |
 
 ### HLTV and the director channel
 
@@ -122,12 +129,19 @@ frames. Meanwhile eight of them are HLTV by the `analysis` crate's own
 implementation is `native/src/obs/client.rs`, which is where the pinned
 handshake tests live — don't treat the copy here as authoritative.
 
+### Child processes
+
+| Probe | Question it answers |
+| --- | --- |
+| `combine_exit_probe` | Does a combine's FFmpeg end when the process that started it is killed (`taskkill /F`)? Runs one combine, as Studio's Combine does (#1496) |
+
 ### Performance
 
 | Probe | Question it answers |
 | --- | --- |
 | `scan_mem_probe` | What does parsing demos N-at-a-time cost in peak memory? |
 | `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
+| `render_threads_probe` | How much sooner does a long segmented render finish beside two short ones when each segment recounts its FFmpeg threads (#1512)? Synthetic 2560x1440 300 fps BMP takes of hard links; needs ~12 GB free for the long render and its segments. |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
 `scan_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,

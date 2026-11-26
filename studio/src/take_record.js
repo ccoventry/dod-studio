@@ -7,16 +7,26 @@
 // breaks them (the owner moves between release, dev and test builds on one
 // project). The capture facts live in a sibling `takeCaptures` key,
 // `take_key -> { session_id, captured_at, capture_mode, capture_fps,
-// take_folder }`, which older builds ignore (and drop when they save).
+// take_folder, settings }`, which older builds ignore (and drop when they save).
+//
+// `settings` is everything else the capture used, with a hash over it (part of
+// #1085): the backend builds it from the batch's own config
+// (`native::hlcr::take_settings`) and it is stored as it arrives. A field
+// inside an entry, not a new top-level key, so every build that knows
+// `takeCaptures` keeps it (attachCaptures and carryCaptures keep whole
+// entries). A take without it was captured before
+// it existed: "not recorded", never a difference.
 //
 // In memory the map rides on the take index object as a non-enumerable
 // property, so every module that already passes the index around reaches it
 // without new plumbing, and JSON.stringify of the index never includes it.
 
+import { effectiveAgrFps } from './agr_rate.js';
+
 const CAPTURES = 'takeCaptures';
 
 /** The capture facts a record keeps. */
-const CAPTURE_FIELDS = ['session_id', 'captured_at', 'capture_mode', 'capture_fps', 'take_folder'];
+const CAPTURE_FIELDS = ['session_id', 'captured_at', 'capture_mode', 'capture_fps', 'take_folder', 'settings'];
 
 /** The index's capture map, made on first use. */
 export function captureMapOf(takeIndex) {
@@ -29,6 +39,32 @@ export function captureMapOf(takeIndex) {
 /** What is known of how `takeKey` was captured, or undefined. */
 export function captureOf(takeIndex, takeKey) {
   return takeIndex?.[CAPTURES]?.[takeKey];
+}
+
+/**
+ * When the session folder's name says its take was captured: HLAE names it
+ * `session_YYYYMMDD_HHMMSS` in local time. Epoch milliseconds, or undefined
+ * when the text holds no such name or the date is not a real one.
+ */
+export function sessionFolderTime(text) {
+  const m = /session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(String(text || ''));
+  if (!m) return undefined;
+  const [year, month, day, hour, minute, second] = m.slice(1).map(Number);
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  const real = date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    && date.getHours() === hour && date.getMinutes() === minute && date.getSeconds() === second;
+  return real ? date.getTime() : undefined;
+}
+
+/**
+ * When `takeKey` was captured: its recorded time, else the time in its take
+ * folder's name, else in the take key's own session folder; undefined when
+ * none says (movie order puts those last).
+ */
+export function capturedAtOf(takeIndex, takeKey) {
+  const record = captureOf(takeIndex, takeKey);
+  if (record?.captured_at != null) return record.captured_at;
+  return sessionFolderTime(record?.take_folder) ?? sessionFolderTime(takeKey);
 }
 
 /**
@@ -71,12 +107,14 @@ export function capturesToSave(takeIndex) {
 /**
  * The rate a batch really recorded at. `capture_fps` is the frame-sequence and
  * direct-to-video setting only: OBS mode records at its own `obs_capture_fps`
- * (60 when unset, as the backend counts it) and AGR at `agr_fps` (0 = the
- * same as `capture_fps`). `undefined` when the source doesn't carry the OBS
- * rate (a batch manifest read back after a restart).
+ * (60 when unset, as the backend counts it) and AGR at `agr_fps` (0 =
+ * `DEFAULT_AGR_FPS`, agr_rate.js). `undefined` when the source doesn't carry
+ * the OBS rate (a batch manifest read back after a restart). A manifest's
+ * `agr_fps` is the rate the batch resolved, never 0 for an AGR batch, so a
+ * batch captured when 0 still meant Capture FPS reads back as it recorded.
  */
 export function captureRateOf(mode, { capture_fps, obs_capture_fps, agr_fps } = {}) {
   if (mode === 'obs') return obs_capture_fps === undefined ? undefined : (obs_capture_fps > 0 ? obs_capture_fps : 60);
-  if (mode === 'agr') return agr_fps > 0 ? agr_fps : capture_fps;
+  if (mode === 'agr') return effectiveAgrFps(agr_fps);
   return capture_fps;
 }

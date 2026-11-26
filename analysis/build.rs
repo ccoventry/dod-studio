@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "build script: a panic is how Cargo fails the build with a message (#1179)"
+)]
 use std::env;
 use std::fs;
 use std::path::Path;

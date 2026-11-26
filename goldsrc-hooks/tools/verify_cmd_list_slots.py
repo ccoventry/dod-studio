@@ -42,14 +42,14 @@ except ImportError:  # pragma: no cover - developer tooling
 STEAM = Path(r"C:\Program Files (x86)\Steam\steamapps\common")
 DEFAULT_DLLS = [
     STEAM / "Half-Life - PRE-Anniversary for Movies" / "hw.dll",
-    STEAM / "Half-Life" / "hw.dll",
+    STEAM / "Half-Life - POST-Anniversary for Movies" / "hw.dll",
 ]
 SRC = Path(__file__).resolve().parent.parent / "src"
-RUST = [SRC / "demo_reload.rs", SRC / "connect_guard.rs", SRC / "engine.rs"]
+RUST = [SRC / "cmd_list.rs", SRC / "demo_reload.rs", SRC / "connect_guard.rs", SRC / "engine" / "client_cmd.rs"]
 
 
 def rust_const(name, rust=RUST):
-    """The value of `const <name>`, or `const ENGFUNCS_<name>` (engine.rs's
+    """The value of `const <name>`, or `const ENGFUNCS_<name>` (engine/client_cmd.rs's
     spelling), from the first file that has it."""
     for path in rust:
         m = re.search(rf"const (?:ENGFUNCS_)?{name}: usize = (\d+);", path.read_text(encoding="utf-8"))
@@ -120,12 +120,12 @@ def verify(path):
     argv = body(slot(39))
     check(any("[ebp + 8]" in i for i in argv), f"slot 39 (Cmd_Argv) takes an index: {argv[:6]}")
     client_cmd = rust_const("SLOT_CLIENT_CMD")
-    check(client_cmd == 20, f"SLOT_CLIENT_CMD is 20 (pfnClientCmd), as engine.rs documents")
+    check(client_cmd == 20, f"SLOT_CLIENT_CMD is 20 (pfnClientCmd), as engine/client_cmd.rs documents")
 
     # -- 2. the list walkers --------------------------------------------------
     first = rust_const("SLOT_GET_FIRST_CMD_FUNCTION_HANDLE")
-    check(rust_const("SLOT_GET_FIRST_CMD_FUNCTION_HANDLE", RUST[1:2]) == first,
-          "connect_guard.rs walks the list from the same slot as demo_reload.rs")
+    check(all("cmd_list::for_each" in (SRC / f).read_text(encoding="utf-8") for f in ("connect_guard.rs", "demo_reload.rs")),
+          "connect_guard.rs and demo_reload.rs walk the list through cmd_list.rs, from the same slot")
     head = body(slot(first))
     check(len(head) == 2 and re.match(r"mov eax, dword ptr \[0x[0-9a-f]+\]$", head[0]) and head[1] == "ret",
           f"slot {first} returns the list head: {head}")

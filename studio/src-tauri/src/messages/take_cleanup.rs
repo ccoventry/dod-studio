@@ -34,6 +34,14 @@ pub fn take_cleanup_stays(take_folder: impl Display, why: impl Display) -> Strin
     format!("[take-cleanup] {take_folder} stays: {why}")
 }
 
+/// The Render tab's pictures of a take were being made when it was due to
+/// go: stopped, so FFmpeg doesn't hold its files open (#1438).
+pub fn take_cleanup_stopped_pictures(take_folder: impl Display) -> String {
+    format!(
+        "[take-cleanup] Stopped making the Render tab's pictures of {take_folder} so it can be deleted"
+    )
+}
+
 /// Making room found the free space unreadable.
 pub fn take_cleanup_room_unknown(job: impl Display) -> String {
     format!(

@@ -79,24 +79,24 @@ describe('bannedCommandsWarning', () => {
 
 describe('takesFoundMissing (#1081)', () => {
   it('does not call a clip Cancel cut short missing', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1 })).toBe(
       '0/1 takes found on disk — 1 cut short by Cancel (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, cutShort: 1 })).toBe(
       '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2)).toBe('1/2 takes found on disk — 1 missing.');
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { missing: 1 })).toBe('1/2 takes found on disk — 1 missing.');
     // #1105: a take whose video stopped early is not blamed on Cancel.
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 0, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { stoppedEarly: 1 })).toBe(
       '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
     );
   });
 
   it('names the game closing or the batch stopping instead of Cancel', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 1, 0, 'game_closed')).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, { cutShort: 1, cutBy: 'game_closed' })).toBe(
       '1/2 takes found on disk — 1 cut short when the game closed (partial take, not captured).',
     );
-    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1, 0, 'stopped')).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, { cutShort: 1, cutBy: 'stopped' })).toBe(
       '0/1 takes found on disk — 1 cut short when the batch stopped (partial take, not captured).',
     );
     expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
@@ -105,11 +105,31 @@ describe('takesFoundMissing (#1081)', () => {
     expect(STRINGS.BATCH_RESULTS.cutShortBy('studio_closed')).toBe('Cut short: DoD Studio closed while OBS recorded it (not captured)');
   });
 
+  it('says a clip the batch ended before reaching is not reached, not missing (#1434)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(174, 340, { notReached: 165, cutShort: 1 })).toBe(
+      '174/340 takes found on disk — 165 not reached (batch cancelled), 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { notReached: 2, endedBy: 'game_closed' })).toBe(
+      '1/3 takes found on disk — 2 not reached (the game closed).',
+    );
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('cancel')).toBe('Not reached: the batch was cancelled first');
+    expect(STRINGS.BATCH_RESULTS.notReachedBy('stopped')).toBe('Not reached: the batch stopped first');
+  });
+
   it('says a take OBS started late is missing its opening, not missing (#1109)', () => {
-    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, 0, 0, undefined, 1)).toBe(
+    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, { startedLate: 1 })).toBe(
       "2/3 takes found on disk — 1 OBS started recording late (missing the clip's opening, not captured).",
     );
     expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
+  });
+
+  it('says a clip the game reported failed is failed, not missing (#1401)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, { missing: 1, failed: 1 })).toBe(
+      '1/3 takes found on disk — 1 missing, 1 failed in the game (not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.clipFailed('no_start')).toBe('Failed: the game never started recording it (not captured)');
+    expect(STRINGS.BATCH_RESULTS.clipShort(16.75, 16.76, 1)).toBe('Captured, but missing 1 kill: 16.75 s of 16.76 s planned');
+    expect(STRINGS.BATCH_RESULTS.clipShort(10, 19.88, 0)).toBe('Captured, but short: 10.00 s of 19.88 s planned');
   });
 });
 
@@ -145,5 +165,33 @@ describe('AUDITOR.doneStatus', () => {
 
   it('leaves archives out when none were looked inside', () => {
     expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4 s')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
+  });
+});
+
+describe('networkProtocolValue (#239)', () => {
+  it('says a protocol-47 demo plays with a warning', () => {
+    expect(STRINGS.ANALYZER.networkProtocolValue(47)).toBe('47 (older build): plays with an outdated-protocol warning');
+  });
+
+  it('is the bare number for any other protocol', () => {
+    expect(STRINGS.ANALYZER.networkProtocolValue(48)).toBe('48');
+  });
+});
+
+// The catalog is assembled from one file per area (#604); a spread would
+// silently let a later area overwrite an earlier one's key.
+describe('catalog areas', () => {
+  it('no key is defined in two area files', async () => {
+    const files = import.meta.glob('./strings/*.js', { eager: true });
+    const seen = new Map();
+    for (const [file, mod] of Object.entries(files)) {
+      for (const area of Object.values(mod)) {
+        for (const key of Object.keys(area)) {
+          expect(seen.get(key), `${key} in ${file} and ${seen.get(key)}`).toBeUndefined();
+          seen.set(key, file);
+        }
+      }
+    }
+    expect([...seen.keys()].sort()).toEqual(Object.keys(STRINGS).sort());
   });
 });

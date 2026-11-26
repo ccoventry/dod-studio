@@ -1,6 +1,6 @@
 // vegas_script_install.js
-// The "Add Nameplate Script to VEGAS" button on the Render tab (#429): copies
-// the bundled VEGAS script into VEGAS's script menu folder. The copy, the
+// The "Add Scripts to VEGAS" button on the Render tab (#429, #1514): copies
+// the bundled VEGAS scripts (nameplates, relink) into VEGAS's script menu folder. The copy, the
 // activity-log lines and the folder lookup are the backend's
 // (`vegas_manager.rs`).
 

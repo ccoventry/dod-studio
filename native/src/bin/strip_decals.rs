@@ -5,7 +5,7 @@
 //! into the real capture batch pipeline.
 
 use clap::Parser;
-use native::patch::{
+use native::decals::{
     Cancel, DecalCleanOptions, FlushSource, MAX_OVERLAP_DECALS, clean_demo_decals,
 };
 use std::fs;
@@ -63,7 +63,7 @@ struct Args {
     /// How long, in seconds of demo time, before a capture window the flush
     /// burst finishes. Larger values leave a longer visibly-clean stretch
     /// before the clip, which is useful when watching the sweep happen.
-    #[arg(long, default_value_t = native::patch::DEFAULT_LEAD_SECONDS)]
+    #[arg(long, default_value_t = native::decals::DEFAULT_LEAD_SECONDS)]
     lead_seconds: f32,
 }
 

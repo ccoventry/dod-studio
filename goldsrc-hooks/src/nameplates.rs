@@ -5,7 +5,7 @@
 //! ## What is drawn
 //!
 //! - **Who:** the players `client.dll`'s `HUD_AddEntity` let through this
-//!   frame ([`note_added`], from `engine.rs`'s detour, after the real one
+//!   frame ([`note_added`], from `engine/client_exports.rs`'s detour, after the real one
 //!   answered): every player the engine is about to render, so nobody out of
 //!   the recorder's view, nobody the hook's own `ds_map_hide_asset` hid, and
 //!   not the player an HLTV camera watches in-eye (the client returns 0 for
@@ -76,7 +76,7 @@ const BAR_ALPHA: i32 = 220;
 /// Around the name, and between the name and the bar.
 const PADDING: i32 = 2;
 
-/// Called from `engine.rs`'s `HUD_AddEntity` detour for each entity the
+/// Called from `engine/client_exports.rs`'s `HUD_AddEntity` detour for each entity the
 /// client let through. Notes the players among them.
 ///
 /// # Safety

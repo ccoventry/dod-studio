@@ -9,6 +9,7 @@
 // catch-up marks it. If it never gets there, the prompt says the batch has not
 // started and closing cancels it.
 
+use lock_recover::lock_or_recover;
 use native::game_handoff::{BatchStart, StartState};
 use std::time::{Duration, Instant};
 
@@ -54,10 +55,8 @@ pub async fn wait_for_batch_start(
     let cancel = std::sync::Arc::clone(&state.cancel_token);
     let timeout = Duration::from_millis(timeout_ms).min(MAX_WAIT);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let running = || {
-            *is_running.lock().unwrap_or_else(|p| p.into_inner())
-                && !cancel.load(std::sync::atomic::Ordering::Relaxed)
-        };
+        let running =
+            || *lock_or_recover(&is_running) && !cancel.load(std::sync::atomic::Ordering::Relaxed);
         let state = wait_for_start(&start, timeout, POLL, running);
         if state == StartState::Pending {
             native::log_markdown(&crate::messages::batch::start_not_reached_on_close(

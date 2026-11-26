@@ -17,6 +17,10 @@ members = [
     # 32-bit cdylib injected into hl.exe; see goldsrc-hooks/README.md. Built
     # for i686-pc-windows-msvc, not the host target.
     "goldsrc-hooks",
+    # Source-reading checks with no dependencies; see its Cargo.toml.
+    "source-checks",
+    # The three poison-recovering lock helpers every other crate shares (#1377).
+    "lock-recover",
 ]
 
 [workspace.package]
@@ -28,6 +32,7 @@ version = "0.10.0"
 # sysinfo 0.29 and 0.30 both ended up in the tree, each compiled separately).
 # A member opts in with `{ workspace = true }` and adds its own `features`.
 [workspace.dependencies]
+lock-recover = { path = "lock-recover" }
 clap = "4.5.41"
 dem = "0.2.3"
 filetime = "0.2.25"
@@ -82,13 +87,23 @@ type_complexity = "allow"
 # Indexing by axis (`for axis in 0..3 { out[axis] = ... }`) reads better than an
 # iterator when the index *is* the meaning -- x, y, z.
 needless_range_loop = "allow"
-# `!(hi > lo)` in patch/bsp.rs is deliberate NaN handling: with a NaN bound it is
+# `!(hi > lo)` in maps/bsp.rs is deliberate NaN handling: with a NaN bound it is
 # true and the surface is skipped, where `hi <= lo` is false and the walk
 # proceeds on garbage. Clippy's suggested rewrite inverts the safe case.
 neg_cmp_op_on_partial_ord = "allow"
 # One site, in the vendored dem-patch parser. Correct as written, and that
 # crate's bit-level code is not somewhere to make cosmetic edits.
 unnecessary_unwrap = "allow"
+# No `unwrap()` / `expect()` outside tests (#1179). Release builds abort on a
+# panic, and in the hook DLL a panic takes hl.exe down with it, so bad input
+# from a demo, a file, the OS or the user returns an error instead. A call
+# that truly cannot fail carries `#[expect(clippy::unwrap_used, reason = "...")]`
+# on the smallest item, saying why (docs/coding_standards.md). `clippy.toml`
+# allows both in tests; dem-patch (vendored), the dev-only examples and probe
+# bins, build scripts and integration-test helpers allow them at their crate or
+# file root.
+unwrap_used = "warn"
+expect_used = "warn"
 
 [patch.crates-io]
 dem = { path = "./dem-patch" }
@@ -102,6 +117,15 @@ opt-level = 1
 # the Overviews page took 43 s for dod_harrington and 270 s for dod_charlie
 # in `npm run tauri dev`, against 0.3 s and 1.3 s in release.
 [profile.dev.package.native]
+opt-level = 3
+
+# `dem` (the dem-patch crate) and `analysis` parse and walk whole demos in tight
+# loops, so their tests were mostly unoptimised-code time: the workspace test
+# CPU time went from 124.8 s to 29.4 s with these two at opt-level 3.
+[profile.dev.package.dem]
+opt-level = 3
+
+[profile.dev.package.analysis]
 opt-level = 3
 
 # Reduce the amount of debug info generated to speed up compilation

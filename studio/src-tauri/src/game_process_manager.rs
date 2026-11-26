@@ -3,6 +3,7 @@
 // game that is already running, the running-process guard, and watching a
 // launch for the game's error boxes.
 
+use lock_recover::lock_or_recover;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -141,6 +142,7 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
 
         let patcher_config = launch_config(&settings, &LaunchRequest::default());
         let mut cmd = patcher_config.build_hlae_process("");
+        native::tool_versions::log_hlae_launch(&patcher_config);
         let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae)?;
         watch_for_error_dialogs(app, launcher);
@@ -161,10 +163,7 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
 
 pub(crate) fn saved_settings(app: &tauri::AppHandle) -> crate::settings_manager::AppSettings {
     let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let guard = settings_state
-        .inner
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let guard = lock_or_recover(&settings_state.inner);
     guard.clone()
 }
 

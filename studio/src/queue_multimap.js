@@ -12,6 +12,8 @@
 
 import { splitProgressBar } from './split_progress.js';
 import { isAlreadySplit, splitStatus } from './split_status.js';
+import { isDamagedDemo } from './repair_view.js';
+import { mapsToSplit, repairableStatus, splitDamageReason } from './repair_status.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -35,7 +37,7 @@ export function pickedMultiMapDemos(demos) {
  * select the row; the first `update(SplitProgress)` swaps the button for a
  * progress bar until it ends.
  */
-export function multiMapHint(demo, onSplit, status = splitStatus) {
+export function multiMapHint(demo, onSplit, status = splitStatus, repairable = repairableStatus) {
   if (!isMultiMapDemo(demo) || !onSplit) return null;
   const hint = document.createElement('span');
   hint.className = 'multimap-hint';
@@ -45,14 +47,26 @@ export function multiMapHint(demo, onSplit, status = splitStatus) {
   note.textContent = STRINGS.WORKSPACE.MULTI_MAP_ALREADY_SPLIT;
   hint.append(btn, note);
   const show = (answer) => {
-    if (btn.disabled) return; // splitting: its bar stays until it ends
+    if (btn.dataset.splitting) return; // its bar stays until it ends
     const title = alreadySplitNoteTitle(demo, answer);
     btn.hidden = title !== null;
     note.hidden = title === null;
     if (title !== null) note.title = title;
   };
   show(status.last(demo.path));
-  status.check(demo.path, demo.signon_maps).then(show);
+  if (isDamagedDemo(demo)) {
+    holdForRepair(btn, demo, repairable.last(demo.path));
+    // The repair check answers Repair's offer and the maps its repair is
+    // split by, which the "Already split" check then asks with.
+    mapsToSplit(demo.path, demo.signon_maps, true, repairable)
+      .then((maps) => {
+        holdForRepair(btn, demo, repairable.last(demo.path));
+        return status.check(demo.path, maps);
+      })
+      .then(show);
+  } else {
+    status.check(demo.path, demo.signon_maps).then(show);
+  }
   return hint;
 }
 
@@ -65,11 +79,14 @@ export function alreadySplitNoteTitle(demo, answer) {
 
 /** Why the right-click menu's Split Maps can't run for this queue row, from
  *  its hint: the "Already split" note's tooltip (naming the pieces) while
- *  that note shows, a line while the row's split runs, else false. */
+ *  that note shows, a line while the row's split runs, the button's own
+ *  reason while a damaged demo waits for its repair (#15), else false. */
 export function splitBlockedReason(row) {
   const note = row.querySelector('.multimap-split-note');
   if (note && !note.hidden) return note.title || STRINGS.WORKSPACE.MULTI_MAP_ALREADY_SPLIT;
-  return row.querySelector('.multimap-split-btn')?.disabled ? STRINGS.WORKSPACE.MULTI_MAP_SPLITTING : false;
+  const btn = row.querySelector('.multimap-split-btn');
+  if (!btn?.disabled) return false;
+  return btn.dataset.splitting ? STRINGS.WORKSPACE.MULTI_MAP_SPLITTING : btn.title;
 }
 
 /** The "2 maps · Split" button itself. */
@@ -82,6 +99,7 @@ function splitButton(demo, onSplit) {
   btn.addEventListener('click', async (e) => {
     e.stopPropagation(); // do not select the row
     btn.disabled = true;
+    btn.dataset.splitting = '1';
     let bar = null;
     const update = (p) => {
       if (!bar) {
@@ -98,7 +116,19 @@ function splitButton(demo, onSplit) {
       bar?.el.remove();
       btn.hidden = false;
       btn.disabled = false;
+      delete btn.dataset.splitting;
     }
   });
   return btn;
+}
+
+/** Greys out a damaged demo's Split (#15): the split can't read past the
+ *  damage. Its tooltip says why, from `answer` (repair_status.js's: true,
+ *  false or null while unknown): "Repair it first" while the row offers
+ *  Repair & Split, else that Repair can't cut this damage out either. */
+function holdForRepair(btn, demo, answer) {
+  if (btn.dataset.splitting) return;
+  const reason = splitDamageReason(demo, answer);
+  btn.disabled = reason !== null;
+  btn.title = reason ?? STRINGS.WORKSPACE.multiMapSplitTitle(demo.signon_maps);
 }

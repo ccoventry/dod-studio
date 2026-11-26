@@ -8,6 +8,11 @@
 //! frames later, to step past the wreckage at the edge of the hole.
 //!
 //!     cargo run --release -p analysis --example bridge_skip_probe -- <demo> <damage-off> <resync-off>
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "dev-only probe run by hand: a panic on bad input is its error report (#1179)"
+)]
 
 const DEMO_HEADER_SIZE: usize = 544;
 const DIRECTORY_OFFSET_POS: usize = 540;
@@ -196,7 +201,7 @@ fn main() {
                     e.frame_count = e.frames.len() as i32;
                     e.track_time = e.frames.iter().map(|f| f.time).fold(0.0f32, f32::max);
                 }
-                d.write_to_bytes()
+                d.write_to_bytes().expect("re-encode")
             }
             Err(_) => out,
         };
