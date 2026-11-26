@@ -3,8 +3,11 @@
 // event indices are 0-based, media is named by its file path or, for a
 // subclip, the key project_info lists.
 //
-// Safety: VEGAS reopens the user's last project on start, so nothing here
-// saves in place. save_as writes only a path that does not exist yet, unless
+// Safety: these run only in a VEGAS started for the bridge (Session). Every
+// file they write, and every project or script they open, is inside its work
+// folder: open_project copies a project from anywhere else into it and opens
+// the copy, so the user's own .veg files are never opened or saved. Nothing
+// saves in place: save_as writes only a path that does not exist yet, unless
 // this session wrote it; new_project and open_project refuse to drop unsaved
 // changes unless told to; render refuses to overwrite a file.
 using System;
@@ -19,8 +22,9 @@ public class Commands {
     readonly Vegas vegas;
     // Files this session saved, the only ones save_as may overwrite.
     readonly HashSet<string> savedThisSession = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    readonly DialogAnswerer dialogs;
 
-    public Commands(Vegas vegas) { this.vegas = vegas; }
+    public Commands(Vegas vegas, DialogAnswerer dialogs) { this.vegas = vegas; this.dialogs = dialogs; }
 
     public object Run(string cmd, Args a) {
         switch (cmd) {
@@ -65,7 +69,11 @@ public class Commands {
         Dictionary<string, object> r = new Dictionary<string, object>();
         r["bridge"] = BridgeModule.Version;
         r["vegas"] = vegas.Version;
+        r["pid"] = Session.Pid;
+        r["pipe"] = Session.PipeName;
+        r["work_folder"] = Session.Root;
         r["project"] = vegas.Project != null ? (object)vegas.Project.FilePath : null;
+        r["dialogs_answered"] = dialogs.All();
         return r;
     }
 
@@ -92,14 +100,31 @@ public class Commands {
         return ProjectInfo();
     }
 
+    // A project outside the work folder is never opened itself: it is copied
+    // into <work folder>\copies and the copy opened. The .veg keeps its
+    // media's full paths, so the copy finds the same files.
     object OpenProject(Args a) {
-        string path = a.Str("path");
+        string path = Path.GetFullPath(a.Str("path"));
         if (!File.Exists(path)) throw new BridgeError("no project at " + path);
+        if (!path.EndsWith(".veg", StringComparison.OrdinalIgnoreCase)) throw new BridgeError("open_project needs a .veg path");
         RefuseUnsaved(a);
+        string copiedFrom = null;
+        if (!Session.UnderRoot(path)) {
+            copiedFrom = path;
+            path = Session.FreshCopyPath(path);
+            File.Copy(copiedFrom, path);
+            Log.Write("open_project: copied " + copiedFrom + " to " + path);
+        }
         // Clear the dirty state first so OpenProject never asks to save.
         vegas.NewProject(false, false);
         if (!vegas.OpenProject(path)) throw new BridgeError("VEGAS could not open " + path);
-        return ProjectInfo();
+        object info = ProjectInfo();
+        if (copiedFrom == null) return info;
+        Dictionary<string, object> r = new Dictionary<string, object>();
+        r["opened_copy"] = path;
+        r["copied_from"] = copiedFrom;
+        r["project"] = info;
+        return r;
     }
 
     // An EDL (DoD Studio's Export VEGAS EDL / Export Project to VEGAS, or
@@ -148,7 +173,7 @@ public class Commands {
     }
 
     object SaveAs(Args a) {
-        string path = Path.GetFullPath(a.Str("path"));
+        string path = Session.RequireUnderRoot(a.Str("path"), "save_as's path");
         if (!path.EndsWith(".veg", StringComparison.OrdinalIgnoreCase)) throw new BridgeError("save_as needs a .veg path");
         if (File.Exists(path) && !(a.Bool("overwrite", false) && savedThisSession.Contains(path)))
             throw new BridgeError(path + " exists; save_as only overwrites a file this bridge session saved, with overwrite=true");
@@ -552,7 +577,7 @@ public class Commands {
     }
 
     object Render(Args a) {
-        string path = Path.GetFullPath(a.Str("path"));
+        string path = Session.RequireUnderRoot(a.Str("path"), "render's path");
         if (File.Exists(path)) throw new BridgeError(path + " exists; render never overwrites");
         if (!a.Has("template")) throw new BridgeError("missing argument \"template\" (a name or part of one, see list_render_templates)");
         KeyValuePair<Renderer, RenderTemplate> pick = new KeyValuePair<Renderer, RenderTemplate>();
@@ -576,27 +601,33 @@ public class Commands {
         args.RenderTemplate = pick.Value;
         args.Start = Tc(a.Num("start", 0.0));
         args.Length = a.Has("length") ? Tc(a.Num("length")) : Tc(Sec(P.Length) - a.Num("start", 0.0));
+        // The first-render Hint box that holds a render until OK is pressed
+        // is answered by the session's DialogAnswerer; the reply's "dialogs"
+        // says so.
         DateTime t0 = DateTime.Now;
-        RenderStatus st;
-        int hints;
-        using (HintDismisser hd = new HintDismisser()) {
-            st = vegas.Render(args);
-            hints = hd.Dismissed;
-        }
+        RenderStatus st = vegas.Render(args);
         Dictionary<string, object> r = TemplateInfo(pick.Key, pick.Value);
         r["status"] = st.ToString();
-        r["hints_dismissed"] = hints;
         r["path"] = path;
         r["seconds"] = (DateTime.Now - t0).TotalSeconds;
         r["exists"] = File.Exists(path);
         return r;
     }
 
-    // Escape hatch for anything the commands above do not cover: a VEGAS
-    // script file (.cs/.js/.vb), run like Tools > Scripting > Run Script.
+    // Escape hatch for anything the commands above do not cover: a C# VEGAS
+    // script in the work folder, run like Tools > Scripting > Run Script.
+    // A compile error in VEGAS's own compiler leaves a modal error box, so
+    // the script is compiled here first, the way VEGAS compiles it (C# 5,
+    // no System.Core), and a failure comes back as the reply instead.
     object RunScript(Args a) {
-        string path = a.Str("path");
+        string path = Session.RequireUnderRoot(a.Str("path"), "run_script's path");
         if (!File.Exists(path)) throw new BridgeError("no script at " + path);
+        if (!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            throw new BridgeError("run_script runs C# (.cs) scripts only: they are compiled first so an error never leaves a box open");
+        List<string> errors = ScriptCheck.Compile(path);
+        if (errors.Count > 0)
+            throw new BridgeError("the script does not compile as VEGAS compiles it (C# 5, no System.Core); nothing ran:\n" +
+                                  string.Join("\n", errors.ToArray()));
         vegas.RunScriptFile(path, a.Str("script_args", ""));
         return "ran " + path;
     }

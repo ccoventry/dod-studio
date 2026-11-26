@@ -3,8 +3,15 @@
 // VEGAS scripting API. The MCP wrapper (../mcp/vegas_mcp.py) forwards tool
 // calls here.
 //
+// VEGAS loads an application extension into every VEGAS the user starts,
+// their own editing sessions included. The bridge stays silent in all of
+// them: it listens only in a VEGAS whose environment says it was started for
+// the bridge (Session.ForBridge), so nothing can reach the project someone
+// is editing. Each such VEGAS gets its own pipe, named after its process id,
+// so several can run beside the user's.
+//
 // VEGAS's API is only safe on its UI thread, so the pipe thread hands each
-// command to a hidden control created on that thread and waits for it.
+// command to UiQueue, which runs it there, and waits for it.
 // C# 5 on purpose: it builds with the csc.exe that ships with .NET Framework.
 using System;
 using System.Collections;
@@ -22,22 +29,27 @@ using ScriptPortal.Vegas;
 namespace DodStudio.VegasBridge {
 
 public class BridgeModule : ICustomCommandModule {
-    public const string PipeName = "dodstudio-vegas";
-    public const string Version = "0.1";
+    public const string Version = "0.2";
 
     Vegas vegas;
-    Control uiThread;
+    UiQueue uiThread;
     Commands commands;
     Thread server;
     CustomCommand menuCommand;
+    DialogAnswerer dialogs;
 
     public void InitializeModule(Vegas v) {
         vegas = v;
-        Log.Write("InitializeModule, VEGAS " + v.Version + ", thread " + Thread.CurrentThread.ManagedThreadId);
-        uiThread = new Control();
-        uiThread.CreateControl();
-        IntPtr unused = uiThread.Handle;
-        commands = new Commands(v);
+        if (!Session.ForBridge) {
+            Log.Write("VEGAS " + v.Version + " PID " + Session.Pid + ": not started for the bridge (" + Session.WhyOff +
+                      "), not listening");
+            return;
+        }
+        Log.Write("VEGAS " + v.Version + " PID " + Session.Pid + ": listening on " + Session.PipeName +
+                  ", work folder " + Session.Root);
+        uiThread = new UiQueue();
+        dialogs = new DialogAnswerer();
+        commands = new Commands(v, dialogs);
         server = new Thread(Serve);
         server.IsBackground = true;
         server.Name = "dodstudio-vegas pipe";
@@ -45,13 +57,15 @@ public class BridgeModule : ICustomCommandModule {
     }
 
     // One Tools > Extensions menu item that only reports the bridge's state,
-    // so the user can see it loaded.
+    // so the user can see it loaded and that it is off in their own VEGAS.
     public ICollection GetCustomCommands() {
         menuCommand = new CustomCommand(CommandCategory.Tools, "DodStudioVegasBridge");
-        menuCommand.DisplayName = "DoD Studio bridge (pipe " + PipeName + ")";
+        menuCommand.DisplayName = Session.ForBridge ? "DoD Studio bridge (listening)" : "DoD Studio bridge (off in this VEGAS)";
         menuCommand.Invoked += delegate(object s, EventArgs e) {
-            MessageBox.Show("DoD Studio bridge " + Version + " is listening on \\\\.\\pipe\\" + PipeName +
-                            ".\nLog: " + Log.Path, "DoD Studio bridge");
+            string state = Session.ForBridge
+                ? "is listening on \\\\.\\pipe\\" + Session.PipeName + ".\nWork folder: " + Session.Root
+                : "is off in this VEGAS: it listens only in a VEGAS started for it, never in one you edit in.";
+            MessageBox.Show("DoD Studio bridge " + Version + " " + state + "\nLog: " + Log.Path, "DoD Studio bridge");
         };
         return new CustomCommand[] { menuCommand };
     }
@@ -67,7 +81,7 @@ public class BridgeModule : ICustomCommandModule {
         while (true) {
             try {
                 using (NamedPipeServerStream pipe = new NamedPipeServerStream(
-                           PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                           Session.PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                            PipeOptions.None, 1 << 16, 1 << 16, CurrentUserOnly())) {
                     pipe.WaitForConnection();
                     Log.Write("client connected");
@@ -103,11 +117,19 @@ public class BridgeModule : ICustomCommandModule {
             req.TryGetValue("args", out argsObj);
             Args args = new Args(argsObj as Dictionary<string, object>);
             Log.Write("cmd " + cmd + " " + line.Length + " bytes");
+            int seen = dialogs.Count;
             object result = null;
             Exception error = null;
-            uiThread.Invoke((MethodInvoker)delegate {
-                try { result = commands.Run(cmd, args); } catch (Exception e) { error = e; Log.Write(cmd + " failed: " + e); }
-            });
+            try {
+                uiThread.Run(delegate {
+                    try { result = commands.Run(cmd, args); } catch (Exception e) { error = e; Log.Write(cmd + " failed: " + e); }
+                });
+            } finally {
+                // The dialogs VEGAS raised during this command and how each was
+                // answered, so the caller learns e.g. that media went offline.
+                List<string> answered = dialogs.Since(seen);
+                if (answered.Count > 0) reply["dialogs"] = answered;
+            }
             if (error != null) throw error;
             reply["ok"] = true;
             reply["result"] = result;
@@ -151,7 +173,8 @@ public static class Log {
             try {
                 FileInfo f = new FileInfo(Path);
                 if (f.Exists && f.Length > 4 * 1024 * 1024) f.Delete();
-                File.AppendAllText(Path, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + s + Environment.NewLine);
+                // Every bridge VEGAS writes here, so each line names its PID.
+                File.AppendAllText(Path, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " [" + Session.Pid + "] " + s + Environment.NewLine);
             } catch { }
         }
     }
