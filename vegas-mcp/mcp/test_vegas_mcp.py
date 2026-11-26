@@ -147,6 +147,35 @@ class Tools(unittest.TestCase):
     def test_local_tools_are_handled_here(self):
         self.assertEqual(vegas_mcp.LOCAL_NAMES, {"launch", "end", "instances", "use"})
 
+    def test_every_required_argument_is_described(self):
+        # Also inside list items (keyframes, points, ops): a required name with
+        # no schema is a typo a caller can never satisfy.
+        def check(schema, where):
+            for name in schema.get("required", []):
+                self.assertIn(name, schema.get("properties", {}), "%s requires %s" % (where, name))
+            for name, sub in schema.get("properties", {}).items():
+                if isinstance(sub, dict):
+                    check(sub, "%s.%s" % (where, name))
+                    if isinstance(sub.get("items"), dict):
+                        check(sub["items"], "%s.%s[]" % (where, name))
+
+        for t in vegas_mcp.TOOLS:
+            check(t["inputSchema"], t["name"])
+
+    def test_the_project_detail_tools_go_to_the_bridge(self):
+        names = {t["name"] for t in vegas_mcp.TOOLS}
+        detail = {"get_keyframes", "set_keyframes", "get_pan_crop", "set_pan_crop", "get_track_motion", "set_track_motion",
+                  "list_transitions", "set_fade", "crossfade", "get_markers", "set_markers", "get_envelopes",
+                  "set_envelope", "group_events"}
+        self.assertLessEqual(detail, names)
+        self.assertFalse(detail & vegas_mcp.LOCAL_NAMES)
+
+    def test_every_fx_chain_can_be_targeted(self):
+        for t in vegas_mcp.TOOLS:
+            target = t["inputSchema"]["properties"].get("target")
+            if target is not None:
+                self.assertEqual(target["enum"], ["event", "media", "track", "output"], t["name"])
+
     @unittest.skipUnless(os.name == "nt", "named pipes")
     def test_a_bridge_call_with_no_bridge_vegas_is_an_error_not_a_crash(self):
         instances = vegas_mcp.Instances()
