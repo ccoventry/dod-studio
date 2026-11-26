@@ -19,6 +19,14 @@ namespace DodStudio.VegasBridge {
 public static class FrameImage {
     // Raw bytes of one inline image; base64 adds a third.
     public const int InlineMaxBytes = 1000000;
+    // Raw bytes of every inline image in one call: the MCP server's own cap
+    // (snapshot_content.MAX_TOTAL_BYTES), so the bridge encodes and sends
+    // nothing the server would drop.
+    public const long InlineCallMaxBytes = 4000000;
+    // A model sees no more than about this many pixels across, so a wider
+    // frame (width 0 on a 4K project) goes inline scaled to it; the file on
+    // disk keeps the asked-for width.
+    public const int InlineMaxWidth = 2000;
     static readonly long[] JpegQualities = { 90, 75 };
 
     // VEGAS's PNG at `rawPath`, composited over black, at `width` (aspect
@@ -30,10 +38,7 @@ public static class FrameImage {
         using (Gdi.Bitmap src = new Gdi.Bitmap(bytes)) {
             Gdi.Bitmap flat = OnBlack(src);
             if (width <= 0 || width >= flat.Width) return flat;
-            using (flat) {
-                int h = Math.Max(1, (int)Math.Round(flat.Height * (double)width / flat.Width));
-                return Scaled(flat, width, h);
-            }
+            using (flat) return ToWidth(flat, width);
         }
     }
 
@@ -44,23 +49,43 @@ public static class FrameImage {
         }
     }
 
-    // {"mime_type", "data" (base64)} for the tool result, or {"left_out": why}.
-    public static Dictionary<string, object> InlineCopy(Gdi.Bitmap frame, byte[] png) {
+    // {"mime_type", "data" (base64), "bytes", "width", "height"} for the tool
+    // result, or {"left_out": why}. `png` is `frame` as a PNG; `callBytesLeft`
+    // is what the call's earlier inline copies left of InlineCallMaxBytes.
+    public static Dictionary<string, object> InlineCopy(Gdi.Bitmap frame, byte[] png, long callBytesLeft) {
         Dictionary<string, object> r = new Dictionary<string, object>();
-        if (png.Length <= InlineMaxBytes) {
-            r["mime_type"] = "image/png";
-            r["data"] = Convert.ToBase64String(png);
+        long cap = Math.Min(InlineMaxBytes, callBytesLeft);
+        string tooBig = cap < InlineMaxBytes
+            ? "the call's images would pass " + InlineCallMaxBytes + " bytes; ask for fewer times or a smaller width"
+            : "over " + InlineMaxBytes + " bytes even as a JPEG; ask for a smaller width";
+        if (cap <= 0) {
+            r["left_out"] = tooBig;
             return r;
         }
-        foreach (long quality in JpegQualities) {
-            byte[] jpeg = Jpeg(frame, quality);
-            if (jpeg.Length > InlineMaxBytes) continue;
-            r["mime_type"] = "image/jpeg";
-            r["jpeg_quality"] = quality;
-            r["data"] = Convert.ToBase64String(jpeg);
-            return r;
+        Gdi.Bitmap small = frame.Width > InlineMaxWidth ? ToWidth(frame, InlineMaxWidth) : null;
+        try {
+            Gdi.Bitmap image = small ?? frame;
+            byte[] imagePng = small == null ? png : Png(small);
+            if (imagePng.Length <= cap) return Inline(r, image, "image/png", imagePng);
+            foreach (long quality in JpegQualities) {
+                byte[] jpeg = Jpeg(image, quality);
+                if (jpeg.Length > cap) continue;
+                r["jpeg_quality"] = quality;
+                return Inline(r, image, "image/jpeg", jpeg);
+            }
+        } finally {
+            if (small != null) small.Dispose();
         }
-        r["left_out"] = "over " + InlineMaxBytes + " bytes even as a JPEG; ask for a smaller width";
+        r["left_out"] = tooBig;
+        return r;
+    }
+
+    static Dictionary<string, object> Inline(Dictionary<string, object> r, Gdi.Bitmap image, string mimeType, byte[] data) {
+        r["mime_type"] = mimeType;
+        r["data"] = Convert.ToBase64String(data);
+        r["bytes"] = data.Length;
+        r["width"] = image.Width;
+        r["height"] = image.Height;
         return r;
     }
 
@@ -81,38 +106,61 @@ public static class FrameImage {
     static Gdi.Bitmap OnBlack(Gdi.Bitmap src) {
         Gdi.Rectangle all = new Gdi.Rectangle(0, 0, src.Width, src.Height);
         Gdi.Bitmap dst = new Gdi.Bitmap(src.Width, src.Height, GdiImaging.PixelFormat.Format24bppRgb);
-        GdiImaging.BitmapData from = src.LockBits(all, GdiImaging.ImageLockMode.ReadOnly, GdiImaging.PixelFormat.Format32bppArgb);
-        GdiImaging.BitmapData to = dst.LockBits(all, GdiImaging.ImageLockMode.WriteOnly, GdiImaging.PixelFormat.Format24bppRgb);
         try {
-            byte[] row = new byte[src.Width * 4];
-            byte[] outRow = new byte[to.Stride];
-            for (int y = 0; y < src.Height; y++) {
-                Marshal.Copy(new IntPtr(from.Scan0.ToInt64() + (long)y * from.Stride), row, 0, row.Length);
-                for (int x = 0; x < src.Width; x++) {
-                    int alpha = row[x * 4 + 3];
-                    for (int c = 0; c < 3; c++) outRow[x * 3 + c] = (byte)((row[x * 4 + c] * alpha + 127) / 255);
+            GdiImaging.BitmapData from = src.LockBits(all, GdiImaging.ImageLockMode.ReadOnly, GdiImaging.PixelFormat.Format32bppArgb);
+            try {
+                GdiImaging.BitmapData to = dst.LockBits(all, GdiImaging.ImageLockMode.WriteOnly, GdiImaging.PixelFormat.Format24bppRgb);
+                try {
+                    CopyOverBlack(from, to, src.Width, src.Height);
+                } finally {
+                    dst.UnlockBits(to);
                 }
-                Marshal.Copy(outRow, 0, new IntPtr(to.Scan0.ToInt64() + (long)y * to.Stride), outRow.Length);
+            } finally {
+                src.UnlockBits(from);
             }
-        } finally {
-            src.UnlockBits(from);
-            dst.UnlockBits(to);
+            return dst;
+        } catch {
+            dst.Dispose();
+            throw;
         }
-        return dst;
+    }
+
+    static void CopyOverBlack(GdiImaging.BitmapData from, GdiImaging.BitmapData to, int width, int height) {
+        byte[] row = new byte[width * 4];
+        byte[] outRow = new byte[to.Stride];
+        for (int y = 0; y < height; y++) {
+            Marshal.Copy(new IntPtr(from.Scan0.ToInt64() + (long)y * from.Stride), row, 0, row.Length);
+            for (int x = 0; x < width; x++) {
+                int alpha = row[x * 4 + 3];
+                for (int c = 0; c < 3; c++) outRow[x * 3 + c] = (byte)((row[x * 4 + c] * alpha + 127) / 255);
+            }
+            Marshal.Copy(outRow, 0, new IntPtr(to.Scan0.ToInt64() + (long)y * to.Stride), outRow.Length);
+        }
+    }
+
+    // `src` scaled to `width`, aspect kept.
+    static Gdi.Bitmap ToWidth(Gdi.Bitmap src, int width) {
+        int h = Math.Max(1, (int)Math.Round(src.Height * (double)width / src.Width));
+        return Scaled(src, width, h);
     }
 
     // Bicubic with mirrored edges, so the border does not darken from
     // sampling outside the frame.
     static Gdi.Bitmap Scaled(Gdi.Bitmap src, int w, int h) {
         Gdi.Bitmap dst = new Gdi.Bitmap(w, h, GdiImaging.PixelFormat.Format24bppRgb);
-        using (Gdi.Graphics g = Gdi.Graphics.FromImage(dst))
-        using (GdiImaging.ImageAttributes edges = new GdiImaging.ImageAttributes()) {
-            g.InterpolationMode = Gdi.Drawing2D.InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = Gdi.Drawing2D.PixelOffsetMode.HighQuality;
-            edges.SetWrapMode(Gdi.Drawing2D.WrapMode.TileFlipXY);
-            g.DrawImage(src, new Gdi.Rectangle(0, 0, w, h), 0, 0, src.Width, src.Height, Gdi.GraphicsUnit.Pixel, edges);
+        try {
+            using (Gdi.Graphics g = Gdi.Graphics.FromImage(dst))
+            using (GdiImaging.ImageAttributes edges = new GdiImaging.ImageAttributes()) {
+                g.InterpolationMode = Gdi.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = Gdi.Drawing2D.PixelOffsetMode.HighQuality;
+                edges.SetWrapMode(Gdi.Drawing2D.WrapMode.TileFlipXY);
+                g.DrawImage(src, new Gdi.Rectangle(0, 0, w, h), 0, 0, src.Width, src.Height, Gdi.GraphicsUnit.Pixel, edges);
+            }
+            return dst;
+        } catch {
+            dst.Dispose();
+            throw;
         }
-        return dst;
     }
 }
 

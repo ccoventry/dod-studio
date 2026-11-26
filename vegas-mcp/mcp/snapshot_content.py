@@ -11,7 +11,8 @@ request. A frame left out is named in the text, and its PNG is still on disk.
 """
 
 # Raw image bytes in one call's result; base64 adds a third. A 1280 px game
-# frame is about 0.3 MB as the bridge's JPEG.
+# frame is about 0.3 MB as the bridge's JPEG. The bridge stops at the same
+# total (FrameImage.InlineCallMaxBytes); this cap still guards the result.
 MAX_TOTAL_BYTES = 4_000_000
 
 
@@ -31,6 +32,10 @@ def image_blocks(snapshots, max_total_bytes=MAX_TOTAL_BYTES):
             continue
         total += raw_size(copy["data"])
         shot["inline_as"] = copy["mime_type"]
+        if copy.get("width") and shot.get("width") and copy["width"] != shot["width"]:
+            # A frame wider than the bridge's inline cap goes inline scaled down;
+            # its PNG on disk keeps the asked-for width.
+            shot["inline_width"] = copy["width"]
         blocks.append({"type": "image", "data": copy["data"], "mimeType": copy["mime_type"]})
     return blocks
 
