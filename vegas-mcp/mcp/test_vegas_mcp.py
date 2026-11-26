@@ -3,6 +3,7 @@
     python -I -m unittest discover -s vegas-mcp/mcp -p "test_*.py"
 """
 
+import base64
 import io
 import json
 import os
@@ -13,6 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 import vegas_mcp  # noqa: E402
 
@@ -208,6 +210,67 @@ class Tools(unittest.TestCase):
         finally:
             vegas_mcp.send = real
         self.assertIn("café", sent[0]["result"]["content"][0]["text"])
+
+
+def shot(n_bytes, mime_type="image/jpeg", path="D:\\work\\snapshots\\a.png"):
+    """A snapshot reply entry whose inline copy decodes to n_bytes."""
+    data = base64.b64encode(b"\0" * n_bytes).decode("ascii")
+    return {"path": path, "inline": {"mime_type": mime_type, "data": data}}
+
+
+class SnapshotImages(unittest.TestCase):
+    def test_an_inline_copy_becomes_an_image_block_and_leaves_the_text(self):
+        shots = [shot(300, "image/png"), shot(300, "image/jpeg")]
+        blocks = snapshot_content.image_blocks(shots)
+        self.assertEqual([(b["type"], b["mimeType"]) for b in blocks], [("image", "image/png"), ("image", "image/jpeg")])
+        self.assertEqual(base64.b64decode(blocks[0]["data"]), b"\0" * 300)
+        self.assertEqual([s.get("inline_as") for s in shots], ["image/png", "image/jpeg"])
+        self.assertFalse(any("inline" in s for s in shots))
+
+    def test_the_images_past_the_total_cap_are_left_out_and_say_why(self):
+        shots = [shot(300) for _ in range(3)]
+        blocks = snapshot_content.image_blocks(shots, max_total_bytes=700)
+        self.assertEqual(len(blocks), 2)
+        self.assertIn("fewer times", shots[2]["not_inline"])
+        self.assertNotIn("inline", shots[2])
+
+    def test_a_copy_the_bridge_left_out_keeps_its_reason(self):
+        shots = [{"path": "x.png", "inline": {"left_out": "over 1000000 bytes even as a JPEG"}}]
+        self.assertEqual(snapshot_content.image_blocks(shots), [])
+        self.assertIn("even as a JPEG", shots[0]["not_inline"])
+
+    def test_a_missing_or_strange_copy_is_left_out(self):
+        shots = [{"path": "a.png"}, shot(10, "image/gif"), "not a dict"]
+        self.assertEqual(snapshot_content.image_blocks(shots), [])
+        self.assertEqual([s.get("not_inline") is not None for s in shots[:2]], [True, True])
+
+    def call_snapshot(self, arguments, reply):
+        instances = vegas_mcp.Instances()
+        instances.call = lambda name, args: reply
+        return vegas_mcp.call_tool(instances, "snapshot", arguments)
+
+    def test_a_snapshot_result_is_its_text_then_its_images(self):
+        result = self.call_snapshot({"time": 1}, {"ok": True, "result": {"snapshots": [shot(100)]}})
+        self.assertFalse(result["isError"])
+        self.assertEqual([c["type"] for c in result["content"]], ["text", "image"])
+        self.assertIn("D:\\\\work\\\\snapshots\\\\a.png", result["content"][0]["text"])
+        self.assertNotIn("AAAA", result["content"][0]["text"])
+
+    def test_inline_false_sends_only_the_text(self):
+        result = self.call_snapshot({"time": 1, "inline": False}, {"ok": True, "result": {"snapshots": [{"path": "a.png"}]}})
+        self.assertEqual([c["type"] for c in result["content"]], ["text"])
+        self.assertNotIn("not_inline", result["content"][0]["text"])
+
+    def test_dialogs_still_reach_the_text_beside_the_images(self):
+        reply = {"ok": True, "result": {"snapshots": [shot(100)]}, "dialogs": ["Hint: OK"]}
+        result = self.call_snapshot({"time": 1}, reply)
+        self.assertEqual([c["type"] for c in result["content"]], ["text", "image"])
+        self.assertIn("dialogs_answered", result["content"][0]["text"])
+
+    def test_a_failed_snapshot_is_an_error_with_no_images(self):
+        result = self.call_snapshot({"time": 99}, {"ok": False, "error": "time 99 s is past the end of the project"})
+        self.assertTrue(result["isError"])
+        self.assertEqual([c["type"] for c in result["content"]], ["text"])
 
 
 if __name__ == "__main__":

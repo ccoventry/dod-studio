@@ -21,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also under python -I
 
+import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 
 PROTOCOL = "2025-06-18"
@@ -216,6 +217,20 @@ TOOLS = LOCAL_TOOLS + [
             "length": SECONDS,
         },
         ["path", "template"],
+    ),
+    tool(
+        "snapshot",
+        "See the project at a timeline time: the composited frame (every track and FX, at Best quality and full size), "
+        "returned inline as an image and saved as a PNG under <work folder>\\snapshots (never overwriting). Use it to check "
+        "an edit: a clip in place, an effect's look, a black gap. Leaves the cursor, preview settings and project as they "
+        "were. A time at or past the project's end is an error.",
+        {
+            "time": SECONDS,
+            "times": {"type": "array", "items": {"type": "number"}, "description": "several times (up to 10), one PNG each, instead of time"},
+            "width": {"type": "integer", "description": "scale down to this width, aspect kept; default 1280, 0 = the project's full size; never scaled up"},
+            "folder": {"type": "string", "description": "inside the work folder; default <work folder>\\snapshots"},
+            "inline": {"type": "boolean", "description": "default true: also return each frame as an image (the PNG under 1 MB, else a JPEG of it; 4 MB a call)"},
+        },
     ),
     tool(
         "run_script",
@@ -474,14 +489,27 @@ def call_tool(instances, name, arguments):
         reply = instances.call(name, arguments)
         ok = reply.get("ok")
         body = reply.get("result") if ok else reply.get("error")
+        images = []
+        if ok and name == "snapshot" and arguments.get("inline", True) is not False:
+            images = snapshot_images(body)
         if reply.get("dialogs"):
             # Dialogs VEGAS raised during the call and how the bridge answered them.
             body = {"result" if ok else "error": body, "dialogs_answered": reply["dialogs"]}
-        return tool_result(body, ok)
+        result = tool_result(body, ok)
+        result["content"].extend(images)
+        return result
     except (BridgeUnavailable, vegas_instances.VegasError) as e:
         return tool_result(str(e), False)
     except Exception as e:  # noqa: BLE001 - one bad call must not end the server, which ends every VEGAS it started
         return tool_result("%s failed: %s: %s" % (name, type(e).__name__, e), False)
+
+
+def snapshot_images(body):
+    """The image blocks for a snapshot reply, taken out of its text; a frame
+    left out says why in its `not_inline`."""
+    if not isinstance(body, dict):
+        return []
+    return snapshot_content.image_blocks(body.get("snapshots") or [])
 
 
 LOCAL_NAMES = {t["name"] for t in LOCAL_TOOLS}
@@ -512,7 +540,7 @@ def serve_lines(instances, lines=None):
             result = {
                 "protocolVersion": requested,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "dodstudio-vegas", "version": "0.2"},
+                "serverInfo": {"name": "dodstudio-vegas", "version": "0.3"},
             }
         elif method == "ping":
             result = {}
@@ -565,6 +593,8 @@ def main(argv):
             except ValueError as e:
                 raise BridgeUnavailable("the arguments are not JSON (%s): %s" % (e, rest[3]))
             reply = instances.call(rest[2], args)
+            if rest[2] == "snapshot" and reply.get("ok"):
+                snapshot_images(reply["result"])  # a shell shows the paths, not pages of base64
             print(json.dumps(reply, indent=1))
             return 0 if reply.get("ok") else 1
     except (BridgeUnavailable, vegas_instances.VegasError) as e:

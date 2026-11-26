@@ -10,7 +10,7 @@
 // files are never opened or saved. Nothing
 // saves in place: save_as writes only a path that does not exist yet, unless
 // this session wrote it; new_project and open_project refuse to drop unsaved
-// changes unless told to; render refuses to overwrite a file.
+// changes unless told to; render and snapshot never overwrite a file.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -24,8 +24,13 @@ public class Commands {
     // Files this session saved, the only ones save_as may overwrite.
     readonly HashSet<string> savedThisSession = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     readonly DialogAnswerer dialogs;
+    readonly Snapshot snapshot;
 
-    public Commands(Vegas vegas, DialogAnswerer dialogs) { this.vegas = vegas; this.dialogs = dialogs; }
+    public Commands(Vegas vegas, DialogAnswerer dialogs) {
+        this.vegas = vegas;
+        this.dialogs = dialogs;
+        snapshot = new Snapshot(vegas);
+    }
 
     public object Run(string cmd, Args a) {
         switch (cmd) {
@@ -39,6 +44,8 @@ public class Commands {
             case "list_render_templates": return ListRenderTemplates(a);
             case "render": return Render(a);
             case "run_script": return RunScript(a);
+            // Not an edit: it leaves the project, cursor and preview as they were (Snapshot.cs).
+            case "snapshot": return snapshot.Take(a);
         }
         // An extension's project edits must sit in an undo block: outside
         // one, every change fails with E_UNEXPECTED. One block per command,

@@ -11,6 +11,16 @@ using System.Windows.Forms;
 
 namespace DodStudio.VegasBridge {
 
+// What a command returns when the rest of it has to wait for VEGAS's own
+// message loop: some changes (the preview size) apply only when VEGAS is idle,
+// which never happens while a command runs, and Application.DoEvents does not
+// make it happen. BridgeModule runs Next on the UI thread after AfterMs, as
+// part of the same command, and again for each LaterStep Next returns.
+public sealed class LaterStep {
+    public int AfterMs;
+    public Func<object> Next;
+}
+
 public sealed class UiQueue {
     sealed class Item {
         public MethodInvoker Work;
