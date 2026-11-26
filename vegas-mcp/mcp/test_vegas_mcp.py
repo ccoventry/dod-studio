@@ -519,6 +519,60 @@ class FakeVegasState:
         return "cleaned"
 
 
+class SlowExit:
+    """A process that refuses to be terminated again and exits only after
+    `waits` waits: a VEGAS that takes long to go after a long render."""
+
+    def __init__(self, pid, waits):
+        self.pid = pid
+        self.waits = waits
+        self.gone = False
+
+    def poll(self):
+        return 1 if self.gone else None
+
+    def kill(self):
+        raise OSError("cannot end PID %d (error 5)" % self.pid)
+
+    def wait(self, timeout=None):
+        self.waits -= 1
+        if self.waits > 0:
+            raise subprocess.TimeoutExpired("vegas", timeout)
+        self.gone = True
+        return 1
+
+
+class SlowExitCleanUp(unittest.TestCase):
+    def setUp(self):
+        self.real = vegas_instances.close_problem_reports, vegas_instances.HANDLE_RELEASE_SECONDS
+        vegas_instances.close_problem_reports = lambda pid: []
+        vegas_instances.HANDLE_RELEASE_SECONDS = 0
+
+    def tearDown(self):
+        vegas_instances.close_problem_reports, vegas_instances.HANDLE_RELEASE_SECONDS = self.real
+
+    def test_a_refused_kill_still_waits_and_cleans_up(self):
+        with tempfile.TemporaryDirectory() as folder:
+            autosave = os.path.join(folder, "%08x.autosave.veg" % 4242)
+            open(autosave, "w").close()
+            launched = vegas_instances.Launched(SlowExit(4242, waits=1))
+            self.assertIn("removed its autosave", launched.end(folder))
+            self.assertFalse(os.path.exists(autosave))
+
+    def test_end_all_cleans_up_a_vegas_that_was_still_exiting(self):
+        cleaned = []
+        real_cleanup = vegas_instances.cleanup
+        vegas_instances.cleanup = lambda pid, folder=None: cleaned.append(pid) or "cleaned"
+        try:
+            instances = vegas_mcp.Instances()
+            instances.launched[4242] = vegas_instances.Launched(SlowExit(4242, waits=2))  # past end's own wait
+            instances.end_all()
+        finally:
+            vegas_instances.cleanup = real_cleanup
+        self.assertEqual(cleaned, [4242])
+        self.assertEqual(instances.launched, {})
+
+
 class EndAndCleanUp(unittest.TestCase):
     def test_end_during_a_stuck_call_wins(self):
         with FakeVegasState([4242, 4343]) as state:
@@ -647,6 +701,21 @@ class HiddenDesktop(unittest.TestCase):
             self.assertIn("PID %d" % proc.pid, launched.end(folder))  # a second kill of a dying process is no error
         self.assertTrue(launched.exited())
         self.assertIsNone(desk.handle)
+
+    def test_kill_takes_access_denied_as_already_ending(self):
+        # A VEGAS being terminated refuses a second TerminateProcess until it
+        # has gone, which took over 2 s after a long render.
+        real = desktops.terminate
+        try:
+            proc = desktops.Process(None, 4242)
+            proc.poll = lambda: None  # still running
+            desktops.terminate = lambda handle: desktops.ERROR_ACCESS_DENIED
+            proc.kill()  # no error
+            desktops.terminate = lambda handle: 87
+            with self.assertRaises(OSError):
+                proc.kill()
+        finally:
+            desktops.terminate = real
 
     def test_the_environment_block_is_sorted_and_double_terminated(self):
         block = desktops.environment_block({"b": "2", "A": "1"})

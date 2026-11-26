@@ -237,7 +237,9 @@ def orphan_autosaves(folder=None):
     return sorted(found)
 
 
-END_WAIT_SECONDS = 15
+# A VEGAS took over 2 s to exit after being ended following a long render;
+# this leaves room for a slower one.
+END_WAIT_SECONDS = 30
 # VEGAS takes 7-14 s to open its pipe on this PC; this allows a slow disk.
 DEFAULT_WAIT_SECONDS = 120
 STARTUP_POLL_SECONDS = 0.25
@@ -264,11 +266,16 @@ class Launched:
         """Terminate it through its own handle, then clean up after it
         (folder: where its autosave is, for tests)."""
         if not self.exited():
-            self.proc.kill()  # TerminateProcess on the handle it holds
+            refused = None
+            try:
+                self.proc.kill()  # TerminateProcess on the handle it holds
+            except OSError as e:
+                refused = e  # it may be going anyway: the wait decides
             try:
                 self.proc.wait(END_WAIT_SECONDS)
             except subprocess.TimeoutExpired:
-                raise VegasError("VEGAS PID %d did not exit within %d s of being ended" % (self.pid, END_WAIT_SECONDS))
+                raise VegasError("VEGAS PID %d did not exit within %d s of being ended%s"
+                                 % (self.pid, END_WAIT_SECONDS, " (%s)" % refused if refused else ""))
             what = "ended VEGAS PID %d" % self.pid
         else:
             what = "VEGAS PID %d had already exited" % self.pid
@@ -444,8 +451,10 @@ def end_bridge_pid(pid):
             raise VegasError("PID %d is not VEGAS (%s): left alone" % (pid, image or "unknown"))
         if pid not in bridge_pids():
             raise VegasError("PID %d has no bridge pipe: not a VEGAS started for the bridge, so it is left alone" % pid)
-        if not _k32.TerminateProcess(h, 1):
-            raise VegasError("cannot end VEGAS PID %d (error %d)" % (pid, ctypes.get_last_error()))
+        error = desktops.terminate(h)
+        # Access denied: it is being terminated already (desktops.Process.kill); the wait decides.
+        if error and error != desktops.ERROR_ACCESS_DENIED:
+            raise VegasError("cannot end VEGAS PID %d (error %d)" % (pid, error))
         if _k32.WaitForSingleObject(h, END_WAIT_SECONDS * 1000) != WAIT_OBJECT_0:
             raise VegasError("VEGAS PID %d did not exit within %d s of being ended" % (pid, END_WAIT_SECONDS))
     finally:
