@@ -24,9 +24,11 @@ import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also under python -I
 
+import detail_tools  # noqa: E402
 import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 from bridge_pipe import Bridge, BridgeBusy, BridgeTimeout, BridgeUnavailable  # noqa: E402
+from tool_schema import EVENT, MEDIA, SECONDS, TARGET, TRACK, tool  # noqa: E402
 
 # A call that is still running in VEGAS: its VEGAS is alive, nothing to clean up.
 BridgeTimeoutOrBusy = (BridgeTimeout, BridgeBusy)
@@ -36,7 +38,7 @@ PROTOCOL = "2025-06-18"
 # A client asking for another gets PROTOCOL, as the MCP spec says, and
 # decides itself whether it can go on.
 SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
-SERVER_VERSION = "0.4"
+SERVER_VERSION = "0.5"
 
 # How long a bridge call may take before the server stops waiting for it.
 # Most commands take well under 10 s; opening a project or an EDL waits for
@@ -52,25 +54,8 @@ IMPORT_EDL_MARGIN_SECONDS = 60
 # the request has been sent.
 MAX_TIMEOUT_SECONDS = 7 * 24 * 3600
 
-SECONDS = {"type": "number", "description": "seconds"}
-TRACK = {"type": "integer", "description": "0-based track index (project_info)"}
-EVENT = {"type": "integer", "description": "0-based event index on that track (project_info)"}
-MEDIA = {"type": "string", "description": "media file path, or a subclip's key from project_info"}
 RESAMPLE = {"type": "string", "enum": ["Smart", "Force", "Disable", "OpticalFlow", "ProjectLevel"]}
-TARGET = {
-    "type": "string",
-    "enum": ["event", "media"],
-    "description": "event: the event's own FX chain (track+event); media: the Media FX chain of `media`",
-}
-
-
-def tool(name, description, properties=None, required=()):
-    return {
-        "name": name,
-        "description": description,
-        "inputSchema": {"type": "object", "properties": properties or {}, "required": list(required)},
-    }
-
+OFFSET = {"type": "number", "description": "seconds into the media where the event starts (media time, at any speed)"}
 
 PID = {"type": "integer", "description": "a bridge VEGAS's process id (launch, instances)"}
 
@@ -103,7 +88,14 @@ LOCAL_TOOLS = [
 
 TOOLS = LOCAL_TOOLS + [
     tool("ping", "Check the current bridge VEGAS: versions, pid, work folder, open project, dialogs it answered."),
-    tool("project_info", "The open project: size, fps, tracks with their events (time, speed, media, FX) and the media pool."),
+    tool(
+        "project_info",
+        "The open project: size, fps, tracks with their events (time, speed, media offset, FX; mute, locked, group, "
+        "and loop false, only when not VEGAS's default) and the media pool. detail=true adds each event's fades and snap offset, each track's FX, "
+        "compositing and envelope/keyframe counts, the Video Output FX, markers, regions and event groups; the "
+        "keyframes and points themselves come from the get_* tools.",
+        {"detail": {"type": "boolean", "description": "default false"}},
+    ),
     tool(
         "new_project",
         "Close the open project WITHOUT saving and start an empty one. Refuses when it has unsaved changes unless discard_changes.",
@@ -156,7 +148,7 @@ TOOLS = LOCAL_TOOLS + [
             "track": TRACK,
             "start": SECONDS,
             "length": {"type": "number", "description": "timeline seconds; default: the rest of the media at this speed"},
-            "offset": {"type": "number", "description": "seconds into the media where the event starts"},
+            "offset": OFFSET,
             "playback_rate": {"type": "number", "description": "event speed: 0.2 = 5x slow motion (like ctrl-drag)"},
             "resample": RESAMPLE,
             "name": {"type": "string"},
@@ -166,16 +158,21 @@ TOOLS = LOCAL_TOOLS + [
     ),
     tool(
         "set_event",
-        "Change an event: speed (playback_rate), start, length, media offset, resample mode, name.",
+        "Change an event: speed (playback_rate; the media second it starts at stays unless offset), start, length, "
+        "media offset, resample mode, name, mute, locked, loop, snap offset.",
         {
             "track": TRACK,
             "event": EVENT,
             "playback_rate": {"type": "number"},
             "start": SECONDS,
             "length": SECONDS,
-            "offset": SECONDS,
+            "offset": OFFSET,
             "resample": RESAMPLE,
             "name": {"type": "string"},
+            "mute": {"type": "boolean"},
+            "locked": {"type": "boolean"},
+            "loop": {"type": "boolean"},
+            "snap_offset": {"type": "number", "description": "where the event snaps, seconds from its start"},
         },
         ["track", "event"],
     ),
@@ -188,7 +185,8 @@ TOOLS = LOCAL_TOOLS + [
     tool("list_effects", "Installed video effects (name, unique id, OFX or not), filtered by part of a name or id.", {"filter": {"type": "string"}}),
     tool(
         "add_effect",
-        "Add a video effect to an event (Event FX) or to a media/subclip (Media FX), optionally setting OFX parameters by name or label.",
+        "Add a video effect to an event (Event FX), a media/subclip (Media FX), a video track (Track FX) or the Video "
+        "Output FX, optionally setting OFX parameters by name or label (points as [x, y], colours as [r, g, b, a] 0-1).",
         {
             "target": TARGET,
             "track": TRACK,
@@ -201,7 +199,8 @@ TOOLS = LOCAL_TOOLS + [
     ),
     tool(
         "set_effect_params",
-        "Set OFX parameters (or bypass) of the effect at effect_index in an event's or media's FX chain.",
+        "Set OFX parameters (static values) or bypass of the effect at effect_index in an FX chain (event, media, "
+        "track or output); set_keyframes animates them. Legacy (non-OFX) effects' parameters are refused.",
         {
             "target": TARGET,
             "track": TRACK,
@@ -271,7 +270,7 @@ TOOLS = LOCAL_TOOLS + [
         {"path": {"type": "string"}, "script_args": {"type": "string"}},
         ["path"],
     ),
-]
+] + detail_tools.TOOLS
 
 TIMEOUT_ARGUMENT = "timeout_seconds"
 for _t in TOOLS[len(LOCAL_TOOLS):]:

@@ -101,8 +101,10 @@ public static class FrameImage {
         }
     }
 
-    // The image over black, as 24-bit RGB: each channel times its alpha (PNG
-    // alpha is straight), so an opaque pixel is copied exactly.
+    // The image over black, as 24-bit RGB. VEGAS writes its colour already
+    // multiplied by alpha (a red clip at a 50% fade is (127, 12, 0, 127) in
+    // an Image Sequence PNG render, and ~120 red in an MP4 render), so over
+    // black is the colour channels as they are; alpha is dropped.
     static Gdi.Bitmap OnBlack(Gdi.Bitmap src) {
         Gdi.Rectangle all = new Gdi.Rectangle(0, 0, src.Width, src.Height);
         Gdi.Bitmap dst = new Gdi.Bitmap(src.Width, src.Height, GdiImaging.PixelFormat.Format24bppRgb);
@@ -131,8 +133,7 @@ public static class FrameImage {
         for (int y = 0; y < height; y++) {
             Marshal.Copy(new IntPtr(from.Scan0.ToInt64() + (long)y * from.Stride), row, 0, row.Length);
             for (int x = 0; x < width; x++) {
-                int alpha = row[x * 4 + 3];
-                for (int c = 0; c < 3; c++) outRow[x * 3 + c] = (byte)((row[x * 4 + c] * alpha + 127) / 255);
+                for (int c = 0; c < 3; c++) outRow[x * 3 + c] = row[x * 4 + c];
             }
             Marshal.Copy(outRow, 0, new IntPtr(to.Scan0.ToInt64() + (long)y * to.Stride), outRow.Length);
         }

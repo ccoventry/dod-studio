@@ -20,7 +20,9 @@ using ScriptPortal.Vegas;
 
 namespace DodStudio.VegasBridge {
 
-public class Commands {
+// Partial: each project-detail area (keyframes, Pan/Crop, Track Motion,
+// fades and transitions, markers, envelopes, event groups) has its own file.
+public partial class Commands {
     readonly Vegas vegas;
     // Files this session saved, the only ones save_as may overwrite.
     readonly HashSet<string> savedThisSession = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -36,7 +38,13 @@ public class Commands {
     public object Run(string cmd, Args a) {
         switch (cmd) {
             case "ping": return Ping();
-            case "project_info": return ProjectInfo();
+            case "project_info": return Read(delegate { return ProjectInfo(a.Bool("detail", false)); });
+            case "get_keyframes": return Read(delegate { return GetKeyframes(a); });
+            case "get_pan_crop": return Read(delegate { return GetPanCrop(a); });
+            case "get_track_motion": return Read(delegate { return GetTrackMotion(a); });
+            case "get_markers": return Read(delegate { return GetMarkers(); });
+            case "get_envelopes": return Read(delegate { return GetEnvelopes(a); });
+            case "list_transitions": return ListTransitions(a);
             case "new_project": return NewProject(a);
             case "open_project": return OpenProject(a);
             case "import_edl": return ImportEdl(a);
@@ -64,6 +72,35 @@ public class Commands {
         }
     }
 
+    // Reading can make VEGAS set up what is read (VideoTrack.TrackMotion on a
+    // track that never had any), which outside an undo block fails with
+    // E_UNEXPECTED. A read runs without a block first, so it leaves the undo
+    // and redo lists alone; only one that fails that way runs again in a
+    // block that is always cancelled, leaving no undo step and no change.
+    object Read(Func<object> read) {
+        try {
+            return read();
+        } catch (Exception e) {
+            // A property read through reflection (Keyframes.cs) wraps it.
+            Exception inner = e is System.Reflection.TargetInvocationException && e.InnerException != null ? e.InnerException : e;
+            if (!(inner is System.Runtime.InteropServices.COMException)) throw;
+            // E_UNEXPECTED is the expected one; any other COM error is retried
+            // the same way, and its own message says which it was.
+            Log.Write("a read failed with a COM error (" + inner.Message + "); reading again in a cancelled undo block");
+            return ReadInCancelledBlock(read);
+        }
+    }
+
+    object ReadInCancelledBlock(Func<object> read) {
+        UndoBlock block = new UndoBlock(P, "DoD Studio bridge: read");
+        block.Cancel = true;
+        try {
+            return read();
+        } finally {
+            block.Dispose();
+        }
+    }
+
     Func<Args, object> EditCommand(string cmd) {
         switch (cmd) {
             case "add_media": return AddMedia;
@@ -72,6 +109,14 @@ public class Commands {
             case "add_effect": return AddEffect;
             case "set_effect_params": return SetEffectParams;
             case "blend_by_speed": return BlendBySpeed;
+            case "set_keyframes": return SetKeyframes;
+            case "set_pan_crop": return SetPanCrop;
+            case "set_track_motion": return SetTrackMotion;
+            case "set_fade": return SetFade;
+            case "crossfade": return Crossfade;
+            case "set_markers": return SetMarkers;
+            case "set_envelope": return SetEnvelope;
+            case "group_events": return GroupEvents;
             default: throw new BridgeError("unknown command \"" + cmd + "\"");
         }
     }
@@ -219,7 +264,14 @@ public class Commands {
         return ProjectInfo();
     }
 
-    object ProjectInfo() {
+    object ProjectInfo() { return ProjectInfo(false); }
+
+    // Compact by default: tracks, events and media. `detail` adds each
+    // event's fades, snap offset, envelope and Pan/Crop keyframe counts, each
+    // track's FX, envelopes and Track Motion keyframe count, and the project's
+    // Video Output FX, markers, regions and event groups. Keyframes and points
+    // themselves come from the get_* commands.
+    object ProjectInfo(bool detail) {
         Project p = P;
         Dictionary<string, object> r = new Dictionary<string, object>();
         r["path"] = p.FilePath;
@@ -235,12 +287,25 @@ public class Commands {
             tr["index"] = t.Index;
             tr["type"] = t.IsVideo() ? "video" : "audio";
             tr["name"] = t.Name;
+            if (t.Mute) tr["mute"] = true;
+            if (t.Solo) tr["solo"] = true;
+            if (detail) TrackDetail(t, tr);
             List<object> evs = new List<object>();
-            foreach (TrackEvent ev in t.Events) evs.Add(EventInfo(ev));
+            foreach (TrackEvent ev in t.Events) {
+                Dictionary<string, object> e = EventInfo(ev);
+                if (detail) EventDetail(ev, e);
+                evs.Add(e);
+            }
             tr["events"] = evs;
             tracks.Add(tr);
         }
         r["tracks"] = tracks;
+        if (detail) {
+            r["output_effects"] = EffectsInfo(p.VideoBus.Effects);
+            Dictionary<string, object> marks = (Dictionary<string, object>)GetMarkers();
+            foreach (KeyValuePair<string, object> kv in marks) r[kv.Key] = kv.Value;
+            r["groups"] = GroupsInfo();
+        }
         List<object> media = new List<object>();
         foreach (Media m in p.MediaPool) {
             Dictionary<string, object> mi = new Dictionary<string, object>();
@@ -258,7 +323,7 @@ public class Commands {
         return r;
     }
 
-    object EventInfo(TrackEvent ev) {
+    Dictionary<string, object> EventInfo(TrackEvent ev) {
         Dictionary<string, object> e = new Dictionary<string, object>();
         e["index"] = ev.Index;
         e["name"] = ev.Name;
@@ -266,6 +331,12 @@ public class Commands {
         e["length"] = Sec(ev.Length);
         e["playback_rate"] = ev.PlaybackRate;
         e["selected"] = ev.Selected;
+        // Only when not VEGAS's default (loop is on by default), so the usual
+        // event stays short.
+        if (ev.Mute) e["mute"] = true;
+        if (ev.Locked) e["locked"] = true;
+        if (!ev.Loop) e["loop"] = false;
+        if (ev.IsGrouped) e["group"] = GroupIndex(ev);
         if (ev.ActiveTake != null) {
             Media m = ev.ActiveTake.Media;
             e["media"] = m != null ? m.KeyString : ev.ActiveTake.MediaPath;
@@ -274,7 +345,7 @@ public class Commands {
             e["media_path"] = m == null ? ev.ActiveTake.MediaPath
                             : m.IsSubclip() ? ((Subclip)m).ParentMedia.FilePath : m.FilePath;
             e["offline"] = m == null || m.IsOffline();
-            e["offset"] = Sec(ev.ActiveTake.Offset);
+            e["offset"] = MediaOffset(ev);
         }
         VideoEvent ve = ev as VideoEvent;
         if (ve != null) {
@@ -282,6 +353,32 @@ public class Commands {
             e["effects"] = EffectsInfo(ve.Effects);
         }
         return e;
+    }
+
+    // project_info's `detail` for one event: its fades, snap offset, and how
+    // many envelope points and Pan/Crop keyframes it has (get_envelopes and
+    // get_pan_crop give them).
+    void EventDetail(TrackEvent ev, Dictionary<string, object> e) {
+        e["snap_offset"] = Sec(ev.SnapOffset);
+        e["fade_in"] = FadeInfo(ev.FadeIn, ev.IsVideo(), false);
+        e["fade_out"] = FadeInfo(ev.FadeOut, ev.IsVideo(), false);
+        VideoEvent ve = ev as VideoEvent;
+        if (ve != null) {
+            e["envelopes"] = EnvelopeCounts(ve.Envelopes);
+            e["pan_crop_keyframes"] = ve.VideoMotion.Keyframes.Count;
+        }
+    }
+
+    // project_info's `detail` for one track: its FX, envelopes and, for
+    // video, its compositing and Track Motion keyframe count.
+    void TrackDetail(Track t, Dictionary<string, object> tr) {
+        tr["envelopes"] = EnvelopeCounts(t.Envelopes);
+        VideoTrack vt = t as VideoTrack;
+        if (vt == null) return;
+        tr["effects"] = EffectsInfo(vt.Effects);
+        tr["composite_level"] = vt.CompositeLevel;
+        tr["composite_mode"] = vt.CompositeMode.ToString();
+        tr["track_motion_keyframes"] = vt.TrackMotion.MotionKeyframes.Count;
     }
 
     // ---- media and events ----
@@ -309,10 +406,35 @@ public class Commands {
     }
 
     TrackEvent EventAt(Args a) {
-        Track t = TrackAt(a.Int("track"));
-        int i = a.Int("event");
-        foreach (TrackEvent ev in t.Events) if (ev.Index == i) return ev;
-        throw new BridgeError("no event " + i + " on track " + t.Index);
+        return EventAt(a.Int("track"), a.Int("event"));
+    }
+
+    TrackEvent EventAt(int track, int index) {
+        Track t = TrackAt(track);
+        foreach (TrackEvent ev in t.Events) if (ev.Index == index) return ev;
+        throw new BridgeError("no event " + index + " on track " + t.Index);
+    }
+
+    VideoEvent VideoEventAt(Args a) {
+        VideoEvent ve = EventAt(a) as VideoEvent;
+        if (ve == null) throw new BridgeError("event " + a.Int("event") + " on track " + a.Int("track") + " is not a video event");
+        return ve;
+    }
+
+    // A take's Offset is in stretched (timeline) time: the media second an
+    // event starts at is Offset x its speed (measured on build 315: Offset
+    // 1 s at rate 0.5 shows the media's 0.5 s). The bridge's `offset` is
+    // media seconds, so it reads the same at any speed.
+    static double MediaOffset(TrackEvent ev) {
+        return Sec(ev.ActiveTake.Offset) * ev.PlaybackRate;
+    }
+
+    // Set after the speed: an Offset set at the old speed is clamped to the
+    // media's length at that speed.
+    static void SetMediaOffset(TrackEvent ev, double mediaSeconds) {
+        if (ev.ActiveTake == null) throw new BridgeError("event " + ev.Index + " has no take, so no offset");
+        if (ev.PlaybackRate <= 0) throw new BridgeError("event " + ev.Index + " has speed " + ev.PlaybackRate + "; an offset needs a speed above 0");
+        ev.ActiveTake.Offset = Tc(mediaSeconds / ev.PlaybackRate);
     }
 
     object AddMedia(Args a) {
@@ -338,9 +460,10 @@ public class Commands {
             P.Tracks.Add(track);
         }
         VideoEvent ev = track.AddVideoEvent(Tc(start), Tc(length));
-        Take take = ev.AddTake(vs);
-        take.Offset = Tc(offset);
+        ev.AddTake(vs);
         ev.PlaybackRate = rate;
+        ev.Length = Tc(length);
+        SetMediaOffset(ev, offset);
         if (a.Has("resample")) ev.ResampleMode = (VideoResampleMode)Enum.Parse(typeof(VideoResampleMode), a.Str("resample"), true);
         if (a.Has("name")) ev.Name = a.Str("name");
         Dictionary<string, object> r = new Dictionary<string, object>();
@@ -352,9 +475,10 @@ public class Commands {
             if (aus != null) {
                 AudioTrack at = P.AddAudioTrack();
                 AudioEvent ae = at.AddAudioEvent(Tc(start), Tc(length));
-                Take atake = ae.AddTake(aus);
-                atake.Offset = Tc(offset);
+                ae.AddTake(aus);
                 ae.PlaybackRate = rate;
+                ae.Length = Tc(length);
+                SetMediaOffset(ae, offset);
                 if (a.Has("name")) ae.Name = a.Str("name");
                 TrackEventGroup g = new TrackEventGroup(P);
                 P.TrackEventGroups.Add(g);
@@ -368,17 +492,30 @@ public class Commands {
 
     object SetEvent(Args a) {
         TrackEvent ev = EventAt(a);
-        if (a.Has("playback_rate")) ev.PlaybackRate = a.Num("playback_rate");
+        if (a.Has("playback_rate")) {
+            // A new speed keeps the media second the event starts at, unless
+            // `offset` says another.
+            double keep = ev.ActiveTake != null ? MediaOffset(ev) : 0;
+            ev.PlaybackRate = a.Num("playback_rate");
+            if (ev.ActiveTake != null && !a.Has("offset")) SetMediaOffset(ev, keep);
+        }
         if (a.Has("start")) ev.Start = Tc(a.Num("start"));
         if (a.Has("length")) ev.Length = Tc(a.Num("length"));
-        if (a.Has("offset") && ev.ActiveTake != null) ev.ActiveTake.Offset = Tc(a.Num("offset"));
+        if (a.Has("offset")) SetMediaOffset(ev, a.Num("offset"));
         if (a.Has("name")) ev.Name = a.Str("name");
+        if (a.Has("mute")) ev.Mute = a.Bool("mute", false);
+        if (a.Has("locked")) ev.Locked = a.Bool("locked", false);
+        if (a.Has("loop")) ev.Loop = a.Bool("loop", false);
+        // Where the event snaps, in seconds from its start.
+        if (a.Has("snap_offset")) ev.SnapOffset = Tc(a.Num("snap_offset"));
         if (a.Has("resample")) {
             VideoEvent ve = ev as VideoEvent;
             if (ve == null) throw new BridgeError("resample is for video events");
             ve.ResampleMode = (VideoResampleMode)Enum.Parse(typeof(VideoResampleMode), a.Str("resample"), true);
         }
-        return EventInfo(ev);
+        Dictionary<string, object> r = EventInfo(ev);
+        r["snap_offset"] = Sec(ev.SnapOffset);
+        return r;
     }
 
     object CreateSubclip(Args a) {
@@ -426,7 +563,7 @@ public class Commands {
             double rate = ve.PlaybackRate;
             int frames = (int)Math.Round(captureFps / projectFps * rate);
             frames = Math.Max(1, Math.Min(16, frames));
-            double mediaStart = baseStart + Sec(ve.ActiveTake.Offset);
+            double mediaStart = baseStart + MediaOffset(ve);
             // The blend at the event's last frame reads `frames` captured
             // frames on from it, so the subclip runs that much longer.
             double mediaLength = Sec(ve.Length) * rate + frames / captureFps;
@@ -485,6 +622,8 @@ public class Commands {
         return r;
     }
 
+    // An FX chain: an event's (Event FX), a media's (Media FX), a video
+    // track's (Track FX) or the project's Video Output FX.
     Effects EffectsOf(Args a) {
         string target = a.Str("target", "event");
         if (target == "media") return MediaOrImport(a.Str("media")).Effects;
@@ -493,13 +632,20 @@ public class Commands {
             if (ve == null) throw new BridgeError("effects go on video events");
             return ve.Effects;
         }
-        throw new BridgeError("target is \"event\" or \"media\"");
+        if (target == "track") {
+            Track t = TrackAt(a.Int("track"));
+            if (!t.IsVideo()) throw new BridgeError("track " + t.Index + " is an audio track; video effects go on video tracks");
+            return t.Effects;
+        }
+        if (target == "output") return P.VideoBus.Effects;
+        throw new BridgeError("target is \"event\", \"media\", \"track\" or \"output\"");
     }
 
     object AddEffect(Args a) {
         string want = a.Str("effect");
         PlugInNode fx = FindPlugIn(vegas.VideoFX, want);
         if (fx == null) throw new BridgeError("no video effect named or with id \"" + want + "\" (see list_effects)");
+        RequireOFXPlugIn(fx, "effect");
         Effects chain = EffectsOf(a);
         Effect e = chain.AddEffect(fx);
         if (e == null) throw new BridgeError("VEGAS did not add " + fx.Name);
@@ -508,47 +654,28 @@ public class Commands {
     }
 
     object SetEffectParams(Args a) {
-        Effects chain = EffectsOf(a);
-        int i = a.Int("effect_index");
-        if (i < 0 || i >= chain.Count) throw new BridgeError("no effect " + i + " in that chain (" + chain.Count + ")");
-        Effect e = chain[i];
+        Effect e = EffectAt(a);
         if (a.Has("bypass")) e.Bypass = a.Bool("bypass", false);
         if (a.Has("params")) SetParams(e, a.Obj("params"));
         return EffectInfo(e);
     }
 
+    // Adding a legacy DirectX plug-in fails inside VEGAS with a bare E_FAIL.
+    static void RequireOFXPlugIn(PlugInNode node, string what) {
+        if (!node.IsOFX) throw new BridgeError(node.Name + " is a legacy DirectX " + what + "; legacy DirectX " + what + "s can't be added");
+    }
+
     static void SetParams(Effect e, Dictionary<string, object> values) {
         if (values == null) return;
-        if (!e.IsOFX || e.OFXEffect == null) throw new BridgeError(e.PlugIn.Name + " is not an OFX effect; its parameters are not scriptable");
-        foreach (KeyValuePair<string, object> kv in values) {
-            OFXParameter p = null;
-            foreach (OFXParameter q in e.OFXEffect.Parameters) {
-                if (string.Equals(q.Name, kv.Key, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(q.Label, kv.Key, StringComparison.OrdinalIgnoreCase)) { p = q; break; }
-            }
-            if (p == null) throw new BridgeError(e.PlugIn.Name + " has no parameter \"" + kv.Key + "\"");
-            if (p is OFXIntegerParameter) ((OFXIntegerParameter)p).Value = Convert.ToInt32(kv.Value);
-            else if (p is OFXDoubleParameter) ((OFXDoubleParameter)p).Value = Convert.ToDouble(kv.Value);
-            else if (p is OFXBooleanParameter) ((OFXBooleanParameter)p).Value = Convert.ToBoolean(kv.Value);
-            else if (p is OFXStringParameter) ((OFXStringParameter)p).Value = Convert.ToString(kv.Value);
-            else if (p is OFXChoiceParameter) {
-                OFXChoiceParameter c = (OFXChoiceParameter)p;
-                OFXChoice pick = null;
-                foreach (OFXChoice ch in c.Choices) if (string.Equals(ch.Name, Convert.ToString(kv.Value), StringComparison.OrdinalIgnoreCase)) pick = ch;
-                if (pick == null) throw new BridgeError("\"" + kv.Value + "\" is not a choice of " + p.Name);
-                c.Value = pick;
-            } else throw new BridgeError("parameter " + p.Name + " is a " + p.ParameterType + ", which the bridge cannot set");
-        }
+        RequireOFX(e);
+        foreach (KeyValuePair<string, object> kv in values) SetOfxValue(FindParam(e, kv.Key), kv.Value, false, null);
         e.OFXEffect.AllParametersChanged();
     }
 
     static object ParamValue(OFXParameter p) {
-        if (p is OFXIntegerParameter) return ((OFXIntegerParameter)p).Value;
-        if (p is OFXDoubleParameter) return ((OFXDoubleParameter)p).Value;
-        if (p is OFXBooleanParameter) return ((OFXBooleanParameter)p).Value;
-        if (p is OFXStringParameter) return ((OFXStringParameter)p).Value;
-        if (p is OFXChoiceParameter) { OFXChoice c = ((OFXChoiceParameter)p).Value; return c != null ? c.Name : null; }
-        return null;
+        if (!HoldsValue(p)) return null;
+        // A parameter type the API gives no Value shows without one, as before.
+        try { return OfxJson(Member(p, "Value")); } catch (BridgeError) { return null; }
     }
 
     static object EffectInfo(Effect e) {

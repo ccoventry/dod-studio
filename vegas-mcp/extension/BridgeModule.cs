@@ -29,7 +29,7 @@ using ScriptPortal.Vegas;
 namespace DodStudio.VegasBridge {
 
 public class BridgeModule : ICustomCommandModule {
-    public const string Version = "0.4";
+    public const string Version = "0.5";
 
     Vegas vegas;
     UiQueue uiThread;
@@ -168,12 +168,28 @@ public class Args {
     public object Raw(string k) { return Has(k) ? d[k] : null; }
     public string Str(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Convert.ToString(d[k]); }
     public string Str(string k, string def) { return Has(k) ? Convert.ToString(d[k]) : def; }
-    public double Num(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Convert.ToDouble(d[k]); }
-    public double Num(string k, double def) { return Has(k) ? Convert.ToDouble(d[k]) : def; }
+    public double Num(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Values.Number(d[k], "\"" + k + "\""); }
+    public double Num(string k, double def) { return Has(k) ? Values.Number(d[k], "\"" + k + "\"") : def; }
     public int Int(string k) { return (int)Num(k); }
     public int Int(string k, int def) { return Has(k) ? (int)Num(k) : def; }
     public bool Bool(string k, bool def) { return Has(k) ? Convert.ToBoolean(d[k]) : def; }
     public Dictionary<string, object> Obj(string k) { return Raw(k) as Dictionary<string, object>; }
+    // A JSON array argument (the serializer gives an ArrayList); a missing one fails with its name.
+    public IList List(string k) {
+        IList l = Raw(k) as IList;
+        if (l == null) throw new BridgeError("argument \"" + k + "\" must be a list");
+        return l;
+    }
+    // Each object of a JSON array argument as Args, so its fields get the same typed lookups.
+    public List<Args> Items(string k) {
+        List<Args> r = new List<Args>();
+        foreach (object o in List(k)) {
+            Dictionary<string, object> d = o as Dictionary<string, object>;
+            if (d == null) throw new BridgeError("each item of \"" + k + "\" must be an object");
+            r.Add(new Args(d));
+        }
+        return r;
+    }
 }
 
 public static class Log {
