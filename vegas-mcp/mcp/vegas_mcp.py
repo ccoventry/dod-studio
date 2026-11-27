@@ -20,11 +20,14 @@ import json
 import os
 import sys
 import threading
+import time
 import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also under python -I
 
 import detail_tools  # noqa: E402
+import edit_tools  # noqa: E402
+import project_compare  # noqa: E402
 import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 from bridge_pipe import Bridge, BridgeBusy, BridgeTimeout, BridgeUnavailable  # noqa: E402
@@ -45,7 +48,7 @@ SERVER_VERSION = "0.5"
 # its media, and a render takes as long as the render. `timeout_seconds`
 # on any call overrides these.
 DEFAULT_TIMEOUT_SECONDS = 120
-TIMEOUT_SECONDS = {"render": 3600, "open_project": 600, "import_edl": 600}
+TIMEOUT_SECONDS = {"render": 3600, "open_project": 600, "import_edl": 600, "compare_projects": 600}
 # import_edl waits up to its own wait_seconds for the timeline to fill; the
 # limit is at least that plus this.
 IMPORT_EDL_MARGIN_SECONDS = 60
@@ -56,6 +59,7 @@ MAX_TIMEOUT_SECONDS = 7 * 24 * 3600
 
 RESAMPLE = {"type": "string", "enum": ["Smart", "Force", "Disable", "OpticalFlow", "ProjectLevel"]}
 OFFSET = {"type": "number", "description": "seconds into the media where the event starts (media time, at any speed)"}
+PRESET = {"type": "string", "description": "a preset by name (list_presets), applied before params; an unknown one is an error"}
 
 PID = {"type": "integer", "description": "a bridge VEGAS's process id (launch, instances)"}
 
@@ -182,7 +186,13 @@ TOOLS = LOCAL_TOOLS + [
         {"media": MEDIA, "start": SECONDS, "length": SECONDS, "name": {"type": "string"}, "reverse": {"type": "boolean"}},
         ["media", "start", "length"],
     ),
-    tool("list_effects", "Installed video effects (name, unique id, OFX or not), filtered by part of a name or id.", {"filter": {"type": "string"}}),
+    tool(
+        "list_effects",
+        "Installed video effects, each once (name, unique id, OFX or not, the folders VEGAS lists it under), filtered by "
+        "part of a name or id. details=true (needs a filter, at most 30 effects) adds each one's presets and OFX "
+        "parameters: name, label, type, default, min/max and display range, choices.",
+        {"filter": {"type": "string"}, "details": {"type": "boolean", "description": "default false"}},
+    ),
     tool(
         "add_effect",
         "Add a video effect to an event (Event FX), a media/subclip (Media FX), a video track (Track FX) or the Video "
@@ -193,6 +203,7 @@ TOOLS = LOCAL_TOOLS + [
             "event": EVENT,
             "media": MEDIA,
             "effect": {"type": "string", "description": "effect name or unique id (list_effects)"},
+            "preset": PRESET,
             "params": {"type": "object", "description": "parameter name or label -> value"},
         },
         ["effect"],
@@ -207,6 +218,7 @@ TOOLS = LOCAL_TOOLS + [
             "event": EVENT,
             "media": MEDIA,
             "effect_index": {"type": "integer"},
+            "preset": PRESET,
             "params": {"type": "object"},
             "bypass": {"type": "boolean"},
         },
@@ -270,7 +282,14 @@ TOOLS = LOCAL_TOOLS + [
         {"path": {"type": "string"}, "script_args": {"type": "string"}},
         ["path"],
     ),
-] + detail_tools.TOOLS
+] + detail_tools.TOOLS + edit_tools.TOOLS
+
+# Tools whose bridge reply the server turns into the answer: compare_projects'
+# bridge half reads both projects, project_compare compares them.
+REPLY_SHAPERS = {"compare_projects": project_compare.reply}
+# Tools whose arguments the server checks itself before the bridge call: each
+# returns what is wrong, or None.
+ARGUMENT_CHECKS = {"compare_projects": project_compare.argument_problem}
 
 TIMEOUT_ARGUMENT = "timeout_seconds"
 for _t in TOOLS[len(LOCAL_TOOLS):]:
@@ -402,7 +421,7 @@ class Instances:
                 return "nothing to clean up"
             done = vegas_instances.cleanup(pid)
             launched.close_desktop()
-            return done
+            return done + launched.remove_webview_folder()
 
         return clean_up
 
@@ -531,8 +550,11 @@ class Instances:
     def end_all(self):
         """On shutdown: end every VEGAS this server started, so none stays on
         the user's screen. All are terminated first and cleaned up after, so a
-        shutdown cut short leaves as few running as possible. Never waits on a
-        pipe, so a call stuck in one of them does not hold it up."""
+        shutdown cut short leaves as few running as possible. Each is waited
+        for on a thread of its own, so one slow to exit holds up only itself,
+        and the whole takes at most END_ALL_SECONDS however many there are.
+        Never waits on a pipe, so a call stuck in one of them does not hold
+        it up."""
         with self.lock:
             launched = list(self.launched.values())
             self.launched.clear()
@@ -541,13 +563,18 @@ class Instances:
                 if not one.exited():
                     one.proc.kill()
             except OSError as e:
-                # Already gone, or going: one.end() below tries again and reports.
+                # Already gone, or going: end_on_shutdown tries again and reports.
                 log("end_all: terminating VEGAS PID %d: %s" % (one.pid, e))
-        for one in launched:
-            try:
-                log("end_all: %s" % one.end())
-            except Exception as e:  # noqa: BLE001 - best effort on the way out; the next one still gets ended
-                log("end_all: ending VEGAS PID %d failed: %s: %s" % (one.pid, type(e).__name__, e))
+        threads = [threading.Thread(target=end_on_shutdown, args=(one,), name="end VEGAS %d" % one.pid, daemon=True)
+                   for one in launched]
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + END_ALL_SECONDS
+        for one, t in zip(launched, threads):
+            t.join(max(0.0, deadline - time.monotonic()))
+            if t.is_alive():
+                log("end_all: gave up on VEGAS PID %d after %d s; it may still be running, its autosave left"
+                    % (one.pid, END_ALL_SECONDS))
 
     def run_local(self, name, args):
         if name == "launch":
@@ -559,6 +586,26 @@ class Instances:
         if name == "use":
             return self.use(args)
         raise KeyError(name)
+
+
+# end_all's bound: one VEGAS's end and its second wait, plus its clean-up.
+END_ALL_SECONDS = 2 * vegas_instances.END_WAIT_SECONDS + 15
+
+
+def end_on_shutdown(one):
+    """end_all's part for one VEGAS: end it, and when it is still exiting once
+    that gives up, wait once more and clean up after it, since its autosave
+    would block every later launch."""
+    try:
+        log("end_all: %s" % one.end())
+        return
+    except Exception as e:  # noqa: BLE001 - best effort on the way out
+        log("end_all: ending VEGAS PID %d failed: %s: %s" % (one.pid, type(e).__name__, e))
+    try:
+        one.proc.wait(vegas_instances.END_WAIT_SECONDS)
+        log("end_all: %s" % one.end())
+    except Exception as e:  # noqa: BLE001 - best effort on the way out
+        log("end_all: VEGAS PID %d is still running, its autosave left: %s: %s" % (one.pid, type(e).__name__, e))
 
 
 def pid_argument(args):
@@ -607,9 +654,12 @@ def call_tool(instances, name, arguments):
     try:
         if name in LOCAL_NAMES:
             return tool_result(instances.run_local(name, arguments))
+        problem = ARGUMENT_CHECKS[name](arguments) if name in ARGUMENT_CHECKS else None
+        if problem:
+            return tool_result(problem, False)
         reply = instances.call(name, arguments)
         ok = reply.get("ok")
-        body = reply.get("result") if ok else reply.get("error")
+        body = shaped(name, arguments, reply.get("result")) if ok else reply.get("error")
         images = []
         if ok and name == "snapshot" and arguments.get("inline", True) is not False:
             images = snapshot_images(body)
@@ -628,6 +678,12 @@ def call_tool(instances, name, arguments):
         return tool_result(str(e), False)
     except Exception as e:  # noqa: BLE001 - one bad call must not end the server, which ends every VEGAS it started
         return tool_result("%s failed: %s: %s" % (name, type(e).__name__, e), False)
+
+
+def shaped(name, arguments, body):
+    """A bridge result as the tool answers it (REPLY_SHAPERS), else as it came."""
+    shaper = REPLY_SHAPERS.get(name)
+    return shaper(body, arguments) if shaper else body
 
 
 def snapshot_images(body):
@@ -741,6 +797,8 @@ def main(argv):
             except ValueError as e:
                 raise BridgeUnavailable("the arguments are not JSON (%s): %s" % (e, rest[3]))
             reply = instances.call(rest[2], args)
+            if reply.get("ok"):
+                reply["result"] = shaped(rest[2], args, reply["result"])
             if rest[2] == "snapshot" and reply.get("ok"):
                 snapshot_images(reply["result"])  # a shell shows the paths, not pages of base64
             print(json.dumps(reply, indent=1))

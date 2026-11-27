@@ -34,7 +34,7 @@ STARTF_USESHOWWINDOW = 0x00000001
 INFINITE = 0xFFFFFFFF
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
-KILL_GRACE_MS = 2000
+ERROR_ACCESS_DENIED = 5
 GW_OWNER = 4
 # The windows a call stuck in VEGAS may be waiting on: Windows dialog boxes,
 # WinForms forms, and shown WPF windows (a render's progress is one).
@@ -134,17 +134,25 @@ class Process:
         return self.poll()
 
     def kill(self):
-        if self.poll() is None and not _k32.TerminateProcess(self._handle, 1):
-            # A process already being terminated refuses a second
-            # TerminateProcess (access denied) until it has gone.
-            error = ctypes.get_last_error()
-            if _k32.WaitForSingleObject(self._handle, KILL_GRACE_MS) != WAIT_OBJECT_0:
-                raise OSError("cannot end PID %d (error %d)" % (self.pid, error))
+        """TerminateProcess through the handle; wait() waits for the exit.
+        A process already being terminated refuses a second TerminateProcess
+        with access denied until it has gone, which a VEGAS after a long
+        render took over 2 s to do: that one is ending, so it is no error."""
+        if self.poll() is not None:
+            return
+        error = terminate(self._handle)
+        if error and error != ERROR_ACCESS_DENIED and self.poll() is None:
+            raise OSError("cannot end PID %d (error %d)" % (self.pid, error))
 
     def __del__(self):
         if self._handle:
             _k32.CloseHandle(self._handle)
             self._handle = None
+
+
+def terminate(handle):
+    """TerminateProcess on a process handle: 0 when it was done, else the Windows error."""
+    return 0 if _k32.TerminateProcess(handle, 1) else ctypes.get_last_error()
 
 
 def environment_block(env):

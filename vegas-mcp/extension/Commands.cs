@@ -21,7 +21,9 @@ using ScriptPortal.Vegas;
 namespace DodStudio.VegasBridge {
 
 // Partial: each project-detail area (keyframes, Pan/Crop, Track Motion,
-// fades and transitions, markers, envelopes, event groups) has its own file.
+// fades and transitions, markers, envelopes, event groups), presets and the
+// effect catalogue, changes to many events, and comparing projects has its
+// own file.
 public partial class Commands {
     readonly Vegas vegas;
     // Files this session saved, the only ones save_as may overwrite.
@@ -50,6 +52,11 @@ public partial class Commands {
             case "import_edl": return ImportEdl(a);
             case "save_as": return SaveAs(a);
             case "list_effects": return ListEffects(a);
+            // Not edits: a throwaway copy in an undo block that is always cancelled (Presets.cs).
+            case "list_presets": return ListPresets(a);
+            case "read_preset": return ReadPreset(a);
+            // Opens copies, then reopens the open project (CompareProjects.cs).
+            case "compare_projects": return CompareProjects(a);
             case "list_render_templates": return ListRenderTemplates(a);
             case "render": return Render(a);
             case "run_script": return RunScript(a);
@@ -117,6 +124,7 @@ public partial class Commands {
             case "set_markers": return SetMarkers;
             case "set_envelope": return SetEnvelope;
             case "group_events": return GroupEvents;
+            case "apply_to_events": return ApplyToEvents;
             default: throw new BridgeError("unknown command \"" + cmd + "\"");
         }
     }
@@ -603,25 +611,6 @@ public partial class Commands {
         return null;
     }
 
-    static void CollectPlugIns(PlugInNode node, string filter, List<object> into) {
-        foreach (PlugInNode c in node) {
-            if (c.IsContainer) { CollectPlugIns(c, filter, into); continue; }
-            if (filter.Length > 0 && c.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0 &&
-                (c.UniqueID ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            Dictionary<string, object> d = new Dictionary<string, object>();
-            d["name"] = c.Name;
-            d["id"] = c.UniqueID;
-            d["ofx"] = c.IsOFX;
-            into.Add(d);
-        }
-    }
-
-    object ListEffects(Args a) {
-        List<object> r = new List<object>();
-        CollectPlugIns(vegas.VideoFX, a.Str("filter", ""), r);
-        return r;
-    }
-
     // An FX chain: an event's (Event FX), a media's (Media FX), a video
     // track's (Track FX) or the project's Video Output FX.
     Effects EffectsOf(Args a) {
@@ -649,15 +638,22 @@ public partial class Commands {
         Effects chain = EffectsOf(a);
         Effect e = chain.AddEffect(fx);
         if (e == null) throw new BridgeError("VEGAS did not add " + fx.Name);
-        if (a.Has("params")) SetParams(e, a.Obj("params"));
-        return EffectInfo(e);
+        return WithPresetAndParams(e, a);
     }
 
     object SetEffectParams(Args a) {
         Effect e = EffectAt(a);
         if (a.Has("bypass")) e.Bypass = a.Bool("bypass", false);
+        return WithPresetAndParams(e, a);
+    }
+
+    // The preset first (Presets.cs), so `params` change it.
+    object WithPresetAndParams(Effect e, Args a) {
+        string preset = a.Has("preset") ? ApplyPreset(e, a.Str("preset")) : null;
         if (a.Has("params")) SetParams(e, a.Obj("params"));
-        return EffectInfo(e);
+        Dictionary<string, object> r = (Dictionary<string, object>)EffectInfo(e);
+        if (preset != null) r["preset_applied"] = preset;
+        return r;
     }
 
     // Adding a legacy DirectX plug-in fails inside VEGAS with a bare E_FAIL.

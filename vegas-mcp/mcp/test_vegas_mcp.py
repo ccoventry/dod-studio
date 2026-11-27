@@ -23,6 +23,7 @@ import desktops  # noqa: E402
 import snapshot_content  # noqa: E402
 import vegas_instances  # noqa: E402
 import vegas_mcp  # noqa: E402
+import webview_folders  # noqa: E402
 
 
 class PipeNames(unittest.TestCase):
@@ -175,6 +176,15 @@ class Tools(unittest.TestCase):
         import detail_tools
         self.assertIn("Hold", detail_tools.CURVE["enum"])
         self.assertNotIn("None", detail_tools.CURVE["enum"])
+
+    def test_apply_to_events_schema_refuses_unknown_keys_as_the_bridge_does(self):
+        schema = next(t for t in vegas_mcp.TOOLS if t["name"] == "apply_to_events")["inputSchema"]
+        self.assertIs(schema.get("additionalProperties"), False)
+        self.assertIn("timeout_seconds", schema["properties"])  # still allowed: the server takes it off
+        for key in ("filter", "set_event", "add_effect", "set_effect", "remove_effect", "pan_crop", "fade_in", "fade_out"):
+            self.assertIs(schema["properties"][key].get("additionalProperties"), False, key)
+        self.assertIn("all", schema["properties"]["filter"]["properties"])
+        self.assertIn("shift", schema["properties"]["set_event"]["properties"])
 
     def test_shadow_and_glow_say_they_take_reset(self):
         props = next(t for t in vegas_mcp.TOOLS if t["name"] == "set_track_motion")["inputSchema"]["properties"]
@@ -492,6 +502,150 @@ class FakeLaunched:
     def close_desktop(self):
         pass
 
+    def remove_webview_folder(self):
+        return ""
+
+
+class WebViewFolders(unittest.TestCase):
+    def test_each_launch_gets_a_fresh_folder(self):
+        with tempfile.TemporaryDirectory() as root:
+            a, b = webview_folders.new_folder(root), webview_folders.new_folder(root)
+            self.assertNotEqual(a, b)
+            self.assertTrue(os.path.isdir(a) and os.path.isdir(b))
+
+    def test_the_sweep_removes_only_folders_whose_vegas_has_gone(self):
+        with tempfile.TemporaryDirectory() as root:
+            gone, live, fresh, stale = (webview_folders.new_folder(root) for _ in range(4))
+            webview_folders.claim(gone, 1111)
+            webview_folders.claim(live, 2222)
+            old = time.time() - webview_folders.UNCLAIMED_GRACE_SECONDS - 60
+            os.utime(stale, (old, old))  # never claimed: a launch that died long ago
+            removed = webview_folders.sweep(lambda pid: pid == 2222, root)
+            self.assertEqual(sorted(removed), sorted([gone, stale]))
+            self.assertTrue(os.path.isdir(live) and os.path.isdir(fresh))
+
+    def test_a_launched_vegas_removes_its_folder_once_it_has_exited(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = webview_folders.new_folder(root)
+
+            class Proc:
+                pid = 4242
+                returncode = None
+
+                def poll(self):
+                    return self.returncode
+
+            proc = Proc()
+            launched = vegas_instances.Launched(proc, webview_folder=folder)
+            self.assertEqual(launched.remove_webview_folder(), "")  # still running: kept
+            proc.returncode = 1
+            self.assertIn("removed its WebView2 folder", launched.remove_webview_folder())
+            self.assertFalse(os.path.exists(folder))
+
+    def test_launch_sets_the_webview2_variable(self):
+        self.assertEqual(webview_folders.VARIABLE, "WEBVIEW2_USER_DATA_FOLDER")
+        self.assertTrue(webview_folders.parent().startswith(tempfile.gettempdir()))
+
+    def test_the_sweep_touches_only_folders_it_made(self):
+        with tempfile.TemporaryDirectory() as root:
+            old = time.time() - webview_folders.UNCLAIMED_GRACE_SECONDS - 60
+            other = os.path.join(root, "someone-elses")
+            os.makedirs(other)
+            open(os.path.join(other, webview_folders.PID_FILE), "w").close()
+            a_file = os.path.join(root, webview_folders.PREFIX + "not-a-folder")
+            open(a_file, "w").close()
+            for path in (other, a_file):
+                os.utime(path, (old, old))
+            self.assertEqual(webview_folders.sweep(lambda pid: False, root), [])
+            self.assertTrue(os.path.isdir(other) and os.path.isfile(a_file))
+
+    def test_an_empty_pid_file_is_a_claim_being_written_not_pid_0(self):
+        with tempfile.TemporaryDirectory() as root:
+            fresh, stale = webview_folders.new_folder(root), webview_folders.new_folder(root)
+            for path in (fresh, stale):
+                open(os.path.join(path, webview_folders.PID_FILE), "w").close()
+            old = time.time() - webview_folders.UNCLAIMED_GRACE_SECONDS - 60
+            os.utime(stale, (old, old))
+            self.assertIsNone(webview_folders.claimed_pid(fresh))
+            self.assertEqual(webview_folders.sweep(lambda pid: False, root), [stale])
+            self.assertTrue(os.path.isdir(fresh))
+
+
+class FakeStartedVegas:
+    """A process launch started: running until killed."""
+
+    def __init__(self, pid=4242):
+        self.pid = pid
+        self.returncode = None
+        self.killed = 0
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed += 1
+        self.returncode = 1
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class LaunchCleansUpAfterAFailure(unittest.TestCase):
+    """What launch made before a step failed (its WebView2 folder, the VEGAS
+    it started) is gone again."""
+
+    def setUp(self):
+        self.root = tempfile.TemporaryDirectory()
+        self.folders = os.path.join(self.root.name, "webview2")
+        os.makedirs(self.folders)
+        self.proc = FakeStartedVegas()
+        stubs = {
+            (vegas_instances, "checked_work_folder"): lambda root: self.root.name,
+            (vegas_instances, "vegas_exe"): lambda: sys.executable,
+            (vegas_instances, "orphan_autosaves"): lambda: [],
+            (vegas_instances, "vegas_pids"): lambda: [],
+            (vegas_instances, "bridge_pids"): lambda: [],
+            (vegas_instances, "cleanup"): lambda pid, folder=None: "cleaned",
+            (vegas_instances.desktops, "start"): lambda command, env, show, desktop: self.proc,
+            (webview_folders, "parent"): lambda: self.folders,
+        }
+        self.real = {k: getattr(*k) for k in stubs}
+        for (module, name), value in stubs.items():
+            setattr(module, name, value)
+
+    def tearDown(self):
+        for (module, name), value in self.real.items():
+            setattr(module, name, value)
+        self.root.cleanup()
+
+    def test_a_failed_claim_ends_the_vegas_it_started_and_removes_its_folder(self):
+        real_claim = webview_folders.claim
+
+        def refuse(path, pid):
+            raise OSError("disk full")
+        webview_folders.claim = refuse
+        try:
+            with self.assertRaises(OSError):
+                vegas_instances.launch(wait_seconds=1, minimised=False)
+        finally:
+            webview_folders.claim = real_claim
+        self.assertEqual(self.proc.killed, 1)
+        self.assertEqual(os.listdir(self.folders), [])
+
+    def test_a_desktop_windows_refuses_removes_the_new_folder(self):
+        real = vegas_instances.new_desktop
+
+        def refuse():
+            raise vegas_instances.VegasError("cannot start VEGAS on a hidden desktop: refused")
+        vegas_instances.new_desktop = refuse
+        try:
+            with self.assertRaises(vegas_instances.VegasError):
+                vegas_instances.launch(wait_seconds=1, minimised=True)
+        finally:
+            vegas_instances.new_desktop = real
+        self.assertEqual(self.proc.killed, 0)  # never started
+        self.assertEqual(os.listdir(self.folders), [])
+
 
 class FakeVegasState:
     """bridge_pids and cleanup replaced for one test; cleanup calls are recorded."""
@@ -528,6 +682,84 @@ class FakeVegasState:
             t.join()
             self.lock_free_during_cleanup.append(free[0])
         return "cleaned"
+
+
+class SlowExit:
+    """A process that refuses to be terminated again and exits only after
+    `waits` waits: a VEGAS that takes long to go after a long render."""
+
+    def __init__(self, pid, waits):
+        self.pid = pid
+        self.waits = waits
+        self.gone = False
+
+    def poll(self):
+        return 1 if self.gone else None
+
+    def kill(self):
+        raise OSError("cannot end PID %d (error 5)" % self.pid)
+
+    def wait(self, timeout=None):
+        self.waits -= 1
+        if self.waits > 0:
+            raise subprocess.TimeoutExpired("vegas", timeout)
+        self.gone = True
+        return 1
+
+
+class SlowExitCleanUp(unittest.TestCase):
+    def setUp(self):
+        self.real = vegas_instances.close_problem_reports, vegas_instances.HANDLE_RELEASE_SECONDS
+        vegas_instances.close_problem_reports = lambda pid: []
+        vegas_instances.HANDLE_RELEASE_SECONDS = 0
+
+    def tearDown(self):
+        vegas_instances.close_problem_reports, vegas_instances.HANDLE_RELEASE_SECONDS = self.real
+
+    def test_a_refused_kill_still_waits_and_cleans_up(self):
+        with tempfile.TemporaryDirectory() as folder:
+            autosave = os.path.join(folder, "%08x.autosave.veg" % 4242)
+            open(autosave, "w").close()
+            launched = vegas_instances.Launched(SlowExit(4242, waits=1))
+            self.assertIn("removed its autosave", launched.end(folder))
+            self.assertFalse(os.path.exists(autosave))
+
+    def test_end_all_cleans_up_a_vegas_that_was_still_exiting(self):
+        cleaned = []
+        real_cleanup = vegas_instances.cleanup
+        vegas_instances.cleanup = lambda pid, folder=None: cleaned.append(pid) or "cleaned"
+        try:
+            instances = vegas_mcp.Instances()
+            instances.launched[4242] = vegas_instances.Launched(SlowExit(4242, waits=2))  # past end's own wait
+            instances.end_all()
+        finally:
+            vegas_instances.cleanup = real_cleanup
+        self.assertEqual(cleaned, [4242])
+        self.assertEqual(instances.launched, {})
+
+    def test_end_all_waits_for_stuck_vegas_side_by_side_within_one_bound(self):
+        class Stuck(SlowExit):
+            """Never exits; each wait takes its whole timeout."""
+
+            def wait(self, timeout=None):
+                time.sleep(timeout)
+                raise subprocess.TimeoutExpired("vegas", timeout)
+
+        real = vegas_instances.END_WAIT_SECONDS, vegas_mcp.END_ALL_SECONDS, vegas_instances.cleanup
+        vegas_instances.END_WAIT_SECONDS, vegas_mcp.END_ALL_SECONDS = 0.3, 1.0
+        vegas_instances.cleanup = lambda pid, folder=None: "cleaned"
+        try:
+            instances = vegas_mcp.Instances()
+            for pid in (4242, 4343, 4444, 4545):
+                instances.launched[pid] = vegas_instances.Launched(Stuck(pid, waits=0))
+            began = time.monotonic()
+            instances.end_all()
+            took = time.monotonic() - began
+        finally:
+            vegas_instances.END_WAIT_SECONDS, vegas_mcp.END_ALL_SECONDS, vegas_instances.cleanup = real
+        # One after another, four would take 4 x 0.6 s; side by side they share the 1 s bound.
+        self.assertLess(took, 1.6)
+        self.assertEqual(instances.launched, {})
 
 
 class EndAndCleanUp(unittest.TestCase):
@@ -658,6 +890,21 @@ class HiddenDesktop(unittest.TestCase):
             self.assertIn("PID %d" % proc.pid, launched.end(folder))  # a second kill of a dying process is no error
         self.assertTrue(launched.exited())
         self.assertIsNone(desk.handle)
+
+    def test_kill_takes_access_denied_as_already_ending(self):
+        # A VEGAS being terminated refuses a second TerminateProcess until it
+        # has gone, which took over 2 s after a long render.
+        real = desktops.terminate
+        try:
+            proc = desktops.Process(None, 4242)
+            proc.poll = lambda: None  # still running
+            desktops.terminate = lambda handle: desktops.ERROR_ACCESS_DENIED
+            proc.kill()  # no error
+            desktops.terminate = lambda handle: 87
+            with self.assertRaises(OSError):
+                proc.kill()
+        finally:
+            desktops.terminate = real
 
     def test_the_environment_block_is_sorted_and_double_terminated(self):
         block = desktops.environment_block({"b": "2", "A": "1"})

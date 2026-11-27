@@ -39,6 +39,7 @@ import threading
 import time
 
 import desktops
+import webview_folders
 
 PIPE_DIR = "\\\\.\\pipe\\"
 PIPE_PREFIX = "dodstudio-vegas-"
@@ -237,7 +238,9 @@ def orphan_autosaves(folder=None):
     return sorted(found)
 
 
-END_WAIT_SECONDS = 15
+# A VEGAS took over 2 s to exit after being ended following a long render;
+# this leaves room for a slower one.
+END_WAIT_SECONDS = 30
 # VEGAS takes 7-14 s to open its pipe on this PC; this allows a slow disk.
 DEFAULT_WAIT_SECONDS = 120
 STARTUP_POLL_SECONDS = 0.25
@@ -250,12 +253,14 @@ class Launched:
     desktops.Process) keeps the process handle open, so Windows cannot give
     its PID to another process (the user's next VEGAS) while this record
     exists, and ending it goes through that handle. `desktop` is the hidden
-    desktop it runs on, closed once it has ended."""
+    desktop it runs on, closed once it has ended; `webview_folder` its own
+    WebView2 data (webview_folders.py), removed then too."""
 
-    def __init__(self, proc, desktop=None):
+    def __init__(self, proc, desktop=None, webview_folder=None):
         self.proc = proc
         self.pid = proc.pid
         self.desktop = desktop
+        self.webview_folder = webview_folder
 
     def exited(self):
         return self.proc.poll() is not None
@@ -264,11 +269,16 @@ class Launched:
         """Terminate it through its own handle, then clean up after it
         (folder: where its autosave is, for tests)."""
         if not self.exited():
-            self.proc.kill()  # TerminateProcess on the handle it holds
+            refused = None
+            try:
+                self.proc.kill()  # TerminateProcess on the handle it holds
+            except OSError as e:
+                refused = e  # it may be going anyway: the wait decides
             try:
                 self.proc.wait(END_WAIT_SECONDS)
             except subprocess.TimeoutExpired:
-                raise VegasError("VEGAS PID %d did not exit within %d s of being ended" % (self.pid, END_WAIT_SECONDS))
+                raise VegasError("VEGAS PID %d did not exit within %d s of being ended%s"
+                                 % (self.pid, END_WAIT_SECONDS, " (%s)" % refused if refused else ""))
             what = "ended VEGAS PID %d" % self.pid
         else:
             what = "VEGAS PID %d had already exited" % self.pid
@@ -276,12 +286,21 @@ class Launched:
         # clean-up comes before the desktop handle goes.
         done = what + "; " + cleanup(self.pid, folder)
         self.close_desktop()
-        return done
+        return done + self.remove_webview_folder()
 
     def close_desktop(self):
         if self.desktop is not None:
             self.desktop.close()
             self.desktop = None
+
+    def remove_webview_folder(self):
+        """'; <what happened to its WebView2 folder>', or '' when it had none.
+        Only once it has exited."""
+        if self.webview_folder is None or not self.exited():
+            return ""
+        done = webview_folders.remove(self.webview_folder)
+        self.webview_folder = None
+        return "; " + done
 
 
 def new_desktop():
@@ -343,7 +362,19 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
     # A command-line string, so the script path is quoted after the colon the
     # way VEGAS reads it (-SCRIPT:"C:\a b\start_vegas.cs").
     command = '"%s" -SCRIPT:"%s"' % (exe, START_SCRIPT)
-    desktop = new_desktop() if minimised else None
+    # Its own WebView2 folder: sharing the user's from another desktop makes
+    # their VEGAS's Hub fail on their screen (webview_folders.py).
+    webview_folders.sweep(is_vegas)
+    try:
+        webview = webview_folders.new_folder()
+    except OSError as e:
+        raise VegasError("cannot create a WebView2 folder for VEGAS: %s" % e)
+    env[webview_folders.VARIABLE] = webview
+    try:
+        desktop = new_desktop() if minimised else None
+    except BaseException:
+        webview_folders.remove(webview, wait_seconds=0)
+        raise
     try:
         # Minimised on its hidden desktop too: snapshot and the dialog
         # answerer were measured on a minimised VEGAS. Never takes focus.
@@ -351,9 +382,12 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
     except OSError as e:
         if desktop is not None:
             desktop.close()
+        webview_folders.remove(webview, wait_seconds=0)
         raise VegasError("cannot start VEGAS: %s" % e)
-    launched = Launched(proc, desktop)
+    launched = Launched(proc, desktop, webview)
     try:
+        # Inside the try: a claim that fails still ends the VEGAS just started.
+        webview_folders.claim(webview, launched.pid)
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             if launched.exited():
@@ -444,8 +478,10 @@ def end_bridge_pid(pid):
             raise VegasError("PID %d is not VEGAS (%s): left alone" % (pid, image or "unknown"))
         if pid not in bridge_pids():
             raise VegasError("PID %d has no bridge pipe: not a VEGAS started for the bridge, so it is left alone" % pid)
-        if not _k32.TerminateProcess(h, 1):
-            raise VegasError("cannot end VEGAS PID %d (error %d)" % (pid, ctypes.get_last_error()))
+        error = desktops.terminate(h)
+        # Access denied: it is being terminated already (desktops.Process.kill); the wait decides.
+        if error and error != desktops.ERROR_ACCESS_DENIED:
+            raise VegasError("cannot end VEGAS PID %d (error %d)" % (pid, error))
         if _k32.WaitForSingleObject(h, END_WAIT_SECONDS * 1000) != WAIT_OBJECT_0:
             raise VegasError("VEGAS PID %d did not exit within %d s of being ended" % (pid, END_WAIT_SECONDS))
     finally:

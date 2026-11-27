@@ -165,6 +165,7 @@ public class Args {
     readonly Dictionary<string, object> d;
     public Args(Dictionary<string, object> d) { this.d = d ?? new Dictionary<string, object>(); }
     public bool Has(string k) { return d.ContainsKey(k) && d[k] != null; }
+    public ICollection<string> Keys { get { return d.Keys; } }
     public object Raw(string k) { return Has(k) ? d[k] : null; }
     public string Str(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Convert.ToString(d[k]); }
     public string Str(string k, string def) { return Has(k) ? Convert.ToString(d[k]) : def; }
