@@ -82,7 +82,7 @@ TOOLS = [
         "get_pan_crop",
         "Read a video event's Pan/Crop keyframes: time (s from the event's start), bounds (the four corners of the part "
         "of the source shown: top-left, top-right, bottom-right, bottom-left, in the source media's own pixels, y down), "
-        "center, width, height, zoom (vs the default frame: the whole media, the box VEGAS gives a new event), rotation "
+        "center, width, height, zoom (vs the default frame: the whole media, upright if its stream is turned a quarter; the box VEGAS gives a new event), rotation "
         "(degrees; positive turns the picture anticlockwise), smoothness, interpolation.",
         {"track": TRACK_REQUIRED, "event": EVENT},
         ["track", "event"],
@@ -141,7 +141,7 @@ TOOLS = [
     tool(
         "get_track_motion",
         "Read a video track's Track Motion: keyframes (time in project seconds, x and y in project pixels from the frame's "
-        "centre with y up, width and height in project pixels, rotation in degrees, smoothness, interpolation), and its "
+        "centre with y up, width and height in project pixels, rotation in degrees with positive clockwise, smoothness, interpolation), and its "
         "2D shadow and glow (enabled, keyframes with blur, intensity, color).",
         {"track": TRACK_REQUIRED},
         ["track"],
@@ -149,7 +149,7 @@ TOOLS = [
     tool(
         "set_track_motion",
         "Set a video track's Track Motion keyframes (time in project seconds; x, y from the frame's centre, y up, project "
-        "pixels; width/height or scale 1 = the whole frame; rotation degrees). A field a keyframe leaves out keeps the "
+        "pixels; width/height or scale 1 = the whole frame; rotation degrees, positive clockwise).A field a keyframe leaves out keeps the "
         "track's value there. shadow and glow take {enabled, keyframes, mode}. Returns get_track_motion.",
         {
             "track": TRACK_REQUIRED,
