@@ -1,8 +1,10 @@
 // Track Motion: a video track's position, size and rotation keyframes, and
 // its 2D shadow and glow, get_track_motion and set_track_motion. Positions
 // are project pixels from the frame's centre, x right and y up; width and
-// height are project pixels (the whole frame at first); rotation in degrees;
-// times are seconds from the project's start.
+// height are project pixels (the whole frame at first); rotation in degrees,
+// which is what VEGAS keeps in RotationZ (1.5708 there turned the picture
+// 1.5 degrees, not 90), unlike Pan/Crop's radians; times are seconds from the
+// project's start.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -50,7 +52,7 @@ public partial class Commands {
         d["y"] = Values.Round(k.PositionY);
         d["width"] = Values.Round(k.Width);
         d["height"] = Values.Round(k.Height);
-        d["rotation"] = Values.Degrees(k.RotationZ);
+        d["rotation"] = Values.Round(k.RotationZ);
         d["smoothness"] = Values.Round(k.Smoothness);
         d["interpolation"] = k.Type.ToString();
         TrackShadowKeyframe s = k as TrackShadowKeyframe;
@@ -144,7 +146,7 @@ public partial class Commands {
         if (s.Has("y")) k.PositionY = s.Num("y");
         if (s.Has("width")) k.Width = s.Num("width");
         if (s.Has("height")) k.Height = s.Num("height");
-        if (s.Has("rotation")) k.RotationZ = Values.Radians(s.Num("rotation"));
+        if (s.Has("rotation")) k.RotationZ = s.Num("rotation");
         if (s.Has("smoothness")) k.Smoothness = s.Num("smoothness");
         if (s.Has("interpolation")) k.Type = Values.Enum<VideoKeyframeType>(s.Str("interpolation"), "interpolation");
         TrackShadowKeyframe sh = k as TrackShadowKeyframe;
