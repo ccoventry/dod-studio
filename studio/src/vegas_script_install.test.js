@@ -27,11 +27,11 @@ beforeEach(() => {
 });
 
 describe('startVegasScriptInstall', () => {
-  it('toasts where the script went and how to see it in VEGAS', async () => {
-    startVegasScriptInstall({ install: async () => 'C:\\Docs\\Vegas Script Menu\\DoD Studio Nameplates.cs' });
+  it('toasts where the scripts went and how to see them in VEGAS', async () => {
+    startVegasScriptInstall({ install: async () => 'C:\\Docs\\Vegas Script Menu' });
     await button.click();
     const [text, kind] = showToast.mock.calls[0];
-    expect(text).toContain('C:\\Docs\\Vegas Script Menu\\DoD Studio Nameplates.cs');
+    expect(text).toContain('Scripts copied to C:\\Docs\\Vegas Script Menu');
     expect(text).toContain('Tools > Scripting > Rescan Script Menu Folder');
     expect(kind).toBe('success');
   });
