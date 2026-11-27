@@ -15,17 +15,48 @@ public partial class Commands {
     // The changes apply_to_events knows, in the order it makes them.
     static readonly string[] BatchChanges = { "set_event", "add_effect", "set_effect", "remove_effect", "pan_crop", "fade_in", "fade_out" };
 
+    static readonly string[] FilterKeys = { "all", "track", "tracks", "start", "end", "media", "name", "selected", "type" };
+
+    // What each change takes. A key it does not know is refused rather than
+    // dropped: a typo would otherwise make the change to every event the
+    // filter picks without the part that was meant.
+    static readonly Dictionary<string, string[]> BatchChangeKeys = new Dictionary<string, string[]> {
+        { "set_event", new string[] { "playback_rate", "start", "shift", "length", "offset", "resample", "name", "mute", "locked", "loop", "snap_offset" } },
+        { "add_effect", new string[] { "effect", "preset", "params", "target" } },
+        { "set_effect", new string[] { "effect", "preset", "params", "bypass", "target" } },
+        { "remove_effect", new string[] { "effect", "target" } },
+        { "pan_crop", new string[] { "keyframes", "zoom", "pan", "mode", "reset" } },
+        { "fade_in", new string[] { "length", "curve", "reciprocal_curve", "transition", "preset", "params" } },
+        { "fade_out", new string[] { "length", "curve", "reciprocal_curve", "transition", "preset", "params" } },
+    };
+
+    static void RefuseUnknownKeys(IEnumerable<string> keys, string[] known, string what) {
+        List<string> unknown = new List<string>();
+        foreach (string k in keys) if (Array.IndexOf(known, k) < 0) unknown.Add(k);
+        if (unknown.Count > 0)
+            throw new BridgeError(what + " has no \"" + string.Join("\", \"", unknown.ToArray()) + "\"; it takes " + string.Join(", ", known));
+    }
+
     object ApplyToEvents(Args a) {
-        if (!a.Has("filter")) throw new BridgeError("missing argument \"filter\" ({} picks every event)");
+        List<string> known = new List<string>(BatchChanges);
+        known.Add("filter");
+        RefuseUnknownKeys(a.Keys, known.ToArray(), "apply_to_events");
+        if (!a.Has("filter")) throw new BridgeError("missing argument \"filter\" ({\"all\": true} picks every event)");
+        if (a.Obj("filter") == null) throw new BridgeError("filter must be an object");
         Args filter = new Args(a.Obj("filter"));
         bool any = false;
-        foreach (string c in BatchChanges) any |= a.Has(c);
+        foreach (string c in BatchChanges) {
+            if (!a.Has(c)) continue;
+            any = true;
+            if (a.Obj(c) == null) throw new BridgeError(c + " must be an object");
+            RefuseUnknownKeys(a.Obj(c).Keys, BatchChangeKeys[c], c);
+        }
         if (!any) throw new BridgeError("nothing to change: give one or more of " + string.Join(", ", BatchChanges));
         List<TrackEvent> picked = PickEvents(filter);
         if (picked.Count == 0) throw new BridgeError("no event matches the filter (project_info lists the events)");
         List<object> changed = new List<object>();
         List<object> skipped = new List<object>();
-        // A media's Media FX gets an add_effect once, however many events play it.
+        // A media's Media FX gets each change once, however many events play it.
         Dictionary<string, bool> mediaDone = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (TrackEvent ev in picked) {
             List<string> done = new List<string>();
@@ -44,7 +75,29 @@ public partial class Commands {
         reply["matched"] = picked.Count;
         reply["changed"] = changed;
         if (skipped.Count > 0) reply["skipped"] = skipped;
+        if (a.Has("set_event")) {
+            List<object> overlaps = OverlapsWithUnpicked(picked);
+            if (overlaps.Count > 0) reply["warnings"] = overlaps;
+        }
         return reply;
+    }
+
+    // Each picked event that now overlaps an event on its track the filter
+    // did not pick: a shift or a longer event can land on a neighbour, which
+    // VEGAS allows (the two then play as a crossfade).
+    static List<object> OverlapsWithUnpicked(List<TrackEvent> picked) {
+        List<object> r = new List<object>();
+        foreach (TrackEvent ev in picked) {
+            foreach (TrackEvent other in ev.Track.Events) {
+                if (picked.Contains(other)) continue;
+                if (other.Start >= ev.End || ev.Start >= other.End) continue;
+                Dictionary<string, object> w = EventRefInfo(ev);
+                w["overlaps"] = EventRefInfo(other);
+                w["why"] = "now overlaps an event the filter did not pick";
+                r.Add(w);
+            }
+        }
+        return r;
     }
 
     // One change to one event. Returns why it was skipped, or null when made
@@ -57,7 +110,7 @@ public partial class Commands {
             // shift: move by seconds, each event from its own start.
             if (d.ContainsKey("shift")) {
                 if (d.ContainsKey("start")) throw new BridgeError("set_event takes start or shift, not both");
-                d["start"] = Sec(ev.Start) + Convert.ToDouble(d["shift"]);
+                d["start"] = Sec(ev.Start) + Values.Number(d["shift"], "set_event's shift");
                 d.Remove("shift");
             }
             SetEvent(ForEvent(ev, d));
@@ -86,9 +139,13 @@ public partial class Commands {
             if (ev.ActiveTake == null || ev.ActiveTake.Media == null) return "no media to put a Media FX on";
             args["media"] = ev.ActiveTake.Media.KeyString;
         }
+        if (media) {
+            string once = change + " " + ev.ActiveTake.Media.KeyString;
+            // The chain is the media's, so an event playing the same media again would repeat it.
+            if (mediaDone.ContainsKey(once)) return "its media's Media FX had this " + change + " for an earlier event";
+            mediaDone[once] = true;
+        }
         if (change == "add_effect") {
-            if (media && mediaDone.ContainsKey(ev.ActiveTake.Media.KeyString)) return "its media's Media FX already got it from an earlier event";
-            if (media) mediaDone[ev.ActiveTake.Media.KeyString] = true;
             Dictionary<string, object> r = (Dictionary<string, object>)AddEffect(ForEvent(ev, args));
             done.Add("add_effect " + r["name"] + " at " + (media ? "Media FX " : "Event FX ") + r["index"]);
             return null;
@@ -133,15 +190,22 @@ public partial class Commands {
 
     // filter: track or tracks, start/end (events overlapping that stretch of
     // the timeline), media (part of the file path or subclip key), name (part
-    // of the event's name), selected, type (video or audio); {} picks every
-    // event. All given must hold.
+    // of the event's name), selected, type (video or audio). All given must
+    // hold. Every event takes {"all": true}, alone: an empty filter is refused,
+    // since a filter whose keys were all mistyped would otherwise be one.
     List<TrackEvent> PickEvents(Args f) {
+        RefuseUnknownKeys(f.Keys, FilterKeys, "filter");
+        if (f.Keys.Count == 0) throw new BridgeError("filter is empty: give {\"all\": true} to change every event");
+        if (f.Has("all")) {
+            if (!f.Bool("all", false)) throw new BridgeError("filter all is true or left out");
+            if (f.Keys.Count > 1) throw new BridgeError("filter all picks every event, so it goes alone");
+        }
         List<int> tracks = null;
         if (f.Has("track")) tracks = new List<int>(new int[] { f.Int("track") });
         if (f.Has("tracks")) {
             if (tracks != null) throw new BridgeError("filter takes track or tracks, not both");
             tracks = new List<int>();
-            foreach (object o in f.List("tracks")) tracks.Add(Convert.ToInt32(o));
+            foreach (object o in f.List("tracks")) tracks.Add((int)Values.Number(o, "filter tracks"));
         }
         if (tracks != null) foreach (int i in tracks) TrackAt(i);  // an unknown track is an error, not "no match"
         string type = f.Str("type", "");

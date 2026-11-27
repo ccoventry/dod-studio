@@ -370,7 +370,11 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
     except OSError as e:
         raise VegasError("cannot create a WebView2 folder for VEGAS: %s" % e)
     env[webview_folders.VARIABLE] = webview
-    desktop = new_desktop() if minimised else None
+    try:
+        desktop = new_desktop() if minimised else None
+    except BaseException:
+        webview_folders.remove(webview, wait_seconds=0)
+        raise
     try:
         # Minimised on its hidden desktop too: snapshot and the dialog
         # answerer were measured on a minimised VEGAS. Never takes focus.
@@ -381,8 +385,9 @@ def launch(root=None, wait_seconds=DEFAULT_WAIT_SECONDS, minimised=True, owned=F
         webview_folders.remove(webview, wait_seconds=0)
         raise VegasError("cannot start VEGAS: %s" % e)
     launched = Launched(proc, desktop, webview)
-    webview_folders.claim(webview, launched.pid)
     try:
+        # Inside the try: a claim that fails still ends the VEGAS just started.
+        webview_folders.claim(webview, launched.pid)
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             if launched.exited():

@@ -90,13 +90,7 @@ public partial class Commands {
         // Set on the effect the fade holds, in case assigning copied it.
         Effect live = f.Transition as Effect;
         if (live == null) throw new BridgeError("VEGAS did not put " + node.Name + " on the fade");
-        if (a.Has("preset")) {
-            string preset = a.Str("preset");
-            bool found = false;
-            foreach (EffectPreset p in live.Presets) if (string.Equals(p.Name, preset, StringComparison.OrdinalIgnoreCase)) { preset = p.Name; found = true; }
-            if (!found) throw new BridgeError(node.Name + " has no preset \"" + preset + "\"");
-            live.Preset = preset;
-        }
+        if (a.Has("preset")) ApplyPreset(live, a.Str("preset"));
         if (a.Has("params")) SetParams(live, a.Obj("params"));
     }
 

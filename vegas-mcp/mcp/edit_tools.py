@@ -5,9 +5,21 @@ compare_projects' comparison itself is project_compare.py, run on the
 bridge's reply.
 """
 
-from tool_schema import tool
+from tool_schema import SECONDS, tool
 
-KIND = {"type": "string", "enum": ["effect", "transition"], "description": "a video effect (default) or a transition"}
+
+def closed(description, properties, required=()):
+    """An object argument that takes only these keys, as the bridge's
+    apply_to_events does (Batch.cs refuses any other)."""
+    return {"type": "object", "description": description, "properties": properties, "required": list(required),
+            "additionalProperties": False}
+
+
+FADE = {
+    "length": SECONDS, "curve": {"type": "string"}, "reciprocal_curve": {"type": "string"},
+    "transition": {"type": "string"}, "preset": {"type": "string"}, "params": {"type": "object"},
+}
+KIND ={"type": "string", "enum": ["effect", "transition"], "description": "a video effect (default) or a transition"}
 PLUGIN = {"type": "string", "description": "name or unique id (list_effects, list_transitions)"}
 EFFECT_TARGET = {"type": "string", "enum": ["event", "media"],
                  "description": "event (default): each event's Event FX; media: the Media FX of the media each event plays"}
@@ -34,13 +46,16 @@ TOOLS = [
         "set_event fields (or shift, seconds to move each), add_effect (with preset and params), set_effect (preset, "
         "params or bypass on every effect of that plug-in already in the chain), remove_effect, pan_crop (set_pan_crop's "
         "arguments, e.g. a zoom), fade_in / fade_out (set_fade's arguments). Each runs that tool for each event, so its "
-        "arguments mean the same; effect and Pan/Crop changes skip audio events. Returns what changed on which event, and "
-        "what was skipped and why.",
+        "arguments mean the same; effect and Pan/Crop changes skip audio events, and a Media FX change is made once per "
+        "media. An unknown key anywhere is refused. Returns what changed on which event, what was skipped and why, and "
+        "warnings where a moved or longer event now overlaps one the filter did not pick.",
         {
             "filter": {
                 "type": "object",
-                "description": "all given must hold; {} picks every event",
+                "description": "all given must hold; {\"all\": true} (alone) picks every event, and an empty filter is refused",
+                "additionalProperties": False,
                 "properties": {
+                    "all": {"type": "boolean", "enum": [True], "description": "every event"},
                     "track": {"type": "integer"},
                     "tracks": {"type": "array", "items": {"type": "integer"}},
                     "start": {"type": "number", "description": "events overlapping the timeline from here (seconds)"},
@@ -51,23 +66,27 @@ TOOLS = [
                     "type": {"type": "string", "enum": ["video", "audio"]},
                 },
             },
-            "set_event": {"type": "object", "description": "set_event's fields (playback_rate, length, offset, name, mute, "
-                          "locked, loop, resample, snap_offset, start) or shift"},
-            "add_effect": {"type": "object", "description": "{effect, preset, params, target}",
-                           "properties": {"effect": PLUGIN, "preset": {"type": "string"}, "params": {"type": "object"},
-                                          "target": EFFECT_TARGET},
-                           "required": ["effect"]},
-            "set_effect": {"type": "object", "description": "{effect, preset, params, bypass, target}",
-                           "properties": {"effect": PLUGIN, "preset": {"type": "string"}, "params": {"type": "object"},
-                                          "bypass": {"type": "boolean"}, "target": EFFECT_TARGET},
-                           "required": ["effect"]},
-            "remove_effect": {"type": "object", "description": "{effect, target}: every effect of that plug-in in the chain",
-                              "properties": {"effect": PLUGIN, "target": EFFECT_TARGET}, "required": ["effect"]},
-            "pan_crop": {"type": "object", "description": "set_pan_crop's arguments (keyframes, zoom, pan, mode, reset)"},
-            "fade_in": {"type": "object", "description": "set_fade's arguments (length, curve, transition, preset, params)"},
-            "fade_out": {"type": "object", "description": "set_fade's arguments"},
+            "set_event": closed("set_event's fields, with shift (seconds to move each event) in place of start", {
+                "playback_rate": {"type": "number"}, "start": SECONDS, "shift": SECONDS, "length": SECONDS,
+                "offset": {"type": "number", "description": "media seconds"}, "resample": {"type": "string"},
+                "name": {"type": "string"}, "mute": {"type": "boolean"}, "locked": {"type": "boolean"},
+                "loop": {"type": "boolean"}, "snap_offset": SECONDS}),
+            "add_effect": closed("{effect, preset, params, target}", {
+                "effect": PLUGIN, "preset": {"type": "string"}, "params": {"type": "object"}, "target": EFFECT_TARGET},
+                ["effect"]),
+            "set_effect": closed("{effect, preset, params, bypass, target}", {
+                "effect": PLUGIN, "preset": {"type": "string"}, "params": {"type": "object"}, "bypass": {"type": "boolean"},
+                "target": EFFECT_TARGET}, ["effect"]),
+            "remove_effect": closed("{effect, target}: every effect of that plug-in in the chain",
+                                    {"effect": PLUGIN, "target": EFFECT_TARGET}, ["effect"]),
+            "pan_crop": closed("set_pan_crop's arguments", {
+                "keyframes": {"type": "array", "items": {"type": "object"}}, "zoom": {"type": "object"},
+                "pan": {"type": "object"}, "mode": {"type": "string", "enum": ["replace", "add"]}, "reset": {"type": "boolean"}}),
+            "fade_in": closed("set_fade's arguments", FADE),
+            "fade_out": closed("set_fade's arguments", FADE),
         },
         ["filter"],
+        closed=True,
     ),
     tool(
         "compare_projects",

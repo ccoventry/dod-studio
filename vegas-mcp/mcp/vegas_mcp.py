@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import threading
+import time
 import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also under python -I
@@ -286,6 +287,9 @@ TOOLS = LOCAL_TOOLS + [
 # Tools whose bridge reply the server turns into the answer: compare_projects'
 # bridge half reads both projects, project_compare compares them.
 REPLY_SHAPERS = {"compare_projects": project_compare.reply}
+# Tools whose arguments the server checks itself before the bridge call: each
+# returns what is wrong, or None.
+ARGUMENT_CHECKS = {"compare_projects": project_compare.argument_problem}
 
 TIMEOUT_ARGUMENT = "timeout_seconds"
 for _t in TOOLS[len(LOCAL_TOOLS):]:
@@ -546,8 +550,11 @@ class Instances:
     def end_all(self):
         """On shutdown: end every VEGAS this server started, so none stays on
         the user's screen. All are terminated first and cleaned up after, so a
-        shutdown cut short leaves as few running as possible. Never waits on a
-        pipe, so a call stuck in one of them does not hold it up."""
+        shutdown cut short leaves as few running as possible. Each is waited
+        for on a thread of its own, so one slow to exit holds up only itself,
+        and the whole takes at most END_ALL_SECONDS however many there are.
+        Never waits on a pipe, so a call stuck in one of them does not hold
+        it up."""
         with self.lock:
             launched = list(self.launched.values())
             self.launched.clear()
@@ -556,23 +563,18 @@ class Instances:
                 if not one.exited():
                     one.proc.kill()
             except OSError as e:
-                # Already gone, or going: one.end() below tries again and reports.
+                # Already gone, or going: end_on_shutdown tries again and reports.
                 log("end_all: terminating VEGAS PID %d: %s" % (one.pid, e))
-        still_going = []
-        for one in launched:
-            try:
-                log("end_all: %s" % one.end())
-            except Exception as e:  # noqa: BLE001 - best effort on the way out; the next one still gets ended
-                log("end_all: ending VEGAS PID %d failed: %s: %s" % (one.pid, type(e).__name__, e))
-                still_going.append(one)
-        # One still exiting when its end gave up leaves its autosave, which
-        # blocks every later launch: once it has gone, it is cleaned up too.
-        for one in still_going:
-            try:
-                one.proc.wait(vegas_instances.END_WAIT_SECONDS)
-                log("end_all: %s" % one.end())
-            except Exception as e:  # noqa: BLE001 - best effort on the way out
-                log("end_all: VEGAS PID %d is still running, its autosave left: %s: %s" % (one.pid, type(e).__name__, e))
+        threads = [threading.Thread(target=end_on_shutdown, args=(one,), name="end VEGAS %d" % one.pid, daemon=True)
+                   for one in launched]
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + END_ALL_SECONDS
+        for one, t in zip(launched, threads):
+            t.join(max(0.0, deadline - time.monotonic()))
+            if t.is_alive():
+                log("end_all: gave up on VEGAS PID %d after %d s; it may still be running, its autosave left"
+                    % (one.pid, END_ALL_SECONDS))
 
     def run_local(self, name, args):
         if name == "launch":
@@ -584,6 +586,26 @@ class Instances:
         if name == "use":
             return self.use(args)
         raise KeyError(name)
+
+
+# end_all's bound: one VEGAS's end and its second wait, plus its clean-up.
+END_ALL_SECONDS = 2 * vegas_instances.END_WAIT_SECONDS + 15
+
+
+def end_on_shutdown(one):
+    """end_all's part for one VEGAS: end it, and when it is still exiting once
+    that gives up, wait once more and clean up after it, since its autosave
+    would block every later launch."""
+    try:
+        log("end_all: %s" % one.end())
+        return
+    except Exception as e:  # noqa: BLE001 - best effort on the way out
+        log("end_all: ending VEGAS PID %d failed: %s: %s" % (one.pid, type(e).__name__, e))
+    try:
+        one.proc.wait(vegas_instances.END_WAIT_SECONDS)
+        log("end_all: %s" % one.end())
+    except Exception as e:  # noqa: BLE001 - best effort on the way out
+        log("end_all: VEGAS PID %d is still running, its autosave left: %s: %s" % (one.pid, type(e).__name__, e))
 
 
 def pid_argument(args):
@@ -632,6 +654,9 @@ def call_tool(instances, name, arguments):
     try:
         if name in LOCAL_NAMES:
             return tool_result(instances.run_local(name, arguments))
+        problem = ARGUMENT_CHECKS[name](arguments) if name in ARGUMENT_CHECKS else None
+        if problem:
+            return tool_result(problem, False)
         reply = instances.call(name, arguments)
         ok = reply.get("ok")
         body = shaped(name, arguments, reply.get("result")) if ok else reply.get("error")

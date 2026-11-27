@@ -26,6 +26,8 @@ import time
 
 VARIABLE = "WEBVIEW2_USER_DATA_FOLDER"
 PID_FILE = "vegas.pid"
+# Every folder new_folder makes starts with this; the sweep touches nothing else.
+PREFIX = "vegas-"
 # A folder made by a launch that has not written its PID yet is left alone this long.
 UNCLAIMED_GRACE_SECONDS = 600
 # WebView2's processes go a moment after their VEGAS; removal retries this long.
@@ -39,7 +41,7 @@ def parent():
 
 def new_folder(root=None):
     """A fresh, empty folder for one VEGAS's WebView2 data."""
-    path = os.path.join(root or parent(), "vegas-%d-%s" % (os.getpid(), secrets.token_hex(4)))
+    path = os.path.join(root or parent(), "%s%d-%s" % (PREFIX, os.getpid(), secrets.token_hex(4)))
     os.makedirs(path)
     return path
 
@@ -66,7 +68,8 @@ def remove(path, wait_seconds=REMOVE_WAIT_SECONDS):
 def sweep(is_vegas, root=None):
     """Remove the folders of bridge VEGAS that are no longer running (a server
     killed outright never removed its own). is_vegas(pid) says whether a PID
-    is a running VEGAS. Returns the folders removed."""
+    is a running VEGAS. Only folders new_folder made are touched. Returns the
+    folders removed."""
     root = root or parent()
     try:
         names = os.listdir(root)
@@ -75,11 +78,9 @@ def sweep(is_vegas, root=None):
     removed = []
     for name in names:
         path = os.path.join(root, name)
-        try:
-            with open(os.path.join(path, PID_FILE)) as f:
-                pid = int(f.read().strip() or 0)
-        except (OSError, ValueError):
-            pid = None
+        if not name.startswith(PREFIX) or not os.path.isdir(path):
+            continue
+        pid = claimed_pid(path)
         if pid is None:
             try:
                 fresh = time.time() - os.path.getmtime(path) < UNCLAIMED_GRACE_SECONDS
@@ -92,3 +93,18 @@ def sweep(is_vegas, root=None):
         if remove(path, wait_seconds=0) == "removed its WebView2 folder":
             removed.append(path)
     return removed
+
+
+def claimed_pid(path):
+    """The PID claim() wrote in a folder, or None while it has none: no file,
+    an empty one (claim's write not finished) or one that is not a PID."""
+    try:
+        with open(os.path.join(path, PID_FILE)) as f:
+            text = f.read().strip()
+    except OSError:
+        return None
+    try:
+        pid = int(text)
+    except ValueError:
+        return None
+    return pid if pid > 0 else None

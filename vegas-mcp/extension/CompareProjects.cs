@@ -1,9 +1,11 @@
 // compare_projects' half in VEGAS: every detail of two projects, the open
 // one and/or .veg files, for the MCP server to compare (mcp/project_compare.py).
 // A file is never opened itself: it is copied into <work folder>\copies and
-// the copy opened, read and dropped. The open project is reopened from its
-// file afterwards, so it must have no unsaved changes; an untitled one with
-// none is put back as a new empty project of the same size and rate.
+// the copy opened, read, closed and deleted. The open project is reopened
+// from its file afterwards, so it must have no unsaved changes, and VEGAS's
+// undo history starts again from that reopen; an untitled one with none is
+// put back as a new empty project of the same size and rate (saved into
+// copies when putting its settings back leaves it modified).
 //
 // The detail is project_info's `detail` with the counts replaced by what
 // they count: every FX parameter keyframe, Pan/Crop keyframe, Track Motion
@@ -29,6 +31,8 @@ public partial class Commands {
         string openPath = open.FilePath;
         if (openPath != null && !Session.UnderRoot(openPath))
             throw new BridgeError("the open project " + openPath + " is outside the work folder, so it cannot be reopened in place afterwards");
+        if (openPath != null && !File.Exists(openPath))
+            throw new BridgeError("the open project's file " + openPath + " is gone, so it cannot be reopened afterwards: save_as it first");
         if (openPath == null && open.Tracks.Count > 0)
             throw new BridgeError("the open project is untitled: save_as it first, so it can be reopened afterwards");
         VideoSettings settings = new VideoSettings(open);
@@ -49,21 +53,32 @@ public partial class Commands {
             read[i] = openPath ?? "the open untitled project";
         }
         bool replaced = false;
+        List<string> copies = new List<string>();
+        Exception failed = null;
         try {
             for (int i = 0; i < 2; i++) {
                 if (sides[i] == OpenProjectSide) continue;
                 string source = Path.GetFullPath(sides[i]);
                 string copy = Session.FreshCopyPath(source);
                 File.Copy(source, copy);
+                copies.Add(copy);
                 Log.Write("compare_projects: copied " + source + " to " + copy);
                 replaced = true;
-                vegas.NewProject(false, false);
+                StartNewProject();
                 if (!vegas.OpenProject(copy)) throw new BridgeError("VEGAS could not open " + copy + " (a copy of " + source + ")");
                 dumps[i] = Read(delegate { return ProjectDump(); });
                 read[i] = copy;
             }
+        } catch (Exception e) {
+            failed = e;
+            throw;
         } finally {
-            if (replaced) r["restored"] = Restore(openPath, settings);
+            // After the restore, which closes the last copy.
+            try {
+                if (replaced) r["restored"] = RestoreKeepingFirstError(openPath, settings, failed);
+            } finally {
+                DeleteCopies(copies);
+            }
         }
         r["a"] = dumps[0];
         r["b"] = dumps[1];
@@ -86,8 +101,30 @@ public partial class Commands {
         }
     }
 
+    // NewProject returns false when VEGAS keeps the project it has.
+    void StartNewProject() {
+        if (!vegas.NewProject(false, false)) throw new BridgeError("VEGAS did not start a new project");
+    }
+
+    // Restore, and when the compare had already failed, an error that still
+    // says why it failed: an exception thrown in a finally block replaces the
+    // one on its way out.
+    string RestoreKeepingFirstError(string openPath, VideoSettings s, Exception failed) {
+        try {
+            return Restore(openPath, s);
+        } catch (Exception e) {
+            if (failed == null) throw;
+            Log.Write("compare_projects: putting the open project back failed after the compare failed: " + e);
+            throw new BridgeError(ErrorText(failed) + "; putting the open project back failed too: " + ErrorText(e));
+        }
+    }
+
+    static string ErrorText(Exception e) {
+        return e is BridgeError ? e.Message : e.GetType().Name + ": " + e.Message;
+    }
+
     string Restore(string openPath, VideoSettings s) {
-        vegas.NewProject(false, false);
+        StartNewProject();
         if (openPath != null) {
             if (!vegas.OpenProject(openPath)) throw new BridgeError("VEGAS could not reopen " + openPath + " after the compare");
             return "reopened " + openPath;
@@ -101,7 +138,27 @@ public partial class Commands {
             p.Video.FrameRate = s.Fps;
             p.Video.PixelFormat = s.Format;
         }
-        return "a new empty untitled project of the same size and rate (it now shows as modified)";
+        if (!p.IsModified) return "a new empty untitled project of the same size and rate";
+        // Changing the settings marks it modified, which the project before
+        // the compare was not (it was refused otherwise), and VEGAS has no way
+        // to clear that but a save; so it is saved where the copies go.
+        string seed = Session.FreshCopyPath(Path.Combine(Session.Root, "untitled before compare_projects.veg"));
+        if (!p.SaveProject(seed)) throw new BridgeError("VEGAS could not save the restored empty project as " + seed);
+        savedThisSession.Add(seed);
+        return "a new empty project of the same size and rate, saved as " + seed + " so it has no unsaved changes";
+    }
+
+    // The copies the compare opened; each is closed by now. One VEGAS still
+    // holds stays, named in the log.
+    static void DeleteCopies(List<string> copies) {
+        foreach (string c in copies) {
+            try {
+                File.Delete(c);
+            } catch (Exception e) {
+                if (!(e is IOException || e is UnauthorizedAccessException)) throw;
+                Log.Write("compare_projects: could not delete the copy " + c + ": " + e.Message);
+            }
+        }
     }
 
     // project_info with detail, and every keyframe and point behind its counts.

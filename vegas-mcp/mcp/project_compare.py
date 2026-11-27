@@ -10,12 +10,19 @@ removed and another added:
 - Tracks by type and name in order (difflib), so a track added in the
   middle does not shift every later one; tracks with no name match in order.
 - Events within a pair of tracks, in passes: the same file starting at the
-  same time (within `tolerance` seconds); then the same file playing from the
-  same media second (the event moved on the timeline); then the same file in
-  timeline order (moved, and its offset changed too). What is left was added
-  or removed (an event whose take now plays another file is both).
+  same time from the same media second (within `tolerance` seconds); then
+  the same file from the same media second (the event moved on the
+  timeline); then the same file at the same start (its media offset
+  changed); then the same file (moved, and its offset changed too). What is
+  left was added or removed (an event whose take now plays another file is
+  both).
+- Within a pass, the events that may pair (the same file, and for the
+  offset passes the same media second) pair in timeline order: the first
+  left in a with the first left in b, and so on, skipping only where that
+  pairs more of them or brings them closer in time. So the same clip used
+  three times and moved keeps its order, which nearest-first did not.
 - Effects in a chain by position; markers, regions and command markers by
-  time and label, then by label alone (moved).
+  time and label, then by label alone (moved), in time order the same way.
 
 Standard library only.
 """
@@ -36,9 +43,10 @@ PROJECT_FIELDS = ("width", "height", "fps", "pixel_format", "length")
 MAX_LIST_SHOWN = 12
 
 MATCHED_BY = (
-    "tracks by type and name in order; events within matched tracks by the same file starting within %g s, "
-    "then the same file playing from the same media second (moved), then the same file in timeline order "
-    "(moved); effects by position in their chain; markers by time and label, then by label (moved)"
+    "tracks by type and name in order; events within matched tracks by the same file starting within %g s from the "
+    "same media second, then the same file from the same media second (moved), then the same file at the same start "
+    "(offset changed), then the same file (moved), each pass pairing in timeline order; effects by position in "
+    "their chain; markers by time and label, then by label (moved)"
 )
 
 
@@ -62,6 +70,18 @@ def compare(a, b, tolerance=DEFAULT_TOLERANCE):
     return out
 
 
+def argument_problem(arguments):
+    """What is wrong with compare_projects' own arguments, or None. Checked
+    before the bridge reads both projects, which can take minutes, so a bad
+    tolerance fails at once rather than after that."""
+    tolerance = arguments.get("tolerance")
+    if tolerance is None:
+        return None
+    if not is_number(tolerance) or not 0 <= tolerance < float("inf"):
+        return "tolerance must be a number of seconds, 0 or more; got %r" % (tolerance,)
+    return None
+
+
 def reply(body, arguments):
     """The tool's answer from the bridge's reply: the comparison, and which files were read."""
     result = compare(body["a"], body["b"], arguments.get("tolerance", DEFAULT_TOLERANCE))
@@ -74,23 +94,64 @@ def reply(body, arguments):
 # ---- matching ----
 
 
-def pair_up(xs, ys, passes):
-    """Pairs of xs and ys, pass by pass: each pass takes (name, same(x, y),
-    distance(x, y)) and pairs each x still left with the nearest y left that
-    `same` accepts. Returns (pairs as (x, y, pass name), xs left, ys left)."""
+def pair_up(xs, ys, passes, when):
+    """Pairs of xs and ys, pass by pass. Each pass is (name, groups, fits,
+    cost): groups(items) gives each item's group key (only items of one group
+    may pair), fits(x, y) whether two may pair, cost(x, y) how far apart they
+    are. Within a group, the items left pair in order of when(item)
+    (pair_in_order). Returns (pairs as (x, y, pass name), xs left, ys left),
+    the lefts in their given order."""
     left_x = list(xs)
     left_y = list(ys)
     pairs = []
-    for name, same, distance in passes:
-        for x in list(left_x):
-            fits = [y for y in left_y if same(x, y)]
-            if not fits:
+    for name, groups, fits, cost in passes:
+        keys = groups(left_x + left_y)
+        by_x, by_y = {}, {}
+        for i, x in enumerate(left_x):
+            by_x.setdefault(keys[i], []).append(x)
+        for j, y in enumerate(left_y):
+            by_y.setdefault(keys[len(left_x) + j], []).append(y)
+        taken = set()
+        for key in by_x:
+            if key not in by_y:
                 continue
-            y = min(fits, key=lambda y: distance(x, y))
-            pairs.append((x, y, name))
-            left_x.remove(x)
-            left_y.remove(y)
+            for x, y in pair_in_order(sorted(by_x[key], key=when), sorted(by_y[key], key=when), fits, cost):
+                pairs.append((x, y, name))
+                taken.add(id(x))
+                taken.add(id(y))
+        left_x = [x for x in left_x if id(x) not in taken]
+        left_y = [y for y in left_y if id(y) not in taken]
     return pairs, left_x, left_y
+
+
+def pair_in_order(xs, ys, fits, cost):
+    """Pairs of xs and ys that keep both lists' order (no two pairs cross):
+    as many pairs as fit, and of those the smallest total cost. xs and ys
+    are already in order."""
+    n, m = len(xs), len(ys)
+    # best[i][j]: (pairs, -cost) for xs[:i] and ys[:j]; took[i][j]: how it was reached.
+    best = [[(0, 0.0)] * (m + 1) for _ in range(n + 1)]
+    took = [[None] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            options = [(best[i - 1][j], "skip x"), (best[i][j - 1], "skip y")]
+            if fits(xs[i - 1], ys[j - 1]):
+                count, score = best[i - 1][j - 1]
+                options.append(((count + 1, score - cost(xs[i - 1], ys[j - 1])), "pair"))
+            best[i][j], took[i][j] = max(options, key=lambda o: o[0])
+    pairs = []
+    i, j = n, m
+    while i > 0 and j > 0:
+        step = took[i][j]
+        if step == "pair":
+            pairs.append((xs[i - 1], ys[j - 1]))
+            i, j = i - 1, j - 1
+        elif step == "skip x":
+            i -= 1
+        else:
+            j -= 1
+    pairs.reverse()
+    return pairs
 
 
 def media_of(event):
@@ -98,18 +159,55 @@ def media_of(event):
     return os.path.normcase(path) if path else None
 
 
-def event_passes(tolerance):
-    def gap(x, y):
-        return abs(x.get("start", 0) - y.get("start", 0))
+def file_key(event):
+    """What counts as the same file: its path, or for an event with no media its name."""
+    media = media_of(event)
+    return ("media", media) if media is not None else ("name", event.get("name"))
 
-    def same_file(x, y):
-        return media_of(x) == media_of(y) and (media_of(x) is not None or x.get("name") == y.get("name"))
+
+def event_start(e):
+    return e.get("start", 0)
+
+
+def clusters(values, tolerance):
+    """Each value's cluster: the values in order, split where two neighbours
+    are more than `tolerance` apart, so values within it of each other share one."""
+    out = {}
+    n = 0
+    previous = None
+    for v in sorted(set(values)):
+        if previous is not None and v - previous > tolerance:
+            n += 1
+        out[v] = n
+        previous = v
+    return out
+
+
+def event_passes(tolerance):
+    def offset(e):
+        return e.get("offset") or 0
+
+    def gap(x, y):
+        return abs(event_start(x) - event_start(y))
+
+    def by_file(items):
+        return [file_key(e) for e in items]
+
+    def by_file_and_offset(items):
+        cluster = clusters([offset(e) for e in items], tolerance)
+        return [(file_key(e), cluster[offset(e)]) for e in items]
+
+    def same_start(x, y):
+        return gap(x, y) <= tolerance
+
+    def anywhere(x, y):
+        return True
 
     return [
-        ("same file and start", lambda x, y: same_file(x, y) and gap(x, y) <= tolerance, gap),
-        ("same file and media offset (moved)",
-         lambda x, y: same_file(x, y) and abs((x.get("offset") or 0) - (y.get("offset") or 0)) <= tolerance, gap),
-        ("same file, in timeline order (moved)", same_file, gap),
+        ("same file, start and media offset", by_file_and_offset, same_start, gap),
+        ("same file and media offset (moved)", by_file_and_offset, anywhere, gap),
+        ("same file and start (media offset changed)", by_file, same_start, gap),
+        ("same file, in timeline order (moved)", by_file, anywhere, gap),
     ]
 
 
@@ -134,7 +232,7 @@ def compare_track_pair(x, y, tolerance, tracks, events):
     changes = diff(track_fields(x), track_fields(y), "", tolerance)
     if changes:
         tracks["changed"].append(dict(track_pair_ref(x, y), changes=changes))
-    pairs, removed, added = pair_up(x.get("events") or [], y.get("events") or [], event_passes(tolerance))
+    pairs, removed, added = pair_up(x.get("events") or [], y.get("events") or [], event_passes(tolerance), event_start)
     for ea, eb, how in pairs:
         ref = dict(track_pair_ref(x, y), event_a=ea.get("index"), event_b=eb.get("index"), media=short_media(eb))
         if abs(ea.get("start", 0) - eb.get("start", 0)) > tolerance:
@@ -169,9 +267,10 @@ def short_media(event):
 def compare_markers(ma, mb, tolerance):
     key = lambda m: m.get("label") or m.get("comment") or ""  # noqa: E731
     gap = lambda x, y: abs(x.get("time", 0) - y.get("time", 0))  # noqa: E731
-    passes = [("same time and label", lambda x, y: key(x) == key(y) and gap(x, y) <= tolerance, gap),
-              ("same label (moved)", lambda x, y: key(x) == key(y), gap)]
-    pairs, removed, added = pair_up(ma, mb, passes)
+    by_label = lambda items: [key(m) for m in items]  # noqa: E731
+    passes = [("same time and label", by_label, lambda x, y: gap(x, y) <= tolerance, gap),
+              ("same label (moved)", by_label, lambda x, y: True, gap)]
+    pairs, removed, added = pair_up(ma, mb, passes, lambda m: m.get("time", 0))
     out = {"added": [strip_index(m) for m in added], "removed": [strip_index(m) for m in removed], "changed": []}
     for x, y, _ in pairs:
         changes = diff(strip_index(x), strip_index(y), "", tolerance)
