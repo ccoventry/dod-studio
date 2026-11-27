@@ -84,6 +84,7 @@ public partial class Commands {
             // A property read through reflection (Keyframes.cs) wraps it.
             Exception inner = e is System.Reflection.TargetInvocationException && e.InnerException != null ? e.InnerException : e;
             if (!(inner is System.Runtime.InteropServices.COMException)) throw;
+            Log.Write("a read needed an undo block (" + inner.Message + "); reading again in a cancelled one");
             return ReadInCancelledBlock(read);
         }
     }
