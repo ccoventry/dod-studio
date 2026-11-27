@@ -82,7 +82,8 @@ TOOLS = [
         "get_pan_crop",
         "Read a video event's Pan/Crop keyframes: time (s from the event's start), bounds (the four corners of the part "
         "of the source shown: top-left, top-right, bottom-right, bottom-left, in the source media's own pixels, y down), "
-        "center, width, height, zoom (vs the default frame), rotation (degrees), smoothness, interpolation.",
+        "center, width, height, zoom (vs the default frame: the whole media, the box VEGAS gives a new event), rotation "
+        "(degrees; positive turns the picture anticlockwise), smoothness, interpolation.",
         {"track": TRACK_REQUIRED, "event": EVENT},
         ["track", "event"],
     ),
@@ -109,7 +110,7 @@ TOOLS = [
                                                 "width": {"type": "number"}, "height": {"type": "number"}}},
                         "bounds": {"type": "array", "items": POINT, "minItems": 4, "maxItems": 4,
                                    "description": "four corners: top-left, top-right, bottom-right, bottom-left"},
-                        "rotation": {"type": "number", "description": "degrees"},
+                        "rotation": {"type": "number", "description": "degrees; positive turns the picture anticlockwise"},
                         "smoothness": {"type": "number"},
                         "interpolation": VIDEO_INTERPOLATION,
                     },
@@ -163,7 +164,7 @@ TOOLS = [
                         "width": {"type": "number"},
                         "height": {"type": "number"},
                         "scale": {"type": "number", "description": "width and height as a share of the frame's (0.5 = half size)"},
-                        "rotation": {"type": "number", "description": "degrees"},
+                        "rotation": {"type": "number", "description": "degrees; positive turns the picture clockwise"},
                         "smoothness": {"type": "number"},
                         "interpolation": VIDEO_INTERPOLATION,
                     },
