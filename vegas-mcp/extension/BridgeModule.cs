@@ -29,7 +29,7 @@ using ScriptPortal.Vegas;
 namespace DodStudio.VegasBridge {
 
 public class BridgeModule : ICustomCommandModule {
-    public const string Version = "0.3";
+    public const string Version = "0.4";
 
     Vegas vegas;
     UiQueue uiThread;
@@ -46,7 +46,8 @@ public class BridgeModule : ICustomCommandModule {
             return;
         }
         Log.Write("VEGAS " + v.Version + " PID " + Session.Pid + ": listening on " + Session.PipeName +
-                  ", work folder " + Session.Root);
+                  ", work folder " + Session.Root + ", AppDomain " + AppDomain.CurrentDomain.FriendlyName);
+        OwnerWatch.Start();
         uiThread = new UiQueue();
         dialogs = new DialogAnswerer();
         commands = new Commands(v, dialogs);
