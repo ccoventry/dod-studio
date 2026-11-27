@@ -30,6 +30,13 @@ public partial class Commands {
         return "project start";
     }
 
+    // An Event FX keyframe past the event's end never plays; other chains'
+    // times are not bounded.
+    double ChainTimeLimit(Args a) {
+        if (a.Str("target", "event") != "event") return double.PositiveInfinity;
+        return Sec(EventAt(a).Length);
+    }
+
     // Legacy DirectX plug-ins hide their parameters from scripts.
     static void RequireOFX(Effect e) {
         if (!e.IsOFX || e.OFXEffect == null)
@@ -208,7 +215,8 @@ public partial class Commands {
     // mode "replace" (default): the parameter's keyframes become exactly
     // these (VEGAS keeps one at time 0: given none there, it takes the first
     // keyframe's value, so the value holds until then). "add": these are added,
-    // replacing any at the same time. "clear": no keyframes, the static
+    // replacing any at the same time; on a parameter not animated yet, the
+    // keyframe at 0 holds its static value. "clear": no keyframes, the static
     // `value` (or the value it had at time 0).
     object SetKeyframes(Args a) {
         Effect e = EffectAt(a);
@@ -223,16 +231,18 @@ public partial class Commands {
         } else {
             List<Args> keys = a.Items("keyframes");
             if (keys.Count == 0) throw new BridgeError("keyframes is empty; mode \"clear\" removes them all");
-            keys.Sort(delegate(Args x, Args y) { return x.Num("time").CompareTo(y.Num("time")); });
-            if (mode == "replace") p.IsAnimated = false;
-            if (!p.IsAnimated) {
-                // Animating starts from one keyframe at 0 holding the static value.
+            Values.CheckTimes(keys, "keyframe", ChainTimeLimit(a), ChainTimeOrigin(a));
+            Values.SortByTime(keys);
+            if (mode == "replace") {
+                // Animating starts from one keyframe at 0 holding the static
+                // value, so that value becomes the first keyframe's.
+                p.IsAnimated = false;
                 SetOfxValue(p, keys[0].Raw("value"), false, null);
-                p.IsAnimated = true;
             }
+            // In "add" a parameter not animated yet keeps its static value at 0.
+            p.IsAnimated = true;
             foreach (Args k in keys) {
                 double t = k.Num("time");
-                if (t < 0) throw new BridgeError("keyframe time " + t + " is before the start");
                 if (!k.Has("value")) throw new BridgeError("the keyframe at " + t + " s has no value");
                 SetOfxValue(p, k.Raw("value"), true, Tc(t));
                 if (k.Has("interpolation")) {

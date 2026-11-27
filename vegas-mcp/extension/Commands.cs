@@ -74,9 +74,21 @@ public partial class Commands {
 
     // Reading can make VEGAS set up what is read (VideoTrack.TrackMotion on a
     // track that never had any), which outside an undo block fails with
-    // E_UNEXPECTED. Reads run in a block that is always cancelled, so they
-    // leave no undo step and no change.
+    // E_UNEXPECTED. A read runs without a block first, so it leaves the undo
+    // and redo lists alone; only one that fails that way runs again in a
+    // block that is always cancelled, leaving no undo step and no change.
     object Read(Func<object> read) {
+        try {
+            return read();
+        } catch (Exception e) {
+            // A property read through reflection (Keyframes.cs) wraps it.
+            Exception inner = e is System.Reflection.TargetInvocationException && e.InnerException != null ? e.InnerException : e;
+            if (!(inner is System.Runtime.InteropServices.COMException)) throw;
+            return ReadInCancelledBlock(read);
+        }
+    }
+
+    object ReadInCancelledBlock(Func<object> read) {
         UndoBlock block = new UndoBlock(P, "DoD Studio bridge: read");
         block.Cancel = true;
         try {
@@ -630,6 +642,7 @@ public partial class Commands {
         string want = a.Str("effect");
         PlugInNode fx = FindPlugIn(vegas.VideoFX, want);
         if (fx == null) throw new BridgeError("no video effect named or with id \"" + want + "\" (see list_effects)");
+        RequireOFXPlugIn(fx, "effect");
         Effects chain = EffectsOf(a);
         Effect e = chain.AddEffect(fx);
         if (e == null) throw new BridgeError("VEGAS did not add " + fx.Name);
@@ -644,9 +657,13 @@ public partial class Commands {
         return EffectInfo(e);
     }
 
+    // Adding a legacy DirectX plug-in fails inside VEGAS with a bare E_FAIL.
+    static void RequireOFXPlugIn(PlugInNode node, string what) {
+        if (!node.IsOFX) throw new BridgeError(node.Name + " is a legacy DirectX " + what + "; legacy DirectX " + what + "s can't be added");
+    }
+
     static void SetParams(Effect e, Dictionary<string, object> values) {
         if (values == null) return;
-        if (!e.IsOFX || e.OFXEffect == null) throw new BridgeError(e.PlugIn.Name + " is not an OFX effect; its parameters are not scriptable");
         RequireOFX(e);
         foreach (KeyValuePair<string, object> kv in values) SetOfxValue(FindParam(e, kv.Key), kv.Value, false, null);
         e.OFXEffect.AllParametersChanged();

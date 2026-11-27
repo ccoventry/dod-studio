@@ -37,8 +37,8 @@ public partial class Commands {
     static object FadeInfo(Fade f, bool video, bool full) {
         Dictionary<string, object> d = new Dictionary<string, object>();
         d["length"] = Sec(f.Length);
-        d["curve"] = f.Curve.ToString();
-        d["reciprocal_curve"] = f.ReciprocalCurve.ToString();
+        d["curve"] = CurveName(f.Curve);
+        d["reciprocal_curve"] = CurveName(f.ReciprocalCurve);
         Effect t = video ? f.Transition as Effect : null;
         if (t != null) {
             if (full) d["transition"] = EffectInfo(t);
@@ -80,7 +80,13 @@ public partial class Commands {
         }
         PlugInNode node = FindPlugIn(vegas.Transitions, want);
         if (node == null) throw new BridgeError("no transition named or with id \"" + want + "\" (see list_transitions)");
-        f.Transition = new Effect(node);
+        try {
+            f.Transition = new Effect(node);
+        } catch (System.Runtime.InteropServices.COMException) {
+            // A legacy DirectX plug-in fails here with a bare E_FAIL.
+            if (!node.IsOFX) throw new BridgeError(node.Name + " is a legacy DirectX transition; legacy DirectX transitions can't be added");
+            throw;
+        }
         // Set on the effect the fade holds, in case assigning copied it.
         Effect live = f.Transition as Effect;
         if (live == null) throw new BridgeError("VEGAS did not put " + node.Name + " on the fade");
@@ -100,6 +106,12 @@ public partial class Commands {
         CurveType c = Values.Enum<CurveType>(name, "curve");
         if (c == CurveType.Invalid) throw new BridgeError("curve \"Invalid\" is not a curve");
         return c;
+    }
+
+    // A curve as the tools name it: None comes back as "Hold", the name
+    // Curve() takes and the schemas list.
+    static string CurveName(CurveType c) {
+        return c == CurveType.None ? "Hold" : c.ToString();
     }
 
     object FadeReply(TrackEvent ev) {
@@ -133,9 +145,12 @@ public partial class Commands {
         double newStart = Sec(earlier.End) - length;
         if (newStart <= Sec(earlier.Start)) throw new BridgeError("a " + length + " s crossfade is longer than event " + earlier.Index + " (" + Sec(earlier.Length) + " s)");
         double move = Sec(later.Start) - newStart;
+        // The take's offset is in timeline seconds at the event's speed, as
+        // `move` is; the media seconds it stands for go in brackets.
         if (move > 0 && later.ActiveTake != null && Sec(later.ActiveTake.Offset) < move - Values.SameTime)
-            throw new BridgeError("event " + later.Index + " starts " + Values.Round(MediaOffset(later)) + " s into its media, too little to start " +
-                                  Values.Round(move) + " s earlier for this crossfade");
+            throw new BridgeError("event " + later.Index + " has " + Values.Round(Sec(later.ActiveTake.Offset)) + " timeline s of media before its first frame (" +
+                                  Values.Round(MediaOffset(later)) + " media s at speed " + Values.Round(later.PlaybackRate) +
+                                  "), too little to start " + Values.Round(move) + " timeline s earlier for this crossfade");
         double newLength = Sec(later.Length) + move;
         if (newLength <= length) throw new BridgeError("a " + length + " s crossfade is longer than event " + later.Index);
         later.AdjustStartLength(Tc(newStart), Tc(newLength), true);
