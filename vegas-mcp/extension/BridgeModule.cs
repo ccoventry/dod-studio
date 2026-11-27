@@ -29,7 +29,7 @@ using ScriptPortal.Vegas;
 namespace DodStudio.VegasBridge {
 
 public class BridgeModule : ICustomCommandModule {
-    public const string Version = "0.2";
+    public const string Version = "0.3";
 
     Vegas vegas;
     UiQueue uiThread;
@@ -124,6 +124,16 @@ public class BridgeModule : ICustomCommandModule {
                 uiThread.Run(delegate {
                     try { result = commands.Run(cmd, args); } catch (Exception e) { error = e; Log.Write(cmd + " failed: " + e); }
                 });
+                // The UI thread is free between steps, so VEGAS's message loop
+                // runs; no other bridge command starts meanwhile, since this
+                // pipe thread handles one at a time.
+                while (error == null && result is LaterStep) {
+                    LaterStep later = (LaterStep)result;
+                    Thread.Sleep(later.AfterMs);
+                    uiThread.Run(delegate {
+                        try { result = later.Next(); } catch (Exception e) { error = e; Log.Write(cmd + " failed: " + e); }
+                    });
+                }
             } finally {
                 // The dialogs VEGAS raised during this command and how each was
                 // answered, so the caller learns e.g. that media went offline.
