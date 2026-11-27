@@ -18,7 +18,10 @@ public partial class Commands {
 
     // The box VEGAS gives a new event: the whole media, in its own pixels,
     // whatever the project's size and aspect (measured on 640x480 and
-    // 1600x600 media in a 1280x720 project).
+    // 1600x600 media in a 1280x720 project). A stream turned a quarter
+    // either way gets the box upright, width and height swapped, while
+    // VideoStream.Width and Height stay as stored (1600x600 media turned
+    // a quarter gives a new event a 600x1600 box; inverted keeps 1600x600).
     struct PanFrame {
         public double Width, Height, CenterX, CenterY;
     }
@@ -27,9 +30,13 @@ public partial class Commands {
         if (ve.ActiveTake == null) throw new BridgeError("event " + ve.Index + " has no take, so no Pan/Crop frame");
         VideoStream vs = ve.ActiveTake.MediaStream as VideoStream;
         if (vs == null) throw new BridgeError("event " + ve.Index + "'s take has no video stream");
+        if (vs.Width <= 0 || vs.Height <= 0)
+            throw new BridgeError("event " + ve.Index + "'s media has no picture size" + (vs.Parent.IsOffline() ? " (it is offline)" : "") + ", so no Pan/Crop frame");
+        bool quarterTurn = vs.Rotation == VideoOutputRotation.QuarterTurnClockwise
+            || vs.Rotation == VideoOutputRotation.QuarterTurnCounterclockwise;
         PanFrame f = new PanFrame();
-        f.Width = vs.Width;
-        f.Height = vs.Height;
+        f.Width = quarterTurn ? vs.Height : vs.Width;
+        f.Height = quarterTurn ? vs.Width : vs.Height;
         f.CenterX = f.Width / 2;
         f.CenterY = f.Height / 2;
         return f;

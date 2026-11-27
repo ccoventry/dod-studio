@@ -91,7 +91,9 @@ public partial class Commands {
             // A property read through reflection (Keyframes.cs) wraps it.
             Exception inner = e is System.Reflection.TargetInvocationException && e.InnerException != null ? e.InnerException : e;
             if (!(inner is System.Runtime.InteropServices.COMException)) throw;
-            Log.Write("a read needed an undo block (" + inner.Message + "); reading again in a cancelled one");
+            // E_UNEXPECTED is the expected one; any other COM error is retried
+            // the same way, and its own message says which it was.
+            Log.Write("a read failed with a COM error (" + inner.Message + "); reading again in a cancelled undo block");
             return ReadInCancelledBlock(read);
         }
     }
