@@ -82,7 +82,7 @@ static class Values {
         items.Sort(delegate(Args x, Args y) { return x.Num("time").CompareTo(y.Num("time")); });
     }
 
-    // VEGAS keeps angles in radians; the bridge speaks degrees, as VEGAS's own windows do.
+    // Pan/Crop keeps its rotation in radians (Track Motion keeps degrees); the bridge speaks degrees, as VEGAS's own windows do.
     public static double Degrees(double radians) { return Round(radians * 180.0 / Math.PI); }
     public static double Radians(double degrees) { return degrees * Math.PI / 180.0; }
 

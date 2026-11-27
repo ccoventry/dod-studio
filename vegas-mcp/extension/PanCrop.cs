@@ -5,8 +5,9 @@
 // the next keyframe. Times are seconds from the event's start.
 //
 // "zoom" is how much larger the picture shows than at the event's default
-// frame (the whole media, widened or heightened to the project's aspect as
-// VEGAS does): zoom 2 shows a box half as wide and high.
+// frame (the whole media, the box VEGAS gives a new event; with Maintain
+// aspect ratio on, VEGAS pads it to the project's aspect when it draws it):
+// zoom 2 shows a box half as wide and high.
 using System;
 using System.Collections.Generic;
 using ScriptPortal.Vegas;
@@ -15,8 +16,9 @@ namespace DodStudio.VegasBridge {
 
 public partial class Commands {
 
-    // The box VEGAS shows a new event's media in: the whole media, padded to
-    // the project's aspect so it is not stretched.
+    // The box VEGAS gives a new event: the whole media, in its own pixels,
+    // whatever the project's size and aspect (measured on 640x480 and
+    // 1600x600 media in a 1280x720 project).
     struct PanFrame {
         public double Width, Height, CenterX, CenterY;
     }
@@ -25,14 +27,11 @@ public partial class Commands {
         if (ve.ActiveTake == null) throw new BridgeError("event " + ve.Index + " has no take, so no Pan/Crop frame");
         VideoStream vs = ve.ActiveTake.MediaStream as VideoStream;
         if (vs == null) throw new BridgeError("event " + ve.Index + "'s take has no video stream");
-        double w = vs.Width, h = vs.Height;
-        double project = (double)P.Video.Width / P.Video.Height * P.Video.PixelAspectRatio;
-        double media = w / h * vs.PixelAspectRatio;
         PanFrame f = new PanFrame();
-        f.CenterX = w / 2;
-        f.CenterY = h / 2;
-        if (media > project) { f.Width = w; f.Height = w * vs.PixelAspectRatio / project; }
-        else { f.Height = h; f.Width = h * project / vs.PixelAspectRatio; }
+        f.Width = vs.Width;
+        f.Height = vs.Height;
+        f.CenterX = f.Width / 2;
+        f.CenterY = f.Height / 2;
         return f;
     }
 
