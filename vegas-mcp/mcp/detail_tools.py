@@ -54,8 +54,9 @@ TOOLS = [
     tool(
         "set_keyframes",
         "Keyframe one OFX parameter of an effect on any FX chain (times as get_keyframes: Event FX from the event's "
-        "start). mode replace (default) makes its keyframes exactly these, add adds them, clear removes them all "
-        "(leaving `value`, if given, as its static value). Legacy (non-OFX) effects are refused.",
+        "start, and no later than its end). mode replace (default) makes its keyframes exactly these, add adds them "
+        "(a parameter not animated yet keeps its static value at 0), clear removes them all (leaving `value`, if "
+        "given, as its static value). Legacy (non-OFX) effects are refused.",
         dict(EFFECT_ARGS, **{
             "param": {"type": "string", "description": "parameter name or label"},
             "keyframes": {
@@ -87,9 +88,9 @@ TOOLS = [
     ),
     tool(
         "set_pan_crop",
-        "Set a video event's Pan/Crop (times in s from the event's start, positions in the source media's pixels, y "
-        "down). Each keyframe gives one of bounds, rect, or zoom and/or center, plus rotation, smoothness, "
-        "interpolation. Shortcuts for a whole move in one call: zoom (into a point, optionally animated) and pan "
+        "Set a video event's Pan/Crop (times in s from the event's start, up to its end; positions in the source media's "
+        "pixels, y down). Each keyframe gives one of bounds, rect, zoom (with an optional center), or center alone "
+        "(moves the box, keeping its size), plus rotation, smoothness, interpolation. Shortcuts for a whole move in one call: zoom (into a point, optionally animated) and pan "
         "(between two points). reset puts back the default frame. Returns get_pan_crop.",
         {
             "track": TRACK_REQUIRED,
@@ -100,8 +101,9 @@ TOOLS = [
                     "type": "object",
                     "properties": {
                         "time": SECONDS,
-                        "zoom": {"type": "number", "description": "2 = twice as large (a box half the default frame's size); default 1"},
-                        "center": dict(POINT, description="[x, y] the middle of the shown box, source pixels; default the media's middle"),
+                        "zoom": {"type": "number", "description": "2 = twice as large (a box half the default frame's size)"},
+                        "center": dict(POINT, description="[x, y] the middle of the shown box, source pixels; with zoom "
+                                                          "its default is the media's middle, alone it moves the box as it is"),
                         "rect": {"type": "object", "description": "{x, y, width, height}: the shown box's top-left and size",
                                  "properties": {"x": {"type": "number"}, "y": {"type": "number"},
                                                 "width": {"type": "number"}, "height": {"type": "number"}}},
@@ -116,8 +118,9 @@ TOOLS = [
             },
             "zoom": {
                 "type": "object",
-                "description": "zoom to `scale` at `center`: held from `start` (default 0), or with `end` moving there from "
-                               "from_scale (default 1) at from_center (default the middle)",
+                "description": "zoom to `scale` at `center`: held from `start` (default 0; before it the default frame, "
+                               "zoom 1, holds), or with `end` moving there from from_scale (default 1) at from_center "
+                               "(default the middle)",
                 "properties": {"scale": {"type": "number"}, "center": POINT, "start": SECONDS, "end": SECONDS,
                                "from_scale": {"type": "number"}, "from_center": POINT, "interpolation": VIDEO_INTERPOLATION},
                 "required": ["scale"],
@@ -169,8 +172,10 @@ TOOLS = [
             },
             "mode": MODE,
             "reset": {"type": "boolean", "description": "back to one keyframe at the whole frame before anything else"},
-            "shadow": {"type": "object", "description": "{enabled, keyframes (as above plus blur, intensity, color [r, g, b, a] 0-1), mode}"},
-            "glow": {"type": "object", "description": "{enabled, keyframes (as above plus blur, intensity, color [r, g, b, a] 0-1), mode}"},
+            "shadow": {"type": "object", "description": "{enabled, keyframes (as above plus blur, intensity, color [r, g, b, a] "
+                                                        "0-1), mode, reset (back to the one keyframe VEGAS keeps)}"},
+            "glow": {"type": "object", "description": "{enabled, keyframes (as above plus blur, intensity, color [r, g, b, a] "
+                                                      "0-1), mode, reset (back to the one keyframe VEGAS keeps)}"},
         },
         ["track"],
     ),

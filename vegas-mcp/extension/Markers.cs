@@ -120,6 +120,10 @@ public partial class Commands {
             m.Label = op.Str("label");
             return;
         }
+        // A label given to a command marker would otherwise be dropped silently.
+        if (op.Has("label")) throw new BridgeError("a command marker has no label; rename it with type, parameter or comment");
+        if (!op.Has("type") && !op.Has("parameter") && !op.Has("comment"))
+            throw new BridgeError("renaming a command marker needs type, parameter or comment");
         if (op.Has("type") || op.Has("parameter"))
             c.SetCommand(op.Has("type") ? CommandType(op.Str("type")) : c.CommandType, op.Str("parameter", c.CommandParameter));
         if (op.Has("comment")) c.Comment = op.Str("comment");

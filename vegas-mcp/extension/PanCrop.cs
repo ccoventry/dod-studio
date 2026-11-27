@@ -92,7 +92,8 @@ public partial class Commands {
         if (a.Has("pan")) specs.AddRange(PanMove(new Args(a.Obj("pan")), ve));
         bool reset = a.Bool("reset", false);
         if (specs.Count == 0 && !reset) throw new BridgeError("nothing to set: give keyframes, zoom, pan or reset");
-        specs.Sort(delegate(Args x, Args y) { return x.Num("time").CompareTo(y.Num("time")); });
+        Values.CheckTimes(specs, "keyframe", Sec(ve.Length), "event start");
+        Values.SortByTime(specs);
         VideoMotionKeyframes keys = ve.VideoMotion.Keyframes;
         if (reset || mode == "replace") {
             keys.Clear();
@@ -103,11 +104,7 @@ public partial class Commands {
             first.Smoothness = 0;
             first.Type = VideoKeyframeType.Linear;
         }
-        foreach (Args s in specs) {
-            double t = s.Num("time");
-            if (t < 0) throw new BridgeError("keyframe time " + t + " is before the event's start");
-            ApplyPanKey(PanKeyAt(ve, t), s, f);
-        }
+        foreach (Args s in specs) ApplyPanKey(PanKeyAt(ve, s.Num("time")), s, f);
         if (mode == "replace" && specs.Count > 0 && specs[0].Num("time") > Values.SameTime) ApplyPanKey(keys[0], specs[0], f);
         return GetPanCrop(a);
     }
@@ -121,7 +118,9 @@ public partial class Commands {
     }
 
     // A keyframe's frame from one of: bounds (four corners), rect (x, y,
-    // width, height), or zoom and/or center. What it does not give stays.
+    // width, height), zoom (centred on `center`, else the media's middle),
+    // or center alone (the box moves there, keeping its size, shape and
+    // rotation). What it does not give stays.
     void ApplyPanKey(VideoMotionKeyframe k, Args s, PanFrame f) {
         if (s.Has("bounds")) {
             System.Collections.IList c = s.List("bounds");
@@ -138,8 +137,11 @@ public partial class Commands {
             double w = r.Num("width"), h = r.Num("height");
             if (w <= 0 || h <= 0) throw new BridgeError("rect's width and height must be above 0");
             SetPanBoxSize(k, r.Num("x") + w / 2, r.Num("y") + h / 2, w, h);
-        } else if (s.Has("zoom") || s.Has("center")) {
-            double zoom = s.Num("zoom", 1.0);
+        } else if (s.Has("center") && !s.Has("zoom")) {
+            double[] c = Values.Numbers(s.Raw("center"), 2, "center");
+            MovePanBox(k, c[0], c[1]);
+        } else if (s.Has("zoom")) {
+            double zoom = s.Num("zoom");
             if (zoom <= 0) throw new BridgeError("zoom must be above 0");
             double cx = f.CenterX, cy = f.CenterY;
             if (s.Has("center")) { double[] c = Values.Numbers(s.Raw("center"), 2, "center"); cx = c[0]; cy = c[1]; }
@@ -148,6 +150,20 @@ public partial class Commands {
         if (s.Has("rotation")) k.Rotation = Values.Radians(s.Num("rotation"));
         if (s.Has("smoothness")) k.Smoothness = (float)s.Num("smoothness");
         if (s.Has("interpolation")) k.Type = Values.Enum<VideoKeyframeType>(s.Str("interpolation"), "interpolation");
+    }
+
+    // The keyframe's four corners and centre moved together, so the box
+    // centres on (cx, cy) as it is.
+    static void MovePanBox(VideoMotionKeyframe k, double cx, double cy) {
+        VideoMotionBounds b = k.Bounds;
+        float dx = (float)(cx - (b.TopLeft.X + b.BottomRight.X) / 2), dy = (float)(cy - (b.TopLeft.Y + b.BottomRight.Y) / 2);
+        k.Bounds = new VideoMotionBounds(Moved(b.TopLeft, dx, dy), Moved(b.TopRight, dx, dy),
+                                         Moved(b.BottomRight, dx, dy), Moved(b.BottomLeft, dx, dy));
+        k.Center = new VideoMotionVertex((float)cx, (float)cy);
+    }
+
+    static VideoMotionVertex Moved(VideoMotionVertex v, float dx, float dy) {
+        return new VideoMotionVertex(v.X + dx, v.Y + dy);
     }
 
     static void SetPanBox(VideoMotionKeyframe k, PanFrame f, double cx, double cy, double zoom) {
@@ -162,9 +178,10 @@ public partial class Commands {
     }
 
     // zoom: {scale, center, start, end, from_scale, from_center, interpolation}.
-    // Without `end` the event holds `scale` at `center` from `start`; with it,
-    // the picture moves from from_scale at from_center (default 1, the middle)
-    // at `start` to `scale` at `center` at `end`.
+    // Without `end` the event holds `scale` at `center` from `start`, the
+    // default frame (zoom 1) holding before it; with it, the picture moves
+    // from from_scale at from_center (default 1, the middle) at `start` to
+    // `scale` at `center` at `end`.
     static List<Args> ZoomMove(Args z, VideoEvent ve) {
         List<Args> r = new List<Args>();
         double start = z.Num("start", 0.0);
@@ -172,6 +189,13 @@ public partial class Commands {
         to["zoom"] = z.Num("scale");
         if (z.Has("center")) to["center"] = z.Raw("center");
         if (!z.Has("end")) {
+            if (start > Values.SameTime) {
+                Dictionary<string, object> before = new Dictionary<string, object>();
+                before["time"] = 0.0;
+                before["zoom"] = 1.0;
+                before["interpolation"] = "Hold";
+                r.Add(new Args(before));
+            }
             to["time"] = start;
             if (z.Has("interpolation")) to["interpolation"] = z.Str("interpolation");
             r.Add(new Args(to));

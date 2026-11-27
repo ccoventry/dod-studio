@@ -106,7 +106,8 @@ public partial class Commands {
         string mode = a.Str("mode", "replace");
         if (mode != "replace" && mode != "add") throw new BridgeError("mode is \"replace\" or \"add\"");
         List<Args> specs = a.Has("keyframes") ? a.Items("keyframes") : new List<Args>();
-        specs.Sort(delegate(Args x, Args y) { return x.Num("time").CompareTo(y.Num("time")); });
+        Values.CheckTimes(specs, "keyframe", double.PositiveInfinity, "project start");
+        Values.SortByTime(specs);
         if (mode == "replace" || a.Bool("reset", false)) {
             // Clear leaves the list with one keyframe, as VEGAS needs one.
             clear();
@@ -122,11 +123,7 @@ public partial class Commands {
                 first.Type = VideoKeyframeType.Linear;
             }
         }
-        foreach (Args s in specs) {
-            double t = s.Num("time");
-            if (t < 0) throw new BridgeError("keyframe time " + t + " is before the project's start");
-            ApplyMotionKey(MotionKeyAt(keys, t, insert), s);
-        }
+        foreach (Args s in specs) ApplyMotionKey(MotionKeyAt(keys, s.Num("time"), insert), s);
         if (mode == "replace" && specs.Count > 0 && specs[0].Num("time") > Values.SameTime)
             ApplyMotionKey((BaseTrackMotionKeyframe)keys[0], specs[0]);
     }

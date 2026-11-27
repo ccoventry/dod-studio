@@ -171,6 +171,17 @@ class Tools(unittest.TestCase):
         self.assertLessEqual(detail, names)
         self.assertFalse(detail & vegas_mcp.LOCAL_NAMES)
 
+    def test_every_curve_the_bridge_sends_back_is_one_it_takes(self):
+        # The bridge sends VEGAS's None curve back as "Hold" (CurveName in Transitions.cs).
+        import detail_tools
+        self.assertIn("Hold", detail_tools.CURVE["enum"])
+        self.assertNotIn("None", detail_tools.CURVE["enum"])
+
+    def test_shadow_and_glow_say_they_take_reset(self):
+        props = next(t for t in vegas_mcp.TOOLS if t["name"] == "set_track_motion")["inputSchema"]["properties"]
+        for part in ("shadow", "glow"):
+            self.assertIn("reset", props[part]["description"], part)
+
     def test_every_fx_chain_can_be_targeted(self):
         for t in vegas_mcp.TOOLS:
             target = t["inputSchema"]["properties"].get("target")

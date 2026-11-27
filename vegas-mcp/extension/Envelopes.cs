@@ -58,7 +58,7 @@ public partial class Commands {
             Dictionary<string, object> pd = new Dictionary<string, object>();
             pd["time"] = Sec(p.X);
             pd["value"] = Values.Round(p.Y);
-            pd["curve"] = p.Curve.ToString();
+            pd["curve"] = CurveName(p.Curve);
             pts.Add(pd);
         }
         d["points"] = pts;
@@ -91,7 +91,8 @@ public partial class Commands {
         }
         List<Args> pts = a.Items("points");
         if (pts.Count == 0) throw new BridgeError("points is empty; mode \"remove\" removes the envelope");
-        pts.Sort(delegate(Args x, Args y) { return x.Num("time").CompareTo(y.Num("time")); });
+        Values.CheckTimes(pts, "point", a.Has("event") ? Sec(EventAt(a).Length) : double.PositiveInfinity, timesFrom);
+        Values.SortByTime(pts);
         if (env == null) {
             if (!CanAddEnvelope(a, type)) throw new BridgeError(owner + " cannot have a " + type + " envelope (get_envelopes lists can_add)");
             env = new Envelope(type);
@@ -116,7 +117,6 @@ public partial class Commands {
 
     static void SetEnvelopePoint(Envelope env, Args p) {
         double t = p.Num("time"), y = p.Num("value");
-        if (t < 0) throw new BridgeError("point time " + t + " is before the start");
         if (y < env.Min || y > env.Max) throw new BridgeError(env.Type + " values run " + env.Min + " to " + env.Max + "; got " + y);
         CurveType curve = p.Has("curve") ? Curve(p.Str("curve")) : CurveType.Linear;
         EnvelopePoint at = null;

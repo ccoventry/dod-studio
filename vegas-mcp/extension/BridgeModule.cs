@@ -168,8 +168,8 @@ public class Args {
     public object Raw(string k) { return Has(k) ? d[k] : null; }
     public string Str(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Convert.ToString(d[k]); }
     public string Str(string k, string def) { return Has(k) ? Convert.ToString(d[k]) : def; }
-    public double Num(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Convert.ToDouble(d[k]); }
-    public double Num(string k, double def) { return Has(k) ? Convert.ToDouble(d[k]) : def; }
+    public double Num(string k) { if (!Has(k)) throw new BridgeError("missing argument \"" + k + "\""); return Values.Number(d[k], "\"" + k + "\""); }
+    public double Num(string k, double def) { return Has(k) ? Values.Number(d[k], "\"" + k + "\"") : def; }
     public int Int(string k) { return (int)Num(k); }
     public int Int(string k, int def) { return Has(k) ? (int)Num(k) : def; }
     public bool Bool(string k, bool def) { return Has(k) ? Convert.ToBoolean(d[k]) : def; }
