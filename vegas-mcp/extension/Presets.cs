@@ -195,8 +195,7 @@ public partial class Commands {
     }
 
     // Applies a preset by name (any case) and returns its name as VEGAS has
-    // it. An unknown name fails listing the presets there are: VEGAS itself
-    // takes one silently.
+    // it. An unknown name fails, listing the presets there are.
     static string ApplyPreset(Effect e, string preset) {
         foreach (EffectPreset p in e.Presets) {
             if (string.Equals(p.Name, preset, StringComparison.OrdinalIgnoreCase)) {
