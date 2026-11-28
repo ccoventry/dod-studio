@@ -331,6 +331,11 @@ pub const AREAS: &[Area] = &[
                 "Apply map light files",
                 "relight the boxes and lamps dodstudio_maps\\<map>_light.txt lists.",
             ),
+            check(
+                console_name!("map_fix_old_build"),
+                "Fix demos on an older map build",
+                "HLTV demos recorded on an older build of the map: draw each piece the demo spawned, hide what today's map no longer has.",
+            ),
         ],
     },
     Area {

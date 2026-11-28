@@ -316,6 +316,7 @@ mod tests {
             crate::map_weather::NAME,
             crate::map_wind::NAME,
             crate::nameplates::NAME,
+            crate::map_old_build::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

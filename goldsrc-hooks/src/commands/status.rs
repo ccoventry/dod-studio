@@ -53,6 +53,12 @@ fn status_text() -> String {
         ),
         format!(
             "{} = {} -- {}",
+            crate::map_old_build::NAME,
+            bit(crate::map_old_build::SETTING.on()),
+            crate::map_old_build::status()
+        ),
+        format!(
+            "{} = {} -- {}",
             crate::headshot_sound::NAME,
             bit(crate::headshot_sound::CVAR.on()),
             crate::headshot_sound::status()

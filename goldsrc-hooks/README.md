@@ -184,6 +184,16 @@ is the complete list):
   `message` the loaded map's own entities declare (read from the map's BSP once
   per level). Same prepend/forward hook as `ds_hud_deathmsg`; nothing is
   patched. See the module doc in `src/map_text.rs` (issue #287).
+- **Old map builds** (`ds_map_fix_old_build 1`, on by default): an HLTV demo
+  recorded on an older build of its map draws each brush entity with the
+  piece of today's map its spawn bounds fit, and hides one that fits none,
+  instead of black boxes over triggers and solid water where the map's pieces
+  were renumbered. A demo on the map's own build is left as it is: nothing
+  changes unless some entity fits a piece at another number. Decided once per
+  demo from the engine's own copy of the map and the demo's baselines, and
+  applied in `HUD_AddEntity` by setting the entity's model for the frame; no
+  code is patched. The hook log counts what it did per demo. See
+  `src/map_old_build.rs` and `dod/src/brush_pieces.rs` (#1540).
 - **HLTV text** (`ds_spec_hide_hltv_messages 1`): drops the text an HLTV
   proxy puts on screen during playback -- "You're watching HLTV. Visit
   www.valvesoftware.com", about once a minute, and a proxy operator's own
