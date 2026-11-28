@@ -122,6 +122,12 @@ pub fn held_by_another_studio(map: &str, slot: impl Display) -> String {
     )
 }
 
+pub fn part_sweep_skipped(addon: impl Display) -> String {
+    format!(
+        "- Map builds: another DoD Studio is changing the map builds in {addon}; unfinished copies are left for the next start"
+    )
+}
+
 pub fn library_parts_swept(count: usize, library: impl Display) -> String {
     format!("- Map builds: removed {count} unfinished add(s) from {library}")
 }
@@ -256,7 +262,7 @@ pub fn slot_taken_warning(map: &str, slot: impl Display) -> String {
 /// Another running DoD Studio keeps another version in place for its game.
 pub fn held_by_another_studio_warning(map: &str) -> String {
     format!(
-        "{map}: another DoD Studio that is running has another version in place for its game, so the installed version plays. Close that DoD Studio's game first."
+        "{map}: the game plays the version another DoD Studio that is running put in dod_addon\\maps for its game, not the one these demos were recorded on. Try again once that game has closed."
     )
 }
 

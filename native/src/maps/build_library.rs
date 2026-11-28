@@ -250,6 +250,10 @@ fn write_with_progress(
 /// longer running: a Studio that closed or crashed mid-add. Returns how
 /// many went.
 pub fn sweep_unfinished_adds(library: &Path) -> usize {
+    // Most installs have no library: no process list for them.
+    if !library.is_dir() {
+        return 0;
+    }
     let sys = crate::sys::process::snapshot();
     let removed = sweep_unfinished_adds_where(library, &|pid| {
         sys.process(sysinfo::Pid::from_u32(pid)).is_some()

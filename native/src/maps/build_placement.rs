@@ -50,6 +50,9 @@ const LOCK_FILE: &str = "placed.lock";
 const PART_SUFFIX: &str = ".dodstudio-part";
 /// How long a change to the record waits for another Studio's.
 const LOCK_WAIT: Duration = Duration::from_secs(5);
+/// How long the start-up sweep waits for it: a busy record means another
+/// Studio is placing, and the next start sweeps instead.
+const SWEEP_LOCK_WAIT: Duration = Duration::from_millis(250);
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// How often a release waiting on the game looks at the process list: it
 /// only watches a process stay alive (CLAUDE.md, process lifecycles).
@@ -376,6 +379,11 @@ impl Placement {
             return;
         }
         let session = self.session;
+        // No game to wait for (a batch, whose game has run): its start is
+        // over now, not once the thread first looks.
+        if start_wait.is_zero() {
+            game_started(session);
+        }
         let spawned = std::thread::Builder::new()
             .name("map_builds_release".into())
             .spawn(move || {
@@ -785,7 +793,7 @@ pub fn release_stale(addon: &Path) -> usize {
 /// Studio's copy in progress is never taken (a copy keeps its source's
 /// modified time, so an age says nothing). Returns how many went.
 pub fn sweep_part_files(addon: &Path) -> usize {
-    sweep_part_files_within(addon, LOCK_WAIT)
+    sweep_part_files_within(addon, SWEEP_LOCK_WAIT)
 }
 
 fn sweep_part_files_within(addon: &Path, wait: Duration) -> usize {
@@ -794,6 +802,7 @@ fn sweep_part_files_within(addon: &Path, wait: Duration) -> usize {
         return 0;
     }
     let Ok(_guard) = lock_record_within(addon, wait) else {
+        log_markdown(&msg::part_sweep_skipped(addon.display()));
         return 0;
     };
     let Ok(entries) = std::fs::read_dir(addon.join("maps")) else {
@@ -911,12 +920,17 @@ pub fn release_leftovers_after_games(addon: &Path) {
 /// Returns how many came out.
 pub fn release_at_exit() -> usize {
     SHUTTING_DOWN.store(true, Ordering::Relaxed);
-    let starting = !lock_or_recover(&STARTING).is_empty();
-    release_at_exit_in(if starting {
-        GameState::Running
-    } else {
+    release_at_exit_in(exit_game_state())
+}
+
+/// The state of the games as `release_at_exit` reads it: a launch of this
+/// Studio still waiting for its game counts as a running game.
+fn exit_game_state() -> GameState {
+    if lock_or_recover(&STARTING).is_empty() {
         GameState::now()
-    })
+    } else {
+        GameState::Running
+    }
 }
 
 /// [`release_at_exit`]'s second half, with `games` the state of the games:

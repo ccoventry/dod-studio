@@ -339,15 +339,27 @@ fn closing_studio_while_a_launch_is_starting_leaves_its_build() {
     let i = install("exit_starting");
     let (first, _) = place_builds(&i.addon, &[build(1)]);
     assert!(lock_or_recover(&STARTING).contains(&first.session));
-    // `release_at_exit` reads a non-empty STARTING as a running game.
-    let starting = !lock_or_recover(&STARTING).is_empty();
-    let games = if starting {
-        GameState::Running
-    } else {
-        GameState::now()
-    };
-    assert_eq!(games, GameState::Running);
+    assert_eq!(exit_game_state(), GameState::Running);
     assert_eq!(first.release(), 1);
+}
+
+#[test]
+fn a_release_with_no_game_to_wait_for_ends_the_start_at_once() {
+    // A batch hands its builds over once its game has run.
+    let i = install("batch_end");
+    let (placement, _) = place_builds(&i.addon, &[build(1)]);
+    let session = placement.session;
+    placement.release_after_game(Duration::ZERO);
+    assert!(!lock_or_recover(&STARTING).contains(&session));
+}
+
+#[test]
+fn a_launch_whose_game_was_seen_is_no_longer_starting() {
+    let i = install("game_seen");
+    let (placement, _) = place_builds(&i.addon, &[build(1)]);
+    placement.game_seen();
+    assert!(!lock_or_recover(&STARTING).contains(&placement.session));
+    assert_eq!(placement.release(), 1);
 }
 
 #[test]
