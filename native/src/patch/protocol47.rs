@@ -415,6 +415,28 @@ fn new_part_file(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
     ))
 }
 
+/// Protocol-47 demos for other modules' tests.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    /// The protocol-48 demo `p48` made to say 47 where a 2004 recording does:
+    /// in the header and in every server info. [`convert_in_place`] turns it
+    /// back into `p48` byte for byte.
+    pub(crate) fn as_protocol_47(p48: &[u8]) -> Vec<u8> {
+        let mut old = p48.to_vec();
+        old[HEADER_NETWORK_PROTOCOL].copy_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
+        let mut needle = vec![SVC_SERVERINFO];
+        needle.extend_from_slice(&NETWORK_PROTOCOL_48.to_le_bytes());
+        for at in 0..old.len().saturating_sub(needle.len()) {
+            if old[at..at + needle.len()] == needle[..] && is_server_info_at(&old, at) {
+                old[at + 1..at + 5].copy_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
+            }
+        }
+        old
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

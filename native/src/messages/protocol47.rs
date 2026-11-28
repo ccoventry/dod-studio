@@ -33,6 +33,53 @@ pub fn cannot_write(path: impl Display, err: impl Display) -> String {
 /// Every part-file name beside the copy was taken.
 pub const NO_FREE_PART_NAME: &str = "every temporary name beside the copy is taken by another file";
 
+// ── patch/protocol48_copies.rs (#1549) ───────────────────────────────────
+
+/// A protocol-48 copy was made for the game's `viewdemo`.
+pub fn copy_made(name: impl Display, server_infos: usize, copy: impl Display, secs: f64) -> String {
+    format!(
+        "**Protocol-48 copy** — `{name}` is an older protocol-47 demo, which the game's viewdemo \
+         can't play. The game plays a converted copy ({}), saved as `{copy}` in {secs:.1} s; \
+         the original is unchanged.",
+        map_loads(server_infos)
+    )
+}
+
+/// An earlier play's protocol-48 copy plays again.
+pub fn copy_in_use(name: impl Display, copy: impl Display) -> String {
+    format!("`{name}` is an older protocol-47 demo: the game plays its converted copy `{copy}`.")
+}
+
+// ── sys/game_convert_requests.rs (#1549) ─────────────────────────────────
+
+/// The game asked for a protocol-48 copy (its Load Demo window, Demos tab or
+/// console `viewdemo`).
+pub fn game_convert_request(demo: impl Display) -> String {
+    format!(
+        "**Game asked for a protocol-48 copy** of `{demo}` (an older demo its viewdemo can't play)."
+    )
+}
+
+/// The game's request for a copy failed.
+pub fn game_convert_failed(why: impl Display) -> String {
+    format!("**No protocol-48 copy for the game**: {why}")
+}
+
+/// The game asked for a copy of a demo that is not protocol 47.
+pub const GAME_CONVERT_NOT_PROTOCOL_47: &str =
+    "it is not a protocol-47 demo, so there is nothing to convert";
+
+/// The copy's drive is too full.
+pub fn copy_no_room(folder: impl Display, free_bytes: u64, needed_bytes: u64) -> String {
+    let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
+    format!(
+        "the converted copy needs {:.0} MB in {folder}, and its drive has {:.0} MB free \
+         with 1 GB to keep spare: free some space there",
+        mb(needed_bytes),
+        mb(free_bytes)
+    )
+}
+
 /// How many map loads a conversion rewrote: one server info each, and a
 /// restart loads the same map again.
 pub fn map_loads(server_infos: usize) -> String {

@@ -56,6 +56,7 @@ pub mod highlevel;
 pub mod launch_settings;
 pub mod map_text;
 pub mod protocol47;
+pub mod protocol48_copies;
 pub mod runtime_batch;
 pub mod scanner;
 pub mod sound_mute;
