@@ -512,6 +512,16 @@ Studio's game pipe, which shows a toast with Repair
 (`src/demo_damage/tell.rs`). It only reads. On by default;
 `GOLDSRC_HOOKS_DEMO_DAMAGE=0` turns it off.
 
+`src/old_protocol.rs` plays DoD Studio's converted copy of a 2004-era
+protocol-47 demo started with `viewdemo` (the in-game Load Demo window, the
+Demos tab, the console), which the demo player's `Core.dll` refuses (#1549,
+`docs/goldsrc_protocol_47.md`). `demo_reload`'s `viewdemo` wrapper hands it
+each named `viewdemo` first: it reads the first 16 bytes of the file the name
+opens, and for a protocol-47 demo runs no `viewdemo`, asks Studio over its game
+pipe for the copy (`convert <path>`) on a thread of its own, and plays the copy
+on a later frame. Without Studio, or when the copy can't be made, the console
+says why and a centre print points there. No engine code is patched.
+
 `src/pov_map_keys.rs` makes `+map` and `+mapzoom` do nothing while a POV demo
 plays (#1441). The recorder's presses replay there and cycle the viewer's
 `_cl_minimap`; the map never draws in POV playback (#897), so all that shows

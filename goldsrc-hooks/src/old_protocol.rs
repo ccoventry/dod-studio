@@ -39,6 +39,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 /// The bytes of a demo's start that say its protocol: the magic, the demo
 /// protocol, then the network protocol.
@@ -157,21 +158,88 @@ fn store(pending: Pending) {
     READY.store(true, Ordering::Release);
 }
 
+/// How long a request waits for a free instance of Studio's pipe while it is
+/// busy with other requests (the Highlights tab asks it too), and how often
+/// it tries.
+const BUSY_WAIT: Duration = Duration::from_secs(5);
+const BUSY_RETRY: Duration = Duration::from_millis(100);
+/// How long Studio gets to answer. A conversion reads and writes the demo
+/// once (about half a second for 90 MB on a local disk), so this leaves room
+/// for a slow drive while still ending a request a hung Studio never answers.
+const ANSWER_WAIT: Duration = Duration::from_secs(60);
+/// Windows' "All pipe instances are busy".
+const ERROR_PIPE_BUSY: i32 = 231;
+
 /// Asks Studio for `demo`'s copy and waits for its answer, on the request's
 /// own thread.
 fn ask_studio(demo: &Path) -> Answer {
-    let Ok(mut pipe) = crate::studio_pipe::connect() else {
-        return Answer::NoStudio;
+    let mut pipe = match connect_waiting() {
+        Ok(pipe) => pipe,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Answer::NoStudio,
+        Err(e) => return Answer::Failed(format!("its pipe didn't open ({e})")),
     };
     if let Err(e) = pipe.write_all(request_line(demo).as_bytes()) {
         return Answer::Failed(format!("the request didn't reach it ({e})"));
     }
-    let mut line = String::new();
-    match BufReader::new(pipe).read_line(&mut line) {
-        Ok(_) => parse_answer(&line),
-        Err(e) => Answer::Failed(format!("no answer ({e})")),
+    match read_line_within(pipe, ANSWER_WAIT) {
+        Ok(line) => parse_answer(&line),
+        Err(why) => Answer::Failed(why),
     }
 }
+
+/// Studio's game pipe, waiting up to [`BUSY_WAIT`] while every instance is
+/// busy: a busy pipe is a Studio that is there.
+fn connect_waiting() -> std::io::Result<std::fs::File> {
+    let started = Instant::now();
+    loop {
+        match crate::studio_pipe::connect() {
+            Err(e)
+                if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && started.elapsed() < BUSY_WAIT =>
+            {
+                std::thread::sleep(BUSY_RETRY);
+            }
+            result => return result,
+        }
+    }
+}
+
+/// One line from `reader`, or why not within `wait`. The read runs on a
+/// thread of its own; on Windows a read still blocked at the deadline is
+/// cancelled, so that thread ends too.
+fn read_line_within(reader: impl Read + Send + 'static, wait: Duration) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("old-protocol-answer".into())
+        .spawn(move || {
+            let mut line = String::new();
+            let read = BufReader::new(reader).read_line(&mut line).map(|_| line);
+            let _ = tx.send(read);
+        });
+    let reading = spawned.map_err(|e| format!("no thread to read its answer on ({e})"))?;
+    match rx.recv_timeout(wait) {
+        Ok(Ok(line)) => Ok(line),
+        Ok(Err(e)) => Err(format!("no answer ({e})")),
+        Err(_) => {
+            cancel_read(&reading);
+            Err(format!(
+                "no answer within {} s: DoD Studio may be stuck",
+                wait.as_secs()
+            ))
+        }
+    }
+}
+
+/// Ends the blocked read on `thread`, so it doesn't outlive the request.
+#[cfg(windows)]
+fn cancel_read(thread: &std::thread::JoinHandle<()>) {
+    use std::os::windows::io::AsRawHandle;
+    // Safety: the handle of a thread this module started and still owns; a
+    // thread with no read in progress just reports nothing to cancel.
+    unsafe { windows_sys::Win32::System::IO::CancelSynchronousIo(thread.as_raw_handle()) };
+}
+
+#[cfg(not(windows))]
+fn cancel_read(_thread: &std::thread::JoinHandle<()>) {}
 
 /// The request for `demo`'s copy.
 fn request_line(demo: &Path) -> String {
@@ -261,6 +329,9 @@ fn log(what: &str) {
 mod tests {
     use super::*;
 
+    /// The tests that use the module's answer slot run one at a time.
+    static SHARED_STATE: Mutex<()> = Mutex::new(());
+
     fn header(protocol: i32) -> Vec<u8> {
         let mut head = MAGIC.to_vec();
         head.extend_from_slice(&5i32.to_le_bytes());
@@ -324,6 +395,7 @@ mod tests {
 
     #[test]
     fn an_answer_for_a_demo_the_player_moved_on_from_is_dropped() {
+        let _one_at_a_time = SHARED_STATE.lock().unwrap();
         let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
         demo_command_started();
         store(Pending {
@@ -335,6 +407,54 @@ mod tests {
         poll();
         assert!(ANSWER.lock().unwrap().is_none());
         assert!(!READY.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn an_earlier_requests_answer_arriving_last_does_not_replace_the_later_one() {
+        let _one_at_a_time = SHARED_STATE.lock().unwrap();
+        let earlier = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        let later = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        store(Pending {
+            generation: later,
+            answer: Answer::Copy(PathBuf::from("later_p48.dem")),
+        });
+        store(Pending {
+            generation: earlier,
+            answer: Answer::Copy(PathBuf::from("earlier_p48.dem")),
+        });
+        let held = ANSWER.lock().unwrap().take().unwrap();
+        assert_eq!(held.generation, later);
+        assert_eq!(held.answer, Answer::Copy(PathBuf::from("later_p48.dem")));
+        READY.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn an_answer_is_read_up_to_its_line_end() {
+        let answer = std::io::Cursor::new(b"copy C:/x_p48.dem\nmore".to_vec());
+        assert_eq!(
+            read_line_within(answer, Duration::from_secs(5)).unwrap(),
+            "copy C:/x_p48.dem\n"
+        );
+    }
+
+    /// A reader that answers only after `0`.
+    struct Slow(Duration);
+
+    impl Read for Slow {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            std::thread::sleep(self.0);
+            buf[0] = b'\n';
+            Ok(1)
+        }
+    }
+
+    #[test]
+    fn a_studio_that_never_answers_ends_the_request() {
+        let started = Instant::now();
+        let e =
+            read_line_within(Slow(Duration::from_secs(2)), Duration::from_millis(100)).unwrap_err();
+        assert!(e.contains("no answer within"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
