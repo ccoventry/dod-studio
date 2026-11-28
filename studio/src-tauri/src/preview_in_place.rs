@@ -4,7 +4,9 @@
 //! by a relative path, or by its full path on another drive with a hook DLL
 //! from #779 on (`native::preview_in_place`), Launch Preview plays the
 //! original demo and opens the in-game DoD Studio window's Highlights tab,
-//! which lists the highlights with Go (#565). Nothing is written to disk. In
+//! which lists the highlights with Go (#565). Nothing is written to disk,
+//! except for a protocol-47 demo, which `viewdemo` refuses: it plays from a
+//! converted copy in Studio's own folder (#1549, `protocol48_demos`). In
 //! every other case Launch Preview patches a `<stem>_preview.dem` with a
 //! bookmark per highlight, as before.
 
@@ -39,6 +41,25 @@ pub fn plan(config: &PatcherConfig, dod_dir: &Path, demo: &Path) -> Option<Strin
     // The DLL file is only read for a demo on another drive.
     viewdemo_arg_any_drive(dod_dir, demo, false)
         .or_else(|| viewdemo_arg_any_drive(dod_dir, demo, hook_plays_other_drives(&dll)))
+}
+
+/// [`plan`] for the file the game plays for `demo`: a protocol-47 demo's
+/// converted copy, made now if there is none yet, since `viewdemo` refuses
+/// the original (#1549, `protocol48_demos`). Nothing is converted without the
+/// hook DLL: that preview is patched, and the patcher converts as it copies.
+/// `Err` when a protocol-47 demo's copy can't be made: the preview must not
+/// start.
+pub fn plan_playable(
+    app: &tauri::AppHandle,
+    config: &PatcherConfig,
+    dod_dir: &Path,
+    demo: &Path,
+) -> Result<Option<String>, String> {
+    if config.goldsrc_hooks_dll().is_none() || !demo.is_file() {
+        return Ok(None);
+    }
+    let file = crate::protocol48_demos::for_preview(app, demo)?;
+    Ok(plan(config, dod_dir, &file))
 }
 
 /// Starts the game, then, once it takes commands, plays the original demo and

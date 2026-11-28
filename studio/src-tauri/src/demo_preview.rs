@@ -176,12 +176,15 @@ pub async fn launch_demo_preview(
             None => None,
         };
         // The original demo (or its trimmed copy), untouched, when the game
-        // can play it in place (#434).
-        if let Some(arg) = trimmed
-            .as_deref()
-            .or(first.as_deref())
-            .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
-        {
+        // can play it in place (#434); a protocol-47 one's converted copy
+        // (#1549).
+        let in_place = match trimmed.as_deref().or(first.as_deref()) {
+            Some(demo) => {
+                crate::preview_in_place::plan_playable(&app, &patcher_config, &dod_dir, demo)?
+            }
+            None => None,
+        };
+        if let Some(arg) = in_place {
             return crate::preview_in_place::launch(app, &patcher_config, &arg);
         }
         let (jobs, _generated) =
@@ -273,11 +276,13 @@ pub async fn send_preview_to_running_game(
             Some(demo) => crate::trimmed_demos::for_preview(&app, demo, &game_path)?,
             None => None,
         };
-        if let Some(arg) = trimmed
-            .as_deref()
-            .or(first.as_deref())
-            .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
-        {
+        let in_place = match trimmed.as_deref().or(first.as_deref()) {
+            Some(demo) => {
+                crate::preview_in_place::plan_playable(&app, &patcher_config, &dod_dir, demo)?
+            }
+            None => None,
+        };
+        if let Some(arg) = in_place {
             return crate::preview_in_place::send_to_running(&pids, &arg);
         }
         let (jobs, _generated) =

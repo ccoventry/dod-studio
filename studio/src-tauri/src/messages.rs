@@ -592,6 +592,37 @@ pub fn preview_plays_trimmed_copy(engine: &native::patch::trimmed_copies::Engine
     )
 }
 
+// ── protocol48_demos.rs (#1549) ──────────────────────────────────────────
+
+pub const CAPTURE_CANCELLED_WHILE_CONVERTING: &str =
+    "Capture cancelled while making a protocol-48 copy. Nothing was captured.";
+
+/// The status line while Studio makes a protocol-47 demo's converted copy.
+pub fn converting_demo(demo: &str, step: native::patch::protocol48_copies::Step) -> String {
+    use native::patch::protocol48_copies::Step;
+    match step {
+        Step::Reading(f) => format!(
+            "Converting {demo}, an older protocol-47 demo: reading it ({}%)",
+            (f.clamp(0.0, 1.0) * 100.0).round() as u32
+        ),
+        Step::Writing => {
+            format!("Converting {demo}, an older protocol-47 demo: writing the copy")
+        }
+    }
+}
+
+/// Why a protocol-47 demo can't play: no converted copy could be made, and
+/// the game's viewdemo refuses the original.
+pub fn demo_cannot_be_converted(demo: &str, why: impl std::fmt::Display) -> String {
+    format!(
+        "{demo} is an older protocol-47 demo, which the game's viewdemo can't play, \
+         and no converted copy could be made: {why}."
+    )
+}
+
+/// What a Launch Preview says when it plays a converted copy.
+pub const PREVIEW_PLAYS_CONVERTED_COPY: &str = "This is an older protocol-47 demo, which the game's viewdemo can't play, so the preview plays a converted copy. The original is unchanged.";
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 /// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`

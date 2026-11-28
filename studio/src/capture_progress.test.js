@@ -22,6 +22,9 @@ describe('captureStepView (#952)', () => {
     // A trimmed copy being made (#207): the block slides, the line counts.
     expect(captureStepView({ stage: 'trimming', index: 1, total: 2, measured: false }))
       .toEqual({ fill: 0, slideTo: CAPTURE_SHARES.preparing[1] });
+    // A protocol-47 demo's converted copy (#1549): the same.
+    expect(captureStepView({ stage: 'converting', index: 0, total: 1, measured: false }))
+      .toEqual({ fill: 0, slideTo: CAPTURE_SHARES.preparing[1] });
   });
 
   it('counts clips on the rest, with the next clip sliding', () => {

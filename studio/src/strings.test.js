@@ -168,9 +168,9 @@ describe('AUDITOR.doneStatus', () => {
   });
 });
 
-describe('networkProtocolValue (#239)', () => {
-  it('says a protocol-47 demo plays with a warning', () => {
-    expect(STRINGS.ANALYZER.networkProtocolValue(47)).toBe('47 (older build): plays with an outdated-protocol warning');
+describe('networkProtocolValue (#239, #1549)', () => {
+  it('says DoD Studio plays a protocol-47 demo from a converted copy', () => {
+    expect(STRINGS.ANALYZER.networkProtocolValue(47)).toBe('47 (older protocol): DoD Studio converts a copy when it plays it');
   });
 
   it('is the bare number for any other protocol', () => {

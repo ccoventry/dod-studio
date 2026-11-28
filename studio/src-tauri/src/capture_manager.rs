@@ -1567,13 +1567,42 @@ pub async fn start_capture_batch_impl(
             }
         };
 
+        // ── Under the hook's viewdemo a protocol-47 demo plays a converted copy (#1549) ──
+        // A patched batch converts as it copies, and starts with playdemo.
+        let crate::protocol48_demos::BatchCopies {
+            copies: converted,
+            pins: convert_pins,
+        } = match patcher_config
+            .hook_runs_batch
+            .then(|| {
+                crate::protocol48_demos::for_batch(
+                    &app_handle_clone,
+                    &patch_jobs,
+                    &trimmed,
+                    &cancel_token_arc,
+                )
+            })
+            .transpose()
+        {
+            Ok(batch) => batch.unwrap_or_default(),
+            Err(status) => {
+                let mut running = lock_or_recover(&is_running_arc);
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({ "running": false, "error": true, "status": status }),
+                );
+                return;
+            }
+        };
+
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
             match crate::hook_batch::prepare(
                 &patch_jobs,
                 &planned_streaks,
                 &patcher_config,
-                &trimmed,
+                &crate::protocol48_demos::plays_from(&trimmed, &converted),
             ) {
                 Ok(mut batch) => {
                     batch.reuse_game = reuse_game_pid;
@@ -1895,8 +1924,10 @@ pub async fn start_capture_batch_impl(
         std::thread::spawn(move || {
             // Ends Render While Capturing however the listener ends.
             let _room_guard = RoomGuard(room.clone());
-            // The batch's trimmed copies can't be pruned until it ends (#207).
+            // The batch's trimmed and converted copies can't be pruned until
+            // it ends (#207, #1549).
             let _trim_pins = trim_pins;
+            let _convert_pins = convert_pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per

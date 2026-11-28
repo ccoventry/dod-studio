@@ -53,6 +53,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod project_session_cmd;
+mod protocol48_demos;
 mod render_export_dirs;
 mod render_live_resumable;
 mod render_manager;

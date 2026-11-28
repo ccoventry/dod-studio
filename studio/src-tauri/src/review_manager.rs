@@ -156,6 +156,13 @@ pub async fn start_highlight_review(
     start_from: Option<f64>,
 ) -> Result<ReviewStarted, String> {
     let count = highlights.len();
+    // The game plays each demo with viewdemo, which refuses a protocol-47
+    // one: those play a converted copy (#1549).
+    let highlights =
+        crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+            crate::protocol48_demos::for_review(highlights)
+        }))
+        .await?;
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
     std::fs::write(
         &queue,
