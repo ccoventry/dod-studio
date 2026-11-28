@@ -164,6 +164,12 @@ fn read_header(demo: &Path) -> Result<(std::fs::File, String, u32), String> {
 /// a map is never called the wrong build on the strength of a field that was
 /// never filled in: the server info's value stands in for it.
 fn server_info_checksum_of(file: &mut std::fs::File) -> Option<u32> {
+    server_info_checksum(&header_and_window(file)?)
+}
+
+/// A zeroed 544-byte header followed by the next [`SERVER_INFO_WINDOW`] bytes
+/// of `file` (positioned after the header), the shape `find_server_info` reads.
+fn header_and_window(file: &mut std::fs::File) -> Option<Vec<u8>> {
     use std::io::Read;
 
     let mut window = vec![0u8; HEADER_READ_LEN];
@@ -171,7 +177,21 @@ fn server_info_checksum_of(file: &mut std::fs::File) -> Option<u32> {
         .take(SERVER_INFO_WINDOW as u64)
         .read_to_end(&mut window)
         .ok()?;
-    server_info_checksum(&window)
+    Some(window)
+}
+
+/// Whether the demo's server sent a `client.dll` hash, which only an older
+/// release of Day of Defeat does (every modern 1.3 server sends zeros, #1542).
+/// Reads 544 bytes plus 8 KB, so call it for a demo already known to have a
+/// problem, not for a whole folder. `false` when the demo or its server info
+/// can't be read.
+pub fn recorded_on_older_release(demo: &Path) -> bool {
+    let Ok((mut file, _, _)) = read_header(demo) else {
+        return false;
+    };
+    header_and_window(&mut file)
+        .and_then(|start| dod::server_info::find_server_info(&start))
+        .is_some_and(|stamp| stamp.client_dll_hash != [0; 16])
 }
 
 /// The map checksum in the first `svc_serverinfo` of `file_start` (a demo's
@@ -346,6 +366,23 @@ mod tests {
             MapStatus::Missing,
             "no map here, and never a wrong build"
         );
+    }
+
+    #[test]
+    fn a_server_that_sent_a_client_dll_hash_is_an_older_release() {
+        let dir = scratch("older_release");
+        let modern = dir.join("modern.dem");
+        let older = dir.join("older.dem");
+        std::fs::write(&modern, hltv_demo("dod_anzio", 0x801b_771f, 5)).unwrap();
+        // The helper writes a zero hash; an old server's is real bytes.
+        let mut bytes = hltv_demo("dod_anzio", 0x801b_771f, 5);
+        let hash_at = HEADER_READ_LEN + 200 + 13;
+        bytes[hash_at..hash_at + 16].copy_from_slice(&[0x2f; 16]);
+        std::fs::write(&older, bytes).unwrap();
+
+        assert!(!recorded_on_older_release(&modern));
+        assert!(recorded_on_older_release(&older));
+        assert!(!recorded_on_older_release(&dir.join("gone.dem")));
     }
 
     #[test]

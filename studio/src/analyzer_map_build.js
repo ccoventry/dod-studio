@@ -23,8 +23,15 @@ function buildText(checksum) {
 /** The notice's text for a map-check row, or null when there is no problem. */
 export function mapBuildNotice(row) {
   return row
-    ? STRINGS.ANALYZER.wrongMapBuildNotice(row.mapName, buildText(row.expectedChecksum), buildText(row.installedChecksum))
+    ? STRINGS.ANALYZER.wrongMapBuildNotice(row.mapName, row.olderRelease === true)
     : null;
+}
+
+/** The two builds, for the banner's tooltip: the detail the notice leaves out. */
+export function mapBuildDetail(row) {
+  return row
+    ? STRINGS.ANALYZER.wrongMapBuildDetail(buildText(row.expectedChecksum), buildText(row.installedChecksum))
+    : '';
 }
 
 /** Checks `demoPath` against the maps beside the configured hl.exe.
@@ -45,4 +52,5 @@ export function renderMapBuildBanner(el, row) {
   const notice = mapBuildNotice(row);
   el.hidden = !notice;
   el.textContent = notice || '';
+  el.title = mapBuildDetail(row);
 }

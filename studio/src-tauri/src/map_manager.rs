@@ -25,6 +25,9 @@ pub struct MapCheckRow {
     pub expected_checksum: Option<u32>,
     /// The installed map's build, when it is a different one (`wrongBuild`).
     pub installed_checksum: Option<u32>,
+    /// A `wrongBuild` demo whose server sent a `client.dll` hash: recorded on
+    /// an older release of the game. `false` otherwise.
+    pub older_release: bool,
     /// `ok` | `wrongBuild` | `missing` | `unverifiable` | `unreadableMap` |
     /// `unreadableDemo`
     pub state: String,
@@ -72,6 +75,7 @@ pub async fn check_demo_maps(
                         map_name: String::new(),
                         expected_checksum: None,
                         installed_checksum: None,
+                        older_release: false,
                         state: "unreadableDemo".to_string(),
                         detail: e,
                         playable: false,
@@ -108,6 +112,8 @@ pub async fn check_demo_maps(
                 demo_path: path,
                 demo_name,
                 installed_checksum,
+                older_release: matches!(status, MapStatus::WrongBuild { .. })
+                    && map_check::recorded_on_older_release(&p),
                 detail: status.summary(&reference.map_name),
                 playable: status.is_playable(),
                 map_name: reference.map_name,

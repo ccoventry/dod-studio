@@ -290,9 +290,11 @@ export const ANALYZER_STRINGS = {
     MAP_NAME_LABEL: 'Map name',
     MAP_CHECKSUM_LABEL: 'Map checksum',
     // #1539: the notice above the tabs for a demo recorded on another build of its map.
-    wrongMapBuildNotice: (map, recorded, installed) =>
-      `Different map build: this demo was recorded on build ${recorded} of ${map}, and the installed one is ${installed}. `
-      + 'The demo still plays, but it can draw wrong, and the Kill Map and kill distances are measured on the installed map, not the one it was recorded on.',
+    wrongMapBuildNotice: (map, olderRelease) =>
+      `Different map version: this demo was recorded on another version of ${map} than the one you have, so some walls, water or doors may look wrong.`
+      + (olderRelease ? ' It comes from an older release of Day of Defeat.' : ''),
+    // The troubleshooting detail under that notice (a tooltip).
+    wrongMapBuildDetail: (recorded, installed) => `Map builds: demo ${recorded}, installed ${installed}`,
     // #1539: an HLTV demo's header has no map checksum; its server info does.
     mapChecksumValue: (info) => {
       if (info.map_checksum === 0 && Number.isInteger(info.server_info_map_checksum)) {

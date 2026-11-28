@@ -4,7 +4,7 @@ vi.mock('./ipc_bridge.js', () => ({ checkDemoMaps: vi.fn(), logFrontendEvent: vi
 
 import { checkDemoMaps, logFrontendEvent } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
-import { mapBuildProblem, mapBuildNotice, findMapBuildProblem, renderMapBuildBanner } from './analyzer_map_build.js';
+import { mapBuildProblem, mapBuildNotice, mapBuildDetail, findMapBuildProblem, renderMapBuildBanner } from './analyzer_map_build.js';
 
 const wrong = {
   state: 'wrongBuild', mapName: 'dod_chemille', demoName: 'a.dem', expectedChecksum: 0xbb690c32, installedChecksum: 0xe4d5f058,
@@ -17,13 +17,18 @@ describe('the Demo Analyzer map build notice (#1539)', () => {
     expect(mapBuildProblem(undefined)).toBeNull();
   });
 
-  it('says which builds differ', () => {
+  it('says it in plain words, with no checksums, and keeps the builds for the tooltip', () => {
     const notice = mapBuildNotice(wrong);
-    expect(notice).toContain('bb690c32');
-    expect(notice).toContain('e4d5f058');
-    expect(notice).toContain('dod_chemille');
-    expect(notice).not.toMatch(/[`—]/);
+    expect(notice).toContain('another version of dod_chemille');
+    expect(notice).not.toMatch(/bb690c32|e4d5f058|build|[`—]/);
+    expect(notice).not.toContain('older release');
+    expect(mapBuildDetail(wrong)).toBe('Map builds: demo bb690c32, installed e4d5f058');
     expect(mapBuildNotice(null)).toBeNull();
+  });
+
+  it('adds the older-release line only when the server sent a client.dll hash', () => {
+    expect(mapBuildNotice({ ...wrong, olderRelease: true })).toContain('It comes from an older release of Day of Defeat.');
+    expect(mapBuildNotice({ ...wrong, olderRelease: true })).not.toMatch(/1\.\d/);
   });
 
   it('asks for nothing without a game path, and passes the demo and game path through', async () => {
@@ -39,7 +44,8 @@ describe('the Demo Analyzer map build notice (#1539)', () => {
     const el = { hidden: true, textContent: '' };
     renderMapBuildBanner(el, wrong);
     expect(el.hidden).toBe(false);
-    expect(el.textContent).toContain('bb690c32');
+    expect(el.textContent).toContain('dod_chemille');
+    expect(el.title).toContain('bb690c32');
     renderMapBuildBanner(el, null);
     expect(el.hidden).toBe(true);
     expect(el.textContent).toBe('');

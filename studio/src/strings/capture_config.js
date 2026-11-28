@@ -408,7 +408,7 @@ export const CAPTURE_CONFIG_STRINGS = {
   MAPS: {
     BANNER_TITLE: 'Maps needed',
     MISSING_LABEL: 'missing',
-    WRONG_BUILD_LABEL: 'different build',
+    WRONG_BUILD_LABEL: 'different version',
     UNREADABLE_LABEL: 'unreadable',
     DOWNLOAD_BUTTON: 'Download',
     DOWNLOAD_ALL_BUTTON: 'Download all',
