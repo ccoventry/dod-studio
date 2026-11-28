@@ -884,6 +884,16 @@ fn obs_drop_rate_payload(report: &native::obs::ObsDropReport) -> serde_json::Val
     })
 }
 
+/// Ends a batch that stopped before its game started: clears the running
+/// flag and shows `status` on the Capture footer as an error.
+fn end_unstarted_batch(app: &tauri::AppHandle, is_running: &Mutex<bool>, status: String) {
+    *lock_or_recover(is_running) = false;
+    let _ = app.emit(
+        "capture_status",
+        serde_json::json!({ "running": false, "error": true, "status": status }),
+    );
+}
+
 /// Everything under `path`, in bytes. 0 for a folder that isn't there.
 fn folder_bytes(path: &Path) -> u64 {
     native::sys::folder_walk::Walker::new()
@@ -1552,48 +1562,22 @@ pub async fn start_capture_batch_impl(
             &cancel_token_arc,
         ) {
             Ok(batch) => batch,
-            Err(status) => {
-                let mut running = lock_or_recover(&is_running_arc);
-                *running = false;
-                let _ = app_handle_clone.emit(
-                    "capture_status",
-                    serde_json::json!({
-                        "running": false,
-                        "error": true,
-                        "status": status
-                    }),
-                );
-                return;
-            }
+            Err(status) => return end_unstarted_batch(&app_handle_clone, &is_running_arc, status),
         };
 
         // ── Under the hook's viewdemo a protocol-47 demo plays a converted copy (#1549) ──
-        // A patched batch converts as it copies, and starts with playdemo.
         let crate::protocol48_demos::BatchCopies {
             copies: converted,
             pins: convert_pins,
-        } = match patcher_config
-            .hook_runs_batch
-            .then(|| {
-                crate::protocol48_demos::for_batch(
-                    &app_handle_clone,
-                    &patch_jobs,
-                    &trimmed,
-                    &cancel_token_arc,
-                )
-            })
-            .transpose()
-        {
-            Ok(batch) => batch.unwrap_or_default(),
-            Err(status) => {
-                let mut running = lock_or_recover(&is_running_arc);
-                *running = false;
-                let _ = app_handle_clone.emit(
-                    "capture_status",
-                    serde_json::json!({ "running": false, "error": true, "status": status }),
-                );
-                return;
-            }
+        } = match crate::protocol48_demos::for_batch(
+            &app_handle_clone,
+            &patch_jobs,
+            &trimmed,
+            &patcher_config,
+            &cancel_token_arc,
+        ) {
+            Ok(batch) => batch,
+            Err(status) => return end_unstarted_batch(&app_handle_clone, &is_running_arc, status),
         };
 
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
@@ -1613,17 +1597,7 @@ pub async fn start_capture_batch_impl(
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
                     log_markdown(&crate::messages::capture::batch_not_started_line(&status));
-                    let mut running = lock_or_recover(&is_running_arc);
-                    *running = false;
-                    let _ = app_handle_clone.emit(
-                        "capture_status",
-                        serde_json::json!({
-                            "running": false,
-                            "error": true,
-                            "status": status
-                        }),
-                    );
-                    return;
+                    return end_unstarted_batch(&app_handle_clone, &is_running_arc, status);
                 }
                 Err(why) => {
                     log_markdown(&crate::messages::capture::batch_patched_instead_of_seeking(

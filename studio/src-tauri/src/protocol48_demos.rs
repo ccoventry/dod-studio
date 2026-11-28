@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use native::patch::PatchJob;
 use native::patch::copy_cache::{Pins, prune};
 use native::patch::protocol48_copies::{KEEP_COPIES, Playable, Step, prepare_playable_in};
+use native::patch::{PatchJob, PatcherConfig};
 use native::review_queue::ReviewHighlight;
 use tauri::Emitter;
 
@@ -115,15 +115,21 @@ pub struct BatchCopies {
 
 /// The converted copies a Seek Between Clips batch of `jobs` plays from:
 /// each demo's, or its trimmed copy's (`trimmed`, keyed by the original),
-/// when that is a protocol-47 demo. Reports each step on the Capture footer
-/// (`capture_status`). Prunes the copies past [`KEEP_COPIES`] however it ends.
-/// `Err` is the batch's error line: a copy that couldn't be made, or Cancel.
+/// when that is a protocol-47 demo. None when `config` doesn't have the hook
+/// run the batch: a patched batch converts as it copies, and starts with
+/// `playdemo`. Reports each step on the Capture footer (`capture_status`).
+/// Prunes the copies past [`KEEP_COPIES`] however it ends. `Err` is the
+/// batch's error line: a copy that couldn't be made, or Cancel.
 pub fn for_batch(
     app: &tauri::AppHandle,
     jobs: &[PatchJob],
     trimmed: &HashMap<String, PathBuf>,
+    config: &PatcherConfig,
     cancel: &AtomicBool,
 ) -> Result<BatchCopies, String> {
+    if !config.hook_runs_batch {
+        return Ok(BatchCopies::default());
+    }
     let folders = Folders::studio();
     let with_clips = jobs.iter().filter(|j| !j.blocks.is_empty());
     let played = played_demos(with_clips.map(|j| j.source_demo.as_str()), trimmed);
@@ -210,34 +216,48 @@ pub fn plays_from(
     plays
 }
 
+/// The copies the latest review plays, kept from [`prune`] until the next
+/// review starts: Studio doesn't know when the game is done with a review,
+/// and one of more protocol-47 demos than [`KEEP_COPIES`] would otherwise
+/// prune its own first copies before the game reaches them.
+static REVIEW_PINS: std::sync::Mutex<Option<Pins>> = std::sync::Mutex::new(None);
+
 /// `highlights` with each protocol-47 demo swapped for its converted copy,
 /// for a review (the game plays each with `viewdemo`). The game answers by
-/// each row's key, so a copy's answer still reaches its row. `Err` is the
-/// line saying which demo can't play.
+/// each row's key, so a copy's answer still reaches its row. The copies stay
+/// pinned until the next review. `Err` is the line saying which demo can't
+/// play.
 pub fn for_review(highlights: Vec<ReviewHighlight>) -> Result<Vec<ReviewHighlight>, String> {
     let folders = Folders::studio();
-    let reviewed = review_highlights(highlights, &folders)?;
+    let (reviewed, pins) = review_highlights(highlights, &folders)?;
+    // The previous review's pins go as this one's take their place.
+    *lock_recover::lock_or_recover(&REVIEW_PINS) = Some(pins);
     prune(&folders.copies, KEEP_COPIES);
     Ok(reviewed)
 }
 
-/// [`for_review`] with copies under `folders`: each demo is looked at once.
+/// [`for_review`] with copies under `folders`: each demo is looked at once,
+/// and each copy pinned in the returned [`Pins`].
 fn review_highlights(
     mut highlights: Vec<ReviewHighlight>,
     folders: &Folders,
-) -> Result<Vec<ReviewHighlight>, String> {
+) -> Result<(Vec<ReviewHighlight>, Pins), String> {
     let mut seen: HashMap<String, String> = HashMap::new();
+    let mut pins = Pins::default();
     for highlight in &mut highlights {
         if let Some(file) = seen.get(&highlight.demo) {
             highlight.demo = file.clone();
             continue;
         }
-        let (file, _) = playable_file(Path::new(&highlight.demo), folders, |_| {})?;
+        let (file, played) = playable_file(Path::new(&highlight.demo), folders, |_| {})?;
+        if matches!(played, Playable::Copy { .. }) {
+            pins.add(&file);
+        }
         let file = file.to_string_lossy().into_owned();
         seen.insert(highlight.demo.clone(), file.clone());
         highlight.demo = file;
     }
-    Ok(highlights)
+    Ok((highlights, pins))
 }
 
 #[cfg(test)]
@@ -372,7 +392,7 @@ mod tests {
             spectate: None,
             kills: Vec::new(),
         };
-        let reviewed = review_highlights(
+        let (reviewed, pins) = review_highlights(
             vec![
                 highlight(s.old(), "a"),
                 highlight(s.new_demo(), "b"),
@@ -386,6 +406,12 @@ mod tests {
         assert_eq!(reviewed[2].demo, reviewed[0].demo);
         let keys: Vec<&str> = reviewed.iter().map(|h| h.key.as_str()).collect();
         assert_eq!(keys, ["a", "b", "c"]);
+
+        // The review's copy outlives a prune to nothing until its pins go.
+        assert_eq!(prune(&s.dir.join("copies"), 0), 0);
+        assert!(Path::new(&reviewed[0].demo).is_file());
+        drop(pins);
+        assert_eq!(prune(&s.dir.join("copies"), 0), 1);
     }
 
     #[test]
