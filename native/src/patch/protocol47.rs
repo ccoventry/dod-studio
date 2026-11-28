@@ -1,14 +1,16 @@
 //! Converting a protocol-47 demo to protocol 48 (#239).
 //!
-//! Today's game plays a demo whose header says network protocol 47, but
-//! prints "WARNING! demo protocol outdated." first, on both engine builds,
-//! with HLAE or without. Nothing else about a protocol-47 demo differs: its
-//! frames, messages and delta encoding are laid out as 48's
+//! Today's game, on both engine builds, plays a demo whose header says
+//! network protocol 47 with `playdemo` after "WARNING! demo protocol
+//! outdated.", and refuses it with `viewdemo`, whose `Core.dll` disconnects at
+//! the server info's 47 (#1549). Nothing else about a protocol-47 demo
+//! differs: its frames, messages and delta encoding are laid out as 48's
 //! (`docs/goldsrc_protocol_47.md`). So the conversion rewrites the protocol
 //! in the header and in each `svc_serverinfo` and nothing else: four bytes
 //! in the header and four in each server info, in place. Every other byte,
 //! the directory included, stays what the recorder wrote. Patched batch
-//! copies convert as they are written (`engine::StreamPatcher`), and
+//! copies convert as they are written (`engine::StreamPatcher`), Studio's
+//! `viewdemo` paths play a converted copy (`protocol48_copies`), and
 //! `dod-studio-cli convert-47` converts a demo on its own.
 //!
 //! The idea and the two places to change come from HLAE's DemoTools ("Try
@@ -120,9 +122,9 @@ pub struct Converted {
     pub stopped_at: Option<usize>,
 }
 
-/// Whether `bytes` are a demo whose header says protocol 47: one the game
-/// plays with an outdated-protocol warning until [`convert_in_place`] has
-/// run.
+/// Whether `bytes` are a demo whose header says protocol 47: one `viewdemo`
+/// refuses, and `playdemo` plays with an outdated-protocol warning, until
+/// [`convert_in_place`] has run.
 pub fn is_protocol_47(bytes: &[u8]) -> bool {
     header_protocol(bytes) == Some(NETWORK_PROTOCOL_47)
 }

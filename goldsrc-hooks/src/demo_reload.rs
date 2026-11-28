@@ -143,10 +143,14 @@ fn try_wrap() -> bool {
 }
 
 unsafe extern "C" fn wrapped_playdemo() {
+    let named = !crate::cmd_list::args().is_empty();
+    if named {
+        // A protocol-47 demo's copy still on its way is no longer wanted.
+        crate::old_protocol::demo_command_started();
+    }
     if let Some(name) = remember("playdemo") {
         crate::map_cfgs::before_demo(&name);
     }
-    let named = !crate::cmd_list::args().is_empty();
     unsafe { call_real(&REAL_PLAYDEMO) };
     if named {
         crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Playdemo);
@@ -161,6 +165,15 @@ unsafe extern "C" fn wrapped_viewdemo() {
     if crate::cmd_list::args().is_empty() && crate::studio_panel::viewdemo_in_panel() {
         unsafe { call_real(&REAL_VIEWDEMO) };
         crate::studio_panel::bare_viewdemo();
+        return;
+    }
+    // viewdemo refuses a protocol-47 demo: it plays Studio's converted copy
+    // instead, once Studio has made it (#1549). The copy's own viewdemo
+    // comes back through here.
+    if crate::cmd_list::args()
+        .first()
+        .is_some_and(|name| crate::old_protocol::take_over_viewdemo(name.trim()))
+    {
         return;
     }
     let name = remember("viewdemo");
