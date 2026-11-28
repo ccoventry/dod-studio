@@ -58,8 +58,14 @@ pub fn plan_playable(
     if config.goldsrc_hooks_dll().is_none() || !demo.is_file() {
         return Ok(None);
     }
-    let file = crate::protocol48_demos::for_preview(app, demo)?;
-    Ok(plan(config, dod_dir, &file))
+    let playing = crate::protocol48_demos::for_preview(app, demo)?;
+    let arg = plan(config, dod_dir, &playing.file);
+    // Only a copy the game is really sent says so: one it can't reach falls
+    // back to a patched preview, which converts as it copies.
+    if arg.is_some() && playing.is_copy {
+        crate::protocol48_demos::preview_plays_copy(app, &playing.file);
+    }
+    Ok(arg)
 }
 
 /// Starts the game, then, once it takes commands, plays the original demo and

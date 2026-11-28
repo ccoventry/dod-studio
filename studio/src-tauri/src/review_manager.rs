@@ -135,6 +135,8 @@ fn listen(app: &AppHandle, pid: u32) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
                 native::log_markdown(&crate::messages::review::answer_line(line.trim()));
+                // A converted copy's answer goes to its original's row (#1549).
+                let event = crate::protocol48_demos::answered_demo(event);
                 let ended = matches!(event, native::review_queue::ReviewEvent::Ended { .. });
                 let _ = app.emit(EVENT, event);
                 if ended {
@@ -158,9 +160,10 @@ pub async fn start_highlight_review(
     let count = highlights.len();
     // The game plays each demo with viewdemo, which refuses a protocol-47
     // one: those play a converted copy (#1549).
+    let converting = app.clone();
     let highlights =
         crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-            crate::protocol48_demos::for_review(highlights)
+            crate::protocol48_demos::for_review(&converting, highlights)
         }))
         .await?;
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);

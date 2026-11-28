@@ -1552,42 +1552,23 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
-        // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
-        let crate::trimmed_demos::BatchCopies {
-            copies: trimmed,
-            pins: trim_pins,
-        } = match crate::trimmed_demos::for_batch(
+        // ── Copies played in place of a demo: trimmed (#207), protocol 48 (#1549) ──
+        let copies = match crate::batch_copies::prepare(
             &app_handle_clone,
             &patch_jobs,
-            &patcher_config.game_path,
-            &cancel_token_arc,
-        ) {
-            Ok(batch) => batch,
-            Err(status) => return end_unstarted_batch(&app_handle_clone, &is_running_arc, status),
-        };
-
-        // ── Under the hook's viewdemo a protocol-47 demo plays a converted copy (#1549) ──
-        let crate::protocol48_demos::BatchCopies {
-            copies: converted,
-            pins: convert_pins,
-        } = match crate::protocol48_demos::for_batch(
-            &app_handle_clone,
-            &patch_jobs,
-            &trimmed,
             &patcher_config,
             &cancel_token_arc,
         ) {
-            Ok(batch) => batch,
+            Ok(copies) => copies,
             Err(status) => return end_unstarted_batch(&app_handle_clone, &is_running_arc, status),
         };
-
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
             match crate::hook_batch::prepare(
                 &patch_jobs,
                 &planned_streaks,
                 &patcher_config,
-                &crate::protocol48_demos::plays_from(&trimmed, &converted),
+                &copies.hook_plays,
             ) {
                 Ok(mut batch) => {
                     batch.reuse_game = reuse_game_pid;
@@ -1701,7 +1682,7 @@ pub async fn start_capture_batch_impl(
         // A patched demo over the entity limit is patched from its trimmed
         // copy (#207). Its frames are the original's, so every tick holds.
         for job in &mut patch_jobs {
-            if let Some(copy) = trimmed.get(&job.source_demo) {
+            if let Some(copy) = copies.trimmed.get(&job.source_demo) {
                 job.source_demo = copy.to_string_lossy().into_owned();
             }
         }
@@ -1901,8 +1882,7 @@ pub async fn start_capture_batch_impl(
             let _room_guard = RoomGuard(room.clone());
             // The batch's trimmed and converted copies can't be pruned until
             // it ends (#207, #1549).
-            let _trim_pins = trim_pins;
-            let _convert_pins = convert_pins;
+            let _copy_pins = copies.pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per

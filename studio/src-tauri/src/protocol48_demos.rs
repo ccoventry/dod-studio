@@ -71,36 +71,54 @@ fn playable_file(
     Ok((played.file(demo), played))
 }
 
+/// What a Launch Preview plays for a demo: `file`, and whether it is a
+/// converted copy.
+pub struct PreviewFile {
+    pub file: PathBuf,
+    pub is_copy: bool,
+}
+
+fn emit_preview_status(app: &tauri::AppHandle, status: String, done: bool) {
+    let _ = app.emit(
+        crate::trimmed_demos::PREVIEW_EVENT,
+        serde_json::json!({ "status": status, "done": done }),
+    );
+}
+
 /// The file a Launch Preview plays in place for `demo` (the highlights'
 /// demo, or its trimmed copy): its converted copy for a protocol-47 demo, or
 /// `demo`. Reports each step on the preview's status event
 /// (`trimmed_demos::PREVIEW_EVENT`, which the Launch Preview button shows
-/// whatever copy is being made), and a last line when a copy plays. `Err`:
-/// the preview must not start; the line is logged.
-pub fn for_preview(app: &tauri::AppHandle, demo: &Path) -> Result<PathBuf, String> {
-    let emit = |status: String, done: bool| {
-        let _ = app.emit(
-            crate::trimmed_demos::PREVIEW_EVENT,
-            serde_json::json!({ "status": status, "done": done }),
-        );
-    };
+/// whatever copy is being made). `Err`: the preview must not start; the line
+/// is logged. Once the copy is what the game is sent, the caller calls
+/// [`preview_plays_copy`].
+pub fn for_preview(app: &tauri::AppHandle, demo: &Path) -> Result<PreviewFile, String> {
     let folders = Folders::studio();
-    match playable_file(demo, &folders, |status| emit(status, false)) {
-        Ok((file, Playable::Original)) => Ok(file),
-        Ok((file, Playable::Copy { .. })) => {
-            // The copy was just stamped used, so it is the newest and stays.
-            prune(&folders.copies, KEEP_COPIES);
-            emit(
-                crate::messages::PREVIEW_PLAYS_CONVERTED_COPY.to_string(),
-                true,
-            );
-            Ok(file)
-        }
+    match playable_file(demo, &folders, |status| {
+        emit_preview_status(app, status, false)
+    }) {
+        Ok((file, played)) => Ok(PreviewFile {
+            file,
+            is_copy: matches!(played, Playable::Copy { .. }),
+        }),
         Err(line) => {
             native::log_markdown(&crate::messages::preview_start::preview_not_started(&line));
             Err(line)
         }
     }
+}
+
+/// The preview now plays the converted copy `file`: pins it until the next
+/// preview or game request (Studio isn't told when the game is done with
+/// it), prunes the older copies, and says so in a toast.
+pub fn preview_plays_copy(app: &tauri::AppHandle, file: &Path) {
+    native::patch::protocol48_copies::pin_playing(file);
+    prune(&Folders::studio().copies, KEEP_COPIES);
+    emit_preview_status(
+        app,
+        crate::messages::PREVIEW_PLAYS_CONVERTED_COPY.to_string(),
+        true,
+    );
 }
 
 /// A batch's converted copies: the copy each demo plays from, keyed by the
@@ -115,9 +133,10 @@ pub struct BatchCopies {
 
 /// The converted copies a Seek Between Clips batch of `jobs` plays from:
 /// each demo's, or its trimmed copy's (`trimmed`, keyed by the original),
-/// when that is a protocol-47 demo. None when `config` doesn't have the hook
-/// run the batch: a patched batch converts as it copies, and starts with
-/// `playdemo`. Reports each step on the Capture footer (`capture_status`).
+/// when that is a protocol-47 demo. None when the hook DLL won't run the
+/// batch (`config` says patch, or names no hook DLL): a patched batch
+/// converts as it copies, and starts with `playdemo`, so a copy that can't be
+/// made must not stop it. Reports each step on the Capture footer (`capture_status`).
 /// Prunes the copies past [`KEEP_COPIES`] however it ends. `Err` is the
 /// batch's error line: a copy that couldn't be made, or Cancel.
 pub fn for_batch(
@@ -127,7 +146,7 @@ pub fn for_batch(
     config: &PatcherConfig,
     cancel: &AtomicBool,
 ) -> Result<BatchCopies, String> {
-    if !config.hook_runs_batch {
+    if !config.hook_runs_batch || config.goldsrc_hooks_dll().is_none() {
         return Ok(BatchCopies::default());
     }
     let folders = Folders::studio();
@@ -216,48 +235,143 @@ pub fn plays_from(
     plays
 }
 
-/// The copies the latest review plays, kept from [`prune`] until the next
-/// review starts: Studio doesn't know when the game is done with a review,
-/// and one of more protocol-47 demos than [`KEEP_COPIES`] would otherwise
-/// prune its own first copies before the game reaches them.
-static REVIEW_PINS: std::sync::Mutex<Option<Pins>> = std::sync::Mutex::new(None);
+/// The latest review's copies: pinned, so [`prune`] keeps them until the
+/// next review (Studio isn't told when the game is done with a review, and
+/// one of more protocol-47 demos than [`KEEP_COPIES`] would otherwise prune
+/// its own first copies), and each one's original, which the game's answers
+/// name back ([`answered_demo`]).
+#[derive(Default)]
+struct ReviewCopies {
+    pins: Pins,
+    originals: HashMap<String, String>,
+}
+
+impl ReviewCopies {
+    /// Notes that the review plays `copy` for `original`.
+    fn add(&mut self, copy: &Path, original: &str) {
+        self.pins.add(copy);
+        self.originals
+            .insert(copy.to_string_lossy().into_owned(), original.to_string());
+    }
+}
+
+static LATEST_REVIEW: std::sync::Mutex<Option<ReviewCopies>> = std::sync::Mutex::new(None);
 
 /// `highlights` with each protocol-47 demo swapped for its converted copy,
-/// for a review (the game plays each with `viewdemo`). The game answers by
-/// each row's key, so a copy's answer still reaches its row. The copies stay
-/// pinned until the next review. `Err` is the line saying which demo can't
-/// play.
-pub fn for_review(highlights: Vec<ReviewHighlight>) -> Result<Vec<ReviewHighlight>, String> {
+/// for a review (the game plays each with `viewdemo`). Reports each copy
+/// being made on the preview status event, which the Review highlights
+/// button shows. The copies stay pinned until the next review, and the
+/// game's answers are mapped back to the originals ([`answered_demo`]).
+/// `Err` is the line saying which demo can't play.
+pub fn for_review(
+    app: &tauri::AppHandle,
+    highlights: Vec<ReviewHighlight>,
+) -> Result<Vec<ReviewHighlight>, String> {
     let folders = Folders::studio();
-    let (reviewed, pins) = review_highlights(highlights, &folders)?;
-    // The previous review's pins go as this one's take their place.
-    *lock_recover::lock_or_recover(&REVIEW_PINS) = Some(pins);
+    let (reviewed, copies) = review_highlights(highlights, &folders, &mut |status| {
+        emit_preview_status(app, status, false)
+    })?;
+    // Best-effort: without the file, only a Studio started again during
+    // this review loses track of its copies.
+    let _ = std::fs::write(review_copies_file(), copies_text(&copies.originals));
+    // The previous review's copies go as this one's take their place.
+    *lock_recover::lock_or_recover(&LATEST_REVIEW) = Some(copies);
     prune(&folders.copies, KEEP_COPIES);
     Ok(reviewed)
 }
 
-/// [`for_review`] with copies under `folders`: each demo is looked at once,
-/// and each copy pinned in the returned [`Pins`].
+/// Beside the review queue: the latest review's copies and their originals,
+/// one `copy<TAB>original` per line, so a Studio started again while the game
+/// still reviews keeps them ([`keep_earlier_review`]).
+const REVIEW_COPIES_FILE: &str = "review_copies.tsv";
+
+fn review_copies_file() -> PathBuf {
+    native::shared::paths::get_appdata_dir().join(REVIEW_COPIES_FILE)
+}
+
+fn copies_text(originals: &HashMap<String, String>) -> String {
+    originals
+        .iter()
+        .map(|(copy, original)| format!("{copy}\t{original}\n"))
+        .collect()
+}
+
+fn parse_copies_text(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(copy, original)| (copy.to_string(), original.to_string()))
+        .collect()
+}
+
+/// [`for_review`] with copies under `folders`: each demo is looked at once.
 fn review_highlights(
     mut highlights: Vec<ReviewHighlight>,
     folders: &Folders,
-) -> Result<(Vec<ReviewHighlight>, Pins), String> {
+    report: &mut dyn FnMut(String),
+) -> Result<(Vec<ReviewHighlight>, ReviewCopies), String> {
     let mut seen: HashMap<String, String> = HashMap::new();
-    let mut pins = Pins::default();
+    let mut copies = ReviewCopies::default();
     for highlight in &mut highlights {
         if let Some(file) = seen.get(&highlight.demo) {
             highlight.demo = file.clone();
             continue;
         }
-        let (file, played) = playable_file(Path::new(&highlight.demo), folders, |_| {})?;
+        let (file, played) = playable_file(Path::new(&highlight.demo), folders, &mut *report)?;
         if matches!(played, Playable::Copy { .. }) {
-            pins.add(&file);
+            copies.add(&file, &highlight.demo);
         }
         let file = file.to_string_lossy().into_owned();
         seen.insert(highlight.demo.clone(), file.clone());
         highlight.demo = file;
     }
-    Ok((highlights, pins))
+    Ok((highlights, copies))
+}
+
+/// `event` as the page needs it: an answer or a kill-range edit for a
+/// converted copy the latest review played names the copy's original, the
+/// demo the page's rows are keyed by. Any other event is unchanged.
+pub fn answered_demo(
+    event: native::review_queue::ReviewEvent,
+) -> native::review_queue::ReviewEvent {
+    let latest = lock_recover::lock_or_recover(&LATEST_REVIEW);
+    let originals = latest.as_ref().map(|r| &r.originals);
+    original_named(event, originals)
+}
+
+/// [`answered_demo`]'s rule for the copies in `originals` (copy -> original).
+fn original_named(
+    mut event: native::review_queue::ReviewEvent,
+    originals: Option<&HashMap<String, String>>,
+) -> native::review_queue::ReviewEvent {
+    use native::review_queue::ReviewEvent;
+    if let ReviewEvent::Answer { demo, .. } | ReviewEvent::Edit { demo, .. } = &mut event
+        && let Some(original) = originals.and_then(|o| o.get(demo.as_str()))
+    {
+        *demo = original.clone();
+    }
+    event
+}
+
+/// At start: pins the copies of the review Studio last sent and maps them
+/// back to their originals, so a review still running in the game keeps its
+/// copies and its answers find their rows. Copies already pruned are left
+/// out. Does nothing once this Studio has sent a review.
+pub fn keep_earlier_review() {
+    let Ok(text) = std::fs::read_to_string(review_copies_file()) else {
+        return;
+    };
+    let root = Folders::studio().copies;
+    let mut copies = ReviewCopies::default();
+    for (copy, original) in parse_copies_text(&text) {
+        let path = Path::new(&copy);
+        if path.starts_with(&root) && path.is_file() {
+            copies.add(path, &original);
+        }
+    }
+    let mut latest = lock_recover::lock_or_recover(&LATEST_REVIEW);
+    if latest.is_none() && !copies.originals.is_empty() {
+        *latest = Some(copies);
+    }
 }
 
 #[cfg(test)]
@@ -392,13 +506,14 @@ mod tests {
             spectate: None,
             kills: Vec::new(),
         };
-        let (reviewed, pins) = review_highlights(
+        let (reviewed, copies) = review_highlights(
             vec![
                 highlight(s.old(), "a"),
                 highlight(s.new_demo(), "b"),
                 highlight(s.old(), "c"),
             ],
             &s.folders(),
+            &mut |_| {},
         )
         .unwrap();
         assert!(Path::new(&reviewed[0].demo).starts_with(s.dir.join("copies")));
@@ -407,11 +522,89 @@ mod tests {
         let keys: Vec<&str> = reviewed.iter().map(|h| h.key.as_str()).collect();
         assert_eq!(keys, ["a", "b", "c"]);
 
-        // The review's copy outlives a prune to nothing until its pins go.
+        // The review's copy outlives a prune to nothing until its pins go
+        // (made long ago, so only the pin keeps it).
+        let folder = Path::new(&reviewed[0].demo).parent().unwrap().to_path_buf();
+        backdate(&folder);
         assert_eq!(prune(&s.dir.join("copies"), 0), 0);
         assert!(Path::new(&reviewed[0].demo).is_file());
-        drop(pins);
+        drop(copies);
         assert_eq!(prune(&s.dir.join("copies"), 0), 1);
+    }
+
+    /// Makes `folder`'s copy look last used a day ago.
+    fn backdate(folder: &Path) {
+        let marker = std::fs::File::options()
+            .write(true)
+            .open(folder.join(native::patch::copy_cache::USED_MARKER))
+            .unwrap();
+        marker
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_review_copies_file_reads_back_what_was_written() {
+        let originals = HashMap::from([
+            (
+                "C:/copies/v1-1-2/a_p48.dem".to_string(),
+                "D:/demos/a b.dem".to_string(),
+            ),
+            (
+                "C:/copies/v1-3-4/c_p48.dem".to_string(),
+                "D:/demos/c.dem".to_string(),
+            ),
+        ]);
+        let back: HashMap<String, String> = parse_copies_text(&copies_text(&originals))
+            .into_iter()
+            .collect();
+        assert_eq!(back, originals);
+        assert!(parse_copies_text("no tab here\n").is_empty());
+    }
+
+    #[test]
+    fn an_answer_for_a_reviewed_copy_names_the_original_again() {
+        use native::review_queue::{ReviewEvent, format_queue, parse_event};
+        let s = Scratch::new("review_answer");
+        let highlight = ReviewHighlight {
+            demo: s.old(),
+            key: "row-1".to_string(),
+            player: "Lyssenko".to_string(),
+            kill_times: vec![1.0],
+            from: 1,
+            to: 1,
+            answered: None,
+            note: String::new(),
+            spectate: None,
+            kills: Vec::new(),
+        };
+        let (reviewed, copies) =
+            review_highlights(vec![highlight], &s.folders(), &mut |_| {}).unwrap();
+        let copy = reviewed[0].demo.clone();
+        assert_ne!(copy, s.old());
+        // The queue the game reads names the copy...
+        let queue = format_queue(&reviewed, None, None);
+        assert!(queue.lines().nth(1).unwrap().starts_with(&copy));
+        // ...and the game echoes it back, as goldsrc-hooks review.rs writes
+        // its answer and form lines.
+        for line in [
+            format!("[dod-studio] REVIEW\t{copy}\trow-1\tyes\t1\t1\t"),
+            format!("[dod-studio] REVIEW_EDIT\t{copy}\trow-1\t1\t1\tnice"),
+        ] {
+            let event = parse_event(&line).expect(&line);
+            let event = original_named(event, Some(&copies.originals));
+            match event {
+                ReviewEvent::Answer { demo, key, .. } | ReviewEvent::Edit { demo, key, .. } => {
+                    assert_eq!(demo, s.old(), "{line}");
+                    assert_eq!(key, "row-1");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        // A protocol-48 demo's answer is left alone.
+        let line = format!("[dod-studio] REVIEW\t{}\trow-2\tno\t1\t1\t", s.new_demo());
+        let event = original_named(parse_event(&line).unwrap(), Some(&copies.originals));
+        assert!(matches!(event, ReviewEvent::Answer { demo, .. } if demo == s.new_demo()));
     }
 
     #[test]

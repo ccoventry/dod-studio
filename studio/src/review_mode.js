@@ -13,6 +13,7 @@ import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
 import { buildReviewQueue, applyReviewAnswer, applyReviewEdit, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
+import { watchPreviewTrim } from './preview_trim_status.js';
 import { STRINGS } from './strings.js';
 
 // What settleMissingDemos answers when nothing asks about missing demos.
@@ -154,7 +155,17 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
         document.querySelector('#review-fast-forward-cb')?.checked === true,
         document.querySelector('#review-fast-forward-gap')?.value,
       );
-      const started = await startHighlightReview(highlights, gap, startFrom);
+      // A protocol-47 demo's converted copy is made first (#1549): the
+      // button shows its steps, on the same event a Launch Preview's copy uses.
+      const label = btn.textContent;
+      const stopCopyStatus = await watchPreviewTrim(btn);
+      let started;
+      try {
+        started = await startHighlightReview(highlights, gap, startFrom);
+      } finally {
+        stopCopyStatus();
+        btn.textContent = label;
+      }
       running = true;
       answers = 0;
       showToast(STRINGS.REVIEW.startedToast(started.count, started.launched, skipped), 'success', 8000, {

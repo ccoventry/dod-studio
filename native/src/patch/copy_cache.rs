@@ -15,8 +15,14 @@ use lock_recover::lock_or_recover;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-/// Written beside each copy every time it is used, for [`prune`].
-const USED_MARKER: &str = "last_used";
+/// Written beside each copy every time it is used, and when its folder is
+/// made, for [`prune`].
+pub const USED_MARKER: &str = "last_used";
+
+/// How long after its last use a copy is never pruned, whatever the count:
+/// another Studio (whose pins this one can't see) may have just handed it to
+/// a game, or still be writing it.
+pub const RECENT_USE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// Copy folders that running batches play, one entry per [`Pins`] holding
 /// one. [`prune`] never removes them.
@@ -66,6 +72,9 @@ pub fn save_copy(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
+        // Stamped before the slow write, so a prune meanwhile sees a folder
+        // in use rather than one never used.
+        mark_used(path);
     }
     let partial = path.with_extension(format!(
         "dem.{}-{}.part",
@@ -106,8 +115,9 @@ pub fn mark_used(copy: &Path) {
 }
 
 /// Removes all but the `keep` most recently used copy folders under `root`,
-/// leaving any a running batch has pinned ([`Pins`]) whatever their age.
-/// Returns how many it removed.
+/// leaving any a running batch has pinned ([`Pins`]) and any used within
+/// [`RECENT_USE`], whatever their number. A folder with no stamp yet counts
+/// as used when it was made. Returns how many it removed.
 pub fn prune(root: &Path, keep: usize) -> usize {
     let Ok(entries) = std::fs::read_dir(root) else {
         return 0;
@@ -118,31 +128,37 @@ pub fn prune(root: &Path, keep: usize) -> usize {
         .filter(|p| p.is_dir())
         .map(|p| {
             let used = std::fs::metadata(p.join(USED_MARKER))
+                .or_else(|_| std::fs::metadata(&p))
                 .and_then(|m| m.modified())
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             (used, p)
         })
         .collect();
     let pinned = pinned().clone();
-    folders_to_prune(folders, keep, &pinned)
+    let recent = std::time::SystemTime::now()
+        .checked_sub(RECENT_USE)
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    folders_to_prune(folders, keep, &pinned, recent)
         .iter()
         .filter(|p| std::fs::remove_dir_all(p).is_ok())
         .count()
 }
 
 /// [`prune`]'s rule: of `folders` (each with when it was last used), the ones
-/// past the `keep` newest that aren't in `pinned`.
+/// past the `keep` newest that aren't in `pinned` and weren't used after
+/// `recent`.
 fn folders_to_prune(
     mut folders: Vec<(std::time::SystemTime, PathBuf)>,
     keep: usize,
     pinned: &[PathBuf],
+    recent: std::time::SystemTime,
 ) -> Vec<PathBuf> {
     folders.sort_by_key(|(used, _)| std::cmp::Reverse(*used));
     folders
         .into_iter()
         .skip(keep)
+        .filter(|(used, p)| *used <= recent && !pinned.contains(p))
         .map(|(_, p)| p)
-        .filter(|p| !pinned.contains(p))
         .collect()
 }
 
@@ -174,12 +190,19 @@ mod tests {
         save_copy(&path, b"HLDEMO copy").unwrap();
         save_copy(&path, b"HLDEMO copy").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"HLDEMO copy");
-        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        let mut names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .flatten()
             .map(|e| e.file_name())
             .collect();
-        assert_eq!(names, vec![std::ffi::OsString::from("a_trimmed.dem")]);
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                std::ffi::OsString::from("a_trimmed.dem"),
+                std::ffi::OsString::from(USED_MARKER)
+            ]
+        );
     }
 
     /// `count` copy folders under `dir`, `copy0` the oldest used, each with a
@@ -237,9 +260,64 @@ mod tests {
             (at(2), PathBuf::from("pinned")),
         ];
         assert_eq!(
-            folders_to_prune(folders, 1, &[PathBuf::from("pinned")]),
+            folders_to_prune(folders, 1, &[PathBuf::from("pinned")], at(100)),
             vec![PathBuf::from("old")]
         );
+    }
+
+    #[test]
+    fn a_folder_used_recently_is_never_pruned_whatever_the_count() {
+        let at = |s: u64| std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(s);
+        let folders = vec![
+            (at(1), PathBuf::from("old")),
+            (at(50), PathBuf::from("just used by another Studio")),
+            (at(60), PathBuf::from("newest")),
+        ];
+        assert_eq!(
+            folders_to_prune(folders, 1, &[], at(10)),
+            vec![PathBuf::from("old")]
+        );
+    }
+
+    #[test]
+    fn a_copy_folder_being_made_is_not_pruned() {
+        let dir = Scratch::new("copy_cache_making");
+        // A folder made a moment ago with no stamp yet counts as just used.
+        std::fs::create_dir_all(dir.join("bare")).unwrap();
+        assert_eq!(prune(&dir, 0), 0);
+        assert!(dir.join("bare").is_dir());
+    }
+
+    #[test]
+    fn copies_saved_while_another_thread_prunes_all_survive() {
+        let dir = Scratch::new("copy_cache_concurrent");
+        let root = dir.path().to_path_buf();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pruner = {
+            let (root, stop) = (root.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    prune(&root, 0);
+                }
+            })
+        };
+        let copies: Vec<PathBuf> = (0..20)
+            .map(|i| root.join(format!("key{i}")).join("a_p48.dem"))
+            .collect();
+        for copy in &copies {
+            save_copy(copy, b"HLDEMO copy").unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        pruner.join().unwrap();
+        assert!(copies.iter().all(|c| c.is_file()));
+    }
+
+    #[test]
+    fn a_saved_copy_is_stamped_used() {
+        let dir = Scratch::new("copy_cache_stamp");
+        let copy = dir.join("key").join("a_p48.dem");
+        save_copy(&copy, b"HLDEMO").unwrap();
+        assert!(dir.join("key").join(USED_MARKER).is_file());
     }
 
     #[test]

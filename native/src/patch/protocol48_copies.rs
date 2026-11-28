@@ -119,6 +119,19 @@ impl std::fmt::Display for CopyError {
 
 impl std::error::Error for CopyError {}
 
+/// The copy a Launch Preview or the game's own request last handed to the
+/// game, kept from pruning until the next one replaces it: Studio isn't told
+/// when the game is done with a demo.
+static PLAYING: std::sync::Mutex<Option<crate::patch::copy_cache::Pins>> =
+    std::sync::Mutex::new(None);
+
+/// Pins `copy` as the one the game now plays, unpinning the one before it.
+pub fn pin_playing(copy: &Path) {
+    let mut pins = crate::patch::copy_cache::Pins::default();
+    pins.add(copy);
+    *lock_recover::lock_or_recover(&PLAYING) = Some(pins);
+}
+
 /// The folder copies live in.
 pub fn copies_root() -> PathBuf {
     crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR)

@@ -4,6 +4,7 @@ mod audit_cmd;
 mod audit_manager;
 mod batch_catch_up;
 mod batch_close;
+mod batch_copies;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
@@ -225,6 +226,8 @@ pub fn run() {
             }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
+            // A review sent before a restart keeps its protocol-48 copies (#1549).
+            protocol48_demos::keep_earlier_review();
             // ...and to say a demo it plays is damaged, for a toast with
             // Repair (#1373).
             damaged_demo_notices::serve_damage_notices(app.handle().clone());

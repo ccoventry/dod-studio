@@ -22,7 +22,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::patch::protocol48_copies::{KEEP_COPIES, Playable, copies_root, prepare_playable};
+use crate::patch::protocol48_copies::{
+    KEEP_COPIES, Playable, copies_root, pin_playing, prepare_playable,
+};
 
 /// Whether `line` is one of this module's requests, for the pipe's dispatch.
 pub fn is_convert_request(line: &str) -> bool {
@@ -67,8 +69,8 @@ fn reply_line(played: Result<Playable, String>) -> String {
 
 /// Answers one request line: logs it, makes (or reuses) the copy, and writes
 /// `copy <path>` or why not to `writer`. Writes the copy and its analyzer
-/// cache entry, prunes the copies past `KEEP_COPIES` (the one just played is
-/// the newest and stays), and logs each step to the activity log.
+/// cache entry, pins it as the copy the game plays and prunes the copies past
+/// `KEEP_COPIES`, and logs each step to the activity log.
 pub fn serve(line: &str, writer: &mut impl std::io::Write) {
     use crate::messages::protocol47 as m;
     let played = parse_request(line).and_then(|demo| {
@@ -76,10 +78,13 @@ pub fn serve(line: &str, writer: &mut impl std::io::Write) {
         prepare_playable(&demo, &mut |_| {}).map_err(|e| e.to_string())
     });
     match &played {
-        Ok(Playable::Copy { .. }) => {
+        Ok(Playable::Copy { path, .. }) => {
+            pin_playing(path);
             crate::patch::copy_cache::prune(&copies_root(), KEEP_COPIES);
         }
-        Ok(Playable::Original) => {}
+        Ok(Playable::Original) => {
+            crate::log_markdown(&m::game_convert_failed(m::GAME_CONVERT_NOT_PROTOCOL_47));
+        }
         Err(why) => crate::log_markdown(&m::game_convert_failed(why)),
     }
     let _ = writer.write_all(format!("{}\n", reply_line(played)).as_bytes());
