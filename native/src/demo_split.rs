@@ -70,6 +70,15 @@ pub fn map_stem(file: &str) -> String {
         .to_string()
 }
 
+/// The header's map-name field as text: up to its first NUL, as the engine
+/// reads it. HLAE's demo tools leave their watermark text after the NUL
+/// (#1541), so trimming only the trailing NULs kept it and the map read as
+/// `dod_railroad\0anced Effects...`.
+fn header_map(field: &[u8]) -> String {
+    let name = field.split(|&b| b == 0).next().unwrap_or_default();
+    String::from_utf8_lossy(name).into_owned()
+}
+
 fn c_string(bytes: &[u8], at: usize, max: usize) -> Option<(&[u8], usize)> {
     let rest = bytes.get(at..)?;
     let end = rest.iter().take(max + 1).position(|&b| b == 0)?;
@@ -177,13 +186,31 @@ fn starts(demo: &Demo) -> Vec<(usize, usize)> {
     out
 }
 
+/// A directory entry's type for playback frames (`DEMO_NORMAL`).
+const PLAYBACK_ENTRY: i32 = 1;
+
+/// Where the last map ends: the last playback entry, given every entry's
+/// type in order, or the last entry when none is one. HLAE's demo tools add
+/// a 9-byte entry of type 2 after the playback one, read as garbage from the
+/// original directory (#1541); ending there gave the map a length of 0 and
+/// counted that entry's frames for the playback's.
+fn last_playback_entry(types: impl Iterator<Item = i32>) -> usize {
+    let mut last = None;
+    let mut count = 0;
+    for (i, kind) in types.enumerate() {
+        count = i + 1;
+        if kind == PLAYBACK_ENTRY {
+            last = Some(i);
+        }
+    }
+    last.unwrap_or(count.saturating_sub(1))
+}
+
 /// The maps of a parsed demo.
 pub fn segments(demo: &Demo) -> Vec<MapSegment> {
     let starts = starts(demo);
-    let header_map = String::from_utf8_lossy(&demo.header.map_name.0)
-        .trim_end_matches('\0')
-        .to_string();
-    let last = demo.directory.entries.len().saturating_sub(1);
+    let header_map = header_map(&demo.header.map_name.0);
+    let last = last_playback_entry(demo.directory.entries.iter().map(|e| e.type_));
     let end_of = |i: usize| -> (usize, usize) {
         starts.get(i + 1).copied().unwrap_or((
             last,
@@ -350,18 +377,14 @@ pub fn extract(
 
     let info = server_info(&map_frames[0])?;
     let map = map_stem(&String::from_utf8_lossy(&info.map_file_name));
+    out.header.map_checksum = if map == header_map(&demo.header.map_name.0) {
+        demo.header.map_checksum
+    } else {
+        bsp_checksum(&map).unwrap_or(0)
+    };
     let mut name = map.into_bytes();
     name.resize(demo.header.map_name.0.len().max(260), 0);
     out.header.map_name.0 = name;
-    let header_map = String::from_utf8_lossy(&demo.header.map_name.0)
-        .trim_end_matches('\0')
-        .to_string();
-    out.header.map_checksum =
-        if map_stem(&String::from_utf8_lossy(&info.map_file_name)) == header_map {
-            demo.header.map_checksum
-        } else {
-            bsp_checksum(&map_stem(&String::from_utf8_lossy(&info.map_file_name))).unwrap_or(0)
-        };
     out.directory.entries = vec![
         entry_like(&demo.directory.entries[0], loading, false),
         entry_like(playback, frames, true),
@@ -445,9 +468,7 @@ pub fn quick_segments(bytes: &[u8]) -> Option<Vec<MapSegment>> {
     };
     let protocol = header_protocol(bytes)?;
     // As `segments` reads the parsed header's map_name.
-    let header_map = String::from_utf8_lossy(bytes.get(16..276)?)
-        .trim_end_matches('\0')
-        .to_string();
+    let header_map = header_map(bytes.get(16..276)?);
     let header_crc = i32_at(536)? as u32;
     let directory = usize::try_from(i32_at(540)?).ok()?;
     let count = usize::try_from(i32_at(directory)?).ok()?;
@@ -457,8 +478,10 @@ pub fn quick_segments(bytes: &[u8]) -> Option<Vec<MapSegment>> {
     let mut needle = vec![SVC_SERVERINFO];
     needle.extend_from_slice(&protocol.to_le_bytes());
     let mut entries: Vec<Vec<QuickFrame>> = Vec::with_capacity(count);
+    let mut types = Vec::with_capacity(count);
     for e in 0..count {
         let entry = directory + 4 + e * 92;
+        types.push(i32_at(entry)?);
         let mut at = usize::try_from(i32_at(entry + 84)?).ok()?;
         let mut frames = Vec::new();
         loop {
@@ -492,7 +515,8 @@ pub fn quick_segments(bytes: &[u8]) -> Option<Vec<MapSegment>> {
         }
         entries.push(frames);
     }
-    Some(segments_from_frames(&entries, header_map, header_crc))
+    let last = last_playback_entry(types.into_iter());
+    Some(segments_from_frames(&entries, last, header_map, header_crc))
 }
 
 /// The map a network message signs on to, when it carries a `SvcServerInfo`
@@ -526,8 +550,10 @@ fn signon_in(msg: &[u8], needle: &[u8]) -> Option<(String, u32)> {
 
 /// [`segments`]' rules over walked frames: the first map starts at entry 0,
 /// frame 0 and is the header's; a later one at each signon past entry 0.
+/// The last map ends with entry `last` ([`last_playback_entry`]).
 fn segments_from_frames(
     entries: &[Vec<QuickFrame>],
+    last: usize,
     header_map: String,
     header_crc: u32,
 ) -> Vec<MapSegment> {
@@ -539,7 +565,6 @@ fn segments_from_frames(
             }
         }
     }
-    let last = entries.len().saturating_sub(1);
     let end_of = |i: usize| -> (usize, usize) {
         starts
             .get(i + 1)

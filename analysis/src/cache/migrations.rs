@@ -72,6 +72,11 @@ pub const MIGRATIONS: &[Migration] = &[
     // old folders. The steps below still run in tests.
     // No step to 15 either (#1132): who was capping at a kill comes from the
     // demo's ClientAreas messages, which no entry keeps.
+    Migration {
+        from: 16,
+        to: 17,
+        upgrade: v16_to_v17,
+    },
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
@@ -306,6 +311,27 @@ fn v11_to_v12(analysis: &mut Value) -> Upgrade {
     Upgrade::Done
 }
 
+const NO_PLAYBACK_TIME: &str = "its directory gives no playback time";
+
+/// #1541: `demo_info.playback_time` comes from the frames when the demo's
+/// directory gives none (HLAE's demo tools write every track time as 0).
+/// Only an entry with no playback time and some frames can differ; every
+/// other entry is what v17 writes.
+fn v16_to_v17(analysis: &mut Value) -> Upgrade {
+    let Some(info) = analysis.get("demo_info") else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    let time = info.get("playback_time").and_then(Value::as_f64);
+    let frames = info.get("playback_frames").and_then(Value::as_f64);
+    let (Some(time), Some(frames)) = (time, frames) else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    if time <= 0.0 && frames > 0.0 {
+        return Upgrade::NeedsReparse(NO_PLAYBACK_TIME);
+    }
+    Upgrade::Done
+}
+
 const ROCKET_OPENS_STREAK: &str = "a kill streak starts with a rocket kill";
 
 /// #1091: a rocket kill after its shooter's death joins the life it was
@@ -420,12 +446,36 @@ mod tests {
     /// Nor v15 (#1132): a v14 entry has no `ClientAreas` to tell who was
     /// capping at a kill. Nor v16: a v15 entry counts a KTP HLTV demo's
     /// post-pause replay twice, and only the demo's frames tell which of its
-    /// kills, chat and captures were the replay's.
+    /// kills, chat and captures were the replay's. v16 has a step to v17.
     #[test]
     fn no_entry_older_than_16_upgrades() {
-        assert_eq!(super::super::SCHEMA_VERSION, 16);
+        assert_eq!(super::super::SCHEMA_VERSION, 17);
         for version in 0..16 {
             assert!(!upgrades_from(version), "v{version}");
+        }
+        assert!(upgrades_from(16));
+    }
+
+    #[test]
+    fn a_v16_entry_needs_the_demo_only_when_it_has_frames_and_no_playback_time() {
+        // rr1-dice-xeno-1 (#1541): HLAE's demo tools left every track time 0.
+        let mut value = json!({"demo_info": {"playback_time": 0.0, "playback_frames": 46_449}});
+        assert_eq!(
+            v16_to_v17(&mut value),
+            Upgrade::NeedsReparse(NO_PLAYBACK_TIME)
+        );
+        for mut value in [
+            json!({"demo_info": {"playback_time": 1887.04, "playback_frames": 55_181}}),
+            json!({"demo_info": {"playback_time": 0.0, "playback_frames": 0}}),
+        ] {
+            assert_eq!(v16_to_v17(&mut value), Upgrade::Done);
+        }
+        for mut value in [
+            json!({}),
+            json!({"demo_info": {"playback_frames": 10}}),
+            json!({"demo_info": {"playback_time": null, "playback_frames": 10}}),
+        ] {
+            assert_eq!(v16_to_v17(&mut value), Upgrade::NeedsReparse(MALFORMED));
         }
     }
 
