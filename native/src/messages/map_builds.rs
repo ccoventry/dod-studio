@@ -116,6 +116,22 @@ pub fn lock_failed(why: impl Display) -> String {
     format!("- Map builds: nothing put in place: {why}")
 }
 
+pub fn held_by_another_studio(map: &str, slot: impl Display) -> String {
+    format!(
+        "- Map builds: {slot} holds another build of {map} another running DoD Studio placed for its game, so it is left alone"
+    )
+}
+
+pub fn part_sweep_skipped(addon: impl Display) -> String {
+    format!(
+        "- Map builds: another DoD Studio is changing the map builds in {addon}; unfinished copies are left for the next start"
+    )
+}
+
+pub fn library_parts_swept(count: usize, library: impl Display) -> String {
+    format!("- Map builds: removed {count} unfinished add(s) from {library}")
+}
+
 pub fn library_file_wrong(map: &str, file: impl Display) -> String {
     format!(
         "- Map builds: {file} is not the build its name says, so {map} plays on the installed map"
@@ -240,6 +256,13 @@ pub fn library_file_wrong_warning(map: &str, file: impl Display) -> String {
 pub fn slot_taken_warning(map: &str, slot: impl Display) -> String {
     format!(
         "{map}: the game plays {slot}, a file DoD Studio didn't put there. Move it away to play the demos on the version they were recorded on."
+    )
+}
+
+/// Another running DoD Studio keeps another version in place for its game.
+pub fn held_by_another_studio_warning(map: &str) -> String {
+    format!(
+        "{map}: the game plays the version another DoD Studio that is running put in dod_addon\\maps for its game, not the one these demos were recorded on. Try again once that game has closed."
     )
 }
 
