@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use native::patch::PatchJob;
+use native::patch::copy_cache::{Pins, prune};
 use native::patch::entity_trim::TrimError;
 use native::patch::trimmed_copies::{
-    self, Engine, KEEP_COPIES, Pins, Playable, Progress, prepare_playable,
+    self, Engine, KEEP_COPIES, Playable, Progress, prepare_playable,
 };
 use tauri::Emitter;
 
@@ -83,7 +84,7 @@ pub fn for_batch(
         pins: Pins::default(),
     };
     let made = make_batch_copies(app, jobs, &engine, cancel, &mut batch);
-    trimmed_copies::prune(&trimmed_copies::copies_root(), KEEP_COPIES);
+    prune(&trimmed_copies::copies_root(), KEEP_COPIES);
     made.map(|()| batch)
 }
 
@@ -161,7 +162,7 @@ pub fn for_preview(
         Ok(Playable::Copy { path, .. }) => {
             // The copy was just stamped used, so it is the newest and stays;
             // a running batch's copies are pinned.
-            trimmed_copies::prune(&trimmed_copies::copies_root(), KEEP_COPIES);
+            prune(&trimmed_copies::copies_root(), KEEP_COPIES);
             emit(crate::messages::preview_plays_trimmed_copy(&engine), true);
             Ok(Some(path))
         }
