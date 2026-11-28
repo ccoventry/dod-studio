@@ -427,6 +427,27 @@ export const CAPTURE_CONFIG_STRINGS = {
     replacedNote: (path) => `Previous map kept at ${path}`,
     downloadFailedToast: (map, err) => `Could not install ${map}: ${err}`,
   },
+  // Studio's map builds (#1547): old builds of a map kept in dod_addon and put
+  // in place for the demos recorded on them. Shown on the Maps needed banner.
+  MAP_BUILDS: {
+    ADD_BUTTON: 'Add a build…',
+    ADD_BUTTON_TITLE:
+      'Pick a .bsp of this map. DoD Studio keeps a copy with its map builds and plays each demo on the build it was recorded on. Your installed map stays as it is.',
+    useCopyButton: (file) => `Use ${file}`,
+    useCopyTitle: (path) =>
+      `${path} is the build these demos were recorded on. DoD Studio copies it to its map builds; the file stays where it is.`,
+    PICK_TITLE: 'Pick a build of the map (.bsp)',
+    MAP_FILES_FILTER_NAME: 'Map files',
+    ADDING: 'Adding…',
+    addingLine: (map) => `Adding a build of ${map}`,
+    addedToast: (map, build) => `Added build ${build} of ${map}: these demos now play on it`,
+    otherBuildToast: (map, build, wanted) =>
+      `That file is build ${build} of ${map}, not ${wanted}, the one these demos were recorded on. It is kept for demos recorded on ${build}.`,
+    addFailedToast: (map, err) => `Could not add the build of ${map}: ${err}`,
+    libraryNote: (map, build, demos) => `${map}: ${demos} play on build ${build} from DoD Studio's map builds`,
+    NOTE_HELP:
+      "The installed map is another version. DoD Studio puts the right one in dod_addon\\maps before the game starts and takes it out once the game closes. A game plays one version of a map, so a batch mixing versions of one map plays them all on the first demo's.",
+  },
   // The game's own config files setting cvars this app reads. Advisory only —
   // nothing in this app writes to a config file.
   CFG: {

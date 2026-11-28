@@ -1873,6 +1873,22 @@ button.danger-btn {
   margin-bottom: 10px;
 }
 
+/* #1547: a demo that plays on an old map build from Studio's map builds, and
+   the Master Queue's note of those demos: news, not a warning. */
+.analyzer-info-banner,
+.map-builds-note {
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 3px;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.map-builds-note {
+  margin: 8px 0;
+}
+
 /* #217: a demo that recorded more than one map, above every analyzer tab. */
 .analyzer-multimap-banner {
   display: flex;

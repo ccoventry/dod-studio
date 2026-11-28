@@ -231,6 +231,17 @@ export async function downloadMap(mapName, expectedChecksum, gamePath) {
     });
 }
 
+/** Adds `sourcePath` to the map builds of the install `gamePath` points at, as
+ *  a build of `mapName` (#1547). Resolves with { mapName, checksum, path,
+ *  alreadyThere }; rejects with the reason. */
+export async function addMapBuild(mapName, sourcePath, gamePath) {
+  return invoke("add_map_build", { mapName, sourcePath, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (add_map_build):", err);
+      throw err;
+    });
+}
+
 
 // What the pre-roll and post-roll have to cover. Quiet on failure: a timing
 // hint that cannot be computed is not worth interrupting anyone over.
