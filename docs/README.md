@@ -8,6 +8,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [coding_standards.md](coding_standards.md) — how code here is written: one area per file, one task per function, names, types, errors, duplication, tests.
 - [goldsrc_dod_quirks.md](goldsrc_dod_quirks.md) — engine and DoD behaviour the pipeline depends on. Read before touching capture or patching.
 - [vac_safety.md](vac_safety.md) — what keeps the hook DLL away from VAC-secured servers.
+- [dod_versions.md](dod_versions.md) — which DoD version a demo was recorded on: the client.dll fingerprint in its server info, what is verified (#1542).
 
 ## Capture and render
 - [hlae_protocols.md](hlae_protocols.md) — launching HLAE, how a batch ends, checking a take.
