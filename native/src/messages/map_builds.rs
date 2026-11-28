@@ -33,6 +33,10 @@ pub fn added(map: &str, checksum: u32, from: impl Display, to: impl Display, ms:
     )
 }
 
+pub fn add_failed(map: &str, err: impl Display) -> String {
+    format!("- Map builds: could not add a build of {map}: {err}")
+}
+
 pub fn already_had(map: &str, checksum: u32, path: impl Display) -> String {
     format!(
         "- Map builds: build {} of {map} is already in the library ({path})",
@@ -94,9 +98,7 @@ pub fn removed(map: &str, checksum: u32, slot: impl Display) -> String {
 }
 
 pub fn changed_since_placed(slot: impl Display) -> String {
-    format!(
-        "- Map builds: {slot} changed since Studio put a build there, so it is left alone"
-    )
+    format!("- Map builds: {slot} changed since Studio put a build there, so it is left alone")
 }
 
 pub fn remove_failed(slot: impl Display, err: impl Display) -> String {
@@ -134,5 +136,7 @@ pub fn left_out(demo: impl Display, map: &str, wanted: u32, playing: Option<u32>
 }
 
 pub fn batch_places(count: usize, maps: impl Display) -> String {
-    format!("- Map builds: this batch plays {count} map(s) on a build from Studio's library: {maps}")
+    format!(
+        "- Map builds: this batch plays {count} map(s) on a build from Studio's library: {maps}"
+    )
 }

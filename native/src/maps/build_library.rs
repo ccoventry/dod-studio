@@ -96,18 +96,26 @@ pub enum AddBuildError {
     /// The map name is not one a file can be named by.
     NotAMapName(String),
     /// The source could not be read.
-    Read { path: PathBuf, source: std::io::Error },
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// The source is not a map `bsp::map_checksum` can read.
     NotAMap { path: PathBuf, why: bsp::BspError },
     /// The library copy could not be written.
-    Write { path: PathBuf, source: std::io::Error },
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 impl std::fmt::Display for AddBuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotAMapName(name) => f.write_str(&msg::not_a_map_name(name)),
-            Self::Read { path, source } => f.write_str(&msg::could_not_read(path.display(), source)),
+            Self::Read { path, source } => {
+                f.write_str(&msg::could_not_read(path.display(), source))
+            }
             Self::NotAMap { path, why } => f.write_str(&msg::not_a_map(path.display(), why)),
             Self::Write { path, source } => {
                 f.write_str(&msg::could_not_write(path.display(), source))
@@ -154,8 +162,8 @@ pub fn add_build(
     };
     let size = std::fs::metadata(source).map_err(read_error)?.len();
     let total = size.saturating_mul(2);
-    let bytes = read_with_progress(source, size, &mut |done| progress(done, total))
-        .map_err(read_error)?;
+    let bytes =
+        read_with_progress(source, size, &mut |done| progress(done, total)).map_err(read_error)?;
     let checksum = bsp::map_checksum(&bytes).map_err(|why| AddBuildError::NotAMap {
         path: source.to_path_buf(),
         why,
@@ -330,12 +338,16 @@ mod tests {
         let library = dir.join("library");
 
         let mut last = (0, 0);
-        let added = add_build(&library, "DOD_Chemille", &source, &mut |d, t| last = (d, t)).unwrap();
+        let added =
+            add_build(&library, "DOD_Chemille", &source, &mut |d, t| last = (d, t)).unwrap();
 
         assert_eq!(added.map_name, "dod_chemille");
         assert_eq!(added.checksum, checksum(1));
         assert!(!added.already_there);
-        assert_eq!(added.path, build_path(&library, "dod_chemille", checksum(1)));
+        assert_eq!(
+            added.path,
+            build_path(&library, "dod_chemille", checksum(1))
+        );
         assert_eq!(std::fs::read(&added.path).unwrap(), map_bytes(1));
         assert_eq!(std::fs::read(&source).unwrap(), map_bytes(1));
         let size = map_bytes(1).len() as u64;
@@ -348,7 +360,10 @@ mod tests {
                 path: added.path.clone(),
             }]
         );
-        assert_eq!(find_build(&library, "dod_chemille", checksum(1)), Some(added.path));
+        assert_eq!(
+            find_build(&library, "dod_chemille", checksum(1)),
+            Some(added.path)
+        );
         assert_eq!(find_build(&library, "dod_chemille", checksum(2)), None);
     }
 
@@ -420,6 +435,9 @@ mod tests {
             copy_beside_with_build(&dirs, "dod_armory_b5", checksum(2)),
             Some(maps.join("dod_armory_b5.61e9d38d.bsp.bak"))
         );
-        assert_eq!(copy_beside_with_build(&dirs, "dod_armory_b5", checksum(3)), None);
+        assert_eq!(
+            copy_beside_with_build(&dirs, "dod_armory_b5", checksum(3)),
+            None
+        );
     }
 }

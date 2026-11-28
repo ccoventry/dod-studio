@@ -90,7 +90,8 @@ struct PlacedBuild {
 fn load_record(addon: &Path) -> Option<Record> {
     let path = record_path(addon);
     let read = std::fs::read(&path).and_then(|bytes| {
-        serde_json::from_slice(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        serde_json::from_slice(&bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     });
     match read {
         Ok(record) => Some(record),
@@ -274,7 +275,11 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             .position(|p| p.map_name == want.map_name)
             .filter(|&i| {
                 let p = &record.placed[i];
-                holds_build(&slot, &build_path(&library(addon), &p.map_name, p.checksum), p.checksum)
+                holds_build(
+                    &slot,
+                    &build_path(&library(addon), &p.map_name, p.checksum),
+                    p.checksum,
+                )
             });
         let Some(index) = ours else {
             log_markdown(&msg::slot_not_ours(&want.map_name, slot.display()));
@@ -285,11 +290,20 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             if let Err(e) = save_record(addon, record) {
                 log_markdown(&msg::record_unwritable(record_path(addon).display(), e));
             }
-            log_markdown(&msg::kept_in_place(&want.map_name, want.checksum, slot.display()));
+            log_markdown(&msg::kept_in_place(
+                &want.map_name,
+                want.checksum,
+                slot.display(),
+            ));
             return PlaceOutcome::AlreadyInPlace;
         }
         if let Some(e) = crate::shared::paths::remove_file_retrying(&slot) {
-            log_markdown(&msg::place_failed(&want.map_name, want.checksum, slot.display(), &e));
+            log_markdown(&msg::place_failed(
+                &want.map_name,
+                want.checksum,
+                slot.display(),
+                &e,
+            ));
             return PlaceOutcome::Failed(e.to_string());
         }
         record.placed.remove(index);
@@ -318,7 +332,12 @@ fn copy_into_slot(
         if let Err(save) = save_record(addon, record) {
             log_markdown(&msg::record_unwritable(record_path(addon).display(), save));
         }
-        log_markdown(&msg::place_failed(&want.map_name, want.checksum, slot.display(), e));
+        log_markdown(&msg::place_failed(
+            &want.map_name,
+            want.checksum,
+            slot.display(),
+            e,
+        ));
         PlaceOutcome::Failed(e.to_string())
     };
     if let Err(e) = save_record(addon, record) {
@@ -386,7 +405,11 @@ pub fn release_sessions(addon: &Path, sessions: &[u64]) -> usize {
         match crate::shared::paths::remove_file_retrying(&slot) {
             None => {
                 removed += 1;
-                log_markdown(&msg::removed(&placed.map_name, placed.checksum, slot.display()));
+                log_markdown(&msg::removed(
+                    &placed.map_name,
+                    placed.checksum,
+                    slot.display(),
+                ));
             }
             Some(e) => {
                 log_markdown(&msg::remove_failed(slot.display(), e));
@@ -422,7 +445,13 @@ pub fn is_studio_placement(addon: &Path, map_name: &str) -> bool {
         .placed
         .iter()
         .filter(|p| p.map_name == map_name)
-        .any(|p| holds_build(&slot, &build_path(&library(addon), &p.map_name, p.checksum), p.checksum))
+        .any(|p| {
+            holds_build(
+                &slot,
+                &build_path(&library(addon), &p.map_name, p.checksum),
+                p.checksum,
+            )
+        })
 }
 
 /// At Studio's start: the builds an earlier Studio left in place (closed or
@@ -516,7 +545,10 @@ mod tests {
 
         assert_eq!(placement.release(), 0);
         assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(9));
-        assert!(placed_sessions(&i.addon).is_empty(), "forgotten, not retried");
+        assert!(
+            placed_sessions(&i.addon).is_empty(),
+            "forgotten, not retried"
+        );
     }
 
     #[test]

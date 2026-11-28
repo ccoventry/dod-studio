@@ -201,8 +201,8 @@ pub fn plan_and_log(demos: &[PathBuf], game_root: &Path) -> LaunchMaps {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::maps::build_library::{add_build, test_map_bytes};
     use crate::maps::bsp;
+    use crate::maps::build_library::{add_build, test_map_bytes};
     use crate::test_support::Scratch;
 
     fn checksum(seed: u8) -> u32 {
@@ -242,11 +242,15 @@ mod tests {
         let root = game_root("from_library");
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(2)), &root),
-            MapStatus::FromLibrary { checksum: checksum(2) }
+            MapStatus::FromLibrary {
+                checksum: checksum(2)
+            }
         );
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(1)), &root),
-            MapStatus::Ok { checksum: checksum(1) }
+            MapStatus::Ok {
+                checksum: checksum(1)
+            }
         );
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(3)), &root),
@@ -264,7 +268,9 @@ mod tests {
         std::fs::remove_file(mod_dir(&root).join("maps").join("dod_x.bsp")).unwrap();
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(2)), &root),
-            MapStatus::FromLibrary { checksum: checksum(2) }
+            MapStatus::FromLibrary {
+                checksum: checksum(2)
+            }
         );
     }
 
@@ -284,7 +290,9 @@ mod tests {
         );
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(9)), &root),
-            MapStatus::Ok { checksum: checksum(9) }
+            MapStatus::Ok {
+                checksum: checksum(9)
+            }
         );
     }
 
@@ -300,7 +308,9 @@ mod tests {
         );
         assert_eq!(
             status_for_launch(&reference("dod_x", checksum(1)), &root),
-            MapStatus::Ok { checksum: checksum(1) },
+            MapStatus::Ok {
+                checksum: checksum(1)
+            },
             "compared with the installed map under it"
         );
         placement.release();

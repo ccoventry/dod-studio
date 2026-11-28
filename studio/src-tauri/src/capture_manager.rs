@@ -1498,6 +1498,13 @@ pub async fn start_capture_batch_impl(
             .iter()
             .flat_map(|j| j.blocks.iter().map(|b| b.take_folder.clone()))
             .collect();
+        // The demos in play order, for the map builds their game needs
+        // (#1547). A trimmed copy (#207) names the same map and build.
+        let map_demos: Vec<std::path::PathBuf> = patch_jobs
+            .iter()
+            .filter(|j| !j.blocks.is_empty())
+            .map(|j| std::path::PathBuf::from(&j.source_demo))
+            .collect();
 
         {
             let manifest = CaptureManifest {
@@ -2158,6 +2165,7 @@ pub async fn start_capture_batch_impl(
             runtime_batch,
             batch_start_arc,
             hold,
+            map_demos,
         );
     });
 

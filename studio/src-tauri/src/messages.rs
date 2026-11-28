@@ -706,6 +706,16 @@ pub fn map_download_failed(err: impl Display) -> String {
     format!("Map download failed: {}", err)
 }
 
+// ── map_builds_manager.rs ────────────────────────────────────────────────
+
+pub fn no_game_folder_beside(game_path: &str) -> String {
+    format!("No game folder beside `{game_path}`: set the game's hl.exe in Configuration")
+}
+
+pub fn map_build_add_failed(err: impl Display) -> String {
+    format!("Could not add the map build: {err}")
+}
+
 // ── updater_manager.rs ───────────────────────────────────────────────────
 
 pub fn unknown_update_channel(channel: &str) -> String {

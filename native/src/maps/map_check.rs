@@ -68,7 +68,7 @@ pub enum MapStatus {
     Unreadable { reason: String },
     /// The installed map is missing, unreadable or another build, and
     /// Studio's map builds hold the demo's: Studio puts it in place when it
-    /// starts the game for the demo (uild_plan::status_for_launch, #1547).
+    /// starts the game for the demo (`build_plan::status_for_launch`, #1547).
     /// Only that function answers it; [status_of] looks at one folder.
     FromLibrary { checksum: u32 },
 }

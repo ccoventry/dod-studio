@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use native::maps::build_plan;
 use native::maps::map_check::{self, MapStatus};
 use native::maps::map_fetch;
 use serde::{Deserialize, Serialize};
@@ -28,8 +29,13 @@ pub struct MapCheckRow {
     /// A `wrongBuild` demo whose server sent a `client.dll` hash: recorded on
     /// an older release of the game. `false` otherwise.
     pub older_release: bool,
-    /// `ok` | `wrongBuild` | `missing` | `unverifiable` | `unreadableMap` |
-    /// `unreadableDemo`
+    /// A copy beside the map (`dod_armory_b5.61e9d38d.bsp.bak`) that is the
+    /// build the demo wants, for a `wrongBuild` or `missing` row: one click
+    /// adds it to Studio's map builds (#1547).
+    pub copy_beside: Option<String>,
+    /// `ok` | `fromLibrary` (plays on `expectedChecksum` from Studio's map
+    /// builds, #1547) | `wrongBuild` | `missing` | `unverifiable` |
+    /// `unreadableMap` | `unreadableDemo`
     pub state: String,
     pub detail: String,
     /// Whether the demo can be played at all.
@@ -43,7 +49,9 @@ fn maps_dir(game_path: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| crate::messages::no_map_folder_beside_exe(game_path))
 }
 
-/// Check a list of demos against the map library.
+/// Check a list of demos against the maps a launch from Studio plays them
+/// on: the installed map, or the build from Studio's map builds it puts in
+/// place (#1547, `build_plan::status_for_launch`).
 ///
 /// Map files are read once each however many demos want them, because the
 /// checksum walks the whole file and a folder of 400 demos covers maybe twenty
@@ -54,9 +62,12 @@ pub async fn check_demo_maps(
     game_path: String,
 ) -> Result<Vec<MapCheckRow>, String> {
     let dir = maps_dir(&game_path)?;
+    let Some(root) = Path::new(&game_path).parent().map(Path::to_path_buf) else {
+        return Err(crate::messages::no_map_folder_beside_exe(&game_path));
+    };
 
     tokio::task::spawn_blocking(move || {
-        let mut seen: HashMap<String, MapStatus> = HashMap::new();
+        let mut seen: HashMap<String, (MapStatus, Option<String>)> = HashMap::new();
         let mut rows = Vec::with_capacity(demo_paths.len());
 
         for path in demo_paths {
@@ -76,6 +87,7 @@ pub async fn check_demo_maps(
                         expected_checksum: None,
                         installed_checksum: None,
                         older_release: false,
+                        copy_beside: None,
                         state: "unreadableDemo".to_string(),
                         detail: e,
                         playable: false,
@@ -91,13 +103,18 @@ pub async fn check_demo_maps(
                 reference.map_name,
                 reference.expected_checksum.unwrap_or(0)
             );
-            let status = seen
+            let (status, copy_beside) = seen
                 .entry(cache_key)
-                .or_insert_with(|| map_check::status_of(&reference, &dir))
+                .or_insert_with(|| {
+                    let status = build_plan::status_for_launch(&reference, &root);
+                    let copy = copy_beside(&status, &reference, &dir);
+                    (status, copy)
+                })
                 .clone();
 
             let state = match &status {
                 MapStatus::Ok { .. } => "ok",
+                MapStatus::FromLibrary { .. } => "fromLibrary",
                 MapStatus::WrongBuild { .. } => "wrongBuild",
                 MapStatus::Missing => "missing",
                 MapStatus::Unverifiable => "unverifiable",
@@ -114,6 +131,7 @@ pub async fn check_demo_maps(
                 installed_checksum,
                 older_release: matches!(status, MapStatus::WrongBuild { .. })
                     && map_check::recorded_on_older_release(&p),
+                copy_beside,
                 detail: status.summary(&reference.map_name),
                 playable: status.is_playable(),
                 map_name: reference.map_name,
@@ -126,6 +144,26 @@ pub async fn check_demo_maps(
     })
     .await
     .map_err(crate::messages::map_check_failed)
+}
+
+/// For a demo whose map is missing or another build: a copy beside the
+/// installed map that is the demo's build, read-only, for the warning's
+/// one-click add. Looks in the maps folder and the addon's.
+fn copy_beside(
+    status: &MapStatus,
+    reference: &map_check::MapReference,
+    maps_dir: &Path,
+) -> Option<String> {
+    if !matches!(status, MapStatus::WrongBuild { .. } | MapStatus::Missing) {
+        return None;
+    }
+    let checksum = reference.expected_checksum?;
+    let mut dirs = vec![maps_dir.to_path_buf()];
+    if let Some(root) = maps_dir.parent().and_then(Path::parent) {
+        dirs.push(native::shared::paths::addon_dir(root).join("maps"));
+    }
+    native::maps::build_library::copy_beside_with_build(&dirs, &reference.map_name, checksum)
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

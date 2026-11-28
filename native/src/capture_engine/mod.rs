@@ -121,6 +121,7 @@ struct Batch {
     runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
     batch_start: Arc<crate::game_handoff::BatchStart>,
     hold: Arc<AtomicBool>,
+    map_demos: Vec<PathBuf>,
 }
 
 // One-call seam where every argument is independent; a params struct would exist only to satisfy the lint.
@@ -156,6 +157,10 @@ pub fn spawn_capture_engine(
     // next clip boundary, false lets it go on. Sent over the game's pipe when
     // it changes; a patched batch can't hold, so it is ignored there.
     hold: Arc<AtomicBool>,
+    // The demos the batch plays, in order: the builds of their maps that
+    // Studio's library holds are put in place before the game starts and
+    // removed once it has closed (#1547, `maps::build_plan`).
+    map_demos: Vec<PathBuf>,
 ) {
     let batch = Batch {
         jobs,
@@ -168,6 +173,7 @@ pub fn spawn_capture_engine(
         runtime_batch,
         batch_start,
         hold,
+        map_demos,
     };
     let tx = batch.tx.clone();
     start_engine_thread(
@@ -252,7 +258,9 @@ fn run_batch(batch: Batch) {
         return;
     };
     leftovers.add_readers(&feed.tail_cancel);
+    let map_builds = place_map_builds(&batch, hl_exe_parent);
     let Some(game) = launch::start_game(&batch, &workspace.export_dir, &dod_dir) else {
+        map_builds.release_after_game(std::time::Duration::ZERO);
         return;
     };
     leftovers.launched();
@@ -297,6 +305,33 @@ fn run_batch(batch: Batch) {
         batch_end(watch.failure_reason.take(), cancelled),
         &files,
     );
+    // The game may still be closing, or kept open after the batch: the
+    // builds stay until no game runs (`build_placement`).
+    map_builds.release_after_game(std::time::Duration::ZERO);
+}
+
+/// Puts the library builds the batch's demos need in place for its game
+/// (#1547). None for a batch run in the open game (#725): that game keeps
+/// the build of each map it has loaded, and a second build of one is a fatal
+/// error in it.
+fn place_map_builds(
+    batch: &Batch,
+    game_root: &std::path::Path,
+) -> crate::maps::build_placement::Placement {
+    let runs_in_open_game = batch
+        .runtime_batch
+        .as_ref()
+        .is_some_and(|b| b.reuse_game.is_some());
+    if !runs_in_open_game {
+        return crate::maps::build_plan::place_for_launch(&batch.map_demos, game_root);
+    }
+    let maps = crate::maps::build_plan::plan_and_log(&batch.map_demos, game_root);
+    if !maps.place.is_empty() {
+        crate::log_markdown(&crate::messages::map_builds::open_game_keeps_its_maps(
+            maps.place.len(),
+        ));
+    }
+    crate::maps::build_placement::Placement::none(&crate::shared::paths::addon_dir(game_root))
 }
 
 /// Where a batch's markers come from: the readers' channel and stop flag,
