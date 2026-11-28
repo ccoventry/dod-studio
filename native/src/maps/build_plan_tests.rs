@@ -317,6 +317,8 @@ fn a_build_left_in_place_is_taken_out_before_a_current_demos_launch() {
             checksum: checksum(2),
         }],
     );
+    // Its game came and went; the release never ran.
+    left.game_seen();
     std::mem::forget(left);
     let new = write_demo(&root, "new.dem", checksum(1));
     let launch = place_for_launch_when(&[new], &root, GameState::NoneRunning);

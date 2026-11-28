@@ -39,11 +39,12 @@ export async function confirmMixedMapBuilds(demoPaths, gamePath, { plan = planMa
   if (!maps.length) return true;
   const S = STRINGS.MAP_BUILDS;
   const count = maps.reduce((n, m) => n + m.demos.length, 0);
-  const onOldVersion = maps.some((m) => m.playing);
-  return confirm(S.mixedMessage(count, onOldVersion), {
+  // Each map says its own version: one may stay on the installed version
+  // while another plays on an old one.
+  return confirm(S.mixedMessage(count), {
     title: S.mixedTitle(count),
     confirmLabel: S.START_ANYWAY,
-    details: maps.map((m) => ({ primary: m.map, secondary: m.demos.join(', ') })),
+    details: maps.map((m) => ({ primary: m.map, secondary: S.leftOutDetail(m.demos, m.playing) })),
   });
 }
 

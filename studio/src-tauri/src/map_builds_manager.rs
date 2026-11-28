@@ -263,6 +263,9 @@ pub(crate) fn clean_leftovers_at_start(configured_game_path: Option<String>) {
     roots.dedup();
     for root in roots {
         let addon = native::shared::paths::addon_dir(&root);
+        native::maps::build_library::sweep_unfinished_adds(
+            &native::maps::build_library::library_dir(&root),
+        );
         native::maps::build_placement::sweep_part_files(&addon);
         native::maps::build_placement::release_leftovers_after_games(&addon);
     }

@@ -245,6 +245,43 @@ fn write_with_progress(
     file.sync_all()
 }
 
+/// At Studio's start: removes the unfinished copies an add left in `library`
+/// (`<build>.bsp.part-<pid>-<nanos>`) when the process that wrote it is no
+/// longer running: a Studio that closed or crashed mid-add. Returns how
+/// many went.
+pub fn sweep_unfinished_adds(library: &Path) -> usize {
+    let sys = crate::sys::process::snapshot();
+    let removed = sweep_unfinished_adds_where(library, &|pid| {
+        sys.process(sysinfo::Pid::from_u32(pid)).is_some()
+    });
+    if removed > 0 {
+        crate::log_markdown(&msg::library_parts_swept(removed, library.display()));
+    }
+    removed
+}
+
+/// [`sweep_unfinished_adds`] with `is_running` saying whether a process id
+/// is alive.
+fn sweep_unfinished_adds_where(library: &Path, is_running: &dyn Fn(u32) -> bool) -> usize {
+    let Ok(entries) = std::fs::read_dir(library) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+            unfinished_add_pid(&name).is_some_and(|pid| !is_running(pid))
+        })
+        .filter(|e| std::fs::remove_file(e.path()).is_ok())
+        .count()
+}
+
+/// The process id in an unfinished add's name (`x.61e9d38d.bsp.part-<pid>-<nanos>`).
+fn unfinished_add_pid(name: &str) -> Option<u32> {
+    let (_, rest) = name.split_once(".bsp.part-")?;
+    rest.split_once('-')?.0.parse().ok()
+}
+
 /// Files in `maps_dir` that look like other builds of `map_name` kept beside
 /// it: named `<map>.` and then anything with `.bsp` in it, other than the
 /// installed `<map>.bsp` itself (`dod_chemille.bsp.bak`,
@@ -423,6 +460,26 @@ mod tests {
             Err(AddBuildError::Read { .. })
         ));
         assert!(!library.exists(), "nothing written for a refused file");
+    }
+
+    #[test]
+    fn unfinished_adds_of_a_closed_studio_are_swept_and_a_running_ones_stay() {
+        let dir = Scratch::new("build_library_sweep");
+        let library = dir.join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        for name in [
+            "dod_x.61e9d38d.bsp.part-111-5",
+            "dod_x.61e9d38d.bsp.part-222-6",
+            "dod_x.61e9d38d.bsp",
+            "placed.json",
+        ] {
+            std::fs::write(library.join(name), b"x").unwrap();
+        }
+        assert_eq!(sweep_unfinished_adds_where(&library, &|pid| pid == 222), 1);
+        assert!(!library.join("dod_x.61e9d38d.bsp.part-111-5").exists());
+        assert!(library.join("dod_x.61e9d38d.bsp.part-222-6").exists());
+        assert!(library.join("dod_x.61e9d38d.bsp").exists());
+        assert!(library.join("placed.json").exists());
     }
 
     #[test]

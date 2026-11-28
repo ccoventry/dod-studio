@@ -454,10 +454,13 @@ export const CAPTURE_CONFIG_STRINGS = {
       `The game plays ${path}, a file DoD Studio didn't put there, so DoD Studio can't use its map builds for this map. Move it away to use them.`,
     // The confirm before a batch mixing versions of one map.
     mixedTitle: (count) => (count === 1 ? '1 demo won\'t play on its map version' : `${count} demos won't play on their map version`),
-    // `onOldVersion`: the batch plays the map on an old version DoD Studio
-    // puts in place (no picked demo wants the installed one).
-    mixedMessage: (count, onOldVersion = false) =>
-      `A game plays one version of each map, and ${count === 1 ? 'this demo was' : 'these demos were'} recorded on another version than the rest of the batch uses. ${count === 1 ? 'It plays' : 'They play'} on ${onOldVersion ? 'the old version DoD Studio puts in place for the others' : 'the installed version'}, so some walls, doors or water may look wrong. Capture ${count === 1 ? 'it' : 'them'} in a batch of ${count === 1 ? 'its' : 'their'} own to play ${count === 1 ? 'it' : 'them'} right.`,
+    mixedMessage: (count) =>
+      `A game plays one version of each map, and ${count === 1 ? 'this demo was' : 'these demos were'} recorded on another version than the rest of the batch uses, so some walls, doors or water may look wrong. Capture ${count === 1 ? 'it' : 'them'} in a batch of ${count === 1 ? 'its' : 'their'} own to play ${count === 1 ? 'it' : 'them'} right.`,
+    // One map's line in that confirm: its demos, and the version they play
+    // on instead (`playing`: an old version DoD Studio puts in place for the
+    // others, or null for the installed one).
+    leftOutDetail: (demos, playing) =>
+      `${demos.join(', ')}: ${demos.length === 1 ? 'plays' : 'play'} on ${playing ? `the old version (build ${playing}) DoD Studio puts in place for the others` : 'the installed version'}`,
     OPEN_GAME_TITLE: "Some demos won't play on their map version in the open game",
     OPEN_GAME_MESSAGE:
       'This batch runs in the game that is already open, which keeps the map versions it has loaded. Close the game first to play every demo on the version it was recorded on.',

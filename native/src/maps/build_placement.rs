@@ -68,12 +68,12 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// This Studio's sessions with builds still in place, and the leftovers it
 /// is waiting to remove: what `release_at_exit` removes.
 static ACTIVE: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
-/// This Studio's sessions whose game has not shown up yet (a preview's
-/// launch while HLAE starts): nothing removes their builds meanwhile.
+/// This Studio's sessions whose game has not shown up yet: from the moment
+/// their builds are placed (a preview's launch can take seconds before the
+/// release starts waiting; a batch never waits for its game here) until the
+/// game is seen or the builds come out. Nothing removes their builds
+/// meanwhile, and closing Studio leaves them.
 static STARTING: Mutex<Vec<u64>> = Mutex::new(Vec::new());
-/// How old a `.dodstudio-part` must be before the start-up sweep takes it
-/// for a crash's leftover rather than another Studio's copy in progress.
-const PART_SWEEP_AGE: Duration = Duration::from_secs(60);
 
 /// A build of a map, as the library names it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -300,6 +300,9 @@ pub enum PlaceOutcome {
     AlreadyInPlace,
     /// A file Studio didn't put there holds the slot; it is left alone.
     SlotNotOurs { slot: PathBuf },
+    /// Another running Studio has another build of the map in the slot for
+    /// its game; it is left alone.
+    HeldByAnotherStudio { slot: PathBuf },
     /// The library doesn't hold the build.
     NotInLibrary,
     /// The library's file under that build's name is another build (renamed
@@ -346,12 +349,19 @@ impl Placement {
         &self.builds
     }
 
+    /// This launch's game has been seen: its builds are no longer kept for
+    /// a game still starting. The release thread does this itself.
+    pub fn game_seen(&self) {
+        game_started(self.session);
+    }
+
     /// Removes this launch's builds now, for a game that never started or
     /// has closed. Returns how many came out.
     pub fn release(&self) -> usize {
         if self.is_empty() {
             return 0;
         }
+        game_started(self.session);
         forget_active(&self.addon, self.session);
         release_sessions(&self.addon, &[self.session])
     }
@@ -366,13 +376,12 @@ impl Placement {
             return;
         }
         let session = self.session;
-        lock_or_recover(&STARTING).push(session);
         let spawned = std::thread::Builder::new()
             .name("map_builds_release".into())
             .spawn(move || {
                 let mut probe = || games_running();
                 let started = wait_for_a_game(start_wait, GAME_POLL, &SHUTTING_DOWN, &mut probe);
-                lock_or_recover(&STARTING).retain(|s| *s != session);
+                game_started(session);
                 if started == WaitEnd::Cancelled {
                     return;
                 }
@@ -383,7 +392,7 @@ impl Placement {
                 }
             });
         if let Err(e) = spawned {
-            lock_or_recover(&STARTING).retain(|s| *s != session);
+            game_started(session);
             log_markdown(&msg::release_thread_failed(e));
         }
     }
@@ -440,6 +449,12 @@ fn wait_for_a_game(
     WaitEnd::GamesClosed
 }
 
+/// `session`'s game has been seen (or its builds came out): from now on its
+/// builds are a running game's, or stale once no game runs.
+pub(crate) fn game_started(session: u64) {
+    lock_or_recover(&STARTING).retain(|s| *s != session);
+}
+
 fn remember_active(addon: &Path, session: u64) {
     lock_or_recover(&ACTIVE).push((addon.to_path_buf(), session));
 }
@@ -486,6 +501,7 @@ pub fn place_builds(addon: &Path, wants: &[MapBuild]) -> (Placement, Vec<PlaceOu
         .collect();
     if !placement.is_empty() {
         remember_active(addon, placement.session);
+        lock_or_recover(&STARTING).push(placement.session);
     }
     (placement, outcomes)
 }
@@ -522,6 +538,13 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             log_markdown(&msg::slot_not_ours(&want.map_name, slot.display()));
             return PlaceOutcome::SlotNotOurs { slot };
         };
+        // Another build another running Studio placed: its game may need it.
+        if record.placed[index].checksum != want.checksum
+            && record.placed[index].owned_by_another_live_studio()
+        {
+            log_markdown(&msg::held_by_another_studio(&want.map_name, slot.display()));
+            return PlaceOutcome::HeldByAnotherStudio { slot };
+        }
         if record.placed[index].checksum == want.checksum {
             record.placed[index] = placed_now(want, session);
             if let Err(e) = save_record(addon, record) {
@@ -756,27 +779,30 @@ pub fn release_stale(addon: &Path) -> usize {
     release_sessions(addon, &sessions)
 }
 
-/// At Studio's start: removes `.dodstudio-part` copies in `addon`'s maps
-/// folder older than a minute, left when a copy's link and its own clean-up
-/// both failed. Returns how many went.
+/// At Studio's start: removes the `.dodstudio-part` copies in `addon`'s maps
+/// folder, left when a copy's link and its own clean-up both failed. Holds
+/// the record's lock, which every copy holds while it runs, so another
+/// Studio's copy in progress is never taken (a copy keeps its source's
+/// modified time, so an age says nothing). Returns how many went.
 pub fn sweep_part_files(addon: &Path) -> usize {
-    sweep_part_files_older_than(addon, PART_SWEEP_AGE)
+    sweep_part_files_within(addon, LOCK_WAIT)
 }
 
-fn sweep_part_files_older_than(addon: &Path, age: Duration) -> usize {
+fn sweep_part_files_within(addon: &Path, wait: Duration) -> usize {
+    // No library, no placement ever: nothing to sweep, and no folder made.
+    if !library(addon).is_dir() {
+        return 0;
+    }
+    let Ok(_guard) = lock_record_within(addon, wait) else {
+        return 0;
+    };
     let Ok(entries) = std::fs::read_dir(addon.join("maps")) else {
         return 0;
     };
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        let old_enough = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|elapsed| elapsed >= age);
-        if name.ends_with(PART_SUFFIX) && old_enough && std::fs::remove_file(entry.path()).is_ok() {
+        if name.ends_with(PART_SUFFIX) && std::fs::remove_file(entry.path()).is_ok() {
             removed += 1;
         }
     }

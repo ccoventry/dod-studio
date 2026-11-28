@@ -273,6 +273,7 @@ fn closing_studio_with_no_game_removes_its_builds_and_with_a_game_leaves_them() 
 /// `started`, as another Studio would write it.
 fn record_owned_by(i: &Install, pid: u32, started: u64) {
     let (placement, _) = place_builds(&i.addon, &[build(1)]);
+    placement.game_seen();
     forget_active(&i.addon, placement.session);
     let mut record = load_record(&i.addon).unwrap();
     for placed in &mut record.placed {
@@ -310,14 +311,65 @@ fn a_build_a_closed_studio_placed_is_a_leftover() {
 }
 
 #[test]
-fn a_launch_still_waiting_for_its_game_keeps_its_build() {
+fn a_launch_is_protected_from_the_moment_its_build_is_placed() {
+    // A second launch cleaning up before its own game, while the first
+    // launch's call still runs (before any release thread exists).
     let i = install("starting");
-    let (placement, _) = place_builds(&i.addon, &[build(1)]);
-    lock_or_recover(&STARTING).push(placement.session);
+    let (first, _) = place_builds(&i.addon, &[build(1)]);
     assert_eq!(release_stale(&i.addon), 0);
     assert!(slot(&i.addon).exists());
-    lock_or_recover(&STARTING).retain(|s| *s != placement.session);
-    assert_eq!(placement.release(), 1);
+    assert_eq!(first.release(), 1);
+    assert!(
+        !lock_or_recover(&STARTING).contains(&first.session),
+        "a release ends the start"
+    );
+}
+
+#[test]
+fn once_its_game_was_seen_a_launchs_build_is_stale_when_no_game_runs() {
+    let i = install("seen");
+    let (first, _) = place_builds(&i.addon, &[build(1)]);
+    first.game_seen();
+    assert_eq!(release_stale(&i.addon), 1);
+    assert!(!slot(&i.addon).exists());
+}
+
+#[test]
+fn closing_studio_while_a_launch_is_starting_leaves_its_build() {
+    let i = install("exit_starting");
+    let (first, _) = place_builds(&i.addon, &[build(1)]);
+    assert!(lock_or_recover(&STARTING).contains(&first.session));
+    // `release_at_exit` reads a non-empty STARTING as a running game.
+    let starting = !lock_or_recover(&STARTING).is_empty();
+    let games = if starting {
+        GameState::Running
+    } else {
+        GameState::now()
+    };
+    assert_eq!(games, GameState::Running);
+    assert_eq!(first.release(), 1);
+}
+
+#[test]
+fn another_build_a_running_studio_placed_is_never_replaced() {
+    let i = install("held");
+    let sys = crate::sys::process::snapshot();
+    let other = sys
+        .processes()
+        .values()
+        .find(|p| p.pid().as_u32() != std::process::id() && p.start_time() > 0)
+        .map(|p| (p.pid().as_u32(), p.start_time()))
+        .unwrap();
+    record_owned_by(&i, other.0, other.1);
+    let (placement, outcomes) = place_builds(&i.addon, &[build(2)]);
+    assert_eq!(
+        outcomes,
+        vec![PlaceOutcome::HeldByAnotherStudio {
+            slot: slot(&i.addon)
+        }]
+    );
+    assert!(placement.is_empty());
+    assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(1));
 }
 
 #[test]
@@ -339,16 +391,32 @@ fn the_start_up_sweep_removes_only_studios_unfinished_copies() {
     let i = install("sweep");
     let maps = i.addon.join("maps");
     std::fs::create_dir_all(&maps).unwrap();
-    std::fs::write(part_path(&i.addon, "dod_x"), b"half").unwrap();
+    // As a copy writes it: `fs::copy` keeps the library file's (old) time.
+    let library_file = build_path(&library(&i.addon), "dod_x", build(1).checksum);
+    std::fs::copy(&library_file, part_path(&i.addon, "dod_x")).unwrap();
     std::fs::write(maps.join("dod_x.bsp"), b"the user's").unwrap();
     std::fs::write(maps.join("dod_x.txt"), b"text").unwrap();
     assert_eq!(
-        sweep_part_files(&i.addon),
-        0,
-        "a fresh copy may be in progress"
+        sweep_part_files_within(&i.addon, Duration::from_millis(100)),
+        1
     );
-    assert_eq!(sweep_part_files_older_than(&i.addon, Duration::ZERO), 1);
     assert!(maps.join("dod_x.bsp").exists() && maps.join("dod_x.txt").exists());
+}
+
+#[test]
+fn the_sweep_leaves_a_copy_another_studio_is_writing() {
+    // A copy holds the record's lock while it runs.
+    let i = install("sweep_locked");
+    std::fs::create_dir_all(i.addon.join("maps")).unwrap();
+    let library_file = build_path(&library(&i.addon), "dod_x", build(1).checksum);
+    std::fs::copy(&library_file, part_path(&i.addon, "dod_x")).unwrap();
+    let held = open_unshared(&library(&i.addon).join(LOCK_FILE)).unwrap();
+    assert_eq!(
+        sweep_part_files_within(&i.addon, Duration::from_millis(100)),
+        0
+    );
+    assert!(part_path(&i.addon, "dod_x").exists());
+    drop(held);
 }
 
 #[test]
