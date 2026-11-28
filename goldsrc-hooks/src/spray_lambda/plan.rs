@@ -30,6 +30,9 @@ use dem::types::{
     Aux, EngineMessage, FrameData, MessageData, NetMessage, NetworkMessage, TempEntity,
 };
 
+// The plan stops at a new map: `viewdemo` plays only the first, and a
+// slot's player may differ on the next.
+use crate::demo_file::TURNED_BACK_SECONDS;
 use crate::lookahead::frames::Frames;
 use crate::lookahead::timeline::ReadError;
 
@@ -46,10 +49,6 @@ const LOOK_BACK_SECONDS: f32 = 0.3;
 const SAME_SPOT_UNITS: f32 = 1.0;
 /// A coord on the wire is an `i16` of this many to the unit.
 const COORD_SCALE: f32 = 8.0;
-/// `svc_time` going back more than this is a new map, not the HLTV clock's
-/// millisecond step-backs (`timeline::TURNED_BACK_SECONDS`): `viewdemo` plays
-/// only the first, and a slot's player may differ on the next.
-const TURNED_BACK_SECONDS: f32 = 1.0;
 
 pub type Vec3 = [f32; 3];
 

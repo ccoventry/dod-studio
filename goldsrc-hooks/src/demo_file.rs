@@ -18,7 +18,9 @@
 //! `svc_time`, and viewdemo stops loading where that clock turns back at a
 //! map restart, so on such a demo the load ended at about half (#866).
 //! [`loaded_span`] reads the `svc_time` span the player will hold, on a
-//! background thread; the directory's figure stands until it answers.
+//! background thread; the directory's figure stands until it answers. A
+//! step back of a few milliseconds is not a restart ([`TURNED_BACK_SECONDS`],
+//! #1541).
 
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -39,7 +41,8 @@ const MAX_LOADING_BYTES: usize = 4 << 20;
 /// What the demo player will have buffered once a demo is read, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DemoLength {
-    /// Every non-loading entry's `fTrackTime`, summed.
+    /// Every non-loading entry's `fTrackTime`, summed, or its closing
+    /// frame's time when the directory gives none ([`closing_times`]).
     pub playback: f32,
     /// The world-clock stretch the LOADING segment adds in front of it.
     pub lead_in: f32,
@@ -50,7 +53,12 @@ pub struct DemoLength {
 pub fn length(path: &Path) -> Option<DemoLength> {
     let mut file = std::fs::File::open(path).ok()?;
     let entries = read_directory(&mut file)?;
-    let playback = sum_playback(&entries);
+    let directory = sum_playback(&entries);
+    let playback = if directory > 0.0 {
+        directory
+    } else {
+        closing_times(&mut file, &entries)
+    };
     let lead_in = loading_segment(&mut file, &entries)
         .map(|bytes| lead_in(&bytes))
         .unwrap_or(0.0);
@@ -178,6 +186,38 @@ fn sum_playback(entries: &[u8]) -> f32 {
         .sum()
 }
 
+/// The `NextSection` frame that closes a segment: its type and time, then
+/// the frame number, nothing after.
+const CLOSING_FRAME_LEN: u64 = 9;
+const NEXT_SECTION: u8 = 5;
+
+/// [`sum_playback`] from the frames, for a directory that gives no track
+/// times: each playback entry's closing `NextSection` frame, whose time is
+/// what the engine writes as the entry's track time (the same to the
+/// millisecond on 492 demos with both). HLAE's demo tools write every track
+/// time as 0 (#1541), which left the load at 0% until [`loaded_span`]
+/// answered. One 9-byte read per entry, so it is cheap enough for the game
+/// thread [`length`] runs on.
+fn closing_times(file: &mut std::fs::File, entries: &[u8]) -> f32 {
+    entries
+        .as_chunks::<ENTRY_SIZE>()
+        .0
+        .iter()
+        .filter(|entry| field_i32(&entry[..], 0) != 0)
+        .filter_map(|entry| {
+            let offset = u64::try_from(field_i32(entry, OFFSET_AT)).ok()?;
+            let length = u64::try_from(field_i32(entry, LENGTH_AT)).ok()?;
+            let at = (offset + length).checked_sub(CLOSING_FRAME_LEN)?;
+            file.seek(SeekFrom::Start(at)).ok()?;
+            let mut frame = [0u8; CLOSING_FRAME_LEN as usize];
+            file.read_exact(&mut frame).ok()?;
+            (frame[0] == NEXT_SECTION)
+                .then(|| f32::from_le_bytes([frame[1], frame[2], frame[3], frame[4]]))
+        })
+        .filter(|t| t.is_finite() && *t > 0.0)
+        .sum()
+}
+
 /// How far a load is, 0 to 99. With `loaded` (the `svc_time` span the
 /// player will hold, [`loaded_span`]): the player's span over it, the same
 /// clock. Without it, the directory's estimate: the span less the lead-in
@@ -206,10 +246,11 @@ type Reader = std::io::BufReader<std::fs::File>;
 const SVC_TIME: u8 = 7;
 
 /// The `svc_time` span the demo player holds once it has read the demo: the
-/// first network frame's `svc_time` to the last one before the clock jumps
-/// back. A map restart inside the recording turns it back, and viewdemo
-/// stops loading there (it only plays a demo's first map), so a whole-file
-/// length runs long by everything after it. Reads every frame header, so
+/// first network frame's `svc_time` to the furthest one before the clock
+/// jumps back by more than [`TURNED_BACK_SECONDS`]. A map restart inside
+/// the recording turns it back, and viewdemo stops loading there (it only
+/// plays a demo's first map), so a whole-file length runs long by
+/// everything after it. Reads every frame header, so
 /// it's for a background thread, never a game frame; `None` when the file
 /// isn't a demo or has no `svc_time`.
 pub fn loaded_span(path: &Path) -> Option<f32> {
@@ -219,8 +260,8 @@ pub fn loaded_span(path: &Path) -> Option<f32> {
 /// What [`walk`] found.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Walk {
-    /// [`loaded_span`]'s figure: the `svc_time` span up to the first turn
-    /// back or the first bad frame.
+    /// [`loaded_span`]'s figure: the `svc_time` span up to the first map
+    /// restart or the first bad frame.
     pub span: Option<f32>,
     /// The first `svc_time`, where the demo player's world starts: the two
     /// must agree before a span is held against the player's (#1373).
@@ -264,10 +305,23 @@ pub fn walk(path: &Path) -> Option<Walk> {
 /// MAX_POSSIBLE_MSG`, `docs/goldsrc_hw_dll_survey.md`).
 const MAX_POSSIBLE_MSG: u32 = 65_536;
 
-/// The `svc_time`s seen so far, up to the first that goes back.
+/// `svc_time` going back more than this is a new map; less is the clock
+/// stepping back a few milliseconds, as HLTV demos do (#927). Every frame
+/// walk here stops at a new map (`viewdemo` plays only the first), so they
+/// all share it. A 2004 HLTV demo steps back about 20 ms once in each round
+/// of `shock_vs_3h_merderet_022304_hltv`, 67% and 89% of the way in, and
+/// the load's span used to stop there (#1541). Every map restart in a
+/// survey of 160 demos from the movie library went back at least 3 s, to
+/// the new map's clock of 3 to 5 s, and none of those demos stepped back by
+/// less than a second.
+pub(crate) const TURNED_BACK_SECONDS: f32 = 1.0;
+
+/// The `svc_time`s seen so far, up to the first map restart: the first
+/// step back of more than [`TURNED_BACK_SECONDS`].
 #[derive(Default)]
 struct SvcClock {
     first: Option<f32>,
+    /// The furthest the clock has got.
     last: f32,
     turned_back: bool,
 }
@@ -282,8 +336,8 @@ impl SvcClock {
                 self.first = Some(t);
                 self.last = t;
             }
-            Some(_) if t < self.last => self.turned_back = true,
-            Some(_) => self.last = t,
+            Some(_) if t < self.last - TURNED_BACK_SECONDS => self.turned_back = true,
+            Some(_) => self.last = self.last.max(t),
         }
     }
 
@@ -605,6 +659,97 @@ mod tests {
             assert!(walk(&path).unwrap().bad_frame);
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_step_back_of_a_few_milliseconds_is_not_a_map_restart() {
+        // shock_vs_3h_merderet_022304_hltv_round1 (#1541): 2139.00 to
+        // 2138.98 at 67% of the way, and on to the end of the one map.
+        let frames = [
+            net(879.43),
+            net(2139.0),
+            net(2138.98),
+            net(2749.17),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let path = one_segment_demo("jitter", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(!walked.bad_frame);
+        assert!((walked.span.unwrap() - (2749.17 - 879.43)).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// `shock_vs_3h_merderet_022304_hltv_round1.dem` (#1541) at
+    /// `DOD_CLOCK_JITTER_DEMO`, or in the PRE install's `dod` folder: its
+    /// `svc_time` runs 879.43 to 2749.17 with one 20 ms step back.
+    #[test]
+    #[ignore = "needs shock_vs_3h_merderet_022304_hltv_round1.dem (DOD_CLOCK_JITTER_DEMO or the PRE install)"]
+    fn a_real_demo_whose_clock_steps_back_20_ms_loads_whole() {
+        let path = std::env::var_os("DOD_CLOCK_JITTER_DEMO").map(std::path::PathBuf::from).unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod\shock_vs_3h_merderet_022304_hltv_round1.dem",
+            )
+        });
+        assert!(path.exists(), "no demo at {}", path.display());
+        let walked = walk(&path).unwrap();
+        assert!(!walked.bad_frame);
+        assert!(
+            (walked.span.unwrap() - (2749.17 - 879.43)).abs() < 0.05,
+            "{walked:?}"
+        );
+        assert!((length(&path).unwrap().playback - 1887.04).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_map_restart_soon_after_another_still_ends_the_span() {
+        // ktps8w11sf-warchyld_gskill_m3_rr2_h1: the second restart came 3 s
+        // into the new map (7.99 to 4.98), the smallest restart in the survey.
+        let frames = [
+            net(4.51),
+            net(7.99),
+            net(4.98),
+            net(159.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let path = one_segment_demo("restart", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(!walked.bad_frame);
+        assert!((walked.span.unwrap() - (7.99 - 4.51)).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_directory_with_no_track_times_takes_the_length_from_the_closing_frames() {
+        // rr1-dice-xeno-1 as HLAE's demo tools leave it (#1541): every track
+        // time 0, the playback entry closed at 1325.6 s, and a 9-byte third
+        // entry of garbage that holds no NextSection.
+        let dir = std::env::temp_dir().join(format!("demo_file_closing_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("x.dem");
+        let loading = [frame(2, 0.0, 0), frame(5, 0.0, 0)].concat();
+        let playback = [frame(2, 0.0, 0), net(549.0), frame(5, 1325.6, 0)].concat();
+        let garbage = frame(2, 0.0, 0);
+        let mut bytes = vec![0u8; 544];
+        bytes[..8].copy_from_slice(b"HLDEMO\0\0");
+        let mut entries = Vec::new();
+        for (kind, segment) in [(0, &loading), (1, &playback), (2, &garbage)] {
+            let mut e = entry(kind, 0.0);
+            e[OFFSET_AT..OFFSET_AT + 4].copy_from_slice(&(bytes.len() as i32).to_le_bytes());
+            e[LENGTH_AT..LENGTH_AT + 4].copy_from_slice(&(segment.len() as i32).to_le_bytes());
+            entries.extend(e);
+            bytes.extend(segment);
+        }
+        let directory_at = bytes.len() as i32;
+        bytes[540..544].copy_from_slice(&directory_at.to_le_bytes());
+        bytes.extend(3i32.to_le_bytes());
+        bytes.extend(entries);
+        std::fs::write(&path, &bytes).unwrap();
+        let length = length(&path).unwrap();
+        assert!((length.playback - 1325.6).abs() < 0.01, "{length:?}");
+        assert_eq!(load_percent(662.8, length, None), 50);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
