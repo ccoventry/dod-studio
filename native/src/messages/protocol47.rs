@@ -39,7 +39,7 @@ pub const NO_FREE_PART_NAME: &str = "every temporary name beside the copy is tak
 pub fn copy_made(name: impl Display, server_infos: usize, copy: impl Display, secs: f64) -> String {
     format!(
         "**Protocol-48 copy** — `{name}` is an older protocol-47 demo, which the game's viewdemo \
-         can't play. The game plays a converted copy ({}), saved as `{copy}` in {secs:.1} s; \
+         can't play. The game plays a converted copy ({}), saved as `{copy}` in {secs:.2} s; \
          the original is unchanged.",
         map_loads(server_infos)
     )
