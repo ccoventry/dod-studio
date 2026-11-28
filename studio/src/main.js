@@ -97,7 +97,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Pinned folders (Capture Studio's scan paths), the Explorer's Recent tier
   // and its toggles: demo_folders.js.
-  const demoFolders = createDemoFolders({ persist: () => persistAppSettings() });
+  const demoFolders = createDemoFolders({ persist: () => persistAppSettings(), getGamePath: readHlPath });
   const layoutSplits = createLayoutSplits({ persist: () => persistAppSettings() });
   // Set when the saved pinned list held single demo files (older builds), so
   // the cleaned list is written back once after settings load.

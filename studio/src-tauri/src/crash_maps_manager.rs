@@ -28,7 +28,7 @@ pub async fn crash_map_warnings(demo_paths: Vec<String>) -> Result<Vec<CrashMapW
         }
         let mut out = Vec::new();
         for path in demo_paths {
-            let Ok(reference) = native::maps::map_check::map_reference(Path::new(&path)) else {
+            let Ok(map_name) = native::maps::map_check::map_name(Path::new(&path)) else {
                 continue;
             };
             let demo_name = Path::new(&path)
@@ -37,7 +37,7 @@ pub async fn crash_map_warnings(demo_paths: Vec<String>) -> Result<Vec<CrashMapW
                 .unwrap_or_else(|| path.clone());
             for crash in remembered
                 .iter()
-                .filter(|c| c.map.eq_ignore_ascii_case(&reference.map_name))
+                .filter(|c| c.map.eq_ignore_ascii_case(&map_name))
             {
                 out.push(CrashMapWarning {
                     demo_name: demo_name.clone(),

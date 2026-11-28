@@ -272,7 +272,7 @@ function renderSummaryTab(container) {
       ${section(STRINGS.ANALYZER.GAME_DETAILS_SECTION, [
         [STRINGS.ANALYZER.GAME_MOD_LABEL, esc(gameMod)],
         [STRINGS.ANALYZER.MAP_NAME_LABEL, esc(di.map_name)],
-        [STRINGS.ANALYZER.MAP_CHECKSUM_LABEL, String(di.map_checksum)],
+        [STRINGS.ANALYZER.MAP_CHECKSUM_LABEL, esc(STRINGS.ANALYZER.mapChecksumValue(di))],
       ])}
       ${section(STRINGS.ANALYZER.SERVER_INFO_SECTION, [
         [STRINGS.ANALYZER.SERVER_NAME_LABEL, esc(st.server_name || STRINGS.ANALYZER.EMPTY_DASH)],
