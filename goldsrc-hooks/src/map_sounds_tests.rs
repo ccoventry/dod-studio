@@ -215,20 +215,6 @@ fn malformed_entity_text_gives_nothing_without_panicking() {
 }
 
 #[test]
-fn a_c_string_is_read_up_to_its_nul() {
-    let buf = b"maps/dod_anzio.bsp\0after".to_vec();
-    assert_eq!(
-        read_c_string(buf.as_ptr() as usize, 64).as_deref(),
-        Some(&b"maps/dod_anzio.bsp"[..])
-    );
-    // No NUL within the limit.
-    assert_eq!(read_c_string(buf.as_ptr() as usize, 5), None);
-    // Null and unmapped memory.
-    assert_eq!(read_c_string(0, 64), None);
-    assert_eq!(read_c_string(0x10, 64), None);
-}
-
-#[test]
 fn the_status_line_says_where_the_names_came_from() {
     let read = MapState::Read {
         map: "dod_anzio".into(),

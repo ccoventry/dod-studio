@@ -57,6 +57,11 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `map_old_build`: `ds_map_fix_old_build`, on by default -- a demo
+//!   recorded on an older build of its map draws each brush entity with the
+//!   piece its spawn bounds fit, or hides it when today's map has none, from
+//!   `HUD_AddEntity` (#1540). Demo playback only; a demo on the map's own
+//!   build is left as it is.
 //! - `player_names`: the `ds_player_change_name add|list|remove|clear`
 //!   command -- rename a player everywhere their name shows during playback,
 //!   by SteamID, slot or `self`, for one demo or all, through a detour of
@@ -354,6 +359,7 @@ mod lookahead;
 mod map_cfgs;
 mod map_file_leak;
 mod map_light;
+mod map_old_build;
 mod map_sounds;
 mod map_text;
 mod map_weather;

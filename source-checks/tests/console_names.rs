@@ -31,6 +31,7 @@ const NEW_SINCE_555: &[&str] = &[
     "hud_hide_teammate_info",
     "hud_overview_hide_speaker",
     "map_apply_lighting",
+    "map_fix_old_build",
     "map_reload_lighting",
     "map_run_cfgs",
     "map_weather",
