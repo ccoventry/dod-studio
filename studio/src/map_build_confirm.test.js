@@ -27,10 +27,9 @@ describe('the confirm before a batch mixing versions of one map (#1547)', () => 
     expect(await confirmMixedMapBuilds(['C:/d/old.dem', 'C:/d/new.dem'], 'C:/g/hl.exe', { plan, confirm })).toBe(true);
     expect(plan).toHaveBeenCalledWith(['C:/d/old.dem', 'C:/d/new.dem'], 'C:/g/hl.exe');
     const [message, options] = confirm.mock.calls[0];
-    expect(message).toBe(STRINGS.MAP_BUILDS.mixedMessage(1, false));
-    expect(message).toContain('the installed version');
+    expect(message).toBe(STRINGS.MAP_BUILDS.mixedMessage(1));
     expect(options.confirmLabel).toBe(STRINGS.MAP_BUILDS.START_ANYWAY);
-    expect(options.details).toEqual([{ primary: 'dod_x', secondary: 'old.dem' }]);
+    expect(options.details).toEqual([{ primary: 'dod_x', secondary: 'old.dem: plays on the installed version' }]);
   });
 
   it('stops the batch when the user says no, and never blocks it on a failed check', async () => {
@@ -45,12 +44,19 @@ describe('the confirm before a batch mixing versions of one map (#1547)', () => 
 });
 
 describe('the other wording and the open game (#1547)', () => {
-  it('says the demo plays on the old version when the batch puts one in place', async () => {
+  it('says per map which version its demos play on: one installed, another old', async () => {
     const confirm = vi.fn(async () => true);
-    const plan = async () => [left('older.dem', 'dod_x', '61e9d38d')];
+    const plan = async () => [
+      left('older.dem', 'dod_x', '61e9d38d'),
+      left('old_y.dem', 'dod_y'),
+      left('old_y2.dem', 'dod_y'),
+    ];
     await confirmMixedMapBuilds(['a', 'b'], 'g', { plan, confirm });
-    expect(confirm.mock.calls[0][0]).toBe(STRINGS.MAP_BUILDS.mixedMessage(1, true));
-    expect(confirm.mock.calls[0][0]).toContain('old version');
+    expect(confirm.mock.calls[0][0]).toBe(STRINGS.MAP_BUILDS.mixedMessage(3));
+    expect(confirm.mock.calls[0][1].details).toEqual([
+      { primary: 'dod_x', secondary: 'older.dem: plays on the old version (build 61e9d38d) DoD Studio puts in place for the others' },
+      { primary: 'dod_y', secondary: 'old_y.dem, old_y2.dem: play on the installed version' },
+    ]);
   });
 
   it('asks before a batch in the open game that holds other versions, and not otherwise', async () => {

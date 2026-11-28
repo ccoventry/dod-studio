@@ -403,6 +403,9 @@ fn outcome_warnings(wants: &[MapBuild], outcomes: &[PlaceOutcome]) -> Vec<String
             PlaceOutcome::NotInLibrary => {
                 Some(msg::not_in_library_warning(&want.map_name, want.checksum))
             }
+            PlaceOutcome::HeldByAnotherStudio { .. } => {
+                Some(msg::held_by_another_studio_warning(&want.map_name))
+            }
             PlaceOutcome::LibraryFileWrong { file } => Some(msg::library_file_wrong_warning(
                 &want.map_name,
                 file.display(),

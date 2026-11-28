@@ -276,6 +276,9 @@ fn run_batch(batch: Batch) {
         map_builds.release_after_game(std::time::Duration::ZERO);
         return;
     };
+    // The game is starting or running from here, which keeps the builds in
+    // place; the mark that kept them while the launch ran is no longer needed.
+    map_builds.game_seen();
     leftovers.launched();
 
     let drop_poller = feed.drop_poller.take();
