@@ -1,4 +1,7 @@
 mod british;
+/// Every brush entity's spawn baseline, for matching a demo against a map
+/// build (#1540).
+pub mod brush_baselines;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cache;

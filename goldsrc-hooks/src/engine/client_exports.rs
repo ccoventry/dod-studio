@@ -69,8 +69,8 @@ type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
     unsafe extern "C" fn(i32, *mut *mut c_void, *mut EngineStudioApiPartial) -> i32;
 /// `int (*pHudAddEntity)(int type, cl_entity_t *ent, const char *modelname)`.
-/// `ent` is passed through opaquely -- nothing here reads its fields, only
-/// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
+/// `ent` is passed as an opaque pointer; the modules that read it cast it to
+/// `ClEntityS`.
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
 /// `void HUD_DrawTransparentTriangles(void)`.
 type DrawTransparentTrianglesFn = unsafe extern "C" fn();
@@ -311,12 +311,25 @@ pub(super) unsafe extern "C" fn tramp_hud_key_event(
 
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_asset.rs`'s module doc
-/// for the evidence behind that contract and why it isn't patched.
+/// for the evidence behind that contract and why it isn't patched. A brush
+/// entity's model may be swapped first (`map_old_build`).
 pub(super) unsafe extern "C" fn tramp_hud_add_entity(
     entity_type: i32,
     ent: *mut c_void,
-    modelname: *const c_char,
+    mut modelname: *const c_char,
 ) -> i32 {
+    // Type 0 is ET_NORMAL, which every brush entity is: a `*N` piece is
+    // swapped for the one it was spawned with when the demo is on an older
+    // build of the map, or hidden when today's map has none (#1540).
+    // Safety: a non-null name is the engine's NUL-terminated `model_t.name`.
+    if entity_type == 0 && !modelname.is_null() && unsafe { *modelname } == b'*' as c_char {
+        // Safety: the engine's own `cl_entity_t` for this call.
+        match unsafe { crate::map_old_build::before_add_entity(ent as *mut ClEntityS) } {
+            crate::map_old_build::Redirect::Keep => {}
+            crate::map_old_build::Redirect::Draw(name) => modelname = name,
+            crate::map_old_build::Redirect::Hide => return 0,
+        }
+    }
     if !modelname.is_null() {
         let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
         // Type 2 is ET_TEMPENTITY: the engine's tempent callback adds every

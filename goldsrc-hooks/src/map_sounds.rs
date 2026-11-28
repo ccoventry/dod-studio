@@ -440,64 +440,6 @@ fn classify(text: &[u8]) -> Result<MapNames, String> {
     })
 }
 
-/// Whether `info` describes memory a read can't fault on.
-fn readable_region(info: &windows_sys::Win32::System::Memory::MEMORY_BASIC_INFORMATION) -> bool {
-    use windows_sys::Win32::System::Memory::{
-        MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
-        PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
-    };
-    let readable = PAGE_READONLY
-        | PAGE_READWRITE
-        | PAGE_WRITECOPY
-        | PAGE_EXECUTE_READ
-        | PAGE_EXECUTE_READWRITE
-        | PAGE_EXECUTE_WRITECOPY;
-    info.State == MEM_COMMIT
-        && info.Protect & readable != 0
-        && info.Protect & (PAGE_GUARD | PAGE_NOACCESS) == 0
-}
-
-/// The bytes of the NUL-terminated string at `at`, without the NUL, reading
-/// only committed, readable pages. `None` if any of it isn't readable or no
-/// NUL comes within `max` bytes.
-fn read_c_string(at: usize, max: usize) -> Option<Vec<u8>> {
-    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
-    if at == 0 {
-        return None;
-    }
-    let mut out = Vec::new();
-    let mut cursor = at;
-    while out.len() < max {
-        // Safety: VirtualQuery writes a struct we own and never faults.
-        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
-        let written = unsafe {
-            VirtualQuery(
-                cursor as *const std::ffi::c_void,
-                &mut info,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
-            )
-        };
-        if written == 0 || !readable_region(&info) {
-            return None;
-        }
-        let region_end = (info.BaseAddress as usize).saturating_add(info.RegionSize);
-        let take = region_end.saturating_sub(cursor).min(max - out.len());
-        if take == 0 {
-            return None;
-        }
-        // Safety: `take` bytes from `cursor` lie inside one committed,
-        // readable region, checked just above.
-        let chunk = unsafe { std::slice::from_raw_parts(cursor as *const u8, take) };
-        if let Some(nul) = chunk.iter().position(|&b| b == 0) {
-            out.extend_from_slice(&chunk[..nul]);
-            return Some(out);
-        }
-        out.extend_from_slice(chunk);
-        cursor += take;
-    }
-    None
-}
-
 /// Reads the current map's names once per map, from the world model the
 /// engine loaded. Every frame once the calls are redirected, on the engine
 /// thread; a frame where nothing changed costs a hash of the level name, one
@@ -574,7 +516,7 @@ fn read_map(build: &Build) {
             why: "the map has no entity lump".into(),
         }
     } else {
-        match read_c_string(entities, MAX_ENTITY_TEXT) {
+        match crate::crash::read_c_string(entities, MAX_ENTITY_TEXT) {
             None => MapState::Unreadable {
                 map,
                 why: format!("its entity text isn't readable or runs past {MAX_ENTITY_TEXT} bytes"),
