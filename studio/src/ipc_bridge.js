@@ -231,6 +231,16 @@ export async function downloadMap(mapName, expectedChecksum, gamePath) {
     });
 }
 
+/** For a batch in the game that is open already: one line per map whose
+ *  demos of `demoPaths` that game won't play on their version (#1547). */
+export async function openGameMapWarnings(demoPaths, gamePath) {
+  return invoke("open_game_map_warnings", { demoPaths, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (open_game_map_warnings):", err);
+      throw err;
+    });
+}
+
 /** The demos of `demoPaths` a batch wouldn't play on the version of their map
  *  they were recorded on: [{ demoPath, demoName, mapName }] (#1547). */
 export async function planMapBuilds(demoPaths, gamePath) {

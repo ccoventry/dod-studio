@@ -68,6 +68,12 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// This Studio's sessions with builds still in place, and the leftovers it
 /// is waiting to remove: what `release_at_exit` removes.
 static ACTIVE: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
+/// This Studio's sessions whose game has not shown up yet (a preview's
+/// launch while HLAE starts): nothing removes their builds meanwhile.
+static STARTING: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+/// How old a `.dodstudio-part` must be before the start-up sweep takes it
+/// for a crash's leftover rather than another Studio's copy in progress.
+const PART_SWEEP_AGE: Duration = Duration::from_secs(60);
 
 /// A build of a map, as the library names it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -101,6 +107,24 @@ pub fn games_running() -> bool {
     crate::sys::process::is_running(GAME_PROCESSES)
 }
 
+/// Whether a game runs or starts (`build_placement::GAME_PROCESSES`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameState {
+    Running,
+    NoneRunning,
+}
+
+impl GameState {
+    /// The process list's answer now.
+    pub fn now() -> Self {
+        if games_running() {
+            Self::Running
+        } else {
+            Self::NoneRunning
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Record {
     #[serde(default)]
@@ -113,6 +137,50 @@ struct PlacedBuild {
     checksum: u32,
     /// The launch whose game the build is in place for.
     session: u64,
+    /// The Studio that placed it: its process id and start time, so another
+    /// Studio never removes a build a live one placed. 0 in a record written
+    /// before these existed: read as a Studio that has closed.
+    #[serde(default)]
+    owner_pid: u32,
+    #[serde(default)]
+    owner_started: u64,
+}
+
+impl PlacedBuild {
+    /// Whether another Studio that is still running placed it.
+    fn owned_by_another_live_studio(&self) -> bool {
+        let (pid, started) = this_studio();
+        if self.owner_pid == 0 || (self.owner_pid == pid && self.owner_started == started) {
+            return false;
+        }
+        let sys = crate::sys::process::snapshot();
+        sys.process(sysinfo::Pid::from_u32(self.owner_pid))
+            .is_some_and(|process| process.start_time() == self.owner_started)
+    }
+}
+
+/// This Studio's process id and start time, read once.
+fn this_studio() -> (u32, u64) {
+    static THIS: std::sync::OnceLock<(u32, u64)> = std::sync::OnceLock::new();
+    *THIS.get_or_init(|| {
+        let pid = std::process::id();
+        let started = crate::sys::process::snapshot()
+            .process(sysinfo::Pid::from_u32(pid))
+            .map_or(0, |process| process.start_time());
+        (pid, started)
+    })
+}
+
+/// A record entry for `want`, placed by this Studio for `session`.
+fn placed_now(want: &MapBuild, session: u64) -> PlacedBuild {
+    let (owner_pid, owner_started) = this_studio();
+    PlacedBuild {
+        map_name: want.map_name.clone(),
+        checksum: want.checksum,
+        session,
+        owner_pid,
+        owner_started,
+    }
 }
 
 /// The record held for a change: this Studio's lock and the unshared file.
@@ -234,6 +302,9 @@ pub enum PlaceOutcome {
     SlotNotOurs { slot: PathBuf },
     /// The library doesn't hold the build.
     NotInLibrary,
+    /// The library's file under that build's name is another build (renamed
+    /// or damaged by hand); nothing is placed.
+    LibraryFileWrong { file: PathBuf },
     /// The record of placed builds can't be read, so nothing is placed.
     RecordUnreadable { record: PathBuf },
     /// The copy, the record, or its lock failed.
@@ -294,17 +365,25 @@ impl Placement {
         if self.is_empty() {
             return;
         }
+        let session = self.session;
+        lock_or_recover(&STARTING).push(session);
         let spawned = std::thread::Builder::new()
             .name("map_builds_release".into())
             .spawn(move || {
-                let end = wait_for_games_to_end(start_wait, GAME_POLL, &SHUTTING_DOWN, &mut || {
-                    games_running()
-                });
+                let mut probe = || games_running();
+                let started = wait_for_a_game(start_wait, GAME_POLL, &SHUTTING_DOWN, &mut probe);
+                lock_or_recover(&STARTING).retain(|s| *s != session);
+                if started == WaitEnd::Cancelled {
+                    return;
+                }
+                let end =
+                    wait_for_games_to_end(Duration::ZERO, GAME_POLL, &SHUTTING_DOWN, &mut probe);
                 if end == WaitEnd::GamesClosed {
                     self.release();
                 }
             });
         if let Err(e) = spawned {
+            lock_or_recover(&STARTING).retain(|s| *s != session);
             log_markdown(&msg::release_thread_failed(e));
         }
     }
@@ -328,21 +407,35 @@ pub fn wait_for_games_to_end(
     cancel: &AtomicBool,
     games_running: &mut dyn FnMut() -> bool,
 ) -> WaitEnd {
-    let since = Instant::now();
-    let mut running = games_running();
-    while !running && since.elapsed() < start_wait {
-        if cancel.load(Ordering::Relaxed) {
-            return WaitEnd::Cancelled;
-        }
-        std::thread::sleep(poll);
-        running = games_running();
+    if wait_for_a_game(start_wait, poll, cancel, games_running) == WaitEnd::Cancelled {
+        return WaitEnd::Cancelled;
     }
+    let mut running = games_running();
     while running {
         if cancel.load(Ordering::Relaxed) {
             return WaitEnd::Cancelled;
         }
         std::thread::sleep(poll);
         running = games_running();
+    }
+    WaitEnd::GamesClosed
+}
+
+/// Waits up to `start_wait` for `games_running` to say a game runs or
+/// starts. `GamesClosed` when the wait ends either way, `Cancelled` when
+/// `cancel` was set.
+fn wait_for_a_game(
+    start_wait: Duration,
+    poll: Duration,
+    cancel: &AtomicBool,
+    games_running: &mut dyn FnMut() -> bool,
+) -> WaitEnd {
+    let since = Instant::now();
+    while !games_running() && since.elapsed() < start_wait {
+        if cancel.load(Ordering::Relaxed) {
+            return WaitEnd::Cancelled;
+        }
+        std::thread::sleep(poll);
     }
     WaitEnd::GamesClosed
 }
@@ -403,6 +496,14 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
         log_markdown(&msg::not_in_library(&want.map_name, want.checksum));
         return PlaceOutcome::NotInLibrary;
     }
+    // The name says the build; the bytes must agree before the game gets it.
+    if !bsp::map_checksum_of_file(&library_file).is_ok_and(|found| found == want.checksum) {
+        log_markdown(&msg::library_file_wrong(
+            &want.map_name,
+            library_file.display(),
+        ));
+        return PlaceOutcome::LibraryFileWrong { file: library_file };
+    }
     let slot = slot_path(addon, &want.map_name);
     if slot.exists() {
         let ours = record
@@ -422,7 +523,7 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             return PlaceOutcome::SlotNotOurs { slot };
         };
         if record.placed[index].checksum == want.checksum {
-            record.placed[index].session = session;
+            record.placed[index] = placed_now(want, session);
             if let Err(e) = save_record(addon, record) {
                 log_markdown(&msg::record_unwritable(record_path(addon).display(), e));
             }
@@ -461,11 +562,7 @@ fn copy_into_slot(
 ) -> PlaceOutcome {
     let started = Instant::now();
     let slot = slot_path(addon, &want.map_name);
-    record.placed.push(PlacedBuild {
-        map_name: want.map_name.clone(),
-        checksum: want.checksum,
-        session,
-    });
+    record.placed.push(placed_now(want, session));
     if let Err(e) = save_record(addon, record) {
         log_markdown(&msg::record_unwritable(record_path(addon).display(), &e));
         record.placed.pop();
@@ -533,11 +630,41 @@ fn link_copy(from: &Path, part: &Path, slot: &Path) -> std::io::Result<Linked> {
         Ok(()) => Ok(Linked::Linked),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(Linked::SlotTaken),
         Err(_) if slot.exists() => Ok(Linked::SlotTaken),
-        Err(_) => std::fs::rename(part, slot).map(|()| Linked::Linked),
+        Err(_) => match move_no_replace(part, slot) {
+            Ok(()) => Ok(Linked::Linked),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(Linked::SlotTaken),
+            Err(e) => Err(e),
+        },
     };
     // Gone already after a rename; the slot keeps the bytes after a link.
     let _ = std::fs::remove_file(part);
     linked
+}
+
+/// Moves `from` to `to`, failing with `AlreadyExists` when `to` exists:
+/// Windows' `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (std's rename
+/// replaces).
+#[cfg(windows)]
+fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+    }
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (from_w, to_w) = (wide(from), wide(to));
+    // SAFETY: both are NUL-terminated wide strings that outlive the call.
+    let moved = unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    if moved != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(windows))]
+fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::hard_link(from, to).and_then(|()| std::fs::remove_file(from))
 }
 
 /// Removes the builds of `sessions` from `addon`'s maps folder: each one
@@ -598,6 +725,67 @@ pub fn release_sessions(addon: &Path, sessions: &[u64]) -> usize {
     removed
 }
 
+/// With no game running or starting: removes every build in place in
+/// `addon` that no live launch needs (this Studio's, a closed Studio's),
+/// before a new launch plans its maps. A build another running Studio placed,
+/// or one of this Studio's launches still waiting for its game, stays.
+/// Returns how many came out.
+pub fn release_stale(addon: &Path) -> usize {
+    if !record_path(addon).exists() {
+        return 0;
+    }
+    let starting = lock_or_recover(&STARTING).clone();
+    let sessions: Vec<u64> = {
+        let _guard = lock_or_recover(&RECORD_LOCK);
+        let Some(record) = load_record(addon) else {
+            return 0;
+        };
+        record
+            .placed
+            .iter()
+            .filter(|p| !starting.contains(&p.session) && !p.owned_by_another_live_studio())
+            .map(|p| p.session)
+            .collect()
+    };
+    if sessions.is_empty() {
+        return 0;
+    }
+    for &session in &sessions {
+        forget_active(addon, session);
+    }
+    release_sessions(addon, &sessions)
+}
+
+/// At Studio's start: removes `.dodstudio-part` copies in `addon`'s maps
+/// folder older than a minute, left when a copy's link and its own clean-up
+/// both failed. Returns how many went.
+pub fn sweep_part_files(addon: &Path) -> usize {
+    sweep_part_files_older_than(addon, PART_SWEEP_AGE)
+}
+
+fn sweep_part_files_older_than(addon: &Path, age: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(addon.join("maps")) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let old_enough = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|elapsed| elapsed >= age);
+        if name.ends_with(PART_SUFFIX) && old_enough && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        log_markdown(&msg::parts_swept(removed, addon.display()));
+    }
+    removed
+}
+
 /// The sessions with a build in place in `addon` right now.
 pub fn placed_sessions(addon: &Path) -> Vec<u64> {
     if !record_path(addon).exists() {
@@ -638,13 +826,33 @@ pub fn is_studio_placement(addon: &Path, map_name: &str) -> bool {
     placed_build(addon, map_name).is_some()
 }
 
+/// The sessions in `addon`'s record placed by a Studio that is no longer
+/// running.
+fn closed_studios_sessions(addon: &Path) -> Vec<u64> {
+    if !record_path(addon).exists() {
+        return Vec::new();
+    }
+    let _guard = lock_or_recover(&RECORD_LOCK);
+    let sessions: HashSet<u64> = load_record(addon)
+        .map(|record| {
+            record
+                .placed
+                .iter()
+                .filter(|p| !p.owned_by_another_live_studio())
+                .map(|p| p.session)
+                .collect()
+        })
+        .unwrap_or_default();
+    sessions.into_iter().collect()
+}
+
 /// At Studio's start: the builds an earlier Studio left in place (closed or
 /// crashed before its game did) are removed on a thread of their own once no
 /// game runs or starts; a game still running may have loaded them. Only the
 /// builds in place now: one a launch from this Studio takes over in the
 /// meantime stays.
 pub fn release_leftovers_after_games(addon: &Path) {
-    let sessions = placed_sessions(addon);
+    let sessions = closed_studios_sessions(addon);
     if sessions.is_empty() {
         return;
     }
@@ -677,8 +885,19 @@ pub fn release_leftovers_after_games(addon: &Path) {
 /// Returns how many came out.
 pub fn release_at_exit() -> usize {
     SHUTTING_DOWN.store(true, Ordering::Relaxed);
+    let starting = !lock_or_recover(&STARTING).is_empty();
+    release_at_exit_in(if starting {
+        GameState::Running
+    } else {
+        GameState::now()
+    })
+}
+
+/// [`release_at_exit`]'s second half, with `games` the state of the games:
+/// takes this Studio's sessions and removes their builds when none runs.
+pub fn release_at_exit_in(games: GameState) -> usize {
     let active = std::mem::take(&mut *lock_or_recover(&ACTIVE));
-    release_or_leave(&active, games_running())
+    release_or_leave(&active, games == GameState::Running)
 }
 
 /// `release_at_exit`'s choice for `active` (addon, session) pairs: removed

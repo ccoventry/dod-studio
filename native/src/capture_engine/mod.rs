@@ -552,7 +552,8 @@ mod tests {
         assert_eq!(
             maps.warnings,
             vec![crate::messages::map_builds::open_game_warning(
-                "old.dem", "dod_x"
+                "dod_x",
+                &["old.dem".to_string()]
             )]
         );
     }

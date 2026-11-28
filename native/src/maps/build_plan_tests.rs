@@ -231,10 +231,11 @@ fn a_launch_while_a_game_runs_places_nothing_and_says_which_demos_play_wrong() {
     assert!(!slot(&root).exists());
     assert_eq!(
         launch.warnings,
-        vec![
-            msg::open_game_warning("old.dem", "dod_x"),
-            msg::open_game_warning("other_old.dem", "dod_x")
-        ]
+        vec![msg::open_game_warning(
+            "dod_x",
+            &["old.dem".to_string(), "other_old.dem".to_string()]
+        )],
+        "one warning per map, not one per demo"
     );
 }
 
@@ -278,7 +279,7 @@ fn an_open_game_with_the_installed_map_warns_for_an_old_demo() {
     let new = write_demo(&root, "new.dem", checksum(1));
     assert_eq!(
         open_game_warnings(&[old, new], &root),
-        vec![msg::open_game_warning("old.dem", "dod_x")]
+        vec![msg::open_game_warning("dod_x", &["old.dem".to_string()])]
     );
 }
 
@@ -299,7 +300,58 @@ fn an_open_game_holding_an_old_build_warns_for_a_current_demo() {
     assert_eq!(build_running_game_reads(&root, "dod_x"), Some(checksum(2)));
     assert_eq!(
         open_game_warnings(&[old, new], &root),
-        vec![msg::open_game_warning("new.dem", "dod_x")]
+        vec![msg::open_game_warning("dod_x", &["new.dem".to_string()])]
     );
     placement.release();
+}
+
+#[test]
+fn a_build_left_in_place_is_taken_out_before_a_current_demos_launch() {
+    // Force Relaunch closes the game and starts the next at once: a build
+    // the last launch placed would play this current demo on the old map.
+    let root = game_root("stale");
+    let (left, _) = place_builds(
+        &addon_dir(&root),
+        &[MapBuild {
+            map_name: "dod_x".into(),
+            checksum: checksum(2),
+        }],
+    );
+    std::mem::forget(left);
+    let new = write_demo(&root, "new.dem", checksum(1));
+    let launch = place_for_launch_when(&[new], &root, GameState::NoneRunning);
+    assert!(!slot(&root).exists(), "the old build is out");
+    assert!(launch.warnings.is_empty(), "{:?}", launch.warnings);
+}
+
+#[test]
+fn a_running_game_with_nothing_to_place_still_says_which_demos_play_wrong() {
+    let root = game_root("running_nothing_to_place");
+    let (placement, _) = place_builds(
+        &addon_dir(&root),
+        &[MapBuild {
+            map_name: "dod_x".into(),
+            checksum: checksum(2),
+        }],
+    );
+    let new = write_demo(&root, "new.dem", checksum(1));
+    let launch = place_for_launch_when(&[new], &root, GameState::Running);
+    assert!(slot(&root).exists(), "the running game may have loaded it");
+    assert_eq!(
+        launch.warnings,
+        vec![msg::open_game_warning("dod_x", &["new.dem".to_string()])]
+    );
+    placement.release();
+}
+
+#[test]
+fn a_long_list_of_demos_is_shortened_in_the_warning() {
+    let names: Vec<String> = (1..=40).map(|n| format!("d{n}.dem")).collect();
+    let warning = msg::open_game_warning("dod_x", &names);
+    assert!(warning.starts_with("40 demos of dod_x"), "{warning}");
+    assert!(
+        warning.contains("d1.dem, d2.dem, d3.dem and 37 more"),
+        "{warning}"
+    );
+    assert!(!warning.contains("d4.dem"));
 }

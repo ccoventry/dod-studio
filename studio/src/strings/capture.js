@@ -237,6 +237,7 @@ export const CAPTURE_STRINGS = {
     STEAM: 'Checking Steam…',
     NOT_STARTED: 'Not started.',
     GAME_OPEN: 'Not started yet: the game is already open.',
+    MAP_VERSIONS: 'Not started: some demos would play on another version of their map.',
   },
   // ── capture_progress.js: the capture batch's footer line and bar (#952)
   CAPTURE_PROGRESS: {

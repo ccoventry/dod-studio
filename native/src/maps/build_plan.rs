@@ -24,8 +24,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::bsp;
 use super::build_library::{find_build, library_dir};
+pub use super::build_placement::GameState;
 use super::build_placement::{
-    MapBuild, PlaceOutcome, Placement, games_running, place_builds, placed_build, slot_path,
+    MapBuild, PlaceOutcome, Placement, place_builds, placed_build, release_stale, slot_path,
 };
 use super::map_check::{MapReference, MapStatus, map_path, map_reference, status_of};
 use crate::log_markdown;
@@ -237,24 +238,6 @@ pub struct LaunchOutcome {
     pub warnings: Vec<String>,
 }
 
-/// Whether a game runs or starts (`build_placement::GAME_PROCESSES`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GameState {
-    Running,
-    NoneRunning,
-}
-
-impl GameState {
-    /// The process list's answer now.
-    pub fn now() -> Self {
-        if games_running() {
-            Self::Running
-        } else {
-            Self::NoneRunning
-        }
-    }
-}
-
 /// Plans `demos` for a fresh game of the install in `game_root` and puts the
 /// builds in place, unless a game runs or starts already: it may have loaded
 /// another build of a map, and loading a second is a fatal error.
@@ -269,30 +252,71 @@ pub fn place_for_launch_when(
     games: GameState,
 ) -> LaunchOutcome {
     let addon = addon_dir(game_root);
+    if games == GameState::NoneRunning {
+        // A build an earlier launch left (a failed removal, a game closed
+        // and started again in a moment) would play this launch's demos of
+        // that map on the old build without a word.
+        release_stale(&addon);
+    }
     let demo_maps = demo_maps(demos, game_root);
     let maps = plan(&demo_maps);
     let mut warnings = left_out_warnings(&maps.left_out);
-    if maps.place.is_empty() {
-        return LaunchOutcome {
-            placement: Placement::none(&addon),
-            warnings,
-        };
-    }
     if games == GameState::Running {
-        log_markdown(&msg::game_running(maps.place.len()));
+        if !maps.place.is_empty() {
+            log_markdown(&msg::game_running(maps.place.len()));
+        }
         warnings.extend(running_game_warnings(&demo_maps, game_root));
         return LaunchOutcome {
             placement: Placement::none(&addon),
             warnings,
         };
     }
-    let (placement, outcomes) = place_builds(&addon, &maps.place);
+    let (placement, outcomes) = if maps.place.is_empty() {
+        (Placement::none(&addon), Vec::new())
+    } else {
+        place_builds(&addon, &maps.place)
+    };
     log_in_place(&maps.place, &outcomes);
     warnings.extend(outcome_warnings(&maps.place, &outcomes));
+    warnings.extend(stale_build_warnings(&demo_maps, &maps, &addon));
     LaunchOutcome {
         placement,
         warnings,
     }
+}
+
+/// The demos that want the installed build of a map while a build Studio
+/// placed is still in its slot (one `release_stale` could not remove: its
+/// delete failed, or another running Studio placed it), one warning per map.
+fn stale_build_warnings(demos: &[DemoMap], maps: &LaunchMaps, addon: &Path) -> Vec<String> {
+    let placing: HashSet<&str> = maps.place.iter().map(|b| b.map_name.as_str()).collect();
+    let mut stale: HashMap<&str, bool> = HashMap::new();
+    let affected = demos.iter().filter(|demo| {
+        matches!(demo.need, Need::InstalledIsRight(_))
+            && !placing.contains(demo.map_name.as_str())
+            && *stale
+                .entry(&demo.map_name)
+                .or_insert_with(|| placed_build(addon, &demo.map_name).is_some())
+    });
+    by_map(affected)
+        .into_iter()
+        .map(|(map, names)| {
+            log_markdown(&msg::stale_build_demos(map, &names));
+            msg::stale_build_warning(map, &names)
+        })
+        .collect()
+}
+
+/// `demos`' file names grouped by map, maps in the order first seen.
+fn by_map<'a>(demos: impl Iterator<Item = &'a DemoMap>) -> Vec<(&'a str, Vec<String>)> {
+    let mut grouped: Vec<(&str, Vec<String>)> = Vec::new();
+    for demo in demos {
+        match grouped.iter_mut().find(|(map, _)| *map == demo.map_name) {
+            Some((_, names)) => names.push(demo.name()),
+            None => grouped.push((&demo.map_name, vec![demo.name()])),
+        }
+    }
+    grouped
 }
 
 /// The warnings for `demos` played in a game that runs already (an open game
@@ -305,7 +329,7 @@ pub fn open_game_warnings(demos: &[PathBuf], game_root: &Path) -> Vec<String> {
 
 fn running_game_warnings(demos: &[DemoMap], game_root: &Path) -> Vec<String> {
     let mut reads: HashMap<&str, Option<u32>> = HashMap::new();
-    let warnings: Vec<String> = demos
+    let wrong: Vec<&DemoMap> = demos
         .iter()
         .filter(|demo| {
             let Some(wanted) = demo.need.wanted() else {
@@ -316,12 +340,17 @@ fn running_game_warnings(demos: &[DemoMap], game_root: &Path) -> Vec<String> {
                 .or_insert_with(|| build_running_game_reads(game_root, &demo.map_name));
             read != Some(wanted)
         })
-        .map(|demo| msg::open_game_warning(&demo.name(), &demo.map_name))
         .collect();
-    if !warnings.is_empty() {
-        log_markdown(&msg::open_game_keeps_its_maps(warnings.len()));
+    if !wrong.is_empty() {
+        log_markdown(&msg::open_game_keeps_its_maps(wrong.len()));
     }
-    warnings
+    by_map(wrong.into_iter())
+        .into_iter()
+        .map(|(map, names)| {
+            log_markdown(&msg::open_game_demos(map, &names));
+            msg::open_game_warning(map, &names)
+        })
+        .collect()
 }
 
 /// One warning per map with demos left out, naming them; each also logged.
@@ -374,6 +403,10 @@ fn outcome_warnings(wants: &[MapBuild], outcomes: &[PlaceOutcome]) -> Vec<String
             PlaceOutcome::NotInLibrary => {
                 Some(msg::not_in_library_warning(&want.map_name, want.checksum))
             }
+            PlaceOutcome::LibraryFileWrong { file } => Some(msg::library_file_wrong_warning(
+                &want.map_name,
+                file.display(),
+            )),
             PlaceOutcome::RecordUnreadable { record } => (!RECORD_WARNED
                 .swap(true, Ordering::Relaxed))
             .then(|| msg::record_unreadable_warning(record.display())),

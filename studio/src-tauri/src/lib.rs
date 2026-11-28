@@ -395,6 +395,7 @@ pub fn run() {
             map_manager::download_map,
             map_builds_manager::add_map_build,
             map_builds_manager::plan_map_builds,
+            map_builds_manager::open_game_map_warnings,
             config_checks_cmd::scan_game_configs,
             config_checks_cmd::roll_floors,
             hd_manager::hd_status,

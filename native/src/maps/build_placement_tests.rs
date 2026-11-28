@@ -268,3 +268,96 @@ fn closing_studio_with_no_game_removes_its_builds_and_with_a_game_leaves_them() 
     assert!(!slot(&i.addon).exists());
     forget_active(&i.addon, placement.session);
 }
+
+/// A record entry for `dod_x` build 1 placed by the process `pid` started at
+/// `started`, as another Studio would write it.
+fn record_owned_by(i: &Install, pid: u32, started: u64) {
+    let (placement, _) = place_builds(&i.addon, &[build(1)]);
+    forget_active(&i.addon, placement.session);
+    let mut record = load_record(&i.addon).unwrap();
+    for placed in &mut record.placed {
+        placed.owner_pid = pid;
+        placed.owner_started = started;
+    }
+    save_record(&i.addon, &record).unwrap();
+}
+
+#[test]
+fn a_build_a_running_studio_placed_is_never_taken_as_a_leftover() {
+    let i = install("live_owner");
+    // Another process that is running: the System process stands in for a
+    // second Studio.
+    let sys = crate::sys::process::snapshot();
+    let other = sys
+        .processes()
+        .values()
+        .find(|p| p.pid().as_u32() != std::process::id() && p.start_time() > 0)
+        .map(|p| (p.pid().as_u32(), p.start_time()))
+        .unwrap();
+    record_owned_by(&i, other.0, other.1);
+    assert!(closed_studios_sessions(&i.addon).is_empty());
+    assert_eq!(release_stale(&i.addon), 0);
+    assert!(slot(&i.addon).exists());
+}
+
+#[test]
+fn a_build_a_closed_studio_placed_is_a_leftover() {
+    let i = install("dead_owner");
+    record_owned_by(&i, u32::MAX - 7, 1);
+    assert_eq!(closed_studios_sessions(&i.addon).len(), 1);
+    assert_eq!(release_stale(&i.addon), 1);
+    assert!(!slot(&i.addon).exists());
+}
+
+#[test]
+fn a_launch_still_waiting_for_its_game_keeps_its_build() {
+    let i = install("starting");
+    let (placement, _) = place_builds(&i.addon, &[build(1)]);
+    lock_or_recover(&STARTING).push(placement.session);
+    assert_eq!(release_stale(&i.addon), 0);
+    assert!(slot(&i.addon).exists());
+    lock_or_recover(&STARTING).retain(|s| *s != placement.session);
+    assert_eq!(placement.release(), 1);
+}
+
+#[test]
+fn the_move_without_replace_never_overwrites() {
+    let dir = Scratch::new("build_placement_move");
+    let (from, to) = (dir.join("part"), dir.join("slot.bsp"));
+    std::fs::write(&from, b"ours").unwrap();
+    std::fs::write(&to, b"theirs").unwrap();
+    let err = move_no_replace(&from, &to).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&to).unwrap(), b"theirs");
+    std::fs::remove_file(&to).unwrap();
+    move_no_replace(&from, &to).unwrap();
+    assert_eq!(std::fs::read(&to).unwrap(), b"ours");
+}
+
+#[test]
+fn the_start_up_sweep_removes_only_studios_unfinished_copies() {
+    let i = install("sweep");
+    let maps = i.addon.join("maps");
+    std::fs::create_dir_all(&maps).unwrap();
+    std::fs::write(part_path(&i.addon, "dod_x"), b"half").unwrap();
+    std::fs::write(maps.join("dod_x.bsp"), b"the user's").unwrap();
+    std::fs::write(maps.join("dod_x.txt"), b"text").unwrap();
+    assert_eq!(
+        sweep_part_files(&i.addon),
+        0,
+        "a fresh copy may be in progress"
+    );
+    assert_eq!(sweep_part_files_older_than(&i.addon, Duration::ZERO), 1);
+    assert!(maps.join("dod_x.bsp").exists() && maps.join("dod_x.txt").exists());
+}
+
+#[test]
+fn a_library_file_whose_bytes_are_another_build_is_not_placed() {
+    let i = install("wrong_bytes");
+    let file = build_path(&library(&i.addon), "dod_x", build(1).checksum);
+    std::fs::write(&file, test_map_bytes(9)).unwrap();
+    let (placement, outcomes) = place_builds(&i.addon, &[build(1)]);
+    assert_eq!(outcomes, vec![PlaceOutcome::LibraryFileWrong { file }]);
+    assert!(placement.is_empty());
+    assert!(!slot(&i.addon).exists());
+}

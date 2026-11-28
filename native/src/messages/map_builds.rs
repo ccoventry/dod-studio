@@ -116,6 +116,30 @@ pub fn lock_failed(why: impl Display) -> String {
     format!("- Map builds: nothing put in place: {why}")
 }
 
+pub fn library_file_wrong(map: &str, file: impl Display) -> String {
+    format!(
+        "- Map builds: {file} is not the build its name says, so {map} plays on the installed map"
+    )
+}
+
+pub fn parts_swept(count: usize, addon: impl Display) -> String {
+    format!("- Map builds: removed {count} unfinished copy(ies) from {addon}\\maps")
+}
+
+pub fn open_game_demos(map: &str, demos: &[String]) -> String {
+    format!(
+        "- Map builds: in the running game these demos of {map} won't play on their build: {}",
+        demos.join(", ")
+    )
+}
+
+pub fn stale_build_demos(map: &str, demos: &[String]) -> String {
+    format!(
+        "- Map builds: an old build of {map} is still in dod_addon\\maps, so these demos won't play on the installed build: {}",
+        demos.join(", ")
+    )
+}
+
 pub fn release_thread_failed(err: impl Display) -> String {
     format!(
         "- Map builds: could not start the wait for the game to close ({err}); Studio removes its builds at its next start"
@@ -173,19 +197,45 @@ pub fn left_out_warning(map: &str, demos: &[String]) -> String {
         } else {
             "they were"
         },
-        demos.join(", "),
+        names_preview(demos),
         if demos.len() == 1 { "it" } else { "them" },
         if demos.len() == 1 { "its" } else { "their" },
     )
 }
 
-/// A demo that plays in an open game holding another build of its map.
-pub fn open_game_warning(demo: &str, map: &str) -> String {
+/// Demos of one map that play in an open game holding another build of it.
+pub fn open_game_warning(map: &str, demos: &[String]) -> String {
     format!(
-        "{demo} plays on another version of {map} in the open game. Close the game to play it on the version it was recorded on."
+        "{} of {map} will play on another version in the open game: {}. Close the game to play {} on the version {} recorded on.",
+        count_demos(demos.len()),
+        names_preview(demos),
+        if demos.len() == 1 { "it" } else { "them" },
+        if demos.len() == 1 {
+            "it was"
+        } else {
+            "they were"
+        },
     )
 }
 
+/// Demos that want the installed build while an old one is still in place.
+pub fn stale_build_warning(map: &str, demos: &[String]) -> String {
+    format!(
+        "An old version of {map} DoD Studio put in dod_addon\\maps is still there, so {} will play on it: {}. Close every game and start again, or remove dod_addon\\maps\\{map}.bsp.",
+        if demos.len() == 1 {
+            "1 demo".to_string()
+        } else {
+            format!("{} demos", demos.len())
+        },
+        names_preview(demos),
+    )
+}
+
+pub fn library_file_wrong_warning(map: &str, file: impl Display) -> String {
+    format!(
+        "{map}: {file} is not the version its name says, so the installed version plays. Add the old version again."
+    )
+}
 /// A user's own file in `dod_addon\maps` takes the place of Studio's build.
 pub fn slot_taken_warning(map: &str, slot: impl Display) -> String {
     format!(
@@ -210,6 +260,23 @@ pub fn record_unreadable_warning(path: impl Display) -> String {
     format!(
         "DoD Studio can't read its record of old map versions in place ({path}), so it puts none in place. Close the game, then delete that file and any map in dod_addon\\maps that DoD Studio put there."
     )
+}
+
+/// How many names a warning lists before "and N more"; the log has them all.
+const NAMES_SHOWN: usize = 3;
+
+/// The first few of `names`, then how many more.
+pub fn names_preview(names: &[String]) -> String {
+    let shown = names
+        .iter()
+        .take(NAMES_SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match names.len().saturating_sub(NAMES_SHOWN) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
+    }
 }
 
 fn count_demos(n: usize) -> String {

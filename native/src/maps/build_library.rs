@@ -186,7 +186,17 @@ pub fn add_build(
         }
     };
     std::fs::create_dir_all(library).map_err(write_error(library))?;
-    let part = path.with_extension("bsp.part");
+    // A name of this add's own: two adds of one build at once (two Studios,
+    // two clicks) never write into each other's copy. The same build under
+    // the final name either way, so the second rename changes nothing.
+    let part = library.join(format!(
+        "{}.part-{}-{}",
+        build_file_name(&map_name, checksum),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
     write_with_progress(&part, &bytes, &mut |done| progress(size + done, total))
         .map_err(write_error(&part))?;
     if let Err(e) = std::fs::rename(&part, &path) {

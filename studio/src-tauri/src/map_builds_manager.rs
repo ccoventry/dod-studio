@@ -163,6 +163,9 @@ pub struct LeftOutDemo {
     pub demo_path: String,
     pub demo_name: String,
     pub map_name: String,
+    /// The old build the batch plays that map on instead, as 8 hex digits,
+    /// or `None` for the installed one.
+    pub playing: Option<String>,
 }
 
 /// The demos of a batch of `demo_paths` that won't play on their build, for
@@ -192,18 +195,53 @@ fn left_out_demos(left_out: &[native::maps::build_plan::LeftOut]) -> Vec<LeftOut
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             map_name: left.map_name.clone(),
+            playing: left.playing.map(native::messages::map_builds::build),
         })
         .collect()
+}
+
+/// For a batch about to run in the game that is open already: one warning
+/// per map whose demos that game won't play on their build (it keeps the
+/// builds it has loaded), for the confirm before Start. Puts nothing in place.
+#[tauri::command]
+pub async fn open_game_map_warnings(
+    demo_paths: Vec<String>,
+    game_path: String,
+) -> Result<Vec<String>, String> {
+    let root = game_root(&game_path)?;
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let demos: Vec<PathBuf> = demo_paths.iter().map(PathBuf::from).collect();
+        Ok(native::maps::build_plan::open_game_warnings(&demos, &root))
+    }))
+    .await
+}
+
+/// When a preview's builds come out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewRelease {
+    /// The launch failed: no game will read them.
+    Now,
+    /// Once the game it started has closed.
+    AfterTheGame,
+}
+
+fn preview_release(launched: bool) -> PreviewRelease {
+    if launched {
+        PreviewRelease::AfterTheGame
+    } else {
+        PreviewRelease::Now
+    }
 }
 
 /// After the preview's launch: its builds come out once its game has closed,
 /// or now when the launch failed.
 pub(crate) fn after_preview_launch(placement: Option<Placement>, launched: bool) {
     let Some(placement) = placement else { return };
-    if launched {
-        placement.release_after_game(PREVIEW_START_WAIT);
-    } else {
-        placement.release();
+    match preview_release(launched) {
+        PreviewRelease::AfterTheGame => placement.release_after_game(PREVIEW_START_WAIT),
+        PreviewRelease::Now => {
+            placement.release();
+        }
     }
 }
 
@@ -224,9 +262,9 @@ pub(crate) fn clean_leftovers_at_start(configured_game_path: Option<String>) {
     roots.sort();
     roots.dedup();
     for root in roots {
-        native::maps::build_placement::release_leftovers_after_games(
-            &native::shared::paths::addon_dir(&root),
-        );
+        let addon = native::shared::paths::addon_dir(&root);
+        native::maps::build_placement::sweep_part_files(&addon);
+        native::maps::build_placement::release_leftovers_after_games(&addon);
     }
 }
 
@@ -312,7 +350,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!([{ "demoPath": "C:/d/old.dem", "demoName": "old.dem", "mapName": "dod_x" }])
+            serde_json::json!([{ "demoPath": "C:/d/old.dem", "demoName": "old.dem", "mapName": "dod_x", "playing": null }])
         );
     }
 
@@ -328,8 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_that_failed_to_launch_takes_its_build_out_at_once_and_one_that_launched_keeps_it()
-    {
+    fn a_preview_that_failed_to_launch_takes_its_build_out_at_once() {
         let scratch = crate::test_support::Scratch::new("map_builds_preview");
         let addon = scratch.path().join("dod_addon");
         let source = scratch.path().join("old.bsp");
@@ -345,15 +382,32 @@ mod tests {
         let slot = native::maps::build_placement::slot_path(&addon, "dod_x");
 
         let (failed, _) = native::maps::build_placement::place_builds(&addon, &want);
+        assert!(slot.exists());
         after_preview_launch(Some(failed), false);
         assert!(!slot.exists(), "a launch that failed starts no game");
+    }
 
-        let (launched, _) = native::maps::build_placement::place_builds(&addon, &want);
-        let session_slot = slot.clone();
-        after_preview_launch(Some(launched), true);
+    #[test]
+    fn a_preview_that_launched_keeps_its_build_until_the_game_has_gone() {
+        // The wait itself is native's (`wait_for_games_to_end`, tested there
+        // with a scripted process list).
+        assert_eq!(preview_release(true), PreviewRelease::AfterTheGame);
+        assert_eq!(preview_release(false), PreviewRelease::Now);
+    }
+
+    #[test]
+    fn closing_studio_takes_its_map_builds_out() {
+        // The exit handler in lib.rs calls the native release (#1547); a
+        // build left in place would play every later demo of that map on it.
+        let lib = include_str!("lib.rs");
+        let exit = lib
+            .split("if let tauri::RunEvent::Exit = event {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .expect("the exit handler");
         assert!(
-            session_slot.exists(),
-            "kept until the game has come and gone"
+            exit.contains("native::maps::build_placement::release_at_exit()"),
+            "{exit}"
         );
     }
 }
