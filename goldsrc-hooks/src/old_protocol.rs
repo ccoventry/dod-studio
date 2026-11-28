@@ -141,8 +141,19 @@ pub(crate) fn take_over_viewdemo(name: &str) -> bool {
     true
 }
 
+/// Keeps `pending` for [`poll`], unless an answer for a later request is
+/// already waiting: two protocol-47 demos started in quick succession can
+/// answer in either order, and only the later one is still wanted.
 fn store(pending: Pending) {
-    *lock_recover::lock_or_recover(&ANSWER) = Some(pending);
+    let mut slot = lock_recover::lock_or_recover(&ANSWER);
+    if slot
+        .as_ref()
+        .is_some_and(|held| held.generation > pending.generation)
+    {
+        return;
+    }
+    *slot = Some(pending);
+    drop(slot);
     READY.store(true, Ordering::Release);
 }
 
