@@ -7,19 +7,31 @@
 //! build) stores the submodel array at +0x7c and its count at +0x78, padding
 //! each one's bounds by one unit; `Mod_LoadBrushModel` (pre-Anniversary
 //! `+0x41bb0`) copies a submodel's bounds into `mins` +0x54 and `maxs` +0x60
-//! of each `*N` model it makes. `type` (+0x44) and `entities` (+0x180) are
-//! the offsets `map_sounds` and `map_light` read.
+//! of each `*N` model it makes. `needload` (+0x40), `type` (+0x44) and
+//! `entities` (+0x180) are the offsets `map_light` and `map_sounds` read.
 //! `tools/verify_map_old_build_offsets.py` checks them against both
 //! `hw.dll`s, and [`read_models`] checks every precached `*N` model's bounds
 //! against the submodel array at run time, so a build whose layout moved
 //! reads as unusable and nothing is changed.
+//!
+//! Two engine behaviours this leans on rest on hand disassembly, not on a
+//! verifier script: `GetEntityByIndex` returns null past `cl.max_edicts`
+//! (pre-Anniversary `hw.dll+0xc680`, 25th Anniversary `+0x1960b0`), which
+//! ends [`read_baselines`]' walk; and the engine sets each entity's `model`
+//! from its model index again as each packet arrives (pre-Anniversary
+//! `+0x11fb0`, called for every entity in the packet from `+0x12860`; not
+//! looked for on the Anniversary build), which is why a swap is made on
+//! every frame and undone by the next packet once the setting is off.
 
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use dod::brush_pieces::{Bounds, Piece, Spawned};
 
-use crate::engine::{self, EntityStateS, ModelSPartial};
+use crate::engine::{self, ClEntityS, EntityStateS, ModelSPartial};
 
+/// `model_t.needload`: 0 (`NL_PRESENT`) or 3 (`NL_CLIENT`) once loaded.
+pub(super) const MODEL_NEEDLOAD_AT: usize = 0x40;
+const LOADED: [i32; 2] = [0, 3];
 /// `model_t.type`; 0 is `mod_brush`.
 pub(super) const MODEL_TYPE_AT: usize = 0x44;
 const MOD_BRUSH: i32 = 0;
@@ -41,7 +53,7 @@ pub(super) const DMODEL_SIZE: usize = 64;
 /// this is not a submodel count.
 const MAX_PIECES: usize = 1024;
 /// `MAX_MODELS`: the length of the client's model list.
-const MAX_MODELS: i32 = 512;
+const MAX_MODELS: usize = 512;
 /// More entities than the engine keeps: the walk stops where
 /// `GetEntityByIndex` returns null (it checks `cl.max_edicts`, both builds).
 const MAX_ENTITIES: i32 = 8192;
@@ -75,6 +87,20 @@ pub(super) fn world_model() -> usize {
     }
     // Safety: a cl_entity_t the engine owns; `model` is the SDK layout.
     unsafe { (*world).model as usize }
+}
+
+/// Whether `entity` is the engine's own slot `index`, not a copy the client
+/// made (a client-side entity has an index but lives elsewhere).
+pub(super) fn is_engine_entity(index: usize, entity: *const ClEntityS) -> bool {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return false;
+    };
+    let Ok(index) = i32::try_from(index) else {
+        return false;
+    };
+    // Safety: the engine's own accessor, null past its entity count.
+    let slot = unsafe { (engfuncs.get_entity_by_index)(index) };
+    !slot.is_null() && std::ptr::eq(slot as *const ClEntityS, entity)
 }
 
 fn read_i32(at: usize) -> i32 {
@@ -177,18 +203,26 @@ fn piece_number(name: &str) -> Option<usize> {
 /// The demo's model list, each `*N` checked against the map's piece `N`:
 /// `Err` when one doesn't match, which means this build's `model_t` isn't
 /// laid out as checked.
+///
+/// Read straight out of the engine's `cl.model_precache` (found by
+/// `texture_hires`), not through `GetModelByIndex`: that call loads a model
+/// not loaded yet (`needload` 1 or 2), which would load every lazily
+/// precached model at once (`fs_lazy_precache 1`). A `*N` that isn't loaded
+/// is skipped: its bounds may still be another map's.
 pub(super) fn read_models(pieces: &[Piece]) -> Result<Models, String> {
-    let Some(studio) = engine::engine_studio() else {
-        return Err("the engine's studio interface isn't captured".into());
+    let Some(table) = crate::texture_hires::precache_table() else {
+        return Err("the engine's model list wasn't found".into());
     };
+    if !crate::crash::readable(table, MAX_MODELS * 4) {
+        return Err("the engine's model list isn't readable".into());
+    }
     let mut models = Models {
-        piece_at: vec![None; MAX_MODELS as usize],
+        piece_at: vec![None; MAX_MODELS],
         model_of: vec![0; pieces.len()],
     };
     for index in 1..MAX_MODELS {
-        // Safety: the engine's own accessor; null for an index the demo's
-        // list doesn't fill, and every index is inside the engine's array.
-        let model = unsafe { (studio.get_model_by_index)(index) } as usize;
+        // Safety: inside the 512-pointer array checked readable above.
+        let model = unsafe { std::ptr::read_unaligned((table + index * 4) as *const u32) } as usize;
         if model == 0 || !crate::crash::readable(model, PIECE_READ_LEN) {
             continue;
         }
@@ -197,7 +231,10 @@ pub(super) fn read_models(pieces: &[Piece]) -> Result<Models, String> {
         let Some(n) = piece_number(&name) else {
             continue;
         };
-        models.piece_at[index as usize] = Some(n);
+        if !LOADED.contains(&read_i32(model + MODEL_NEEDLOAD_AT)) {
+            continue;
+        }
+        models.piece_at[index] = Some(n);
         // A number past the map's last piece is one only the demo's build
         // had: nothing to draw it with, and nothing to check.
         let Some(piece) = pieces.get(n) else {

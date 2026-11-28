@@ -334,7 +334,7 @@ pub const AREAS: &[Area] = &[
             check(
                 console_name!("map_fix_old_build"),
                 "Fix demos on an older map build",
-                "HLTV demos recorded on an older build of the map: draw each piece the demo spawned, hide what today's map no longer has.",
+                "demos recorded on an older build of the map: draw each piece the demo spawned, hide what today's map no longer has.",
             ),
         ],
     },

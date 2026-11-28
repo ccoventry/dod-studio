@@ -19,8 +19,9 @@ by one unit, which the matching relies on:
      from `[mod + MODEL_SUBMODELS_AT]`.
 
 `MODEL_TYPE_AT` and `MODEL_ENTITIES_AT` are the offsets
-`verify_map_entities_offsets.py` checks for `map_sounds`; this checks they
-match those.
+`verify_map_entities_offsets.py` checks for `map_sounds`, and
+`MODEL_NEEDLOAD_AT` the one `verify_map_light_offsets.py` checks for
+`map_light`; this checks they match those.
 
 Offsets are read out of `world.rs` rather than restated.
 
@@ -46,6 +47,7 @@ POST = STEAM / "Half-Life - POST-Anniversary for Movies" / "hw.dll"
 SRC = Path(__file__).resolve().parent.parent / "src"
 RUST = SRC / "map_old_build" / "world.rs"
 MAP_SOUNDS = SRC / "map_sounds.rs"
+MAP_LIGHT = SRC / "map_light" / "world.rs"
 
 
 def offsets():
@@ -53,8 +55,8 @@ def offsets():
     text = RUST.read_text(encoding="utf-8")
     found = {m.group(1): int(m.group(2), 0)
              for m in re.finditer(r"const (MODEL_\w+_AT): usize = (0x[0-9a-fA-F]+|\d+);", text)}
-    want = {"MODEL_TYPE_AT", "MODEL_MINS_AT", "MODEL_MAXS_AT", "MODEL_NUMSUBMODELS_AT",
-            "MODEL_SUBMODELS_AT", "MODEL_ENTITIES_AT"}
+    want = {"MODEL_NEEDLOAD_AT", "MODEL_TYPE_AT", "MODEL_MINS_AT", "MODEL_MAXS_AT",
+            "MODEL_NUMSUBMODELS_AT", "MODEL_SUBMODELS_AT", "MODEL_ENTITIES_AT"}
     if set(found) != want:
         sys.exit(f"expected {sorted(want)} in {RUST}, found {sorted(found)}")
     return found
@@ -133,11 +135,16 @@ def check_brush_loop(hw, o):
 
 
 def check_shared(o):
-    """`type` and `entities` are the offsets map_sounds reads."""
+    """`type` and `entities` are the offsets map_sounds reads, `needload` the
+    one map_light reads (`verify_map_light_offsets.py` checks it)."""
     text = MAP_SOUNDS.read_text(encoding="utf-8")
     types = {int(v, 0) for v in re.findall(r"model_type_at: (0x[0-9a-fA-F]+|\d+)", text)}
     ents = {int(v, 0) for v in re.findall(r"model_entities_at: (0x[0-9a-fA-F]+|\d+)", text)}
-    return types == {o["MODEL_TYPE_AT"]} and ents == {o["MODEL_ENTITIES_AT"]}
+    light = MAP_LIGHT.read_text(encoding="utf-8")
+    needload = {int(v, 0) for v in
+                re.findall(r"const MODEL_NEEDLOAD_AT: usize = (0x[0-9a-fA-F]+|\d+);", light)}
+    return (types == {o["MODEL_TYPE_AT"]} and ents == {o["MODEL_ENTITIES_AT"]}
+            and needload == {o["MODEL_NEEDLOAD_AT"]})
 
 
 def check(path, o):
@@ -170,7 +177,8 @@ def main():
     o = offsets()
     ok = check_shared(o)
     print(("ok   " if ok else "FAIL ") + f"type +{o['MODEL_TYPE_AT']:#x} and entities "
-          f"+{o['MODEL_ENTITIES_AT']:#x} are map_sounds' offsets")
+          f"+{o['MODEL_ENTITIES_AT']:#x} are map_sounds' offsets, needload "
+          f"+{o['MODEL_NEEDLOAD_AT']:#x} map_light's")
     for path in dlls:
         print(path)
         ok &= check(path, o)

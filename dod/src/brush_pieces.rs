@@ -30,10 +30,17 @@
 //! - **Several still fit:** left as the demo says.
 //! - **None fits:** hidden, as today's map has nothing there.
 //!
-//! The last two act only when the demo shows it is on another build: when at
-//! least one entity fits a piece at another number. Without that, every entity
-//! is left as it is, so a correct demo with a brush resized by a server plugin
-//! is never touched.
+//! Nothing acts, the first included, unless the demo shows it is on another
+//! build: at least [`MIN_RENUMBERED`] entities fit a piece at another number.
+//! Without that, every entity is left as it is, so a correct demo with a brush
+//! resized by a server plugin, or one that happens to match another piece, is
+//! never touched.
+
+/// How many entities must fit a piece at another number before any entity is
+/// drawn with another piece or hidden: one could be a coincidence (a brush a
+/// plugin resized to another piece's shape); a renumbered map moves many (58
+/// in the old dod_chemille demos).
+pub const MIN_RENUMBERED: usize = 2;
 
 /// How far, in map units, a demo's bounds or origin may sit from a piece's
 /// and still be it. The largest gap measured on a match is ~0.12 units, over
@@ -158,10 +165,49 @@ pub struct Counts {
 
 impl Counts {
     /// Whether the demo shows it was recorded on another build of the map:
-    /// at least one entity fits a piece at another number.
+    /// at least [`MIN_RENUMBERED`] entities fit a piece at another number.
     pub fn is_other_build(&self) -> bool {
-        self.other > 0
+        self.other >= MIN_RENUMBERED
     }
+}
+
+/// The BSP models lump's index, and one `dmodel_t`'s size on disk.
+const LUMP_MODELS: usize = 14;
+const DMODEL_SIZE: usize = 64;
+
+/// A map file's pieces as the engine loads them: the models lump's bounds
+/// padded by one unit (`Mod_LoadSubmodels`), each with its entity's origin.
+/// For the offline tools and tests; the hook reads the engine's own copy.
+pub fn pieces_from_bsp(bsp: &[u8]) -> Result<Vec<Piece>, String> {
+    let (offset, length) = crate::map_entities::lump_span(bsp, LUMP_MODELS)?;
+    let lump = offset
+        .checked_add(length)
+        .and_then(|end| bsp.get(offset..end))
+        .ok_or_else(|| "models lump runs past the end of the file".to_string())?;
+    let entities = crate::map_entities::parse_entities(bsp)?;
+    let (models, _) = lump.as_chunks::<DMODEL_SIZE>();
+    let origins = piece_origins(&entities, models.len());
+    Ok(models
+        .iter()
+        .zip(origins)
+        .map(|(model, origin)| {
+            let f = |i: usize| {
+                f32::from_le_bytes([
+                    model[i * 4],
+                    model[i * 4 + 1],
+                    model[i * 4 + 2],
+                    model[i * 4 + 3],
+                ])
+            };
+            Piece {
+                bounds: Bounds {
+                    mins: [f(0) - 1.0, f(1) - 1.0, f(2) - 1.0],
+                    maxs: [f(3) + 1.0, f(4) + 1.0, f(5) + 1.0],
+                },
+                origin: Some(origin),
+            }
+        })
+        .collect())
 }
 
 /// Each piece's origin, `*N` at index `N` of `count`: the `origin` key of the
@@ -307,10 +353,38 @@ mod tests {
             bounds: padded([900.0, 900.0, 0.0], [920.0, 950.0, 40.0]),
             origin: [0.0; 3],
         };
-        let entities = [gone, spawned_with(3, &pieces, 2)];
+        let entities = [
+            gone,
+            spawned_with(3, &pieces, 2),
+            spawned_with(4, &pieces, 3),
+        ];
         let plan = plan(&entities, &pieces);
-        assert_eq!(plan.actions, vec![Action::Hide, Action::Draw(2)]);
+        assert_eq!(
+            plan.actions,
+            vec![Action::Hide, Action::Draw(2), Action::Draw(3)]
+        );
         assert_eq!(plan.counts.nothing, 1);
+    }
+
+    #[test]
+    fn one_entity_at_another_number_is_a_coincidence_and_changes_nothing() {
+        // A brush resized to exactly another piece's shape, beside one that
+        // fits nothing: one match elsewhere doesn't say the map changed.
+        let pieces = map();
+        let gone = Spawned {
+            named: 1,
+            bounds: padded([900.0, 900.0, 0.0], [920.0, 950.0, 40.0]),
+            origin: [0.0; 3],
+        };
+        let entities = [
+            gone,
+            spawned_with(3, &pieces, 2),
+            spawned_with(1, &pieces, 1),
+        ];
+        let plan = plan(&entities, &pieces);
+        assert_eq!(plan.actions, vec![Action::Keep; 3]);
+        assert_eq!(plan.counts.other, 1);
+        assert!(!plan.counts.is_other_build());
     }
 
     #[test]
@@ -333,8 +407,11 @@ mod tests {
     #[test]
     fn a_number_past_the_maps_last_piece_still_finds_its_piece() {
         let pieces = map();
-        let entities = [spawned_with(40, &pieces, 3)];
-        assert_eq!(plan(&entities, &pieces).actions, vec![Action::Draw(3)]);
+        let entities = [spawned_with(40, &pieces, 3), spawned_with(41, &pieces, 2)];
+        assert_eq!(
+            plan(&entities, &pieces).actions,
+            vec![Action::Draw(3), Action::Draw(2)]
+        );
     }
 
     /// Two rotating doors of one shape: their bounds are relative to their
@@ -371,10 +448,17 @@ mod tests {
         let pieces = doors();
         let mut lost = spawned_with(6, &pieces, 5);
         lost.origin = [0.0, 0.0, 0.0];
-        // Another renumbered piece says the demo is on another build.
-        let entities = [lost, spawned_with(4, &pieces, 3)];
+        // Two other renumbered pieces say the demo is on another build.
+        let entities = [
+            lost,
+            spawned_with(4, &pieces, 3),
+            spawned_with(5, &pieces, 2),
+        ];
         let plan = plan(&entities, &pieces);
-        assert_eq!(plan.actions, vec![Action::Keep, Action::Draw(3)]);
+        assert_eq!(
+            plan.actions,
+            vec![Action::Keep, Action::Draw(3), Action::Draw(2)]
+        );
         assert_eq!(plan.counts.several, 1);
     }
 
@@ -436,6 +520,56 @@ mod tests {
             piece_origins(&entities, 4),
             vec![[0.0; 3], [0.0; 3], [100.0, 300.0, 40.0], [0.0; 3]]
         );
+    }
+
+    /// A version 30 BSP with only an entity lump and a models lump.
+    fn bsp(entities: &str, models: &[([f32; 3], [f32; 3])]) -> Vec<u8> {
+        let header = 4 + 15 * 8;
+        let text = format!("{entities}\0").into_bytes();
+        let mut lump = Vec::new();
+        for (mins, maxs) in models {
+            for v in mins.iter().chain(maxs) {
+                lump.extend_from_slice(&v.to_le_bytes());
+            }
+            lump.extend_from_slice(&[0u8; DMODEL_SIZE - 24]);
+        }
+        let mut out = vec![0u8; header];
+        out[..4].copy_from_slice(&30i32.to_le_bytes());
+        let mut put = |index: usize, offset: usize, length: usize| {
+            out[4 + index * 8..8 + index * 8].copy_from_slice(&(offset as i32).to_le_bytes());
+            out[8 + index * 8..12 + index * 8].copy_from_slice(&(length as i32).to_le_bytes());
+        };
+        put(0, header, text.len());
+        put(LUMP_MODELS, header + text.len(), lump.len());
+        out.extend_from_slice(&text);
+        out.extend_from_slice(&lump);
+        out
+    }
+
+    #[test]
+    fn a_map_files_pieces_are_padded_as_the_engine_loads_them() {
+        let file = bsp(
+            r#"{ "classname" "worldspawn" } { "classname" "func_door_rotating" "model" "*1" "origin" "8 16 24" }"#,
+            &[
+                ([-512.0; 3], [512.0; 3]),
+                ([-2.0, -32.0, -48.0], [2.0, 32.0, 48.0]),
+            ],
+        );
+        let pieces = pieces_from_bsp(&file).unwrap();
+        assert_eq!(pieces.len(), 2);
+        assert_eq!(
+            pieces[1].bounds,
+            padded([-2.0, -32.0, -48.0], [2.0, 32.0, 48.0])
+        );
+        assert_eq!(pieces[1].origin, Some([8.0, 16.0, 24.0]));
+        assert_eq!(pieces[0].origin, Some([0.0; 3]));
+    }
+
+    #[test]
+    fn a_truncated_map_file_is_an_error() {
+        let file = bsp("{ }", &[([0.0; 3], [1.0; 3])]);
+        assert!(pieces_from_bsp(&file[..file.len() - 10]).is_err());
+        assert!(pieces_from_bsp(&[0u8; 8]).is_err());
     }
 
     #[test]

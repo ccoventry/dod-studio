@@ -104,7 +104,7 @@ MAP
   ds_map_reload_lighting
       Read the map's _light.txt again and apply it now, for trying a new scale without reloading the demo.
   ds_map_fix_old_build 0/1
-      HLTV demos recorded on an older build of the map: draw each wall, door and water with the piece it was spawned with, and hide what today's map no longer has (on by default).
+      Demos recorded on an older build of the map: draw each wall, door and water with the piece it was spawned with, and hide what today's map no longer has (on by default).
 
 SOUND
   ds_sound_mute_voice_commands 0/1

@@ -617,7 +617,7 @@
 		"enabled"		"1"
 		"labelText"		"Fix demos on an older map build"
 		"textAlignment"		"west"
-		"helptext"		"ds_map_fix_old_build: HLTV demos recorded on an older build of the map: draw each piece the demo spawned, hide what today's map no longer has."
+		"helptext"		"ds_map_fix_old_build: demos recorded on an older build of the map: draw each piece the demo spawned, hide what today's map no longer has."
 	}
 	"HeadingSound"
 	{
