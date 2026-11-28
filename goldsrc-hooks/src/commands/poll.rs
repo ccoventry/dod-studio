@@ -498,6 +498,8 @@ pub fn poll() {
     // Two float loads and a level-name hash unless ds_map_wind changed.
     crate::map_wind::poll();
     crate::map_sounds::poll();
+    // A demo-name compare: a new demo decides its brush pieces again (#1540).
+    crate::map_old_build::poll();
     // A level-name hash and a few byte compares once applied (#1312).
     crate::map_light::poll();
     crate::screen_effects::poll();

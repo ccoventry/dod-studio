@@ -1212,7 +1212,10 @@ fn find_precache_table() -> Option<usize> {
     (table != 0).then_some(table)
 }
 
-fn precache_table() -> Option<usize> {
+/// The address of `cl.model_precache` (`PRECACHE_SLOTS` model pointers, null
+/// where the demo's list has none), found once; `None` when it couldn't be.
+/// Reading it loads nothing, unlike `GetModelByIndex` (`map_old_build`).
+pub(crate) fn precache_table() -> Option<usize> {
     match PRECACHE_TABLE.load(Ordering::Acquire) {
         0 => {
             // Not until the client has asked for the studio API; only a

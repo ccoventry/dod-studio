@@ -31,7 +31,7 @@ pub mod migrations;
 /// silently deserializing with new fields missing/defaulted. When the new
 /// fields can be worked out from an old entry, add a step to
 /// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
-pub const SCHEMA_VERSION: u32 = 17;
+pub const SCHEMA_VERSION: u32 = 18;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -341,7 +341,8 @@ pub enum CacheState {
     Current,
     /// An older entry a step upgrades ([`has_older_entry`]). The upgrade can
     /// still ask for a re-parse, which only the whole entry shows, except for
-    /// the cases its first KB gives away (a v16 HLTV entry is `NeedsParse`).
+    /// the cases its first KB gives away (a v16 HLTV entry, or a v16 or v17
+    /// one with frames but no playback time, is `NeedsParse`).
     Upgradable,
     /// Neither, or the demo changed since: a full parse of this many bytes.
     NeedsParse(u64),
@@ -830,6 +831,29 @@ mod tests {
 
         assert_eq!(cache_state(&root, &pov), Some(CacheState::Upgradable));
         assert_eq!(cache_state(&root, &hltv), Some(CacheState::NeedsParse(12)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_v17_entry_with_no_playback_time_is_priced_as_a_parse() {
+        // #1541: v17 to v18 re-parses a demo whose directory gave no length.
+        let dir = scratch("v17_estimate");
+        let root = dir.join("cache");
+        let [timed, untimed] = ["timed", "untimed"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&timed, b"a timed demo").unwrap();
+        std::fs::write(&untimed, b"an untimed demo").unwrap();
+        for (demo, time) in [(&timed, "1325.6"), (&untimed, "0.0")] {
+            let analysis = format!(
+                "{{\"demo_info\":{{\"playback_time\":{time},\"playback_frames\":46449,\"map_checksum\":7}},\"state\":{{}}}}"
+            );
+            write_old(&root, 17, demo, stamp(demo).unwrap(), &analysis);
+        }
+
+        assert_eq!(cache_state(&root, &timed), Some(CacheState::Upgradable));
+        assert_eq!(
+            cache_state(&root, &untimed),
+            Some(CacheState::NeedsParse(15))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

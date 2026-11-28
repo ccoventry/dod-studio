@@ -304,6 +304,10 @@ pub fn install() {
     if let Some(cvar) = register(crate::map_light::NAME, "1") {
         crate::map_light::SETTING.set_cvar(cvar);
     }
+    // On by default: a demo on the map's own build is never changed (#1540).
+    if let Some(cvar) = register(crate::map_old_build::NAME, "1") {
+        crate::map_old_build::SETTING.set_cvar(cvar);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.cvar().set(mute);
