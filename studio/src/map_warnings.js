@@ -121,11 +121,7 @@ function renderLibraryNote() {
   note.title = STRINGS.MAP_BUILDS.NOTE_HELP;
   note.innerHTML = [...libraryUses.values()]
     .map((use) => {
-      const line = STRINGS.MAP_BUILDS.libraryNote(
-        use.mapName,
-        buildText(use.checksum),
-        STRINGS.MAPS.demoCount(use.demos.length)
-      );
+      const line = STRINGS.MAP_BUILDS.libraryNote(use.mapName, buildText(use.checksum), use.demos.length);
       return `<div class="map-builds-note-row">${escapeHtml(line)}</div>`;
     })
     .join('');

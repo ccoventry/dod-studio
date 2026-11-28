@@ -444,7 +444,8 @@ export const CAPTURE_CONFIG_STRINGS = {
     otherBuildToast: (map, build, wanted) =>
       `That file is build ${build} of ${map}, not ${wanted}, the one these demos were recorded on. It is kept for demos recorded on ${build}.`,
     addFailedToast: (map, err) => `Could not add the build of ${map}: ${err}`,
-    libraryNote: (map, build, demos) => `${map}: ${demos} play on build ${build} from DoD Studio's map builds`,
+    libraryNote: (map, build, count) =>
+      `${map}: ${count === 1 ? '1 demo plays' : `${count} demos play`} on build ${build} from DoD Studio's map builds`,
     NOTE_HELP:
       "The installed map is another version. DoD Studio puts the right one in dod_addon\\maps before the game starts and takes it out once the game closes. A game plays one version of a map, so a batch mixing versions of one map plays them all on the first demo's.",
   },

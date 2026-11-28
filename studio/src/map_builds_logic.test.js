@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addOutcome, buildKey, buildText, fileName, libraryUses } from './map_builds_logic.js';
+import { STRINGS } from './strings.js';
 
 describe('map builds on the Maps needed banner (#1547)', () => {
   it('writes a build as the 8 hex digits its file is named by', () => {
@@ -27,6 +28,13 @@ describe('map builds on the Maps needed banner (#1547)', () => {
       { key: buildKey('dod_x', 3), mapName: 'dod_x', checksum: 3, demos: ['b.dem'] },
     ]);
     expect(libraryUses(undefined)).toEqual([]);
+  });
+
+  it('counts the demos on the note in plain words', () => {
+    expect(STRINGS.MAP_BUILDS.libraryNote('dod_x', '61e9d38d', 1)).toBe(
+      "dod_x: 1 demo plays on build 61e9d38d from DoD Studio's map builds"
+    );
+    expect(STRINGS.MAP_BUILDS.libraryNote('dod_x', '61e9d38d', 3)).toContain('3 demos play');
   });
 
   it('says an added build helps the demos only when it is the one they want', () => {

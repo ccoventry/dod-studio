@@ -128,15 +128,16 @@ pub fn leftovers_found(count: usize, root: impl Display) -> String {
 }
 
 pub fn left_out(demo: impl Display, map: &str, wanted: u32, playing: Option<u32>) -> String {
-    let playing = playing.map_or_else(|| "the installed one".to_string(), build);
+    let playing = playing.map_or_else(
+        || "the installed build".to_string(),
+        |c| format!("build {}", build(c)),
+    );
     format!(
         "- Map builds: {demo} wants build {} of {map}, but an earlier demo of this batch needs {playing}, and one game plays one build of a map: capture it in a batch of its own",
         build(wanted)
     )
 }
 
-pub fn batch_places(count: usize, maps: impl Display) -> String {
-    format!(
-        "- Map builds: this batch plays {count} map(s) on a build from Studio's library: {maps}"
-    )
+pub fn launch_places(count: usize, maps: impl Display) -> String {
+    format!("- Map builds: this game plays {count} map(s) on a build from Studio's library: {maps}")
 }

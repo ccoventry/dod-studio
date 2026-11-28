@@ -193,7 +193,7 @@ pub fn plan_and_log(demos: &[PathBuf], game_root: &Path) -> LaunchMaps {
             .iter()
             .map(|b| format!("{} {}", b.map_name, msg::build(b.checksum)))
             .collect();
-        log_markdown(&msg::batch_places(maps.place.len(), names.join(", ")));
+        log_markdown(&msg::launch_places(maps.place.len(), names.join(", ")));
     }
     maps
 }
