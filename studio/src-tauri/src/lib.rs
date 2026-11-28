@@ -56,6 +56,7 @@ mod preview_in_place;
 mod project_convert;
 mod project_session_cmd;
 mod protocol48_demos;
+mod protocol48_review;
 mod render_export_dirs;
 mod render_live_resumable;
 mod render_manager;
@@ -226,8 +227,9 @@ pub fn run() {
             }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
-            // A review sent before a restart keeps its protocol-48 copies (#1549).
-            protocol48_demos::keep_earlier_review();
+            // A review sent before a restart keeps its protocol-48 copies while a
+            // game still runs (#1549).
+            protocol48_review::keep_earlier_review();
             // ...and to say a demo it plays is damaged, for a toast with
             // Repair (#1373).
             damaged_demo_notices::serve_damage_notices(app.handle().clone());
