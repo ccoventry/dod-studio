@@ -15,8 +15,12 @@
 // Nothing in playback announces it.
 //
 // The checksum itself is `bsp::map_checksum`. Reading it back out of a demo
-// costs 544 bytes, so a whole folder can be checked at load without parsing a
-// single frame.
+// costs the header and the start of the LOADING segment (64 KB at most), so a
+// whole folder can be checked at load without parsing a single frame.
+//
+// A POV demo's header carries the checksum. An HLTV demo's header zeroes it,
+// but its first `svc_serverinfo` still carries the same value scrambled
+// (`dod::server_info`), so the build check works for both (#1539).
 
 use std::path::{Path, PathBuf};
 
@@ -25,7 +29,11 @@ use super::bsp;
 /// Demo header layout, up to the field this module needs. The map name is a
 /// NUL-padded 260-byte string and the checksum is the `u32` after the game
 /// directory.
-const HEADER_READ_LEN: usize = 544;
+const HEADER_READ_LEN: usize = dod::server_info::DEMO_HEADER_LEN;
+/// How much of the file's start is read: the header plus the LOADING segment's
+/// first frames, where `svc_serverinfo` sits (inside the first 60 KB in every
+/// demo checked).
+const READ_LEN: u64 = 64 * 1024;
 const MAGIC: &[u8] = b"HLDEMO\0\0";
 const MAP_NAME_AT: usize = 16;
 const MAP_NAME_LEN: usize = 260;
@@ -35,7 +43,9 @@ const MAP_CHECKSUM_AT: usize = 536;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapReference {
     pub map_name: String,
-    /// `None` for HLTV demos, which leave the field zeroed — see `MapStatus`.
+    /// The build the demo was recorded on: the header's checksum, or for an
+    /// HLTV demo (which zeroes it) the one in its `svc_serverinfo`. `None`
+    /// only when neither is there, see `MapStatus::Unverifiable`.
     pub expected_checksum: Option<u32>,
 }
 
@@ -47,9 +57,10 @@ pub enum MapStatus {
     WrongBuild { expected: u32, found: u32 },
     /// Not in the map library at all.
     Missing,
-    /// Present, but the demo does not say which build it wants. HLTV demos
-    /// zero the field, so the most that can be said is that a map by that name
-    /// is here.
+    /// Present, but the demo does not say which build it wants: no header
+    /// checksum and no readable `svc_serverinfo` (a demo cut short, or one
+    /// from a server this reader does not know). The most that can be said is
+    /// that a map by that name is here.
     Unverifiable,
     /// Present and unreadable — truncated, or not a BSP at all.
     Unreadable { reason: String },
@@ -81,14 +92,20 @@ impl MapStatus {
     }
 }
 
-/// The map a demo was recorded on, read from its header alone.
+/// The map a demo was recorded on, read from the start of the file: its header,
+/// and for a header with no checksum the first `svc_serverinfo`.
 pub fn map_reference(demo: &Path) -> Result<MapReference, String> {
     use std::io::Read;
 
     let mut file = std::fs::File::open(demo).map_err(|e| format!("{}: {}", demo.display(), e))?;
-    let mut head = vec![0u8; HEADER_READ_LEN];
-    file.read_exact(&mut head)
-        .map_err(|_| format!("{}: shorter than a demo header", demo.display()))?;
+    let mut head = Vec::with_capacity(READ_LEN as usize);
+    (&mut file)
+        .take(READ_LEN)
+        .read_to_end(&mut head)
+        .map_err(|e| format!("{}: {}", demo.display(), e))?;
+    if head.len() < HEADER_READ_LEN {
+        return Err(format!("{}: shorter than a demo header", demo.display()));
+    }
 
     if &head[..MAGIC.len()] != MAGIC {
         return Err(format!("{}: not a HLDEMO file", demo.display()));
@@ -120,11 +137,21 @@ pub fn map_reference(demo: &Path) -> Result<MapReference, String> {
 
     Ok(MapReference {
         map_name: name,
-        // HLTV demos leave this zeroed. Treated as "not stated" rather than as
-        // a checksum, so a map is never called the wrong build on the strength
-        // of a field that was never filled in.
-        expected_checksum: (checksum != 0).then_some(checksum),
+        // An HLTV header leaves this zeroed. A zero is never a checksum, so a
+        // map is never called the wrong build on the strength of a field that
+        // was never filled in: the server info's value stands in for it.
+        expected_checksum: (checksum != 0)
+            .then_some(checksum)
+            .or_else(|| server_info_checksum(&head)),
     })
+}
+
+/// The map checksum in the first `svc_serverinfo` of `file_start`, when there
+/// is one and it is not zero.
+fn server_info_checksum(file_start: &[u8]) -> Option<u32> {
+    dod::server_info::find_server_info(file_start)
+        .map(|stamp| stamp.map_checksum())
+        .filter(|checksum| *checksum != 0)
 }
 
 /// A map name is a short identifier. One that is not is not a map name worth
@@ -200,6 +227,40 @@ mod tests {
         Scratch::new(format_args!("map_check_{tag}"))
     }
 
+    /// A demo start as an HLTV proxy writes it: a header with no checksum, then
+    /// a `svc_serverinfo` carrying `checksum` scrambled the way the engine does
+    /// for `slot` (the inverse of `dod::server_info::unscramble_map_checksum`).
+    fn hltv_demo(map: &str, checksum: u32, slot: u8) -> Vec<u8> {
+        let key = !slot;
+        let mut bytes = (checksum ^ !u32::from(key)).to_be_bytes();
+        for (j, byte) in bytes.iter_mut().enumerate() {
+            let table = [0x20u8, 0x07, 0x13, 0x61][j];
+            *byte ^= (0xa5 | (j << j) | j | usize::from(table)) as u8;
+        }
+        let scrambled = u32::from_le_bytes(bytes) ^ u32::from(key);
+
+        let mut demo = header(map, 0);
+        demo.extend_from_slice(&[0u8; 200]);
+        demo.push(11);
+        demo.extend_from_slice(&48i32.to_le_bytes());
+        demo.extend_from_slice(&1i32.to_le_bytes());
+        demo.extend_from_slice(&scrambled.to_le_bytes());
+        demo.extend_from_slice(&[0u8; 16]);
+        demo.extend_from_slice(&[32, slot, 1]);
+        demo.extend_from_slice(b"dod\0server\0maps/x.bsp\0\0\0");
+        demo
+    }
+
+    /// The smallest map `bsp::map_checksum` reads: a v30 header, fifteen empty
+    /// lumps. Its checksum is `0xffff_ffff`.
+    fn empty_map(maps: &Path, name: &str) -> u32 {
+        let mut bytes = vec![0u8; 4 + 15 * 8];
+        bytes[0] = 30;
+        std::fs::create_dir_all(maps).unwrap();
+        std::fs::write(map_path(maps, name), &bytes).unwrap();
+        bsp::map_checksum(&bytes).unwrap()
+    }
+
     #[test]
     fn a_header_yields_the_map_and_the_build_it_wants() {
         let dir = scratch("ref");
@@ -221,6 +282,105 @@ mod tests {
         std::fs::write(&demo, header("dod_harrington", 0)).unwrap();
 
         assert_eq!(map_reference(&demo).unwrap().expected_checksum, None);
+    }
+
+    #[test]
+    fn an_hltv_demo_states_the_build_its_server_info_carries() {
+        // #1539: the header is zeroed, the server info is not.
+        let dir = scratch("hltv_serverinfo");
+        let demo = dir.join("a.dem");
+        std::fs::write(&demo, hltv_demo("dod_anzio", 0x801b_771f, 5)).unwrap();
+
+        assert_eq!(
+            map_reference(&demo).unwrap().expected_checksum,
+            Some(0x801b_771f)
+        );
+    }
+
+    #[test]
+    fn a_header_checksum_wins_over_the_server_info() {
+        let dir = scratch("header_wins");
+        let demo = dir.join("a.dem");
+        let mut bytes = hltv_demo("dod_anzio", 0x801b_771f, 5);
+        bytes[MAP_CHECKSUM_AT..MAP_CHECKSUM_AT + 4].copy_from_slice(&7u32.to_le_bytes());
+        std::fs::write(&demo, bytes).unwrap();
+
+        assert_eq!(map_reference(&demo).unwrap().expected_checksum, Some(7));
+    }
+
+    #[test]
+    fn an_hltv_demo_on_the_installed_build_is_ok_and_on_another_is_a_wrong_build() {
+        let dir = scratch("hltv_build");
+        let maps = dir.join("maps");
+        let installed = empty_map(&maps, "dod_chemille");
+
+        let same = dir.join("same.dem");
+        std::fs::write(&same, hltv_demo("dod_chemille", installed, 0)).unwrap();
+        let older = dir.join("older.dem");
+        std::fs::write(&older, hltv_demo("dod_chemille", 0xbb69_0c32, 12)).unwrap();
+
+        assert_eq!(
+            check_demo(&same, &maps).unwrap().1,
+            MapStatus::Ok {
+                checksum: installed
+            }
+        );
+        assert_eq!(
+            check_demo(&older, &maps).unwrap().1,
+            MapStatus::WrongBuild {
+                expected: 0xbb69_0c32,
+                found: installed
+            }
+        );
+    }
+
+    #[test]
+    fn a_pov_fixtures_server_info_agrees_with_its_header() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures/ci_fixture.dem");
+        let mut head = vec![0u8; READ_LEN as usize];
+        let read =
+            std::io::Read::read(&mut std::fs::File::open(&fixture).unwrap(), &mut head).unwrap();
+        head.truncate(read);
+
+        let header_checksum = u32::from_le_bytes(
+            head[MAP_CHECKSUM_AT..MAP_CHECKSUM_AT + 4]
+                .try_into()
+                .unwrap(),
+        );
+        assert_ne!(header_checksum, 0);
+        assert_eq!(server_info_checksum(&head), Some(header_checksum));
+    }
+
+    /// The two real HLTV demos of #1539 against the installed maps. Local
+    /// only: `DOD_HLTV_MAPBUILD_DEMOS` is a folder holding
+    /// `chemille-gamewyze-fx-1.dem` (recorded on build `bb690c32`, the
+    /// installed 1.3 map is another) and the anzio scrim demo
+    /// `scrim_1790730448-DEN1_h1-2609292052-dod_anzio.dem` (same build);
+    /// `DOD_MAPS_DIR` is the maps folder, else the PRE install's.
+    #[test]
+    #[ignore = "needs the real HLTV demos: set DOD_HLTV_MAPBUILD_DEMOS"]
+    fn real_hltv_demos_are_checked_against_the_installed_maps() {
+        let demos = std::env::var_os("DOD_HLTV_MAPBUILD_DEMOS")
+            .map(PathBuf::from)
+            .expect("set DOD_HLTV_MAPBUILD_DEMOS to the folder holding the two demos");
+        let maps = std::env::var_os("DOD_MAPS_DIR").map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(
+                "C:/Program Files (x86)/Steam/steamapps/common/Half-Life - PRE-Anniversary for Movies/dod/maps",
+            )
+        });
+
+        let (reference, status) =
+            check_demo(&demos.join("chemille-gamewyze-fx-1.dem"), &maps).unwrap();
+        assert_eq!(reference.expected_checksum, Some(0xbb69_0c32));
+        assert!(matches!(status, MapStatus::WrongBuild { .. }), "{status:?}");
+
+        let (reference, status) = check_demo(
+            &demos.join("scrim_1790730448-DEN1_h1-2609292052-dod_anzio.dem"),
+            &maps,
+        )
+        .unwrap();
+        assert_eq!(reference.expected_checksum, Some(0x801b_771f));
+        assert!(matches!(status, MapStatus::Ok { .. }), "{status:?}");
     }
 
     #[test]

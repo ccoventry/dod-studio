@@ -2,8 +2,8 @@
 // Whether the demos on screen can actually be played, and on the right map.
 //
 // Kept out of the scan pipeline deliberately. Scanning parses every frame of
-// every demo and is the slow, threaded part of loading a folder; this reads 544
-// bytes per demo and one map file per distinct map, so it runs after a scan
+// every demo and is the slow, threaded part of loading a folder; this reads the
+// first 64 KB of each demo and one map file per distinct map, so it runs after a scan
 // without slowing it, and a failure here costs a badge rather than the folder.
 
 use std::collections::HashMap;

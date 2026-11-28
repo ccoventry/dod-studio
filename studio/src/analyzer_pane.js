@@ -12,6 +12,7 @@ import { renderDamageBanner } from './analyzer_damage.js';
 import { repairAnalyzedDemo, repairSplitAnalyzedDemo } from './analyzer_repair.js';
 import { repairableStatus } from './repair_status.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
+import { findMapBuildProblem, renderMapBuildBanner } from './analyzer_map_build.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -117,6 +118,7 @@ async function loadAnalyzerDemo(path) {
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);
   renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), null);
+  renderMapBuildBanner(document.querySelector('#analyzer-map-build-banner'), null);
   const seq = ++analyzerLoadSeq;
   analyzerLoadingPath = path;
   try {
@@ -127,6 +129,11 @@ async function loadAnalyzerDemo(path) {
     showReport(result);
     renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
+    // Beside the report, not before it: the check reads the installed map.
+    const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
+    findMapBuildProblem(path, gamePath).then((row) => {
+      if (seq === analyzerLoadSeq) renderMapBuildBanner(document.querySelector('#analyzer-map-build-banner'), row);
+    });
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

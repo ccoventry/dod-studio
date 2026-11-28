@@ -39,8 +39,9 @@ export async function refreshMapWarnings(demoPaths, gamePath) {
   if (!Array.isArray(rows)) return;
 
   for (const row of rows) {
-    // `unverifiable` is an HLTV demo, whose header records no build. The map is
-    // present; there is simply nothing to compare. Not a problem to report.
+    // `unverifiable` is a demo that states no build (an HLTV demo states it in
+    // its server info since #1539, so this is a cut-short or unknown one). The
+    // map is present; there is simply nothing to compare. Not a problem to report.
     if (row.state === 'ok' || row.state === 'unverifiable') {
       // A map that has since been fixed should stop being listed.
       if (row.mapName) problems.delete(row.mapName);

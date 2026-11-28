@@ -289,6 +289,14 @@ export const ANALYZER_STRINGS = {
     GAME_MOD_LABEL: 'Game mod',
     MAP_NAME_LABEL: 'Map name',
     MAP_CHECKSUM_LABEL: 'Map checksum',
+    // #1539: an HLTV demo's header has no map checksum; its server info does.
+    mapChecksumValue: (info) => {
+      if (info.map_checksum === 0 && Number.isInteger(info.server_info_map_checksum)) {
+        const hex = info.server_info_map_checksum.toString(16).padStart(8, '0');
+        return `${info.server_info_map_checksum} (${hex}), from the server info`;
+      }
+      return String(info.map_checksum);
+    },
     SERVER_INFO_SECTION: 'Server Information',
     SERVER_NAME_LABEL: 'Server name',
     SERVER_ADDRESS_LABEL: 'Server address',
