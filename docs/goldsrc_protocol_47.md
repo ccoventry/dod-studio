@@ -43,6 +43,13 @@ The server build doesn't tell the two apart. In this archive the POV demos from 
 
 Two of the protocol-47 demos (three files: one is a copy under two names) end their LOADING segment with two next-section frames instead of one. `dem-patch` ends the segment at the first, so a demo it writes back drops the second; the directory still points at the right places. HLAE's DemoTools handles the same thing ("munch repeated stops"). The conversion never re-encodes, so it keeps them.
 
+### Demos HLAE's demo tools rewrote
+
+Old demos run through HLAE's demo tools (DemoFix with its protocol 47 to 48 option, advancedfx `demotools.cpp`) come out protocol 48 with the frames unchanged but the header and directory rewritten (#1541; six 2004 HLTV demos from three matches):
+- The 260-byte map-name and game-folder fields hold HLAE's watermark text after the NUL. Read them up to the first NUL, as the engine does.
+- Every directory `track_time` is 0 and `cd_track` is 255. The length comes from each playback entry's closing next-section frame instead, whose time is what the engine writes as the track time (the same to the millisecond on 492 demos that have both).
+- A third, 9-byte directory entry of type 2 follows the playback one: a stray demo-start frame and a next-section, read as garbage from the original directory. `dem-patch` writes it back as 18 bytes, so such a demo does not round-trip byte for byte.
+
 ## Reading one
 
 `dem-patch` reads protocols 47 and 48 and refuses any other by number in the header parse (`dem-patch/src/protocol.rs`): "network protocol N is not supported". No other protocol has been checked against a real demo, so one is not read with rules that may not hold for it. The Demo Analyzer's Technical Specifications show a protocol-47 demo's network protocol as "47 (older build): plays with an outdated-protocol warning".

@@ -78,6 +78,11 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 17,
         upgrade: v16_to_v17,
     },
+    Migration {
+        from: 17,
+        to: 18,
+        upgrade: v17_to_v18,
+    },
 ];
 
 const NO_HEADER_CHECKSUM: &str = "an HLTV demo's map build is in its server info";
@@ -359,21 +364,73 @@ fn v16_to_v17(analysis: &mut Value) -> Upgrade {
     }
 }
 
+const NO_PLAYBACK_TIME: &str = "its directory gives no playback time";
+
+/// #1541: `demo_info.playback_time` comes from the frames when the demo's
+/// directory gives none (HLAE's demo tools write every track time as 0, and
+/// so do unfinished or recovered recordings). Only an entry with no playback
+/// time and some frames can differ; every other entry is what v18 writes.
+fn v17_to_v18(analysis: &mut Value) -> Upgrade {
+    let Some(info) = analysis.get("demo_info") else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    let time = info.get("playback_time").and_then(Value::as_f64);
+    let frames = info.get("playback_frames").and_then(Value::as_f64);
+    let (Some(time), Some(frames)) = (time, frames) else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    if has_no_playback_time(time, frames) {
+        return Upgrade::NeedsReparse(NO_PLAYBACK_TIME);
+    }
+    Upgrade::Done
+}
+
+/// An entry [`v17_to_v18`] sends back to the demo: frames, but no playback
+/// time.
+fn has_no_playback_time(time: f64, frames: f64) -> bool {
+    time <= 0.0 && frames > 0.0
+}
+
 /// How much of an entry's start [`needs_full_parse_from_head`] reads: the
 /// stamp, `file_info` (a path) and the first fields of `demo_info`.
 pub const HEAD_PEEK_LEN: usize = 4096;
 
 /// Whether an entry from schema `version` is known, from its first
 /// [`HEAD_PEEK_LEN`] bytes, to need a full parse instead of an upgrade, so an
-/// estimate can price it right without reading megabytes (#1539). Only v16
-/// has such entries: its HLTV ones (`demo_info.map_checksum` 0, written in
-/// `demo_info` before the first 4 KB ends) are re-parsed by [`v16_to_v17`].
+/// estimate can price it right without reading megabytes (#1539). Two steps
+/// re-parse what the head shows, both from fields `demo_info` writes before
+/// the first 4 KB ends:
+/// - a v16 HLTV entry (`demo_info.map_checksum` 0), re-parsed by
+///   [`v16_to_v17`];
+/// - a v16 or v17 entry with frames but no playback time, re-parsed by
+///   [`v17_to_v18`] (#1541).
 pub fn needs_full_parse_from_head(version: u32, head: &[u8]) -> bool {
     const ZERO_HEADER_CHECKSUM: &[u8] = b"\"map_checksum\":0,";
-    version == 16
-        && head
-            .windows(ZERO_HEADER_CHECKSUM.len())
+    let hltv_without_checksum = || {
+        head.windows(ZERO_HEADER_CHECKSUM.len())
             .any(|w| w == ZERO_HEADER_CHECKSUM)
+    };
+    let without_playback_time = || match (
+        head_number(head, b"\"playback_time\":"),
+        head_number(head, b"\"playback_frames\":"),
+    ) {
+        (Some(time), Some(frames)) => has_no_playback_time(time, frames),
+        _ => false,
+    };
+    match version {
+        16 => hltv_without_checksum() || without_playback_time(),
+        17 => without_playback_time(),
+        _ => false,
+    }
+}
+
+/// The number after `key` in an entry's head (compact JSON), when it is
+/// there whole.
+fn head_number(head: &[u8], key: &[u8]) -> Option<f64> {
+    let at = head.windows(key.len()).position(|w| w == key)? + key.len();
+    let rest = head.get(at..)?;
+    let end = rest.iter().position(|&b| b == b',' || b == b'}')?;
+    std::str::from_utf8(&rest[..end]).ok()?.parse().ok()
 }
 
 #[cfg(test)]
@@ -460,14 +517,15 @@ mod tests {
     /// post-pause replay twice, and only the demo's frames tell which of its
     /// kills, chat and captures were the replay's.
     /// Nor v17 from anything older than v16 (#1539): a step exists only from
-    /// v16, so older entries stay a miss.
+    /// v16, so older entries stay a miss. v18 (#1541) has a step from v17.
     #[test]
-    fn only_a_v16_entry_upgrades_to_17() {
-        assert_eq!(super::super::SCHEMA_VERSION, 17);
+    fn only_v16_and_v17_entries_upgrade_to_18() {
+        assert_eq!(super::super::SCHEMA_VERSION, 18);
         for version in 0..16 {
             assert!(!upgrades_from(version), "v{version}");
         }
         assert!(upgrades_from(16));
+        assert!(upgrades_from(17));
     }
 
     #[test]
@@ -481,6 +539,8 @@ mod tests {
         assert!(needs_full_parse_from_head(16, head(0).as_bytes()));
         assert!(!needs_full_parse_from_head(16, head(7).as_bytes()));
         assert!(!needs_full_parse_from_head(15, head(0).as_bytes()));
+        // v17 already has the server info's checksum: no re-parse for it.
+        assert!(!needs_full_parse_from_head(17, head(0).as_bytes()));
     }
 
     #[test]
@@ -498,8 +558,87 @@ mod tests {
         assert_eq!(v16_to_v17(&mut odd), Upgrade::NeedsReparse(MALFORMED));
     }
 
-    /// The chain up to v13, the last schema with a step: what the fixture's
-    /// entries still upgrade through, so the steps stay tested.
+    #[test]
+    fn a_v17_entry_needs_the_demo_only_when_it_has_frames_and_no_playback_time() {
+        // rr1-dice-xeno-1 (#1541): HLAE's demo tools left every track time 0.
+        let mut value = json!({"demo_info": {"playback_time": 0.0, "playback_frames": 46_449}});
+        assert_eq!(
+            v17_to_v18(&mut value),
+            Upgrade::NeedsReparse(NO_PLAYBACK_TIME)
+        );
+        for mut value in [
+            json!({"demo_info": {"playback_time": 1887.04, "playback_frames": 55_181}}),
+            json!({"demo_info": {"playback_time": 0.0, "playback_frames": 0}}),
+        ] {
+            assert_eq!(v17_to_v18(&mut value), Upgrade::Done);
+        }
+        for mut value in [
+            json!({}),
+            json!({"demo_info": {"playback_frames": 10}}),
+            json!({"demo_info": {"playback_time": null, "playback_frames": 10}}),
+        ] {
+            assert_eq!(v17_to_v18(&mut value), Upgrade::NeedsReparse(MALFORMED));
+        }
+    }
+
+    #[test]
+    fn an_entrys_head_says_whether_it_has_no_playback_time() {
+        // As the cache writes an entry: compact JSON, `playback_time` before
+        // `playback_frames` and `map_checksum`.
+        let head = |time: f32, frames: i32, checksum: u32| {
+            serde_json::to_string(&json!({"demo_info": {
+                "playback_time": time,
+                "playback_frames": frames,
+                "map_checksum": checksum,
+            }}))
+            .unwrap()
+        };
+        for version in [16, 17] {
+            assert!(needs_full_parse_from_head(
+                version,
+                head(0.0, 46_449, 7).as_bytes()
+            ));
+            assert!(!needs_full_parse_from_head(
+                version,
+                head(1325.6, 46_449, 7).as_bytes()
+            ));
+            assert!(!needs_full_parse_from_head(
+                version,
+                head(0.0, 0, 7).as_bytes()
+            ));
+        }
+        assert!(!needs_full_parse_from_head(
+            15,
+            head(0.0, 46_449, 7).as_bytes()
+        ));
+        // A head cut off inside the number says nothing.
+        let cut = head(0.0, 46_449, 7);
+        let cut = &cut.as_bytes()[..cut.find("46").unwrap() + 1];
+        assert!(!needs_full_parse_from_head(17, cut));
+    }
+
+    /// What the analysis writes: `playback_time` and `playback_frames` come
+    /// early enough in `demo_info` for the head peek to see them.
+    #[test]
+    fn the_fixtures_entry_shows_its_playback_time_in_the_head() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let mut analysis = Analysis::try_from_bytes(&bytes).unwrap();
+        let head = serde_json::to_string(&analysis).unwrap();
+        let head = &head.as_bytes()[..HEAD_PEEK_LEN.min(head.len())];
+        assert!(!needs_full_parse_from_head(17, head));
+        analysis.demo_info.playback_time = 0.0;
+        let head = serde_json::to_string(&analysis).unwrap();
+        let head = &head.as_bytes()[..HEAD_PEEK_LEN.min(head.len())];
+        assert!(needs_full_parse_from_head(17, head));
+    }
+
+    /// The chain up to v13, where the first run of steps ends (v14 to v16
+    /// have none): what the fixture's entries still upgrade through, so
+    /// those steps stay tested.
     fn upgrade_to_13(from: u32, analysis: &mut Value) -> Upgrade {
         upgrade_with(MIGRATIONS, from, 13, analysis)
     }

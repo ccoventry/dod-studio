@@ -228,12 +228,7 @@ impl From<&Demo> for DemoInfo {
             .unwrap_or("unknown")
             .to_string();
 
-        let playback_time = value
-            .directory
-            .entries
-            .iter()
-            .map(|e| e.track_time)
-            .sum::<f32>();
+        let playback_time = playback_time(value);
 
         let playback_frames = value
             .directory
@@ -264,6 +259,32 @@ impl From<&Demo> for DemoInfo {
         }
     }
 }
+
+/// The demo's playback length in seconds: its directory's track times,
+/// summed. A directory that gives none takes the length from the frames
+/// instead: each playback entry's last frame time, which is what the engine
+/// writes as that entry's track time (1887.04 s both ways on a 2004 HLTV
+/// demo, 2205.08 s and 1503.61 s on two 2026 ones). HLAE's demo tools write
+/// every track time as 0 (#1541), which left such a demo with no length and
+/// the capture scanner with a guessed tick rate.
+fn playback_time(demo: &Demo) -> f32 {
+    let entries = &demo.directory.entries;
+    let directory: f32 = entries.iter().map(|e| e.track_time).sum();
+    if directory.is_finite() && directory > 0.0 {
+        return directory;
+    }
+    entries
+        .iter()
+        .filter(|e| e.type_ == PLAYBACK_ENTRY)
+        .filter_map(|e| e.frames.last().map(|f| f.time))
+        .filter(|t| t.is_finite() && *t > 0.0)
+        .sum()
+}
+
+/// A directory entry's type for playback frames (`DEMO_NORMAL`). The LOADING
+/// entry (0) sits on the server's clock, and HLAE's demo tools add an entry
+/// of type 2 holding garbage (#1541); neither counts.
+const PLAYBACK_ENTRY: i32 = 1;
 
 /// Whether `demo` is an HLTV proxy's recording: it carries a message only
 /// one has ([`is_hltv_message`]).
@@ -356,5 +377,29 @@ mod tests {
         demo.directory.entries.clear();
 
         assert_eq!(DemoInfo::from(&demo).server_info_map_checksum, None);
+    }
+
+    #[test]
+    fn the_playback_time_is_the_directorys() {
+        let demo = fixture_demo();
+        let directory: f32 = demo.directory.entries.iter().map(|e| e.track_time).sum();
+        assert!(directory > 0.0);
+        assert_eq!(playback_time(&demo), directory);
+    }
+
+    #[test]
+    fn a_directory_with_no_track_times_takes_the_playback_time_from_the_frames() {
+        // As HLAE's demo tools leave a demo (#1541): every track time 0.
+        let mut demo = fixture_demo();
+        let directory: f32 = demo.directory.entries.iter().map(|e| e.track_time).sum();
+        for entry in &mut demo.directory.entries {
+            entry.track_time = 0.0;
+        }
+        let from_frames = playback_time(&demo);
+        assert!(
+            (from_frames - directory).abs() < 0.001,
+            "{from_frames} against the directory's {directory}"
+        );
+        assert_eq!(DemoInfo::from(&demo).playback_time, from_frames);
     }
 }

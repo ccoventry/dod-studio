@@ -16,6 +16,7 @@ use std::io::{Read, Seek};
 use dem::types::{Aux, Delta, EngineMessage, FrameData, MessageData, NetMessage};
 
 use super::frames::Frames;
+use crate::demo_file::TURNED_BACK_SECONDS;
 
 /// The players' entity slots.
 const PLAYERS: usize = 32;
@@ -28,9 +29,6 @@ const STEP_TOLERANCE: f32 = 3.5;
 /// Two snapshots further apart than this don't say what the motion between
 /// them was.
 const SNAPSHOT_GAP_SECONDS: f32 = 0.1;
-/// `svc_time` going back more than this is a new map, not the HLTV clock's
-/// millisecond step-backs (#927).
-const TURNED_BACK_SECONDS: f32 = 1.0;
 
 /// What the look-ahead knows about the whole demo.
 #[derive(Debug, Default, Clone, PartialEq)]
