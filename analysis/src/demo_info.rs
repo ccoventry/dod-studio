@@ -231,15 +231,16 @@ fn playback_time(demo: &Demo) -> f32 {
     }
     entries
         .iter()
-        .filter(|e| e.type_ != LOADING_ENTRY)
+        .filter(|e| e.type_ == PLAYBACK_ENTRY)
         .filter_map(|e| e.frames.last().map(|f| f.time))
         .filter(|t| t.is_finite() && *t > 0.0)
         .sum()
 }
 
-/// A directory entry's type for the LOADING segment, whose frames sit on the
-/// server's clock rather than the playback one.
-const LOADING_ENTRY: i32 = 0;
+/// A directory entry's type for playback frames (`DEMO_NORMAL`). The LOADING
+/// entry (0) sits on the server's clock, and HLAE's demo tools add an entry
+/// of type 2 holding garbage (#1541); neither counts.
+const PLAYBACK_ENTRY: i32 = 1;
 
 /// Whether `demo` is an HLTV proxy's recording: it carries a message only
 /// one has ([`is_hltv_message`]).

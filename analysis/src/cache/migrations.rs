@@ -479,8 +479,9 @@ mod tests {
         }
     }
 
-    /// The chain up to v13, the last schema with a step: what the fixture's
-    /// entries still upgrade through, so the steps stay tested.
+    /// The chain up to v13, where the first run of steps ends (v14 to v16
+    /// have none): what the fixture's entries still upgrade through, so
+    /// those steps stay tested.
     fn upgrade_to_13(from: u32, analysis: &mut Value) -> Upgrade {
         upgrade_with(MIGRATIONS, from, 13, analysis)
     }

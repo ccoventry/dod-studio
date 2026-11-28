@@ -702,6 +702,58 @@ mod tests {
     }
 
     #[test]
+    fn a_step_back_just_under_turned_back_seconds_continues_the_span() {
+        let frames = [
+            net(100.0),
+            net(500.0),
+            net(499.1),
+            net(800.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let path = one_segment_demo("under", &frames);
+        assert!((walk(&path).unwrap().span.unwrap() - 700.0).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_step_back_just_over_turned_back_seconds_is_a_map_restart() {
+        let frames = [
+            net(100.0),
+            net(500.0),
+            net(498.9),
+            net(800.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let path = one_segment_demo("over", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(!walked.bad_frame);
+        assert!((walked.span.unwrap() - 400.0).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_bad_frame_after_a_small_step_back_is_still_damage() {
+        // The step back is not a restart, so the walk reads on to the bad
+        // frame and `demo_damage::viewdemo::verdict` gets `bad_frame`.
+        let frames = [
+            net(10.0),
+            net(500.0),
+            net(499.98),
+            net(507.7),
+            oversized(70_000),
+            net(900.0),
+        ]
+        .concat();
+        let path = one_segment_demo("jitter_damage", &frames);
+        let walked = walk(&path).unwrap();
+        assert!(walked.bad_frame);
+        assert!((walked.span.unwrap() - 497.7).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn a_map_restart_soon_after_another_still_ends_the_span() {
         // ktps8w11sf-warchyld_gskill_m3_rr2_h1: the second restart came 3 s
         // into the new map (7.99 to 4.98), the smallest restart in the survey.

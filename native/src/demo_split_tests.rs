@@ -175,8 +175,22 @@ fn a_garbage_entry_after_the_playback_does_not_end_the_map() {
     assert_eq!(quick_segments(&hlae), Some(full));
 }
 
-/// Every demo HLAE's demo tools rewrote (text after the header's map name)
-/// in `DOD_HLAE_DEMOS` (a folder), or the PRE install's `dod` folder: its
+/// The directory's track times, summed, read from the file's bytes.
+fn directory_seconds(bytes: &[u8]) -> Option<f32> {
+    let i32_at = |at: usize| Some(i32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+    let directory = usize::try_from(i32_at(540)?).ok()?;
+    let count = usize::try_from(i32_at(directory)?).ok()?;
+    (0..count.min(1024))
+        .map(|e| {
+            let at = directory + 4 + e * 92 + 76;
+            Some(f32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+        })
+        .sum()
+}
+
+/// Every demo HLAE's demo tools rewrote (text after the header's map name,
+/// every track time 0) in `DOD_HLAE_DEMOS` (a folder), or the PRE install's
+/// `dod` folder, of which there must be one: its
 /// map reads without the watermark, and its length comes from the frames
 /// though the directory says 0 (#1541).
 #[test]
@@ -199,7 +213,10 @@ fn demos_hlae_rewrote_read_their_map_and_length() {
             continue;
         };
         let name_end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
-        if field[name_end..].iter().all(|&b| b == 0) {
+        // Both marks of the rewrite: text after the map name, and a
+        // directory whose track times are all 0, so the frame-length path
+        // is what gets tested (a demo with only the first has real times).
+        if field[name_end..].iter().all(|&b| b == 0) || directory_seconds(&bytes) != Some(0.0) {
             continue;
         }
         let segs = quick_segments(&bytes).expect("the quick walk reads it");
