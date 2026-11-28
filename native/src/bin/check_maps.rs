@@ -68,7 +68,9 @@ fn main() {
         match check_demo(demo, &maps_dir) {
             Ok((reference, status)) => {
                 match &status {
-                    MapStatus::Ok { .. } => ok += 1,
+                    // `check_demo` compares the installed map only; a
+                    // library build would play right as well.
+                    MapStatus::Ok { .. } | MapStatus::FromLibrary { .. } => ok += 1,
                     MapStatus::WrongBuild { .. } => {
                         wrong += 1;
                         let e = needed.entry(reference.map_name.clone()).or_default();
