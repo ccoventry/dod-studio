@@ -3,8 +3,8 @@
 // analyzer_report.js's render functions. Keep in sync by hand; there is no
 // shared build step between this static site and the desktop app.
 // studio/src/web_analyzer_copy.test.js fails when the two disagree (#238).
-/** The network protocol of older game builds' demos (#239): the game plays
- *  one with an outdated-protocol warning. */
+/** The network protocol of older game builds' demos (#239): the game's
+ *  viewdemo refuses one, so DoD Studio plays a converted copy (#1549). */
 const OLDER_BUILD_NETWORK_PROTOCOL = 47;
 
 export const STRINGS = {
@@ -193,9 +193,9 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
-    // #239: protocol 47 is an older build's; the game warns and plays it.
+    // #239, #1549: protocol 47 is an older build's; viewdemo refuses it.
     networkProtocolValue: (protocol) => (protocol === OLDER_BUILD_NETWORK_PROTOCOL
-      ? `${protocol} (older build): plays with an outdated-protocol warning`
+      ? `${protocol} (older protocol): DoD Studio converts a copy when it plays it`
       : String(protocol)),
     // #207: what decides whether the pre-Anniversary engine can play it.
     PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',

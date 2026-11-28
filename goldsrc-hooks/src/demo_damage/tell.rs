@@ -54,8 +54,8 @@ pub fn strip_line() -> Option<String> {
 }
 
 /// Whether something is being captured: a capture batch runs, or
-/// `host_framerate` is set.
-fn capturing() -> bool {
+/// `host_framerate` is set. Also asked by `old_protocol` (#1549).
+pub(crate) fn capturing() -> bool {
     if crate::batch::running() {
         return true;
     }
@@ -80,8 +80,8 @@ pub(super) fn on_screen(at_text: &str) {
 }
 
 /// `text` through the engine's `pfnCenterPrint`, when the slot points at
-/// the wrapper a known build has.
-fn center_print(text: &str) -> Result<&'static str, String> {
+/// the wrapper a known build has. Also used by `old_protocol` (#1549).
+pub(crate) fn center_print(text: &str) -> Result<&'static str, String> {
     let engfuncs = crate::engine::engfuncs().ok_or("no engine function table yet")?;
     let base = crate::engine::engine_module_base().ok_or("hw.dll is not loaded")?;
     let at = (engfuncs.pfn_center_print as usize).wrapping_sub(base);

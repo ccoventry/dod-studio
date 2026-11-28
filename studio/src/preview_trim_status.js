@@ -3,7 +3,8 @@
 // copy (#207, studio/src-tauri/src/trimmed_demos.rs). While the backend makes
 // one (a few seconds for a WSOD25 HLTV half), the Launch Preview button says
 // which step it is on, from its `preview_trim` events; when the preview plays
-// a copy, a toast says so.
+// a copy, a toast says so. A protocol-47 demo's converted copy reports on the
+// same event (#1549, studio/src-tauri/src/protocol48_demos.rs).
 
 import { listen } from '@tauri-apps/api/event';
 import { showToast } from './toast.js';

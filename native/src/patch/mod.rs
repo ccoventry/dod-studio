@@ -48,6 +48,7 @@ pub mod types;
 /// A Seek Between Clips batch in the game that is already open (#725).
 pub mod batch_reuse;
 pub mod builder;
+pub mod copy_cache;
 pub mod engine;
 pub mod entity_trim;
 pub mod game_dir;
@@ -55,6 +56,7 @@ pub mod highlevel;
 pub mod launch_settings;
 pub mod map_text;
 pub mod protocol47;
+pub mod protocol48_copies;
 pub mod runtime_batch;
 pub mod scanner;
 pub mod sound_mute;

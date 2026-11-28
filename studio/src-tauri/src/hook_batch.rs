@@ -7,7 +7,8 @@
 //! is, by its full path, when the hook DLL can open it that way (#779); for
 //! an older DLL it is copied into the game's folder for the batch
 //! (`source_copies`). A demo over the engine's entity limit plays from its
-//! trimmed copy (`trimmed_demos`, #207).
+//! trimmed copy (`trimmed_demos`, #207), and a protocol-47 demo, which
+//! `viewdemo` refuses, from its converted copy (`protocol48_demos`, #1549).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,7 +64,8 @@ pub fn refresh_viewdemo_times(app: &tauri::AppHandle, streaks: &mut [CaptureStre
 /// Writes the hook's batch file for `jobs` and returns it with the copies it
 /// plays from, or says why this batch has to be patched instead. Nothing is
 /// copied for a batch that then can't run this way. A demo in `trimmed` (the
-/// original's path to its trimmed copy, #207) is played from the copy.
+/// original's path to the copy that plays: trimmed, #207, or converted from
+/// protocol 47, #1549, `protocol48_demos::plays_from`) is played from the copy.
 pub fn prepare(
     jobs: &[PatchJob],
     streaks: &[CaptureStreak],

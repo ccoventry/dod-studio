@@ -135,7 +135,12 @@ fn listen(app: &AppHandle, pid: u32) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
                 native::log_markdown(&crate::messages::review::answer_line(line.trim()));
+                // A converted copy's answer goes to its original's row (#1549).
+                let event = crate::protocol48_review::answered(event);
                 let ended = matches!(event, native::review_queue::ReviewEvent::Ended { .. });
+                if ended {
+                    crate::protocol48_review::ended();
+                }
                 let _ = app.emit(EVENT, event);
                 if ended {
                     return;
@@ -156,6 +161,15 @@ pub async fn start_highlight_review(
     start_from: Option<f64>,
 ) -> Result<ReviewStarted, String> {
     let count = highlights.len();
+    // The game plays each demo with viewdemo, which refuses a protocol-47
+    // one: those play a converted copy (#1549), the latest review's once the
+    // game has the queue.
+    let converting = app.clone();
+    let (highlights, copies) =
+        crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+            crate::protocol48_review::prepare(&converting, highlights)
+        }))
+        .await?;
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
     std::fs::write(
         &queue,
@@ -207,6 +221,7 @@ pub async fn start_highlight_review(
             (pid, true)
         }
     };
+    crate::protocol48_review::sent(copies);
     native::log_markdown(&crate::messages::review::highlights_sent(
         count, pid, launched,
     ));

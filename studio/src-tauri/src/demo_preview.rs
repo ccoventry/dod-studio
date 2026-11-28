@@ -188,8 +188,8 @@ pub async fn launch_demo_preview(
 }
 
 /// Starts the game on the preview of `first` (or its `trimmed` copy): the
-/// original in place when the game can play it (#434), else a patched
-/// bookmark preview.
+/// original in place when the game can play it (#434), or a protocol-47
+/// demo's converted copy (#1549), else a patched bookmark preview.
 fn launch_preview_game(
     app: tauri::AppHandle,
     patcher_config: PatcherConfig,
@@ -198,11 +198,13 @@ fn launch_preview_game(
     first: Option<PathBuf>,
     trimmed: Option<PathBuf>,
 ) -> Result<(), String> {
-    if let Some(arg) = trimmed
-        .as_deref()
-        .or(first.as_deref())
-        .and_then(|demo| crate::preview_in_place::plan(&patcher_config, dod_dir, demo))
-    {
+    // A protocol-47 demo plays its converted copy (#1549); a conversion that
+    // fails returns here, and the caller takes the placed map build out.
+    let in_place = match trimmed.as_deref().or(first.as_deref()) {
+        Some(demo) => crate::preview_in_place::plan_playable(&app, &patcher_config, dod_dir, demo)?,
+        None => None,
+    };
+    if let Some(arg) = in_place {
         return crate::preview_in_place::launch(app, &patcher_config, &arg);
     }
     let (jobs, _generated) =
@@ -292,11 +294,13 @@ pub async fn send_preview_to_running_game(
             Some(demo) => crate::trimmed_demos::for_preview(&app, demo, &game_path)?,
             None => None,
         };
-        if let Some(arg) = trimmed
-            .as_deref()
-            .or(first.as_deref())
-            .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
-        {
+        let in_place = match trimmed.as_deref().or(first.as_deref()) {
+            Some(demo) => {
+                crate::preview_in_place::plan_playable(&app, &patcher_config, &dod_dir, demo)?
+            }
+            None => None,
+        };
+        if let Some(arg) = in_place {
             let sent = crate::preview_in_place::send_to_running(&pids, &arg);
             if let (Ok(Some(_)), Some(demo)) = (&sent, &first) {
                 crate::map_builds_manager::warn_for_open_game(&app, &game_path, demo);

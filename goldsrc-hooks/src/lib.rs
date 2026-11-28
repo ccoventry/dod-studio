@@ -371,6 +371,7 @@ mod nameplates;
 mod names;
 mod objicons;
 mod old_names;
+mod old_protocol;
 mod overview_hd;
 mod overview_map;
 mod overview_marker;

@@ -18,6 +18,9 @@ pub mod file_version;
 /// symlinks and stops at a depth cap (#376).
 pub mod folder_walk;
 pub mod foreground_lock;
+/// The game asks Studio, over the same pipe, for a protocol-48 copy of a
+/// protocol-47 demo (#1549).
+pub mod game_convert_requests;
 /// The game tells Studio, over the same pipe, a demo it plays is damaged
 /// (#1373).
 pub mod game_damage_notices;

@@ -425,6 +425,9 @@ pub fn poll() {
     crate::hull_trace_guard::poll();
     // One atomic load unless a demo just stopped on a damaged frame.
     crate::demo_damage::poll();
+    // One atomic load unless Studio just answered for a protocol-47 demo
+    // viewdemo was given (#1549).
+    crate::old_protocol::poll();
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();

@@ -1,14 +1,16 @@
 //! Converting a protocol-47 demo to protocol 48 (#239).
 //!
-//! Today's game plays a demo whose header says network protocol 47, but
-//! prints "WARNING! demo protocol outdated." first, on both engine builds,
-//! with HLAE or without. Nothing else about a protocol-47 demo differs: its
-//! frames, messages and delta encoding are laid out as 48's
+//! Today's game, on both engine builds, plays a demo whose header says
+//! network protocol 47 with `playdemo` after "WARNING! demo protocol
+//! outdated.", and refuses it with `viewdemo`, whose `Core.dll` disconnects at
+//! the server info's 47 (#1549). Nothing else about a protocol-47 demo
+//! differs: its frames, messages and delta encoding are laid out as 48's
 //! (`docs/goldsrc_protocol_47.md`). So the conversion rewrites the protocol
 //! in the header and in each `svc_serverinfo` and nothing else: four bytes
 //! in the header and four in each server info, in place. Every other byte,
 //! the directory included, stays what the recorder wrote. Patched batch
-//! copies convert as they are written (`engine::StreamPatcher`), and
+//! copies convert as they are written (`engine::StreamPatcher`), Studio's
+//! `viewdemo` paths play a converted copy (`protocol48_copies`), and
 //! `dod-studio-cli convert-47` converts a demo on its own.
 //!
 //! The idea and the two places to change come from HLAE's DemoTools ("Try
@@ -120,9 +122,9 @@ pub struct Converted {
     pub stopped_at: Option<usize>,
 }
 
-/// Whether `bytes` are a demo whose header says protocol 47: one the game
-/// plays with an outdated-protocol warning until [`convert_in_place`] has
-/// run.
+/// Whether `bytes` are a demo whose header says protocol 47: one `viewdemo`
+/// refuses, and `playdemo` plays with an outdated-protocol warning, until
+/// [`convert_in_place`] has run.
 pub fn is_protocol_47(bytes: &[u8]) -> bool {
     header_protocol(bytes) == Some(NETWORK_PROTOCOL_47)
 }
@@ -413,6 +415,28 @@ fn new_part_file(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
         std::io::ErrorKind::AlreadyExists,
         crate::messages::protocol47::NO_FREE_PART_NAME,
     ))
+}
+
+/// Protocol-47 demos for other modules' tests.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    /// The protocol-48 demo `p48` made to say 47 where a 2004 recording does:
+    /// in the header and in every server info. [`convert_in_place`] turns it
+    /// back into `p48` byte for byte.
+    pub(crate) fn as_protocol_47(p48: &[u8]) -> Vec<u8> {
+        let mut old = p48.to_vec();
+        old[HEADER_NETWORK_PROTOCOL].copy_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
+        let mut needle = vec![SVC_SERVERINFO];
+        needle.extend_from_slice(&NETWORK_PROTOCOL_48.to_le_bytes());
+        for at in 0..old.len().saturating_sub(needle.len()) {
+            if old[at..at + needle.len()] == needle[..] && is_server_info_at(&old, at) {
+                old[at + 1..at + 5].copy_from_slice(&NETWORK_PROTOCOL_47.to_le_bytes());
+            }
+        }
+        old
+    }
 }
 
 #[cfg(test)]

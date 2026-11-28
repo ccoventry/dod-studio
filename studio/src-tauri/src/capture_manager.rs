@@ -884,6 +884,16 @@ fn obs_drop_rate_payload(report: &native::obs::ObsDropReport) -> serde_json::Val
     })
 }
 
+/// Ends a batch that stopped before its game started: clears the running
+/// flag and shows `status` on the Capture footer as an error.
+fn end_unstarted_batch(app: &tauri::AppHandle, is_running: &Mutex<bool>, status: String) {
+    *lock_or_recover(is_running) = false;
+    let _ = app.emit(
+        "capture_status",
+        serde_json::json!({ "running": false, "error": true, "status": status }),
+    );
+}
+
 /// Everything under `path`, in bytes. 0 for a folder that isn't there.
 fn folder_bytes(path: &Path) -> u64 {
     native::sys::folder_walk::Walker::new()
@@ -1542,39 +1552,23 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
-        // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
-        let crate::trimmed_demos::BatchCopies {
-            copies: trimmed,
-            pins: trim_pins,
-        } = match crate::trimmed_demos::for_batch(
+        // ── Copies played in place of a demo: trimmed (#207), protocol 48 (#1549) ──
+        let copies = match crate::batch_copies::prepare(
             &app_handle_clone,
             &patch_jobs,
-            &patcher_config.game_path,
+            &patcher_config,
             &cancel_token_arc,
         ) {
-            Ok(batch) => batch,
-            Err(status) => {
-                let mut running = lock_or_recover(&is_running_arc);
-                *running = false;
-                let _ = app_handle_clone.emit(
-                    "capture_status",
-                    serde_json::json!({
-                        "running": false,
-                        "error": true,
-                        "status": status
-                    }),
-                );
-                return;
-            }
+            Ok(copies) => copies,
+            Err(status) => return end_unstarted_batch(&app_handle_clone, &is_running_arc, status),
         };
-
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
             match crate::hook_batch::prepare(
                 &patch_jobs,
                 &planned_streaks,
                 &patcher_config,
-                &trimmed,
+                &copies.hook_plays,
             ) {
                 Ok(mut batch) => {
                     batch.reuse_game = reuse_game_pid;
@@ -1585,17 +1579,7 @@ pub async fn start_capture_batch_impl(
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
                     log_markdown(&crate::messages::capture::batch_not_started_line(&status));
-                    let mut running = lock_or_recover(&is_running_arc);
-                    *running = false;
-                    let _ = app_handle_clone.emit(
-                        "capture_status",
-                        serde_json::json!({
-                            "running": false,
-                            "error": true,
-                            "status": status
-                        }),
-                    );
-                    return;
+                    return end_unstarted_batch(&app_handle_clone, &is_running_arc, status);
                 }
                 Err(why) => {
                     log_markdown(&crate::messages::capture::batch_patched_instead_of_seeking(
@@ -1698,7 +1682,7 @@ pub async fn start_capture_batch_impl(
         // A patched demo over the entity limit is patched from its trimmed
         // copy (#207). Its frames are the original's, so every tick holds.
         for job in &mut patch_jobs {
-            if let Some(copy) = trimmed.get(&job.source_demo) {
+            if let Some(copy) = copies.trimmed.get(&job.source_demo) {
                 job.source_demo = copy.to_string_lossy().into_owned();
             }
         }
@@ -1896,8 +1880,9 @@ pub async fn start_capture_batch_impl(
         std::thread::spawn(move || {
             // Ends Render While Capturing however the listener ends.
             let _room_guard = RoomGuard(room.clone());
-            // The batch's trimmed copies can't be pruned until it ends (#207).
-            let _trim_pins = trim_pins;
+            // The batch's trimmed and converted copies can't be pruned until
+            // it ends (#207, #1549).
+            let _copy_pins = copies.pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per
