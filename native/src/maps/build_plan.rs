@@ -5,36 +5,56 @@
 //! map; this adds the two things a launch from Studio changes. A map file of
 //! the user's own in `dod_addon\maps` is what the game reads first, so it is
 //! the one compared. And where the installed map is missing or another build
-//! while Studio's library holds the demo's, the demo plays right
-//! (`MapStatus::FromLibrary`): Studio puts that build in place before it
-//! starts the game.
+//! while Studio's library holds the demo's, the demo plays right when Studio
+//! starts the game for it (`MapStatus::FromLibrary`): Studio puts that build
+//! in place first.
 //!
-//! One game plays one build of each map (`build_placement`), so a batch whose
-//! demos want different builds of one map plays them all on the build its
-//! first such demo wants, and names the others in the activity log.
+//! One game plays one build of each map (`build_placement`). A batch whose
+//! demos want different builds of one map keeps the installed build when
+//! any of them wants it, so a demo that played right never plays wrong; only
+//! when none does, the first library build wanted is put in place. The
+//! others are left out and the user is told which. A game already running
+//! (an open game a batch or preview reuses, or one in the way of a fresh
+//! launch) keeps what it has loaded: its demos are compared against what it
+//! reads, and the user is told about each that won't play on its build.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use super::bsp;
 use super::build_library::{find_build, library_dir};
-use super::build_placement::{MapBuild, Placement, is_studio_placement, place_builds, slot_path};
-use super::map_check::{MapReference, MapStatus, map_reference, status_of};
+use super::build_placement::{
+    MapBuild, PlaceOutcome, Placement, games_running, place_builds, placed_build, slot_path,
+};
+use super::map_check::{MapReference, MapStatus, map_path, map_reference, status_of};
 use crate::log_markdown;
 use crate::messages::map_builds as msg;
 use crate::shared::paths::{addon_dir, mod_dir};
 
-/// What will play for `reference` when Studio starts the game of the install
-/// in `game_root` (the folder holding `hl.exe`): the map check against the
-/// map the game reads first, with the library's build counted in.
+/// Whether the unreadable-record warning was shown already this run: once
+/// is enough, the log has every time.
+static RECORD_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// What will play for `reference` when Studio starts a fresh game of the
+/// install in `game_root` (the folder holding `hl.exe`): the map check
+/// against the map the game reads first, with the library's build counted
+/// in. A game already running may read something else
+/// ([`open_game_warnings`]).
 pub fn status_for_launch(reference: &MapReference, game_root: &Path) -> MapStatus {
-    let addon = addon_dir(game_root);
-    if slot_path(&addon, &reference.map_name).is_file()
-        && !is_studio_placement(&addon, &reference.map_name)
-    {
-        return status_of(reference, &addon.join("maps"));
+    if let Some(slot) = users_slot_file(game_root, &reference.map_name) {
+        return status_of(reference, slot.parent().unwrap_or(&slot));
     }
     let installed = status_of(reference, &mod_dir(game_root).join("maps"));
     with_library(installed, reference, &library_dir(game_root))
+}
+
+/// The user's own `dod_addon\maps\<map>.bsp`, when one is there: the game
+/// plays it, and Studio never puts a build over it.
+pub fn users_slot_file(game_root: &Path, map_name: &str) -> Option<PathBuf> {
+    let addon = addon_dir(game_root);
+    let slot = slot_path(&addon, map_name);
+    (slot.is_file() && placed_build(&addon, map_name).is_none()).then_some(slot)
 }
 
 /// `status` (against the installed map), or `FromLibrary` when that map is
@@ -52,6 +72,23 @@ pub fn with_library(status: MapStatus, reference: &MapReference, library: &Path)
         }
         _ => status,
     }
+}
+
+/// The build a game running now reads for `map_name`: Studio's build in the
+/// slot, else the user's file there, else the installed map. `None` when
+/// there is none or it can't be read.
+pub fn build_running_game_reads(game_root: &Path, map_name: &str) -> Option<u32> {
+    let addon = addon_dir(game_root);
+    if let Some(checksum) = placed_build(&addon, map_name) {
+        return Some(checksum);
+    }
+    let slot = slot_path(&addon, map_name);
+    let file = if slot.is_file() {
+        slot
+    } else {
+        map_path(&mod_dir(game_root).join("maps"), map_name)
+    };
+    bsp::map_checksum_of_file(&file).ok()
 }
 
 /// What a demo needs from a launch.
@@ -74,6 +111,14 @@ impl Need {
             _ => Self::NothingBetter,
         }
     }
+
+    /// The build the demo was recorded on, when a launch can give it one.
+    pub fn wanted(&self) -> Option<u32> {
+        match self {
+            Self::InstalledIsRight(checksum) | Self::Library(checksum) => Some(*checksum),
+            Self::NothingBetter => None,
+        }
+    }
 }
 
 /// One demo of a launch, in play order.
@@ -84,7 +129,20 @@ pub struct DemoMap {
     pub need: Need,
 }
 
-/// A demo that won't play on its build, because an earlier demo of the same
+impl DemoMap {
+    /// The demo's file name, for the user.
+    pub fn name(&self) -> String {
+        file_name(&self.demo)
+    }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// A demo that won't play on its build, because another demo of the same
 /// launch needs another build of its map.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeftOut {
@@ -102,11 +160,18 @@ pub struct LaunchMaps {
     pub left_out: Vec<LeftOut>,
 }
 
-/// Plans a launch that plays `demos` in this order: for each map, the first
-/// demo that needs a particular build decides it (one game, one build of a
-/// map), and every later demo of that map wanting another is left out.
+/// Plans a launch that plays `demos` in this order. For each map: the
+/// installed build when any demo wants it (a demo that plays right on it
+/// never plays wrong for another's sake), else the first library build
+/// wanted. Every demo wanting another build of that map is left out.
 pub fn plan(demos: &[DemoMap]) -> LaunchMaps {
-    let mut chosen: HashMap<&str, Option<u32>> = HashMap::new();
+    let wants_installed: HashSet<&str> = demos
+        .iter()
+        .filter(|d| matches!(d.need, Need::InstalledIsRight(_)))
+        .map(|d| d.map_name.as_str())
+        .collect();
+    let mut chosen: HashMap<&str, Option<u32>> =
+        wants_installed.iter().map(|m| (*m, None)).collect();
     let mut maps = LaunchMaps::default();
     for demo in demos {
         let (wanted, from_library) = match demo.need {
@@ -114,23 +179,22 @@ pub fn plan(demos: &[DemoMap]) -> LaunchMaps {
             Need::Library(checksum) => (checksum, Some(checksum)),
             Need::NothingBetter => continue,
         };
-        match chosen.get(demo.map_name.as_str()) {
-            None => {
-                chosen.insert(&demo.map_name, from_library);
-                if let Some(checksum) = from_library {
-                    maps.place.push(MapBuild {
-                        map_name: demo.map_name.clone(),
-                        checksum,
-                    });
-                }
+        let playing = *chosen.entry(&demo.map_name).or_insert_with(|| {
+            if let Some(checksum) = from_library {
+                maps.place.push(MapBuild {
+                    map_name: demo.map_name.clone(),
+                    checksum,
+                });
             }
-            Some(playing) if *playing == from_library => {}
-            Some(playing) => maps.left_out.push(LeftOut {
+            from_library
+        });
+        if playing != from_library {
+            maps.left_out.push(LeftOut {
                 demo: demo.demo.clone(),
                 map_name: demo.map_name.clone(),
                 wanted,
-                playing: *playing,
-            }),
+                playing,
+            });
         }
     }
     maps
@@ -158,245 +222,166 @@ pub fn demo_maps(demos: &[PathBuf], game_root: &Path) -> Vec<DemoMap> {
         .collect()
 }
 
-/// Plans `demos` for a fresh game of the install in `game_root`, logs the
-/// demos left out and the builds used, and puts the builds in place. Puts
-/// nothing in place while a game runs: it may have loaded another build of
-/// the map already, and loading a second is a fatal error.
-pub fn place_for_launch(demos: &[PathBuf], game_root: &Path) -> Placement {
-    let maps = plan_and_log(demos, game_root);
-    let addon = addon_dir(game_root);
-    if maps.place.is_empty() {
-        return Placement::none(&addon);
-    }
-    if crate::sys::process::is_running(&[crate::sys::process::GAME_EXE]) {
-        log_markdown(&msg::game_running(maps.place.len()));
-        return Placement::none(&addon);
-    }
-    place_builds(&addon, &maps.place).0
+/// [`plan`] for `demos` on the install in `game_root`, with nothing put in
+/// place: what the confirm before a batch shows.
+pub fn plan_for(demos: &[PathBuf], game_root: &Path) -> LaunchMaps {
+    plan(&demo_maps(demos, game_root))
 }
 
-/// [`plan`] for `demos`, with the left-out demos and the builds the launch
-/// uses written to the activity log.
-pub fn plan_and_log(demos: &[PathBuf], game_root: &Path) -> LaunchMaps {
-    let maps = plan(&demo_maps(demos, game_root));
-    for left in &maps.left_out {
+/// What a launch did with its maps: the builds in place for its game, and
+/// the warnings for the user (demos that won't play on their build, builds
+/// that couldn't be put in place). Each warning is in the activity log too.
+#[derive(Debug)]
+pub struct LaunchOutcome {
+    pub placement: Placement,
+    pub warnings: Vec<String>,
+}
+
+/// Whether a game runs or starts (`build_placement::GAME_PROCESSES`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameState {
+    Running,
+    NoneRunning,
+}
+
+impl GameState {
+    /// The process list's answer now.
+    pub fn now() -> Self {
+        if games_running() {
+            Self::Running
+        } else {
+            Self::NoneRunning
+        }
+    }
+}
+
+/// Plans `demos` for a fresh game of the install in `game_root` and puts the
+/// builds in place, unless a game runs or starts already: it may have loaded
+/// another build of a map, and loading a second is a fatal error.
+pub fn place_for_launch(demos: &[PathBuf], game_root: &Path) -> LaunchOutcome {
+    place_for_launch_when(demos, game_root, GameState::now())
+}
+
+/// [`place_for_launch`] with `games` the state of the games now.
+pub fn place_for_launch_when(
+    demos: &[PathBuf],
+    game_root: &Path,
+    games: GameState,
+) -> LaunchOutcome {
+    let addon = addon_dir(game_root);
+    let demo_maps = demo_maps(demos, game_root);
+    let maps = plan(&demo_maps);
+    let mut warnings = left_out_warnings(&maps.left_out);
+    if maps.place.is_empty() {
+        return LaunchOutcome {
+            placement: Placement::none(&addon),
+            warnings,
+        };
+    }
+    if games == GameState::Running {
+        log_markdown(&msg::game_running(maps.place.len()));
+        warnings.extend(running_game_warnings(&demo_maps, game_root));
+        return LaunchOutcome {
+            placement: Placement::none(&addon),
+            warnings,
+        };
+    }
+    let (placement, outcomes) = place_builds(&addon, &maps.place);
+    log_in_place(&maps.place, &outcomes);
+    warnings.extend(outcome_warnings(&maps.place, &outcomes));
+    LaunchOutcome {
+        placement,
+        warnings,
+    }
+}
+
+/// The warnings for `demos` played in a game that runs already (an open game
+/// a batch or preview reuses): each demo a fresh launch would play on its
+/// build, but this game won't, because it reads another build of the map
+/// (an old build Studio put in place for it, or the installed one).
+pub fn open_game_warnings(demos: &[PathBuf], game_root: &Path) -> Vec<String> {
+    running_game_warnings(&demo_maps(demos, game_root), game_root)
+}
+
+fn running_game_warnings(demos: &[DemoMap], game_root: &Path) -> Vec<String> {
+    let mut reads: HashMap<&str, Option<u32>> = HashMap::new();
+    let warnings: Vec<String> = demos
+        .iter()
+        .filter(|demo| {
+            let Some(wanted) = demo.need.wanted() else {
+                return false;
+            };
+            let read = *reads
+                .entry(&demo.map_name)
+                .or_insert_with(|| build_running_game_reads(game_root, &demo.map_name));
+            read != Some(wanted)
+        })
+        .map(|demo| msg::open_game_warning(&demo.name(), &demo.map_name))
+        .collect();
+    if !warnings.is_empty() {
+        log_markdown(&msg::open_game_keeps_its_maps(warnings.len()));
+    }
+    warnings
+}
+
+/// One warning per map with demos left out, naming them; each also logged.
+fn left_out_warnings(left_out: &[LeftOut]) -> Vec<String> {
+    let mut by_map: Vec<(&str, Vec<String>)> = Vec::new();
+    for left in left_out {
         log_markdown(&msg::left_out(
             left.demo.display(),
             &left.map_name,
             left.wanted,
             left.playing,
         ));
+        let name = file_name(&left.demo);
+        match by_map.iter_mut().find(|(map, _)| *map == left.map_name) {
+            Some((_, demos)) => demos.push(name),
+            None => by_map.push((&left.map_name, vec![name])),
+        }
     }
-    if !maps.place.is_empty() {
-        let names: Vec<String> = maps
-            .place
-            .iter()
-            .map(|b| format!("{} {}", b.map_name, msg::build(b.checksum)))
-            .collect();
-        log_markdown(&msg::launch_places(maps.place.len(), names.join(", ")));
+    by_map
+        .into_iter()
+        .map(|(map, demos)| msg::left_out_warning(map, &demos))
+        .collect()
+}
+
+/// The activity-log line for the builds that are in place, from what
+/// `place_builds` did.
+fn log_in_place(wants: &[MapBuild], outcomes: &[PlaceOutcome]) {
+    let names: Vec<String> = wants
+        .iter()
+        .zip(outcomes)
+        .filter(|(_, outcome)| outcome.is_in_place())
+        .map(|(b, _)| format!("{} {}", b.map_name, msg::build(b.checksum)))
+        .collect();
+    if !names.is_empty() {
+        log_markdown(&msg::launch_places(names.len(), names.join(", ")));
     }
-    maps
+}
+
+/// A warning for each build not put in place, and the unreadable record
+/// once per run.
+fn outcome_warnings(wants: &[MapBuild], outcomes: &[PlaceOutcome]) -> Vec<String> {
+    wants
+        .iter()
+        .zip(outcomes)
+        .filter_map(|(want, outcome)| match outcome {
+            PlaceOutcome::Placed | PlaceOutcome::AlreadyInPlace => None,
+            PlaceOutcome::SlotNotOurs { slot } => {
+                Some(msg::slot_taken_warning(&want.map_name, slot.display()))
+            }
+            PlaceOutcome::NotInLibrary => {
+                Some(msg::not_in_library_warning(&want.map_name, want.checksum))
+            }
+            PlaceOutcome::RecordUnreadable { record } => (!RECORD_WARNED
+                .swap(true, Ordering::Relaxed))
+            .then(|| msg::record_unreadable_warning(record.display())),
+            PlaceOutcome::Failed(why) => Some(msg::place_failed_warning(&want.map_name, why)),
+        })
+        .collect()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::maps::bsp;
-    use crate::maps::build_library::{add_build, test_map_bytes};
-    use crate::test_support::Scratch;
-
-    fn checksum(seed: u8) -> u32 {
-        bsp::map_checksum(&test_map_bytes(seed)).unwrap()
-    }
-
-    fn demo(name: &str, map: &str, need: Need) -> DemoMap {
-        DemoMap {
-            demo: PathBuf::from(name),
-            map_name: map.into(),
-            need,
-        }
-    }
-
-    fn reference(map: &str, checksum: u32) -> MapReference {
-        MapReference {
-            map_name: map.into(),
-            expected_checksum: Some(checksum),
-        }
-    }
-
-    /// An install root with `dod\maps\dod_x.bsp` (build 1) and a library
-    /// holding build 2.
-    fn game_root(tag: &str) -> Scratch {
-        let root = Scratch::new(format_args!("build_plan_{tag}"));
-        let maps = mod_dir(&root).join("maps");
-        std::fs::create_dir_all(&maps).unwrap();
-        std::fs::write(maps.join("dod_x.bsp"), test_map_bytes(1)).unwrap();
-        let source = root.join("old.bsp");
-        std::fs::write(&source, test_map_bytes(2)).unwrap();
-        add_build(&library_dir(&root), "dod_x", &source, &mut |_, _| {}).unwrap();
-        root
-    }
-
-    #[test]
-    fn a_wrong_build_the_library_holds_plays_from_the_library() {
-        let root = game_root("from_library");
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(2)), &root),
-            MapStatus::FromLibrary {
-                checksum: checksum(2)
-            }
-        );
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(1)), &root),
-            MapStatus::Ok {
-                checksum: checksum(1)
-            }
-        );
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(3)), &root),
-            MapStatus::WrongBuild {
-                expected: checksum(3),
-                found: checksum(1)
-            },
-            "no build of its own: still a different version"
-        );
-    }
-
-    #[test]
-    fn a_missing_map_the_library_holds_plays_from_the_library() {
-        let root = game_root("missing");
-        std::fs::remove_file(mod_dir(&root).join("maps").join("dod_x.bsp")).unwrap();
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(2)), &root),
-            MapStatus::FromLibrary {
-                checksum: checksum(2)
-            }
-        );
-    }
-
-    #[test]
-    fn the_users_own_map_in_the_addon_folder_is_the_one_compared() {
-        let root = game_root("users_addon");
-        let slot = slot_path(&addon_dir(&root), "dod_x");
-        std::fs::create_dir_all(slot.parent().unwrap()).unwrap();
-        std::fs::write(&slot, test_map_bytes(9)).unwrap();
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(2)), &root),
-            MapStatus::WrongBuild {
-                expected: checksum(2),
-                found: checksum(9)
-            },
-            "Studio can't put its build over the user's file"
-        );
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(9)), &root),
-            MapStatus::Ok {
-                checksum: checksum(9)
-            }
-        );
-    }
-
-    #[test]
-    fn a_build_studio_placed_is_not_mistaken_for_the_users() {
-        let root = game_root("ours_in_addon");
-        let (placement, _) = place_builds(
-            &addon_dir(&root),
-            &[MapBuild {
-                map_name: "dod_x".into(),
-                checksum: checksum(2),
-            }],
-        );
-        assert_eq!(
-            status_for_launch(&reference("dod_x", checksum(1)), &root),
-            MapStatus::Ok {
-                checksum: checksum(1)
-            },
-            "compared with the installed map under it"
-        );
-        placement.release();
-    }
-
-    #[test]
-    fn a_batch_places_each_library_build_once() {
-        let maps = plan(&[
-            demo("a.dem", "dod_x", Need::Library(2)),
-            demo("b.dem", "dod_x", Need::Library(2)),
-            demo("c.dem", "dod_y", Need::InstalledIsRight(5)),
-            demo("d.dem", "dod_z", Need::NothingBetter),
-        ]);
-        assert_eq!(
-            maps.place,
-            vec![MapBuild {
-                map_name: "dod_x".into(),
-                checksum: 2
-            }]
-        );
-        assert!(maps.left_out.is_empty());
-    }
-
-    #[test]
-    fn two_demos_needing_different_builds_of_one_map_play_on_the_first_ones() {
-        let maps = plan(&[
-            demo("old.dem", "dod_x", Need::Library(2)),
-            demo("new.dem", "dod_x", Need::InstalledIsRight(1)),
-            demo("older.dem", "dod_x", Need::Library(3)),
-        ]);
-        assert_eq!(
-            maps.place,
-            vec![MapBuild {
-                map_name: "dod_x".into(),
-                checksum: 2
-            }]
-        );
-        assert_eq!(
-            maps.left_out,
-            vec![
-                LeftOut {
-                    demo: "new.dem".into(),
-                    map_name: "dod_x".into(),
-                    wanted: 1,
-                    playing: Some(2),
-                },
-                LeftOut {
-                    demo: "older.dem".into(),
-                    map_name: "dod_x".into(),
-                    wanted: 3,
-                    playing: Some(2),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn a_first_demo_on_the_installed_build_keeps_it_for_the_batch() {
-        let maps = plan(&[
-            demo("new.dem", "dod_x", Need::InstalledIsRight(1)),
-            demo("old.dem", "dod_x", Need::Library(2)),
-        ]);
-        assert!(maps.place.is_empty());
-        assert_eq!(maps.left_out.len(), 1);
-        assert_eq!(maps.left_out[0].playing, None);
-    }
-
-    #[test]
-    fn demos_are_read_for_their_maps_in_order() {
-        let root = game_root("demo_maps");
-        let mut header = vec![0u8; crate::patch::DEMO_HEADER_SIZE];
-        header[..8].copy_from_slice(b"HLDEMO\0\0");
-        header[16..21].copy_from_slice(b"dod_x");
-        header[536..540].copy_from_slice(&checksum(2).to_le_bytes());
-        let old = root.join("old.dem");
-        std::fs::write(&old, &header).unwrap();
-        let junk = root.join("junk.dem");
-        std::fs::write(&junk, b"no").unwrap();
-
-        assert_eq!(
-            demo_maps(&[junk, old.clone()], &root),
-            vec![DemoMap {
-                demo: old,
-                map_name: "dod_x".into(),
-                need: Need::Library(checksum(2)),
-            }]
-        );
-    }
-}
+#[path = "build_plan_tests.rs"]
+mod tests;

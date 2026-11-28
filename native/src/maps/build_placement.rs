@@ -11,15 +11,19 @@
 //!   modified since starting the engine" when a later load in the same
 //!   session finds another file (measured on both builds: a copy removed
 //!   between two demos of one game). So a build goes in place only while no
-//!   game runs, and comes out only once the game has closed; between those,
-//!   one game plays one build of each map.
-//! - **Never over a file Studio didn't put there.** A build is copied only
-//!   into an empty slot, and a slot is emptied only while its bytes are still
-//!   the library build's (or, with the library file gone, its checksum is
-//!   still the build's). Anything else there is the user's and is left alone.
+//!   game runs or is starting (`hl.exe` or `hlae.exe`), and comes out only
+//!   once none does; between those, one game plays one build of each map.
+//! - **Never over a file Studio didn't put there.** A build is copied to a
+//!   name of Studio's own beside the slot, then hard-linked into the slot,
+//!   which fails if anything is there: the slot is never overwritten, and is
+//!   never a half copy. It is emptied only while its bytes are still the
+//!   library build's (or, with the library file gone, its checksum is still
+//!   the build's). Anything else there is the user's and is left alone.
 //! - **A record of what is in place**, `placed.json` in the library folder,
 //!   written before each copy, so builds left by a Studio that closed or
-//!   crashed are removed at its next start.
+//!   crashed are removed at its next start. Every change to it holds
+//!   `placed.lock`, opened with no sharing, so two Studios on one install
+//!   never interleave.
 //!
 //! Each launch's builds belong to a session; removing a session's builds
 //! never touches a build a later launch took over.
@@ -27,7 +31,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use lock_recover::lock_or_recover;
@@ -40,14 +44,30 @@ use crate::messages::map_builds as msg;
 
 /// The record of placed builds, in the library folder.
 const RECORD_FILE: &str = "placed.json";
+/// Held, unshared, across every change to the record.
+const LOCK_FILE: &str = "placed.lock";
+/// The suffix of Studio's copy beside the slot, before it is linked in.
+const PART_SUFFIX: &str = ".dodstudio-part";
+/// How long a change to the record waits for another Studio's.
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// How often a release waiting on the game looks at the process list: it
 /// only watches a process stay alive (CLAUDE.md, process lifecycles).
 const GAME_POLL: Duration = Duration::from_millis(500);
 
-/// One read-modify-write of a record at a time, across every thread here.
+/// The processes that mean a game runs or is on its way: the game, and the
+/// HLAE launcher starting it (as Launch Preview's process check counts them).
+pub const GAME_PROCESSES: &[&str] = &["hl.exe", "hlae.exe"];
+
+/// One read-modify-write of a record at a time within this Studio.
 static RECORD_LOCK: Mutex<()> = Mutex::new(());
 /// Makes two sessions started in the same nanosecond still differ.
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+/// Set when Studio closes: every wait for a game stops (`release_at_exit`).
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+/// This Studio's sessions with builds still in place, and the leftovers it
+/// is waiting to remove: what `release_at_exit` removes.
+static ACTIVE: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
 
 /// A build of a map, as the library names it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -61,12 +81,24 @@ pub fn slot_path(addon: &Path, map_name: &str) -> PathBuf {
     addon.join("maps").join(format!("{map_name}.bsp"))
 }
 
+/// Studio's copy beside the slot while it is being written.
+fn part_path(addon: &Path, map_name: &str) -> PathBuf {
+    addon
+        .join("maps")
+        .join(format!("{map_name}.bsp{PART_SUFFIX}"))
+}
+
 fn library(addon: &Path) -> PathBuf {
     addon.join(LIBRARY_FOLDER)
 }
 
 fn record_path(addon: &Path) -> PathBuf {
     library(addon).join(RECORD_FILE)
+}
+
+/// Whether any game is running or starting.
+pub fn games_running() -> bool {
+    crate::sys::process::is_running(GAME_PROCESSES)
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -81,6 +113,55 @@ struct PlacedBuild {
     checksum: u32,
     /// The launch whose game the build is in place for.
     session: u64,
+}
+
+/// The record held for a change: this Studio's lock and the unshared file.
+struct RecordGuard {
+    _file: std::fs::File,
+    _in_process: std::sync::MutexGuard<'static, ()>,
+}
+
+/// Takes the record for a change, waiting up to `wait` for another Studio.
+fn lock_record_within(addon: &Path, wait: Duration) -> Result<RecordGuard, String> {
+    let in_process = lock_or_recover(&RECORD_LOCK);
+    let dir = library(addon);
+    std::fs::create_dir_all(&dir).map_err(|e| msg::could_not_write(dir.display(), e))?;
+    let path = dir.join(LOCK_FILE);
+    let since = Instant::now();
+    loop {
+        match open_unshared(&path) {
+            Ok(file) => {
+                return Ok(RecordGuard {
+                    _file: file,
+                    _in_process: in_process,
+                });
+            }
+            Err(_) if since.elapsed() < wait => std::thread::sleep(LOCK_RETRY),
+            Err(_) => return Err(msg::record_busy(path.display(), wait.as_secs())),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn open_unshared(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_unshared(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
 }
 
 /// The record, or an empty one when there is none. `None` (logged) when it
@@ -128,15 +209,16 @@ pub fn new_session() -> u64 {
     now.wrapping_add(SESSION_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Whether the file at `slot` is still the build Studio put there: its bytes
-/// are the library file's (or the start of them, from a copy cut short), or,
-/// with the library file gone, its checksum is the build's.
+/// Whether the file at `slot` is still the build Studio put there: the same
+/// bytes as the library file, or, with the library file gone, the build's
+/// checksum. A slot only ever receives a whole copy (it is linked in after
+/// the copy finished), so anything shorter is not Studio's.
 fn holds_build(slot: &Path, library_file: &Path, checksum: u32) -> bool {
     let Ok(placed) = std::fs::read(slot) else {
         return false;
     };
     match std::fs::read(library_file) {
-        Ok(build) => placed.len() <= build.len() && build[..placed.len()] == placed[..],
+        Ok(build) => build == placed,
         Err(_) => bsp::map_checksum(&placed).is_ok_and(|found| found == checksum),
     }
 }
@@ -149,11 +231,20 @@ pub enum PlaceOutcome {
     /// Studio had already put this build there; this launch takes it over.
     AlreadyInPlace,
     /// A file Studio didn't put there holds the slot; it is left alone.
-    SlotNotOurs,
+    SlotNotOurs { slot: PathBuf },
     /// The library doesn't hold the build.
     NotInLibrary,
-    /// The copy, or the record before it, failed.
+    /// The record of placed builds can't be read, so nothing is placed.
+    RecordUnreadable { record: PathBuf },
+    /// The copy, the record, or its lock failed.
     Failed(String),
+}
+
+impl PlaceOutcome {
+    /// Whether the build is in place for the launch.
+    pub fn is_in_place(&self) -> bool {
+        matches!(self, Self::Placed | Self::AlreadyInPlace)
+    }
 }
 
 /// One launch's builds, removed together once its game has gone.
@@ -190,15 +281,15 @@ impl Placement {
         if self.is_empty() {
             return 0;
         }
+        forget_active(&self.addon, self.session);
         release_sessions(&self.addon, &[self.session])
     }
 
     /// Removes this launch's builds on a thread of their own once no game
-    /// runs: after waiting up to `start_wait` for a game to show up (a
-    /// launch whose game is still starting), then for every game to close.
-    /// Any game, not only this launch's: one Studio cannot tell apart may
-    /// have loaded the build too. A Studio that closes first leaves them to
-    /// [`release_leftovers_after_games`] at its next start.
+    /// runs or starts: after waiting up to `start_wait` for one to show up,
+    /// then for every one to close. Any game, not only this launch's: one
+    /// Studio cannot tell apart may have loaded the build too. Stops without
+    /// removing anything when Studio closes (`release_at_exit` decides then).
     pub fn release_after_game(self, start_wait: Duration) {
         if self.is_empty() {
             return;
@@ -206,8 +297,12 @@ impl Placement {
         let spawned = std::thread::Builder::new()
             .name("map_builds_release".into())
             .spawn(move || {
-                wait_for_games_to_end(start_wait);
-                self.release();
+                let end = wait_for_games_to_end(start_wait, GAME_POLL, &SHUTTING_DOWN, &mut || {
+                    games_running()
+                });
+                if end == WaitEnd::GamesClosed {
+                    self.release();
+                }
             });
         if let Err(e) = spawned {
             log_markdown(&msg::release_thread_failed(e));
@@ -215,49 +310,90 @@ impl Placement {
     }
 }
 
-/// Waits up to `start_wait` for a game to be running, then until none is.
-fn wait_for_games_to_end(start_wait: Duration) {
-    let mut sys = crate::sys::process::snapshot();
+/// How a wait for the games ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitEnd {
+    /// No game runs or starts any more.
+    GamesClosed,
+    /// `cancel` was set (Studio is closing).
+    Cancelled,
+}
+
+/// Waits up to `start_wait` for `games_running` to say a game runs, then
+/// until it says none does, looking every `poll` and checking `cancel`
+/// every time.
+pub fn wait_for_games_to_end(
+    start_wait: Duration,
+    poll: Duration,
+    cancel: &AtomicBool,
+    games_running: &mut dyn FnMut() -> bool,
+) -> WaitEnd {
     let since = Instant::now();
-    while !crate::sys::process::is_game_in(&sys) && since.elapsed() < start_wait {
-        std::thread::sleep(GAME_POLL);
-        crate::sys::process::refresh(&mut sys);
+    let mut running = games_running();
+    while !running && since.elapsed() < start_wait {
+        if cancel.load(Ordering::Relaxed) {
+            return WaitEnd::Cancelled;
+        }
+        std::thread::sleep(poll);
+        running = games_running();
     }
-    while crate::sys::process::is_game_in(&sys) {
-        std::thread::sleep(GAME_POLL);
-        crate::sys::process::refresh(&mut sys);
+    while running {
+        if cancel.load(Ordering::Relaxed) {
+            return WaitEnd::Cancelled;
+        }
+        std::thread::sleep(poll);
+        running = games_running();
     }
+    WaitEnd::GamesClosed
+}
+
+fn remember_active(addon: &Path, session: u64) {
+    lock_or_recover(&ACTIVE).push((addon.to_path_buf(), session));
+}
+
+fn forget_active(addon: &Path, session: u64) {
+    lock_or_recover(&ACTIVE).retain(|(a, s)| !(a == addon && *s == session));
 }
 
 /// Puts each of `wants` in place in `addon`'s maps folder for one new launch.
 ///
-/// The caller makes sure no game runs (see the module doc). A build Studio
-/// already put there for an earlier launch is taken over, another build of
-/// the same map Studio put there is replaced, and a file Studio didn't put
-/// there is left alone. Logs each step to the activity log. Returns the
-/// launch's [`Placement`] and what happened to each want.
+/// The caller makes sure no game runs or starts (see the module doc). A
+/// build Studio already put there for an earlier launch is taken over,
+/// another build of the same map Studio put there is replaced, and a file
+/// Studio didn't put there is left alone. Logs each step to the activity
+/// log. Returns the launch's [`Placement`] and what happened to each want.
 pub fn place_builds(addon: &Path, wants: &[MapBuild]) -> (Placement, Vec<PlaceOutcome>) {
-    let session = new_session();
-    let _guard = lock_or_recover(&RECORD_LOCK);
     let mut placement = Placement {
         addon: addon.to_path_buf(),
-        session,
+        session: new_session(),
         builds: Vec::new(),
     };
+    let _guard = match lock_record_within(addon, LOCK_WAIT) {
+        Ok(guard) => guard,
+        Err(why) => {
+            log_markdown(&msg::lock_failed(&why));
+            return (placement, vec![PlaceOutcome::Failed(why); wants.len()]);
+        }
+    };
     let Some(mut record) = load_record(addon) else {
-        let unreadable = PlaceOutcome::Failed(msg::RECORD_UNREADABLE.to_string());
+        let unreadable = PlaceOutcome::RecordUnreadable {
+            record: record_path(addon),
+        };
         return (placement, vec![unreadable; wants.len()]);
     };
-    let outcomes = wants
+    let outcomes: Vec<PlaceOutcome> = wants
         .iter()
-        .map(|want| {
-            let outcome = place_one(addon, &mut record, want, session);
-            if matches!(outcome, PlaceOutcome::Placed | PlaceOutcome::AlreadyInPlace) {
-                placement.builds.push(want.clone());
-            }
-            outcome
-        })
+        .map(|want| place_one(addon, &mut record, want, placement.session))
         .collect();
+    placement.builds = wants
+        .iter()
+        .zip(&outcomes)
+        .filter(|(_, outcome)| outcome.is_in_place())
+        .map(|(want, _)| want.clone())
+        .collect();
+    if !placement.is_empty() {
+        remember_active(addon, placement.session);
+    }
     (placement, outcomes)
 }
 
@@ -283,7 +419,7 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             });
         let Some(index) = ours else {
             log_markdown(&msg::slot_not_ours(&want.map_name, slot.display()));
-            return PlaceOutcome::SlotNotOurs;
+            return PlaceOutcome::SlotNotOurs { slot };
         };
         if record.placed[index].checksum == want.checksum {
             record.placed[index].session = session;
@@ -311,73 +447,97 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
     // build just removed, or one the user deleted by hand) is stale, and an
     // old session's release must not take this launch's copy for its own.
     record.placed.retain(|p| p.map_name != want.map_name);
-    copy_into_slot(addon, record, want, session, &library_file, &slot)
+    copy_into_slot(addon, record, want, session, &library_file)
 }
 
 /// Records the build, then copies it into the empty slot. The record comes
-/// first, so a Studio that dies mid-copy still knows to remove what it left.
+/// first, so a Studio that dies mid-copy still knows what to clean up.
 fn copy_into_slot(
     addon: &Path,
     record: &mut Record,
     want: &MapBuild,
     session: u64,
     library_file: &Path,
-    slot: &Path,
 ) -> PlaceOutcome {
     let started = Instant::now();
+    let slot = slot_path(addon, &want.map_name);
     record.placed.push(PlacedBuild {
         map_name: want.map_name.clone(),
         checksum: want.checksum,
         session,
     });
-    let fail = |record: &mut Record, e: &dyn std::fmt::Display| {
-        record.placed.pop();
-        if let Err(save) = save_record(addon, record) {
-            log_markdown(&msg::record_unwritable(record_path(addon).display(), save));
-        }
-        log_markdown(&msg::place_failed(
-            &want.map_name,
-            want.checksum,
-            slot.display(),
-            e,
-        ));
-        PlaceOutcome::Failed(e.to_string())
-    };
     if let Err(e) = save_record(addon, record) {
         log_markdown(&msg::record_unwritable(record_path(addon).display(), &e));
         record.placed.pop();
         return PlaceOutcome::Failed(e.to_string());
     }
-    if let Err(e) = copy_new(library_file, slot) {
-        return fail(record, &e);
+    let copied = link_copy(library_file, &part_path(addon, &want.map_name), &slot);
+    if !matches!(copied, Ok(Linked::Linked)) {
+        record.placed.pop();
+        if let Err(save) = save_record(addon, record) {
+            log_markdown(&msg::record_unwritable(record_path(addon).display(), save));
+        }
     }
-    log_markdown(&msg::placed(
-        &want.map_name,
-        want.checksum,
-        slot.display(),
-        started.elapsed().as_millis(),
-    ));
-    PlaceOutcome::Placed
+    match copied {
+        Ok(Linked::Linked) => {
+            log_markdown(&msg::placed(
+                &want.map_name,
+                want.checksum,
+                slot.display(),
+                started.elapsed().as_millis(),
+            ));
+            PlaceOutcome::Placed
+        }
+        Ok(Linked::SlotTaken) => {
+            log_markdown(&msg::slot_not_ours(&want.map_name, slot.display()));
+            PlaceOutcome::SlotNotOurs { slot }
+        }
+        Err(e) => {
+            log_markdown(&msg::place_failed(
+                &want.map_name,
+                want.checksum,
+                slot.display(),
+                &e,
+            ));
+            PlaceOutcome::Failed(e.to_string())
+        }
+    }
 }
 
-/// Copies `from` to `to`, which must not exist: a file that appeared there
-/// since the check is never overwritten. A copy cut short is removed.
-fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
-    if let Some(parent) = to.parent() {
+/// How [`link_copy`] ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Linked {
+    Linked,
+    /// Something appeared in the slot since it was checked; left alone.
+    SlotTaken,
+}
+
+/// Copies `from` whole to `part` (Studio's own name), then links it in as
+/// `slot`, which fails when anything is there, and removes `part`. A drive
+/// without hard links (FAT, exFAT) gets a rename instead, made only while
+/// the slot is still empty.
+fn link_copy(from: &Path, part: &Path, slot: &Path) -> std::io::Result<Linked> {
+    if let Some(parent) = slot.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut source = std::fs::File::open(from)?;
-    let mut target = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(to)?;
-    let copied = std::io::copy(&mut source, &mut target).and_then(|_| target.sync_all());
-    if copied.is_err() {
-        drop(target);
-        // Our own partial copy, created just above.
-        let _ = std::fs::remove_file(to);
+    // A part left by a Studio that died mid-copy: Studio's own name.
+    let _ = std::fs::remove_file(part);
+    let copied = std::fs::copy(from, part)
+        .and_then(|_| std::fs::OpenOptions::new().write(true).open(part))
+        .and_then(|file| file.sync_all());
+    if let Err(e) = copied {
+        let _ = std::fs::remove_file(part);
+        return Err(e);
     }
-    copied
+    let linked = match std::fs::hard_link(part, slot) {
+        Ok(()) => Ok(Linked::Linked),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(Linked::SlotTaken),
+        Err(_) if slot.exists() => Ok(Linked::SlotTaken),
+        Err(_) => std::fs::rename(part, slot).map(|()| Linked::Linked),
+    };
+    // Gone already after a rename; the slot keeps the bytes after a link.
+    let _ = std::fs::remove_file(part);
+    linked
 }
 
 /// Removes the builds of `sessions` from `addon`'s maps folder: each one
@@ -385,7 +545,16 @@ fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
 /// and forgotten. A delete that fails stays in the record for the next
 /// start. Returns how many came out.
 pub fn release_sessions(addon: &Path, sessions: &[u64]) -> usize {
-    let _guard = lock_or_recover(&RECORD_LOCK);
+    if !record_path(addon).exists() {
+        return 0;
+    }
+    let _guard = match lock_record_within(addon, LOCK_WAIT) {
+        Ok(guard) => guard,
+        Err(why) => {
+            log_markdown(&msg::remove_failed(addon.display(), why));
+            return 0;
+        }
+    };
     let Some(mut record) = load_record(addon) else {
         return 0;
     };
@@ -396,6 +565,8 @@ pub fn release_sessions(addon: &Path, sessions: &[u64]) -> usize {
             kept.push(placed);
             continue;
         }
+        // A copy a Studio that died mid-copy left under Studio's own name.
+        let _ = std::fs::remove_file(part_path(addon, &placed.map_name));
         let slot = slot_path(addon, &placed.map_name);
         if !slot.exists() {
             continue;
@@ -429,6 +600,9 @@ pub fn release_sessions(addon: &Path, sessions: &[u64]) -> usize {
 
 /// The sessions with a build in place in `addon` right now.
 pub fn placed_sessions(addon: &Path) -> Vec<u64> {
+    if !record_path(addon).exists() {
+        return Vec::new();
+    }
     let _guard = lock_or_recover(&RECORD_LOCK);
     let sessions: HashSet<u64> = load_record(addon)
         .map(|record| record.placed.iter().map(|p| p.session).collect())
@@ -436,219 +610,95 @@ pub fn placed_sessions(addon: &Path) -> Vec<u64> {
     sessions.into_iter().collect()
 }
 
-/// Whether the file at `addon`'s slot for `map_name` is a build Studio put
-/// there, rather than one of the user's.
-pub fn is_studio_placement(addon: &Path, map_name: &str) -> bool {
+/// The build Studio has in `addon`'s slot for `map_name`, or `None` when the
+/// slot is empty or holds a file of the user's.
+pub fn placed_build(addon: &Path, map_name: &str) -> Option<u32> {
     let slot = slot_path(addon, map_name);
+    if !slot.is_file() || !record_path(addon).exists() {
+        return None;
+    }
     let _guard = lock_or_recover(&RECORD_LOCK);
-    let Some(record) = load_record(addon) else {
-        return false;
-    };
-    record
+    load_record(addon)?
         .placed
         .iter()
         .filter(|p| p.map_name == map_name)
-        .any(|p| {
+        .find(|p| {
             holds_build(
                 &slot,
                 &build_path(&library(addon), &p.map_name, p.checksum),
                 p.checksum,
             )
         })
+        .map(|p| p.checksum)
+}
+
+/// Whether the file at `addon`'s slot for `map_name` is a build Studio put
+/// there, rather than one of the user's.
+pub fn is_studio_placement(addon: &Path, map_name: &str) -> bool {
+    placed_build(addon, map_name).is_some()
 }
 
 /// At Studio's start: the builds an earlier Studio left in place (closed or
 /// crashed before its game did) are removed on a thread of their own once no
-/// game runs; a game still running may have loaded them. Only the builds in
-/// place now: one a launch from this Studio takes over in the meantime stays.
+/// game runs or starts; a game still running may have loaded them. Only the
+/// builds in place now: one a launch from this Studio takes over in the
+/// meantime stays.
 pub fn release_leftovers_after_games(addon: &Path) {
     let sessions = placed_sessions(addon);
     if sessions.is_empty() {
         return;
     }
     log_markdown(&msg::leftovers_found(sessions.len(), addon.display()));
+    for &session in &sessions {
+        remember_active(addon, session);
+    }
     let addon = addon.to_path_buf();
     let spawned = std::thread::Builder::new()
         .name("map_builds_leftovers".into())
         .spawn(move || {
-            wait_for_games_to_end(Duration::ZERO);
-            release_sessions(&addon, &sessions);
+            let end = wait_for_games_to_end(Duration::ZERO, GAME_POLL, &SHUTTING_DOWN, &mut || {
+                games_running()
+            });
+            if end == WaitEnd::GamesClosed {
+                for &session in &sessions {
+                    forget_active(&addon, session);
+                }
+                release_sessions(&addon, &sessions);
+            }
         });
     if let Err(e) = spawned {
         log_markdown(&msg::release_thread_failed(e));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::maps::build_library::{add_build, test_map_bytes};
-    use crate::test_support::Scratch;
-
-    struct Install {
-        _dir: Scratch,
-        addon: PathBuf,
-    }
-
-    /// An addon folder whose library holds builds 1 and 2 of `dod_x`.
-    fn install(tag: &str) -> Install {
-        let dir = Scratch::new(format_args!("build_placement_{tag}"));
-        let addon = dir.join("dod_addon");
-        for seed in [1, 2] {
-            let source = dir.join(format!("{seed}.bsp"));
-            std::fs::write(&source, test_map_bytes(seed)).unwrap();
-            add_build(&library(&addon), "dod_x", &source, &mut |_, _| {}).unwrap();
-        }
-        Install { _dir: dir, addon }
-    }
-
-    fn build(seed: u8) -> MapBuild {
-        MapBuild {
-            map_name: "dod_x".into(),
-            checksum: bsp::map_checksum(&test_map_bytes(seed)).unwrap(),
-        }
-    }
-
-    fn slot(addon: &Path) -> PathBuf {
-        slot_path(addon, "dod_x")
-    }
-
-    #[test]
-    fn a_build_goes_into_the_empty_slot_and_comes_out_on_release() {
-        let i = install("place");
-        let (placement, outcomes) = place_builds(&i.addon, &[build(1)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::Placed]);
-        assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(1));
-        assert!(is_studio_placement(&i.addon, "dod_x"));
-
-        assert_eq!(placement.release(), 1);
-        assert!(!slot(&i.addon).exists());
-        assert!(!record_path(&i.addon).exists(), "nothing left to remember");
-    }
-
-    #[test]
-    fn a_file_studio_did_not_place_is_never_overwritten_or_removed() {
-        let i = install("theirs");
-        std::fs::create_dir_all(slot(&i.addon).parent().unwrap()).unwrap();
-        std::fs::write(slot(&i.addon), test_map_bytes(9)).unwrap();
-
-        let (placement, outcomes) = place_builds(&i.addon, &[build(1)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::SlotNotOurs]);
-        assert!(placement.is_empty());
-        assert!(!is_studio_placement(&i.addon, "dod_x"));
-        assert_eq!(placement.release(), 0);
-        assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(9));
-    }
-
-    #[test]
-    fn a_placed_build_the_user_replaced_is_left_alone_on_release() {
-        let i = install("replaced");
-        let (placement, _) = place_builds(&i.addon, &[build(1)]);
-        std::fs::write(slot(&i.addon), test_map_bytes(9)).unwrap();
-
-        assert_eq!(placement.release(), 0);
-        assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(9));
-        assert!(
-            placed_sessions(&i.addon).is_empty(),
-            "forgotten, not retried"
-        );
-    }
-
-    #[test]
-    fn a_build_the_library_lacks_is_not_placed() {
-        let i = install("missing");
-        let (placement, outcomes) = place_builds(&i.addon, &[build(7)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::NotInLibrary]);
-        assert!(placement.is_empty());
-        assert!(!slot(&i.addon).exists());
-    }
-
-    #[test]
-    fn a_later_launch_takes_over_the_same_build_and_an_earlier_release_leaves_it() {
-        let i = install("takeover");
-        let (first, _) = place_builds(&i.addon, &[build(1)]);
-        let (second, outcomes) = place_builds(&i.addon, &[build(1)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::AlreadyInPlace]);
-
-        assert_eq!(first.release(), 0, "the second launch's game needs it");
-        assert!(slot(&i.addon).exists());
-        assert_eq!(second.release(), 1);
-        assert!(!slot(&i.addon).exists());
-    }
-
-    #[test]
-    fn another_build_studio_placed_is_replaced_for_a_new_launch() {
-        let i = install("swap");
-        let (first, _) = place_builds(&i.addon, &[build(1)]);
-        let (second, outcomes) = place_builds(&i.addon, &[build(2)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::Placed]);
-        assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(2));
-        assert_eq!(first.release(), 0);
-        assert_eq!(second.release(), 1);
-    }
-
-    #[test]
-    fn a_slot_the_user_emptied_is_placed_again_and_only_the_new_launch_owns_it() {
-        let i = install("emptied");
-        let (first, _) = place_builds(&i.addon, &[build(1)]);
-        std::fs::remove_file(slot(&i.addon)).unwrap();
-
-        let (second, outcomes) = place_builds(&i.addon, &[build(1)]);
-        assert_eq!(outcomes, vec![PlaceOutcome::Placed]);
-        assert_eq!(
-            placed_sessions(&i.addon).len(),
-            1,
-            "the stale entry is gone"
-        );
-        assert_eq!(first.release(), 0, "the old launch's release leaves it");
-        assert!(slot(&i.addon).exists());
-        assert_eq!(second.release(), 1);
-    }
-
-    #[test]
-    fn leftovers_of_a_closed_studio_are_found_and_removed() {
-        let i = install("leftovers");
-        // A Studio that placed a build and never released it.
-        let (placement, _) = place_builds(&i.addon, &[build(1)]);
-        std::mem::forget(placement);
-
-        let sessions = placed_sessions(&i.addon);
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(release_sessions(&i.addon, &sessions), 1);
-        assert!(!slot(&i.addon).exists());
-    }
-
-    #[test]
-    fn a_copy_cut_short_still_counts_as_studios_own() {
-        let i = install("partial");
-        let (placement, _) = place_builds(&i.addon, &[build(1)]);
-        let full = test_map_bytes(1);
-        std::fs::write(slot(&i.addon), &full[..full.len() / 2]).unwrap();
-        assert_eq!(placement.release(), 1);
-    }
-
-    #[test]
-    fn with_the_library_file_gone_a_placed_build_is_still_known_by_its_checksum() {
-        let i = install("library_gone");
-        let (placement, _) = place_builds(&i.addon, &[build(1)]);
-        std::fs::remove_file(build_path(&library(&i.addon), "dod_x", build(1).checksum)).unwrap();
-        assert_eq!(placement.release(), 1);
-    }
-
-    #[test]
-    fn an_unreadable_record_deletes_nothing() {
-        let i = install("bad_record");
-        let (placement, _) = place_builds(&i.addon, &[build(1)]);
-        std::fs::write(record_path(&i.addon), b"{ not json").unwrap();
-        assert_eq!(placement.release(), 0);
-        assert!(slot(&i.addon).exists());
-        assert_eq!(
-            std::fs::read(record_path(&i.addon)).unwrap(),
-            b"{ not json",
-            "never written over"
-        );
-        let (again, outcomes) = place_builds(&i.addon, &[build(2)]);
-        assert!(again.is_empty());
-        assert!(matches!(outcomes[..], [PlaceOutcome::Failed(_)]));
-    }
+/// When Studio closes: stops every wait for a game, then removes this
+/// Studio's builds (and the leftovers it was waiting on) now when no game
+/// runs or starts, or leaves them, logged, to the next start's clean-up.
+/// Returns how many came out.
+pub fn release_at_exit() -> usize {
+    SHUTTING_DOWN.store(true, Ordering::Relaxed);
+    let active = std::mem::take(&mut *lock_or_recover(&ACTIVE));
+    release_or_leave(&active, games_running())
 }
+
+/// `release_at_exit`'s choice for `active` (addon, session) pairs: removed
+/// now with no game running, else left, logged, to the next start.
+fn release_or_leave(active: &[(PathBuf, u64)], games_running: bool) -> usize {
+    if active.is_empty() {
+        return 0;
+    }
+    if games_running {
+        log_markdown(&msg::left_at_exit(active.len()));
+        return 0;
+    }
+    let removed = active
+        .iter()
+        .map(|(addon, session)| release_sessions(addon, &[*session]))
+        .sum();
+    log_markdown(&msg::released_at_exit(removed));
+    removed
+}
+
+#[cfg(test)]
+#[path = "build_placement_tests.rs"]
+mod tests;

@@ -20,8 +20,8 @@ import { mapDownloadLine, showBytes, showSliding } from './download_progress.js'
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
-import { createMapBuilds } from './map_builds.js';
-import { addLibraryUse, addOutcome, buildKey, buildText, fileName } from './map_builds_logic.js';
+import { createMapBuilds, startMapBuildWarnings } from './map_builds.js';
+import { addLibraryUse, buildKey, buildText, fileName } from './map_builds_logic.js';
 
 /** Problem key -> { mapName, expectedChecksum, state, demos: [names], detail,
  *  copyBeside }. */
@@ -89,6 +89,7 @@ export async function refreshMapWarnings(demoPaths, gamePath) {
     const existing = problems.get(key);
     if (existing) {
       if (!existing.demos.includes(row.demoName)) existing.demos.push(row.demoName);
+      if (!existing.demoPaths.includes(row.demoPath)) existing.demoPaths.push(row.demoPath);
       continue;
     }
     problems.set(key, {
@@ -97,7 +98,9 @@ export async function refreshMapWarnings(demoPaths, gamePath) {
       state: row.state,
       detail: row.detail,
       demos: [row.demoName],
+      demoPaths: [row.demoPath],
       copyBeside: row.copyBeside ?? null,
+      addonFile: row.addonFile ?? null,
     });
   }
 
@@ -141,6 +144,14 @@ function buildButtons(p) {
       title="${escapeHtml(STRINGS.MAP_BUILDS.ADD_BUTTON_TITLE)}">${STRINGS.MAP_BUILDS.ADD_BUTTON}</button>`;
 }
 
+/** The row's note that a file of the user's in dod_addon\maps is what the
+ *  game plays, so Studio's builds can't help (#1547). */
+function addonFileNote(p) {
+  if (!p.addonFile) return '';
+  return `<span class="map-addon-file" title="${escapeHtml(STRINGS.MAP_BUILDS.addonFileTitle(p.addonFile))}"
+    style="opacity:.75">, ${escapeHtml(STRINGS.MAP_BUILDS.addonFileLabel)}</span>`;
+}
+
 function label(state) {
   if (state === 'missing') return STRINGS.MAPS.MISSING_LABEL;
   if (state === 'wrongBuild') return STRINGS.MAPS.WRONG_BUILD_LABEL;
@@ -175,6 +186,7 @@ function render() {
           <span style="flex:1">
             <strong>${p.mapName}</strong>
             <span style="opacity:.75"> — ${label(p.state)}, ${demos}</span>
+            ${addonFileNote(p)}
           </span>
           ${buildButtons(p)}
           <button class="map-download-btn" data-key="${p.key}">
@@ -195,9 +207,9 @@ function render() {
 }
 
 /** A problem row's Add a build… or Use <copy> click (#1547): adds the file to
- *  Studio's map builds, the banner disabled meanwhile. When it is the build
- *  the row's demos want, they move from the problems to the note. */
-async function addBuildFor(el, button) {
+ *  Studio's map builds, the banner disabled meanwhile, then checks the row's
+ *  demos again: those it helps move from the problems to the note. */
+async function addBuildFor(el, button, getGamePath) {
   const key = button.dataset.key;
   const problem = problems.get(key);
   if (!problem || !mapBuilds) return;
@@ -220,11 +232,10 @@ async function addBuildFor(el, button) {
     source,
     statusEl: el,
   });
-  if (added && addOutcome(added, problem.expectedChecksum) === 'matches') {
-    problems.delete(key);
-    for (const demo of problem.demos) {
-      addLibraryUse(libraryUses, problem.mapName, problem.expectedChecksum, demo);
-    }
+  if (added) {
+    // What the map check says now, not what the add suggests: a file of the
+    // user's in dod_addon\maps, say, still keeps the build out.
+    await refreshMapWarnings(problem.demoPaths, getGamePath());
   }
   render();
 }
@@ -239,6 +250,7 @@ export function initMapWarnings(getGamePath, { mapBuildActions = null } = {}) {
   const el = bannerEl();
   if (!el) return;
   mapBuilds = mapBuildActions ?? createMapBuilds({ getGamePath });
+  startMapBuildWarnings();
 
   // The map being downloaded, for the banner's step line and bar (#957).
   let active = null;
@@ -265,7 +277,7 @@ export function initMapWarnings(getGamePath, { mapBuildActions = null } = {}) {
     }
 
     if (target.classList.contains('map-add-build-btn') || target.classList.contains('map-use-copy-btn')) {
-      await addBuildFor(el, target);
+      await addBuildFor(el, target, getGamePath);
       return;
     }
 

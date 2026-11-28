@@ -33,6 +33,9 @@ pub struct MapCheckRow {
     /// build the demo wants, for a `wrongBuild` or `missing` row: one click
     /// adds it to Studio's map builds (#1547).
     pub copy_beside: Option<String>,
+    /// The user's own `dod_addon\maps\<map>.bsp`, when one is there: the game
+    /// plays it, and Studio never puts a build over it (#1547).
+    pub addon_file: Option<String>,
     /// `ok` | `fromLibrary` (plays on `expectedChecksum` from Studio's map
     /// builds, #1547) | `wrongBuild` | `missing` | `unverifiable` |
     /// `unreadableMap` | `unreadableDemo`
@@ -67,7 +70,7 @@ pub async fn check_demo_maps(
     };
 
     tokio::task::spawn_blocking(move || {
-        let mut seen: HashMap<String, (MapStatus, Option<String>)> = HashMap::new();
+        let mut seen: HashMap<String, (MapStatus, Option<String>, Option<String>)> = HashMap::new();
         let mut rows = Vec::with_capacity(demo_paths.len());
 
         for path in demo_paths {
@@ -88,6 +91,7 @@ pub async fn check_demo_maps(
                         installed_checksum: None,
                         older_release: false,
                         copy_beside: None,
+                        addon_file: None,
                         state: "unreadableDemo".to_string(),
                         detail: e,
                         playable: false,
@@ -103,12 +107,14 @@ pub async fn check_demo_maps(
                 reference.map_name,
                 reference.expected_checksum.unwrap_or(0)
             );
-            let (status, copy_beside) = seen
+            let (status, copy_beside, addon_file) = seen
                 .entry(cache_key)
                 .or_insert_with(|| {
                     let status = build_plan::status_for_launch(&reference, &root);
                     let copy = copy_beside(&status, &reference, &dir);
-                    (status, copy)
+                    let addon_file = build_plan::users_slot_file(&root, &reference.map_name)
+                        .map(|p| p.to_string_lossy().into_owned());
+                    (status, copy, addon_file)
                 })
                 .clone();
 
@@ -132,6 +138,7 @@ pub async fn check_demo_maps(
                 older_release: matches!(status, MapStatus::WrongBuild { .. })
                     && map_check::recorded_on_older_release(&p),
                 copy_beside,
+                addon_file,
                 detail: status.summary(&reference.map_name),
                 playable: status.is_playable(),
                 map_name: reference.map_name,

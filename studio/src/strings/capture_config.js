@@ -440,14 +440,23 @@ export const CAPTURE_CONFIG_STRINGS = {
     MAP_FILES_FILTER_NAME: 'Map files',
     ADDING: 'Adding…',
     addingLine: (map) => `Adding a build of ${map}`,
-    addedToast: (map, build) => `Added build ${build} of ${map}: these demos now play on it`,
+    addedToast: (map, build) => `Added build ${build} of ${map}: Studio plays these demos on it when it starts the game for them`,
     otherBuildToast: (map, build, wanted) =>
       `That file is build ${build} of ${map}, not ${wanted}, the one these demos were recorded on. It is kept for demos recorded on ${build}.`,
     addFailedToast: (map, err) => `Could not add the build of ${map}: ${err}`,
     libraryNote: (map, build, count) =>
-      `${map}: ${count === 1 ? '1 demo plays' : `${count} demos play`} on build ${build} from DoD Studio's map builds`,
+      `${map}: ${count === 1 ? '1 demo plays' : `${count} demos play`} on build ${build} from DoD Studio's map builds when DoD Studio starts the game for ${count === 1 ? 'it' : 'them'}`,
     NOTE_HELP:
-      "The installed map is another version. DoD Studio puts the right one in dod_addon\\maps before the game starts and takes it out once the game closes. A game plays one version of a map, so a batch mixing versions of one map plays them all on the first demo's.",
+      "The installed map is another version. DoD Studio puts the right one in dod_addon\\maps before it starts the game and takes it out once the game closes. A game that is already open keeps the version it has, and a game plays one version of a map: a batch mixing versions of one map keeps the installed one when any demo wants it.",
+    // A file of the user's own in dod_addon\maps is what the game plays.
+    addonFileLabel: 'a file in dod_addon\\maps is in the way',
+    addonFileTitle: (path) =>
+      `The game plays ${path}, a file DoD Studio didn't put there, so DoD Studio can't use its map builds for this map. Move it away to use them.`,
+    // The confirm before a batch mixing versions of one map.
+    mixedTitle: (count) => (count === 1 ? '1 demo won\'t play on its map version' : `${count} demos won't play on their map version`),
+    mixedMessage: (count) =>
+      `A game plays one version of each map, and ${count === 1 ? 'this demo was' : 'these demos were'} recorded on another version than the rest of the batch uses. ${count === 1 ? 'It plays' : 'They play'} on the installed version, so some walls, doors or water may look wrong. Capture ${count === 1 ? 'it' : 'them'} in a batch of ${count === 1 ? 'its' : 'their'} own to play ${count === 1 ? 'it' : 'them'} right.`,
+    START_ANYWAY: 'Start anyway',
   },
   // The game's own config files setting cvars this app reads. Advisory only —
   // nothing in this app writes to a config file.

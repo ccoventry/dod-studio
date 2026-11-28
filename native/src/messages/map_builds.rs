@@ -1,6 +1,7 @@
 // messages/map_builds.rs
 // Studio's map builds (`maps::build_library`, `maps::build_placement`,
-// `maps::build_plan`, #1547): errors and activity-log lines. Each function
+// `maps::build_plan`, #1547): errors, activity-log lines, and the warnings
+// the user is shown as toasts (the `*_warning` functions). Each function
 // returns the text only.
 
 use std::fmt::Display;
@@ -73,13 +74,13 @@ pub fn not_in_library(map: &str, checksum: u32) -> String {
 
 pub fn game_running(count: usize) -> String {
     format!(
-        "- Map builds: {count} map build(s) not put in place, because a game is running: a game keeps the first build of a map it loads until it closes"
+        "- Map builds: {count} map build(s) not put in place, because a game is running or starting: a game keeps the first build of a map it loads until it closes"
     )
 }
 
 pub fn open_game_keeps_its_maps(count: usize) -> String {
     format!(
-        "- Map builds: {count} map build(s) not put in place, because the batch runs in the open game, which keeps the maps it has loaded; close the game to use them"
+        "- Map builds: {count} demo(s) won't play on their own build, because they play in the open game, which keeps the builds it has loaded"
     )
 }
 
@@ -107,6 +108,14 @@ pub fn remove_failed(slot: impl Display, err: impl Display) -> String {
 
 pub const RECORD_UNREADABLE: &str = "the record of placed builds can't be read";
 
+pub fn record_busy(path: impl Display, secs: u64) -> String {
+    format!("the record of placed builds {path} stayed locked by another DoD Studio for {secs} s")
+}
+
+pub fn lock_failed(why: impl Display) -> String {
+    format!("- Map builds: nothing put in place: {why}")
+}
+
 pub fn release_thread_failed(err: impl Display) -> String {
     format!(
         "- Map builds: could not start the wait for the game to close ({err}); Studio removes its builds at its next start"
@@ -127,17 +136,86 @@ pub fn leftovers_found(count: usize, root: impl Display) -> String {
     )
 }
 
+pub fn left_at_exit(count: usize) -> String {
+    format!(
+        "- Map builds: DoD Studio is closing with {count} launch(es) of map builds in place while a game runs; the next start removes them once no game runs"
+    )
+}
+
+pub fn released_at_exit(count: usize) -> String {
+    format!("- Map builds: DoD Studio is closing; removed {count} map build(s) it had in place")
+}
+
 pub fn left_out(demo: impl Display, map: &str, wanted: u32, playing: Option<u32>) -> String {
     let playing = playing.map_or_else(
         || "the installed build".to_string(),
         |c| format!("build {}", build(c)),
     );
     format!(
-        "- Map builds: {demo} wants build {} of {map}, but an earlier demo of this batch needs {playing}, and one game plays one build of a map: capture it in a batch of its own",
+        "- Map builds: {demo} wants build {} of {map}, but this game plays {playing} of it (one game plays one build of a map)",
         build(wanted)
     )
 }
 
 pub fn launch_places(count: usize, maps: impl Display) -> String {
     format!("- Map builds: this game plays {count} map(s) on a build from Studio's library: {maps}")
+}
+
+// ── Shown to the user (toasts, the batch's warnings) ───────────────────────
+
+/// Demos of one map a launch can't play on their own build.
+pub fn left_out_warning(map: &str, demos: &[String]) -> String {
+    format!(
+        "{} of {map} won't play on the version {} recorded on: {}. A game plays one version of a map, so capture {} in a batch of {} own.",
+        count_demos(demos.len()),
+        if demos.len() == 1 {
+            "it was"
+        } else {
+            "they were"
+        },
+        demos.join(", "),
+        if demos.len() == 1 { "it" } else { "them" },
+        if demos.len() == 1 { "its" } else { "their" },
+    )
+}
+
+/// A demo that plays in an open game holding another build of its map.
+pub fn open_game_warning(demo: &str, map: &str) -> String {
+    format!(
+        "{demo} plays on another version of {map} in the open game. Close the game to play it on the version it was recorded on."
+    )
+}
+
+/// A user's own file in `dod_addon\maps` takes the place of Studio's build.
+pub fn slot_taken_warning(map: &str, slot: impl Display) -> String {
+    format!(
+        "{map}: the game plays {slot}, a file DoD Studio didn't put there. Move it away to play the demos on the version they were recorded on."
+    )
+}
+
+pub fn not_in_library_warning(map: &str, checksum: u32) -> String {
+    format!(
+        "{map}: version {} is no longer in DoD Studio's map builds, so the installed version plays.",
+        build(checksum)
+    )
+}
+
+pub fn place_failed_warning(map: &str, err: impl Display) -> String {
+    format!(
+        "{map}: DoD Studio could not put the old version in place ({err}), so the installed version plays."
+    )
+}
+
+pub fn record_unreadable_warning(path: impl Display) -> String {
+    format!(
+        "DoD Studio can't read its record of old map versions in place ({path}), so it puts none in place. Close the game, then delete that file and any map in dod_addon\\maps that DoD Studio put there."
+    )
+}
+
+fn count_demos(n: usize) -> String {
+    if n == 1 {
+        "1 demo".to_string()
+    } else {
+        format!("{n} demos")
+    }
 }

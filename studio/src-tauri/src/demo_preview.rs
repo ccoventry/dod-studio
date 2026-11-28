@@ -179,7 +179,7 @@ pub async fn launch_demo_preview(
         // game only (#1547); out again once it closes, or now on a failure.
         let placement = first
             .as_deref()
-            .and_then(|demo| crate::map_builds_manager::place_for_preview(&game_path, demo));
+            .and_then(|demo| crate::map_builds_manager::place_for_preview(&app, &game_path, demo));
         let launched = launch_preview_game(app, patcher_config, &dod_dir, streaks, first, trimmed);
         crate::map_builds_manager::after_preview_launch(placement, launched.is_ok());
         launched
@@ -297,7 +297,11 @@ pub async fn send_preview_to_running_game(
             .or(first.as_deref())
             .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
         {
-            return crate::preview_in_place::send_to_running(&pids, &arg);
+            let sent = crate::preview_in_place::send_to_running(&pids, &arg);
+            if let (Ok(Some(_)), Some(demo)) = (&sent, &first) {
+                crate::map_builds_manager::warn_for_open_game(&app, &game_path, demo);
+            }
+            return sent;
         }
         let (jobs, _generated) =
             patch_bookmark_previews(streaks, &dod_dir, &patcher_config, trimmed.as_deref())?;
@@ -322,6 +326,10 @@ pub async fn send_preview_to_running_game(
                     log_markdown(&crate::messages::preview_start::sent_to_running_game(
                         &command, pid,
                     ));
+                    // That game keeps the map builds it has loaded (#1547).
+                    if let Some(demo) = &first {
+                        crate::map_builds_manager::warn_for_open_game(&app, &game_path, demo);
+                    }
                     return Ok(Some(command));
                 }
                 native::sys::game_remote::Sent::NotListening => continue,

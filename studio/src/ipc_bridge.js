@@ -231,6 +231,16 @@ export async function downloadMap(mapName, expectedChecksum, gamePath) {
     });
 }
 
+/** The demos of `demoPaths` a batch wouldn't play on the version of their map
+ *  they were recorded on: [{ demoPath, demoName, mapName }] (#1547). */
+export async function planMapBuilds(demoPaths, gamePath) {
+  return invoke("plan_map_builds", { demoPaths, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (plan_map_builds):", err);
+      throw err;
+    });
+}
+
 /** Adds `sourcePath` to the map builds of the install `gamePath` points at, as
  *  a build of `mapName` (#1547). Resolves with { mapName, checksum, path,
  *  alreadyThere }; rejects with the reason. */

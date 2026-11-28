@@ -86,6 +86,10 @@ pub enum EngineEvent {
     /// and stop markers came and how many frames it wrote, for judging its
     /// take (#1401, `clip_verdict`).
     ClipReported(ClipSummary),
+    /// Before the game starts: demos of the batch that won't play on the
+    /// build of their map they were recorded on, and builds that couldn't be
+    /// put in place (#1547), one plain line each, for a warning toast.
+    MapBuildWarnings(Vec<String>),
 }
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.
@@ -258,7 +262,16 @@ fn run_batch(batch: Batch) {
         return;
     };
     leftovers.add_readers(&feed.tail_cancel);
-    let map_builds = place_map_builds(&batch, hl_exe_parent);
+    let start = if runs_in_open_game(&batch) {
+        GameStart::OpenGame
+    } else {
+        GameStart::Fresh(crate::maps::build_plan::GameState::now())
+    };
+    let map_builds = place_map_builds(&batch.map_demos, hl_exe_parent, start);
+    if !map_builds.warnings.is_empty() {
+        let _ = tx.send(EngineEvent::MapBuildWarnings(map_builds.warnings));
+    }
+    let map_builds = map_builds.placement;
     let Some(game) = launch::start_game(&batch, &workspace.export_dir, &dod_dir) else {
         map_builds.release_after_game(std::time::Duration::ZERO);
         return;
@@ -310,28 +323,44 @@ fn run_batch(batch: Batch) {
     map_builds.release_after_game(std::time::Duration::ZERO);
 }
 
-/// Puts the library builds the batch's demos need in place for its game
-/// (#1547). None for a batch run in the open game (#725): that game keeps
-/// the build of each map it has loaded, and a second build of one is a fatal
-/// error in it.
-fn place_map_builds(
-    batch: &Batch,
-    game_root: &std::path::Path,
-) -> crate::maps::build_placement::Placement {
-    let runs_in_open_game = batch
+/// Whether the batch runs in the game that is open already (#725).
+fn runs_in_open_game(batch: &Batch) -> bool {
+    batch
         .runtime_batch
         .as_ref()
-        .is_some_and(|b| b.reuse_game.is_some());
-    if !runs_in_open_game {
-        return crate::maps::build_plan::place_for_launch(&batch.map_demos, game_root);
+        .is_some_and(|b| b.reuse_game.is_some())
+}
+
+/// How a batch's game starts, for its map builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameStart {
+    /// Studio starts a game, with other games running or not.
+    Fresh(crate::maps::build_plan::GameState),
+    /// The batch runs in the game that is open already (#725).
+    OpenGame,
+}
+
+/// Puts the library builds the batch's `demos` need in place for its game
+/// (#1547), with the warnings for the user. Nothing for a batch run in the
+/// open game or with a game running: that game keeps the build of each map
+/// it has loaded, and a second build of one is a fatal error in it; the
+/// warnings then name the demos it won't play on their build.
+fn place_map_builds(
+    demos: &[PathBuf],
+    game_root: &std::path::Path,
+    start: GameStart,
+) -> crate::maps::build_plan::LaunchOutcome {
+    match start {
+        GameStart::OpenGame => crate::maps::build_plan::LaunchOutcome {
+            placement: crate::maps::build_placement::Placement::none(
+                &crate::shared::paths::addon_dir(game_root),
+            ),
+            warnings: crate::maps::build_plan::open_game_warnings(demos, game_root),
+        },
+        GameStart::Fresh(games) => {
+            crate::maps::build_plan::place_for_launch_when(demos, game_root, games)
+        }
     }
-    let maps = crate::maps::build_plan::plan_and_log(&batch.map_demos, game_root);
-    if !maps.place.is_empty() {
-        crate::log_markdown(&crate::messages::map_builds::open_game_keeps_its_maps(
-            maps.place.len(),
-        ));
-    }
-    crate::maps::build_placement::Placement::none(&crate::shared::paths::addon_dir(game_root))
 }
 
 /// Where a batch's markers come from: the readers' channel and stop flag,
@@ -476,6 +505,57 @@ mod batch_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An install root whose `dod\maps\dod_x.bsp` is build 1 and whose map
+    /// builds hold build 2, and a demo of `dod_x` recorded on build 2.
+    fn install_with_old_demo(tag: &str) -> (crate::test_support::Scratch, PathBuf, PathBuf) {
+        use crate::maps::build_library::{add_build, library_dir, test_map_bytes};
+        let root = crate::test_support::Scratch::new(format_args!("engine_map_builds_{tag}"));
+        let maps = crate::shared::paths::mod_dir(&root).join("maps");
+        std::fs::create_dir_all(&maps).unwrap();
+        std::fs::write(maps.join("dod_x.bsp"), test_map_bytes(1)).unwrap();
+        let source = root.join("old.bsp");
+        std::fs::write(&source, test_map_bytes(2)).unwrap();
+        let added = add_build(&library_dir(&root), "dod_x", &source, &mut |_, _| {}).unwrap();
+        let mut header = vec![0u8; crate::patch::DEMO_HEADER_SIZE];
+        header[..8].copy_from_slice(b"HLDEMO\0\0");
+        header[16..21].copy_from_slice(b"dod_x");
+        header[536..540].copy_from_slice(&added.checksum.to_le_bytes());
+        let demo = root.join("old.dem");
+        std::fs::write(&demo, &header).unwrap();
+        let slot = crate::maps::build_placement::slot_path(
+            &crate::shared::paths::addon_dir(&root),
+            "dod_x",
+        );
+        (root, demo, slot)
+    }
+
+    #[test]
+    fn a_fresh_batch_game_gets_the_old_build_its_demo_needs() {
+        let (root, demo, slot) = install_with_old_demo("fresh");
+        let maps = place_map_builds(
+            &[demo],
+            &root,
+            GameStart::Fresh(crate::maps::build_plan::GameState::NoneRunning),
+        );
+        assert!(maps.warnings.is_empty(), "{:?}", maps.warnings);
+        assert!(slot.is_file());
+        assert_eq!(maps.placement.release(), 1);
+    }
+
+    #[test]
+    fn a_batch_in_the_open_game_places_nothing_and_says_which_demo_plays_wrong() {
+        let (root, demo, slot) = install_with_old_demo("open");
+        let maps = place_map_builds(&[demo], &root, GameStart::OpenGame);
+        assert!(maps.placement.is_empty());
+        assert!(!slot.exists());
+        assert_eq!(
+            maps.warnings,
+            vec![crate::messages::map_builds::open_game_warning(
+                "old.dem", "dod_x"
+            )]
+        );
+    }
 
     #[test]
     fn hold_and_go_use_the_hooks_batch_command() {

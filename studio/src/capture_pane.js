@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
+import { confirmMixedMapBuilds } from './map_build_confirm.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
@@ -1267,6 +1268,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         .filter((d) => (d.streaks || []).some((s) => s.selected === true))
         .map((d) => d.path);
       if (!(await confirmCrashMaps(pickedPaths))) return;
+      // Demos of one map recorded on different versions: a game plays one
+      // version of a map, so some won't play on theirs (#1547).
+      const hlPath = document.querySelector('#hl-path-input')?.value?.trim() || '';
+      if (!(await confirmMixedMapBuilds(pickedPaths, hlPath))) return;
       // A demo over the game's entity limit needs no ask: the batch plays
       // a trimmed copy of it (#207, trimmed_demos.rs). One with no camera
       // data captures a frozen view (#920).

@@ -32,7 +32,7 @@ describe('map builds on the Maps needed banner (#1547)', () => {
 
   it('counts the demos on the note in plain words', () => {
     expect(STRINGS.MAP_BUILDS.libraryNote('dod_x', '61e9d38d', 1)).toBe(
-      "dod_x: 1 demo plays on build 61e9d38d from DoD Studio's map builds"
+      "dod_x: 1 demo plays on build 61e9d38d from DoD Studio's map builds when DoD Studio starts the game for it"
     );
     expect(STRINGS.MAP_BUILDS.libraryNote('dod_x', '61e9d38d', 3)).toContain('3 demos play');
   });

@@ -394,6 +394,7 @@ pub fn run() {
             map_manager::check_demo_maps,
             map_manager::download_map,
             map_builds_manager::add_map_build,
+            map_builds_manager::plan_map_builds,
             config_checks_cmd::scan_game_configs,
             config_checks_cmd::roll_floors,
             hd_manager::hd_status,
@@ -456,6 +457,9 @@ pub fn run() {
         // renders and combines they were writing (#1439).
         if let tauri::RunEvent::Exit = event {
             native::hlcr::renderer::stop_renders_for_exit();
+            // Map builds in place for a game that has closed come out now;
+            // with a game running they stay for the next start (#1547).
+            native::maps::build_placement::release_at_exit();
         }
     });
 }

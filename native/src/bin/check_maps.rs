@@ -9,6 +9,7 @@
 //! or is the wrong build, verifying each one against the demo that wants it
 //! before it is installed.
 
+use native::maps::build_plan::with_library;
 use native::maps::map_check::{MapStatus, check_demo};
 use native::maps::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 use native::messages;
@@ -63,13 +64,22 @@ fn main() {
     let mut needed: std::collections::BTreeMap<String, (usize, Option<u32>)> =
         std::collections::BTreeMap::new();
 
+    // Studio's map builds of the install the maps folder belongs to (#1547):
+    // a demo whose build is there plays right from Studio, and needs no fetch.
+    let library = maps_dir
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(native::maps::build_library::library_dir);
+
     for demo in &demos {
         let name = demo.file_name().unwrap_or_default().to_string_lossy();
         match check_demo(demo, &maps_dir) {
             Ok((reference, status)) => {
+                let status = match &library {
+                    Some(library) => with_library(status, &reference, library),
+                    None => status,
+                };
                 match &status {
-                    // `check_demo` compares the installed map only; a
-                    // library build would play right as well.
                     MapStatus::Ok { .. } | MapStatus::FromLibrary { .. } => ok += 1,
                     MapStatus::WrongBuild { .. } => {
                         wrong += 1;

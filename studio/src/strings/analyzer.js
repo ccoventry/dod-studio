@@ -295,7 +295,7 @@ export const ANALYZER_STRINGS = {
       + (olderRelease ? ' It comes from an older release of Day of Defeat.' : ''),
     // #1547: the notice for a demo whose build Studio's map builds hold.
     fromLibraryMapBuildNotice: (map, build) =>
-      `Old map version: this demo was recorded on another version of ${map} than the one installed. DoD Studio plays it on that version (build ${build}) from its map builds.`,
+      `Old map version: this demo was recorded on another version of ${map} than the one installed. DoD Studio plays it on that version (build ${build}) from its map builds when DoD Studio starts the game for this demo. The Kill Map and the kill distances are still measured on the installed map.`,
     // The troubleshooting detail under that notice (a tooltip).
     wrongMapBuildDetail: (recorded, installed) => `Map builds: demo ${recorded}, installed ${installed}`,
     // #1539: an HLTV demo's header has no map checksum; its server info does.

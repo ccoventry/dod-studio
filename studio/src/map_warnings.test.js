@@ -86,3 +86,20 @@ describe('demos that play on a build from the map builds are news, not problems 
     expect(listLibraryUses()).toHaveLength(0);
   });
 });
+
+describe('a file of the user\'s in dod_addon\maps (#1547)', () => {
+  beforeEach(() => {
+    globalThis.document = { querySelector: () => null };
+    resetMapWarnings();
+  });
+
+  it('is kept on the problem row, with the demos to check again', async () => {
+    checkDemoMaps.mockResolvedValue([
+      { ...row('old.dem', 'wrongBuild', OLD), demoPath: 'C:/d/old.dem', addonFile: 'C:/g/dod_addon/maps/dod_chemille.bsp' },
+    ]);
+    await refreshMapWarnings(['C:/d/old.dem'], 'C:/g/hl.exe');
+    const [problem] = listMapProblems();
+    expect(problem.addonFile).toBe('C:/g/dod_addon/maps/dod_chemille.bsp');
+    expect(problem.demoPaths).toEqual(['C:/d/old.dem']);
+  });
+});

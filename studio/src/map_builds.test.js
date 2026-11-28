@@ -59,3 +59,18 @@ describe('adding a map build from the banner (#1547)', () => {
     expect(await actions({ picked: null }).builds.pickFile()).toBeNull();
   });
 });
+
+describe('map build warnings from a batch or a preview (#1547)', () => {
+  it('shows each one as a warning toast that stays long enough to read', async () => {
+    const { startMapBuildWarnings } = await import('./map_builds.js');
+    let handler = null;
+    const toast = vi.fn();
+    startMapBuildWarnings({ listenTo: (_name, h) => { handler = h; return Promise.resolve(() => {}); }, toast });
+    handler({ payload: 'old.dem plays on another version of dod_x in the open game.' });
+    handler({ payload: '' });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toContain('old.dem');
+    expect(toast.mock.calls[0][1]).toBe('warning');
+    expect(toast.mock.calls[0][2]).toBeGreaterThanOrEqual(10000);
+  });
+});

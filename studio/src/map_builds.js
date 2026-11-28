@@ -76,6 +76,26 @@ export function createMapBuilds({
   return { pickFile, add: addBuild };
 }
 
+/** How long a map build warning stays: it names demos, and comes as a batch
+ *  or a preview starts, while the user looks at the game. */
+const WARNING_MS = 12000;
+let warningsStarted = false;
+
+/**
+ * Shows every `map_build_warning` the backend sends (a batch or preview whose
+ * demos won't play on their map version, a build that couldn't be put in
+ * place) as a warning toast. Once per page; later calls do nothing.
+ */
+export function startMapBuildWarnings({ listenTo = listen, toast = showToast } = {}) {
+  if (warningsStarted) return;
+  warningsStarted = true;
+  Promise.resolve(
+    listenTo('map_build_warning', (event) => {
+      if (typeof event?.payload === 'string' && event.payload) toast(event.payload, 'warning', WARNING_MS);
+    })
+  ).catch((err) => console.error('Failed to listen for map_build_warning:', err));
+}
+
 /** A step line and an empty bar in `el` (the banner), replacing an earlier
  *  one. Returns the bar, or null without an element. */
 function showStatus(el, line) {
