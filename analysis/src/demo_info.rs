@@ -333,6 +333,23 @@ mod tests {
     }
 
     #[test]
+    fn the_parsed_server_info_and_the_byte_finder_give_the_same_build() {
+        // The analyzer reads the first parsed SvcServerInfo; the map check
+        // (native) finds it by shape in the file's first bytes. One file, one
+        // answer.
+        let bytes = crate::tests_fixture::fixture();
+        let mut demo = fixture_demo();
+        demo.header.map_checksum = 0;
+
+        let parsed = DemoInfo::from(&demo).server_info_map_checksum;
+        let found = dod::server_info::find_server_info(&bytes[..8 * 1024])
+            .map(|stamp| stamp.map_checksum());
+
+        assert_eq!(parsed, found);
+        assert_eq!(parsed, Some(0x801b_771f));
+    }
+
+    #[test]
     fn a_demo_with_no_server_info_has_no_server_info_checksum() {
         let mut demo = fixture_demo();
         demo.header.map_checksum = 0;

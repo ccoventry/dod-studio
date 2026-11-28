@@ -72,8 +72,8 @@ pub enum FetchStep {
 
 /// Download one map into `maps_dir`, verifying before it lands.
 ///
-/// `expected` is the checksum the demo asked for. `None` — an HLTV demo, which
-/// records no checksum — means the download can only be checked for being a
+/// `expected` is the checksum the demo asked for. `None` — a demo that states
+/// none, such as a local single-player recording — means the download can only be checked for being a
 /// readable BSP at all.
 pub fn fetch_map(
     map_name: &str,

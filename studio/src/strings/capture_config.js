@@ -409,9 +409,6 @@ export const CAPTURE_CONFIG_STRINGS = {
     BANNER_TITLE: 'Maps needed',
     MISSING_LABEL: 'missing',
     WRONG_BUILD_LABEL: 'different build',
-    // #1539: the Demo Analyzer's notice; `detail` names both builds.
-    analyzerWrongBuildNotice: (detail) =>
-      `Different map build: ${detail}. The demo still plays, but it can draw wrong, and the Kill Map and kill distances are measured on the installed map, not the one it was recorded on.`,
     UNREADABLE_LABEL: 'unreadable',
     DOWNLOAD_BUTTON: 'Download',
     DOWNLOAD_ALL_BUTTON: 'Download all',

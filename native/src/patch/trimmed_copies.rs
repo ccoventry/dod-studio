@@ -324,7 +324,7 @@ fn read_map(demo: &Path, engine: &Engine) -> MapFile {
 /// Where `demo`'s map's `.bsp` would be, or `None` when its map name can't be
 /// read or used, or the engine has no maps folder.
 fn map_file(demo: &Path, engine: &Engine) -> Option<PathBuf> {
-    let name = crate::maps::map_check::map_reference(demo).ok()?.map_name;
+    let name = crate::maps::map_check::map_name(demo).ok()?;
     if !crate::maps::map_check::is_safe_map_name(&name) {
         return None;
     }

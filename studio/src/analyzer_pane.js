@@ -37,6 +37,10 @@ function setAnalyzerFileIndicator(text) {
 let analyzerLoadingPath = null;
 let analyzerLoadSeq = 0;
 
+// The hl.exe path as typed now, for the map-build check (#1539); set by
+// `initAnalyzerPane`.
+let readGamePath = () => '';
+
 // ── Init / entry points ──────────────────────────────────────────────────────
 
 // Registered once here (not per-load) to avoid the double-registration bug
@@ -63,6 +67,7 @@ function showAnalyzerLoading(p) {
 /** Wires the Analyzer tab. `explorer` holds the settings the Explorer
  *  sidebar reads and writes (analyzer_browser.js's `startAnalyzerBrowser`). */
 export function initAnalyzerPane(explorer = {}) {
+  readGamePath = explorer.getGamePath ?? readGamePath;
   startAnalyzerReport({ getWeaponDisplayNames, loadMapOverview });
 
   const browseBtn = document.querySelector('#analyzer-browse-btn');
@@ -130,8 +135,7 @@ async function loadAnalyzerDemo(path) {
     renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
     // Beside the report, not before it: the check reads the installed map.
-    const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
-    findMapBuildProblem(path, gamePath).then((row) => {
+    findMapBuildProblem(path, readGamePath()).then((row) => {
       if (seq === analyzerLoadSeq) renderMapBuildBanner(document.querySelector('#analyzer-map-build-banner'), row);
     });
   } catch (err) {

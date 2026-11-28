@@ -359,6 +359,23 @@ fn v16_to_v17(analysis: &mut Value) -> Upgrade {
     }
 }
 
+/// How much of an entry's start [`needs_full_parse_from_head`] reads: the
+/// stamp, `file_info` (a path) and the first fields of `demo_info`.
+pub const HEAD_PEEK_LEN: usize = 4096;
+
+/// Whether an entry from schema `version` is known, from its first
+/// [`HEAD_PEEK_LEN`] bytes, to need a full parse instead of an upgrade, so an
+/// estimate can price it right without reading megabytes (#1539). Only v16
+/// has such entries: its HLTV ones (`demo_info.map_checksum` 0, written in
+/// `demo_info` before the first 4 KB ends) are re-parsed by [`v16_to_v17`].
+pub fn needs_full_parse_from_head(version: u32, head: &[u8]) -> bool {
+    const ZERO_HEADER_CHECKSUM: &[u8] = b"\"map_checksum\":0,";
+    version == 16
+        && head
+            .windows(ZERO_HEADER_CHECKSUM.len())
+            .any(|w| w == ZERO_HEADER_CHECKSUM)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +468,19 @@ mod tests {
             assert!(!upgrades_from(version), "v{version}");
         }
         assert!(upgrades_from(16));
+    }
+
+    #[test]
+    fn a_v16_entrys_head_says_whether_it_is_an_hltv_one() {
+        let head = |checksum: u32| {
+            serde_json::to_string(
+                &json!({"demo_info": {"demo_type": "HLTV", "map_checksum": checksum, "x": 1}}),
+            )
+            .unwrap()
+        };
+        assert!(needs_full_parse_from_head(16, head(0).as_bytes()));
+        assert!(!needs_full_parse_from_head(16, head(7).as_bytes()));
+        assert!(!needs_full_parse_from_head(15, head(0).as_bytes()));
     }
 
     #[test]

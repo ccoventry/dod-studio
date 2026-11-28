@@ -5,7 +5,7 @@
 // installed map's geometry. POV demos have always carried the build; HLTV
 // demos now say it through their server info, so both are checked.
 
-import { checkDemoMaps } from './ipc_bridge.js';
+import { checkDemoMaps, logFrontendEvent } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 
 /** The map-check row that says the demo's map is a different build, or null.
@@ -15,9 +15,16 @@ export function mapBuildProblem(rows) {
   return rows.find((row) => row?.state === 'wrongBuild') ?? null;
 }
 
+/** A build checksum as the 8 hex digits the map files are named by. */
+function buildText(checksum) {
+  return Number.isInteger(checksum) ? checksum.toString(16).padStart(8, '0') : '?';
+}
+
 /** The notice's text for a map-check row, or null when there is no problem. */
 export function mapBuildNotice(row) {
-  return row ? STRINGS.MAPS.analyzerWrongBuildNotice(row.detail) : null;
+  return row
+    ? STRINGS.ANALYZER.wrongMapBuildNotice(row.mapName, buildText(row.expectedChecksum), buildText(row.installedChecksum))
+    : null;
 }
 
 /** Checks `demoPath` against the maps beside the configured hl.exe.
@@ -25,7 +32,11 @@ export function mapBuildNotice(row) {
  *  or missing, and a failed check all read as "nothing to say". */
 export async function findMapBuildProblem(demoPath, gamePath) {
   if (!gamePath) return null;
-  return mapBuildProblem(await checkDemoMaps([demoPath], gamePath));
+  const row = mapBuildProblem(await checkDemoMaps([demoPath], gamePath));
+  if (row) {
+    logFrontendEvent(`Demo Analyzer: ${row.demoName} was recorded on build ${buildText(row.expectedChecksum)} of ${row.mapName}, the installed one is ${buildText(row.installedChecksum)}`);
+  }
+  return row;
 }
 
 /** Fills `el` with the notice for `row`, or hides it. */

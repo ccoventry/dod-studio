@@ -1,12 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('./ipc_bridge.js', () => ({ checkDemoMaps: vi.fn() }));
+vi.mock('./ipc_bridge.js', () => ({ checkDemoMaps: vi.fn(), logFrontendEvent: vi.fn() }));
 
-import { checkDemoMaps } from './ipc_bridge.js';
+import { checkDemoMaps, logFrontendEvent } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { mapBuildProblem, mapBuildNotice, findMapBuildProblem, renderMapBuildBanner } from './analyzer_map_build.js';
 
-const wrong = { state: 'wrongBuild', detail: '`dod_chemille` is a different build, the demo wants `bb690c32`, this one is `e4d5f058`' };
+const wrong = {
+  state: 'wrongBuild', mapName: 'dod_chemille', demoName: 'a.dem', expectedChecksum: 0xbb690c32, installedChecksum: 0xe4d5f058,
+};
 
 describe('the Demo Analyzer map build notice (#1539)', () => {
   it('picks the wrong-build row and nothing else', () => {
@@ -16,8 +18,11 @@ describe('the Demo Analyzer map build notice (#1539)', () => {
   });
 
   it('says which builds differ', () => {
-    expect(mapBuildNotice(wrong)).toContain('bb690c32');
-    expect(mapBuildNotice(wrong)).toContain('e4d5f058');
+    const notice = mapBuildNotice(wrong);
+    expect(notice).toContain('bb690c32');
+    expect(notice).toContain('e4d5f058');
+    expect(notice).toContain('dod_chemille');
+    expect(notice).not.toMatch(/[`—]/);
     expect(mapBuildNotice(null)).toBeNull();
   });
 
@@ -27,6 +32,7 @@ describe('the Demo Analyzer map build notice (#1539)', () => {
     expect(checkDemoMaps).not.toHaveBeenCalled();
     expect(await findMapBuildProblem('a.dem', 'C:/g/hl.exe')).toBe(wrong);
     expect(checkDemoMaps).toHaveBeenCalledWith(['a.dem'], 'C:/g/hl.exe');
+    expect(logFrontendEvent).toHaveBeenCalledTimes(1);
   });
 
   it('shows the banner for a problem and hides it otherwise', () => {
