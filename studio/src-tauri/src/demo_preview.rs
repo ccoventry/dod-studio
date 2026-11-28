@@ -175,57 +175,75 @@ pub async fn launch_demo_preview(
             Some(demo) => crate::trimmed_demos::for_preview(&app, demo, &game_path)?,
             None => None,
         };
-        // The original demo (or its trimmed copy), untouched, when the game
-        // can play it in place (#434); a protocol-47 one's converted copy
-        // (#1549).
-        let in_place = match trimmed.as_deref().or(first.as_deref()) {
-            Some(demo) => {
-                crate::preview_in_place::plan_playable(&app, &patcher_config, &dod_dir, demo)?
-            }
-            None => None,
-        };
-        if let Some(arg) = in_place {
-            return crate::preview_in_place::launch(app, &patcher_config, &arg);
-        }
-        let (jobs, _generated) =
-            patch_bookmark_previews(streaks, &dod_dir, &patcher_config, trimmed.as_deref())?;
-        let job = jobs
-            .first()
-            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
-
-        let preview_stem = job
-            .output_demo
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
-
-        // With the hook DLL, the demo goes over its pipe once the game is up:
-        // on the launch line its map loads before config.cfg/movie.cfg set
-        // brightness and gamma, so the world is built darker than the models
-        // are lit (#662, the same as #705 for batches). Without the DLL there
-        // is no pipe, so the launch line keeps it.
-        let line = format!("viewdemo {preview_stem}");
-        let over_pipe = patcher_config.goldsrc_hooks_dll().is_some();
-        let before = running_game_pids();
-        let extra = if over_pipe {
-            String::new()
-        } else {
-            format!("+{line}")
-        };
-        let mut cmd = patcher_config.build_hlae_process(&extra);
-        native::tool_versions::log_hlae_launch(&patcher_config);
-        let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
-            .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
-        watch_for_error_dialogs(app, launcher);
-        if over_pipe {
-            std::thread::spawn(move || {
-                crate::preview_in_place::send_when_ready(&before, &[line]);
-            });
-        }
-
-        Ok(())
+        // The build of the demo's map from Studio's library, for this fresh
+        // game only (#1547); out again once it closes, or now on a failure.
+        let placement = first
+            .as_deref()
+            .and_then(|demo| crate::map_builds_manager::place_for_preview(&app, &game_path, demo));
+        let launched = launch_preview_game(app, patcher_config, &dod_dir, streaks, first, trimmed);
+        crate::map_builds_manager::after_preview_launch(placement, launched.is_ok());
+        launched
     }))
     .await
+}
+
+/// Starts the game on the preview of `first` (or its `trimmed` copy): the
+/// original in place when the game can play it (#434), or a protocol-47
+/// demo's converted copy (#1549), else a patched bookmark preview.
+fn launch_preview_game(
+    app: tauri::AppHandle,
+    patcher_config: PatcherConfig,
+    dod_dir: &Path,
+    streaks: Vec<SerializedStreak>,
+    first: Option<PathBuf>,
+    trimmed: Option<PathBuf>,
+) -> Result<(), String> {
+    // A protocol-47 demo plays its converted copy (#1549); a conversion that
+    // fails returns here, and the caller takes the placed map build out.
+    let in_place = match trimmed.as_deref().or(first.as_deref()) {
+        Some(demo) => crate::preview_in_place::plan_playable(&app, &patcher_config, dod_dir, demo)?,
+        None => None,
+    };
+    if let Some(arg) = in_place {
+        return crate::preview_in_place::launch(app, &patcher_config, &arg);
+    }
+    let (jobs, _generated) =
+        patch_bookmark_previews(streaks, dod_dir, &patcher_config, trimmed.as_deref())?;
+    let job = jobs
+        .first()
+        .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+
+    let preview_stem = job
+        .output_demo
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
+
+    // With the hook DLL, the demo goes over its pipe once the game is up:
+    // on the launch line its map loads before config.cfg/movie.cfg set
+    // brightness and gamma, so the world is built darker than the models
+    // are lit (#662, the same as #705 for batches). Without the DLL there
+    // is no pipe, so the launch line keeps it.
+    let line = format!("viewdemo {preview_stem}");
+    let over_pipe = patcher_config.goldsrc_hooks_dll().is_some();
+    let before = running_game_pids();
+    let extra = if over_pipe {
+        String::new()
+    } else {
+        format!("+{line}")
+    };
+    let mut cmd = patcher_config.build_hlae_process(&extra);
+    native::tool_versions::log_hlae_launch(&patcher_config);
+    let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
+        .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
+    watch_for_error_dialogs(app, launcher);
+    if over_pipe {
+        std::thread::spawn(move || {
+            crate::preview_in_place::send_when_ready(&before, &[line]);
+        });
+    }
+
+    Ok(())
 }
 
 /// Launch Preview for a game that is already running (#413): patches the
@@ -283,7 +301,11 @@ pub async fn send_preview_to_running_game(
             None => None,
         };
         if let Some(arg) = in_place {
-            return crate::preview_in_place::send_to_running(&pids, &arg);
+            let sent = crate::preview_in_place::send_to_running(&pids, &arg);
+            if let (Ok(Some(_)), Some(demo)) = (&sent, &first) {
+                crate::map_builds_manager::warn_for_open_game(&app, &game_path, demo);
+            }
+            return sent;
         }
         let (jobs, _generated) =
             patch_bookmark_previews(streaks, &dod_dir, &patcher_config, trimmed.as_deref())?;
@@ -308,6 +330,10 @@ pub async fn send_preview_to_running_game(
                     log_markdown(&crate::messages::preview_start::sent_to_running_game(
                         &command, pid,
                     ));
+                    // That game keeps the map builds it has loaded (#1547).
+                    if let Some(demo) = &first {
+                        crate::map_builds_manager::warn_for_open_game(&app, &game_path, demo);
+                    }
                     return Ok(Some(command));
                 }
                 native::sys::game_remote::Sent::NotListening => continue,

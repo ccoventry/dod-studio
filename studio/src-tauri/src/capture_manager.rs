@@ -1508,6 +1508,7 @@ pub async fn start_capture_batch_impl(
             .iter()
             .flat_map(|j| j.blocks.iter().map(|b| b.take_folder.clone()))
             .collect();
+        let map_demos = crate::map_builds_manager::map_demos(&patch_jobs);
 
         {
             let manifest = CaptureManifest {
@@ -2073,6 +2074,11 @@ pub async fn start_capture_batch_impl(
                             clip_evidence.late_starts.push(late);
                         }
                         EngineEvent::ClipReported(clip) => clip_evidence.reports.push(clip),
+                        // Once, before the game starts (#1547): each line a
+                        // warning toast (map_builds.js).
+                        EngineEvent::MapBuildWarnings(warnings) => {
+                            crate::map_builds_manager::emit_warnings(&app_emitter, &warnings);
+                        }
                         // A batch that played a demo before it failed has
                         // takes to check, like a cancelled one: the finished
                         // ones are real, and the clip recording when it
@@ -2163,6 +2169,7 @@ pub async fn start_capture_batch_impl(
             runtime_batch,
             batch_start_arc,
             hold,
+            map_demos,
         );
     });
 

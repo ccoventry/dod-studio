@@ -66,6 +66,11 @@ pub enum MapStatus {
     Unverifiable,
     /// Present and unreadable — truncated, or not a BSP at all.
     Unreadable { reason: String },
+    /// The installed map is missing, unreadable or another build, and
+    /// Studio's map builds hold the demo's: Studio puts it in place when it
+    /// starts the game for the demo (`build_plan::status_for_launch`, #1547).
+    /// Only that function answers it; [status_of] looks at one folder.
+    FromLibrary { checksum: u32 },
 }
 
 impl MapStatus {
@@ -90,6 +95,10 @@ impl MapStatus {
             MapStatus::Unreadable { reason } => {
                 format!("`{}` could not be read: {}", map_name, reason)
             }
+            MapStatus::FromLibrary { checksum } => format!(
+                "`{}` plays on build `{:08x}` from Studio's map builds",
+                map_name, checksum
+            ),
         }
     }
 }

@@ -231,6 +231,37 @@ export async function downloadMap(mapName, expectedChecksum, gamePath) {
     });
 }
 
+/** For a batch in the game that is open already: one line per map whose
+ *  demos of `demoPaths` that game won't play on their version (#1547). */
+export async function openGameMapWarnings(demoPaths, gamePath) {
+  return invoke("open_game_map_warnings", { demoPaths, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (open_game_map_warnings):", err);
+      throw err;
+    });
+}
+
+/** The demos of `demoPaths` a batch wouldn't play on the version of their map
+ *  they were recorded on: [{ demoPath, demoName, mapName }] (#1547). */
+export async function planMapBuilds(demoPaths, gamePath) {
+  return invoke("plan_map_builds", { demoPaths, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (plan_map_builds):", err);
+      throw err;
+    });
+}
+
+/** Adds `sourcePath` to the map builds of the install `gamePath` points at, as
+ *  a build of `mapName` (#1547). Resolves with { mapName, checksum, path,
+ *  alreadyThere }; rejects with the reason. */
+export async function addMapBuild(mapName, sourcePath, gamePath) {
+  return invoke("add_map_build", { mapName, sourcePath, gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (add_map_build):", err);
+      throw err;
+    });
+}
+
 
 // What the pre-roll and post-roll have to cover. Quiet on failure: a timing
 // hint that cannot be computed is not worth interrupting anyone over.

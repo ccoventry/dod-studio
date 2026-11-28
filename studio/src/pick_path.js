@@ -67,6 +67,7 @@ export const PICK_FIELDS = {
   'blender.assets': 'documents',
   'hd.python': null,
   'hd.upscaler': 'documents',
+  'maps.add_build': 'demos',
 };
 
 const SEP = /[\\/]/;
