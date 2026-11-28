@@ -37,6 +37,7 @@ mod hook_batch;
 mod hook_dll_list;
 mod installs_manager;
 mod manifest_file;
+mod map_builds_manager;
 mod map_manager;
 mod match_group_cmd;
 mod menu_scale_manager;
@@ -212,6 +213,15 @@ pub fn run() {
                     native::sys::hook_copy::clean_at_start(configured.as_deref());
                 });
             }
+            // Map builds an earlier run left in place, once no game runs
+            // (#1547).
+            {
+                let settings = app.state::<SettingsManager>().inner.clone();
+                std::thread::spawn(move || {
+                    let game_path = settings.lock().ok().map(|s| s.hl_path.clone());
+                    map_builds_manager::clean_leftovers_at_start(game_path);
+                });
+            }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
             // ...and to say a demo it plays is damaged, for a toast with
@@ -383,6 +393,9 @@ pub fn run() {
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
             map_manager::download_map,
+            map_builds_manager::add_map_build,
+            map_builds_manager::plan_map_builds,
+            map_builds_manager::open_game_map_warnings,
             config_checks_cmd::scan_game_configs,
             config_checks_cmd::roll_floors,
             hd_manager::hd_status,
@@ -445,6 +458,9 @@ pub fn run() {
         // renders and combines they were writing (#1439).
         if let tauri::RunEvent::Exit = event {
             native::hlcr::renderer::stop_renders_for_exit();
+            // Map builds in place for a game that has closed come out now;
+            // with a game running they stay for the next start (#1547).
+            native::maps::build_placement::release_at_exit();
         }
     });
 }

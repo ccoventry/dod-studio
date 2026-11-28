@@ -427,6 +427,42 @@ export const CAPTURE_CONFIG_STRINGS = {
     replacedNote: (path) => `Previous map kept at ${path}`,
     downloadFailedToast: (map, err) => `Could not install ${map}: ${err}`,
   },
+  // Studio's map builds (#1547): old builds of a map kept in dod_addon and put
+  // in place for the demos recorded on them. Shown on the Maps needed banner.
+  MAP_BUILDS: {
+    ADD_BUTTON: 'Add a build…',
+    ADD_BUTTON_TITLE:
+      'Pick a .bsp of this map. DoD Studio keeps a copy with its map builds and plays each demo on the build it was recorded on. Your installed map stays as it is.',
+    useCopyButton: (file) => `Use ${file}`,
+    useCopyTitle: (path) =>
+      `${path} is the build these demos were recorded on. DoD Studio copies it to its map builds; the file stays where it is.`,
+    PICK_TITLE: 'Pick a build of the map (.bsp)',
+    MAP_FILES_FILTER_NAME: 'Map files',
+    ADDING: 'Adding…',
+    addingLine: (map) => `Adding a build of ${map}`,
+    addedToast: (map, build) => `Added build ${build} of ${map}: Studio plays these demos on it when it starts the game for them`,
+    otherBuildToast: (map, build, wanted) =>
+      `That file is build ${build} of ${map}, not ${wanted}, the one these demos were recorded on. It is kept for demos recorded on ${build}.`,
+    addFailedToast: (map, err) => `Could not add the build of ${map}: ${err}`,
+    libraryNote: (map, build, count) =>
+      `${map}: ${count === 1 ? '1 demo plays' : `${count} demos play`} on build ${build} from DoD Studio's map builds when DoD Studio starts the game for ${count === 1 ? 'it' : 'them'}`,
+    NOTE_HELP:
+      "The installed map is another version. DoD Studio puts the right one in dod_addon\\maps before it starts the game and takes it out once the game closes. A game that is already open keeps the version it has, and a game plays one version of a map: a batch mixing versions of one map keeps the installed one when any demo wants it.",
+    // A file of the user's own in dod_addon\maps is what the game plays.
+    addonFileLabel: 'a file in dod_addon\\maps is in the way',
+    addonFileTitle: (path) =>
+      `The game plays ${path}, a file DoD Studio didn't put there, so DoD Studio can't use its map builds for this map. Move it away to use them.`,
+    // The confirm before a batch mixing versions of one map.
+    mixedTitle: (count) => (count === 1 ? '1 demo won\'t play on its map version' : `${count} demos won't play on their map version`),
+    // `onOldVersion`: the batch plays the map on an old version DoD Studio
+    // puts in place (no picked demo wants the installed one).
+    mixedMessage: (count, onOldVersion = false) =>
+      `A game plays one version of each map, and ${count === 1 ? 'this demo was' : 'these demos were'} recorded on another version than the rest of the batch uses. ${count === 1 ? 'It plays' : 'They play'} on ${onOldVersion ? 'the old version DoD Studio puts in place for the others' : 'the installed version'}, so some walls, doors or water may look wrong. Capture ${count === 1 ? 'it' : 'them'} in a batch of ${count === 1 ? 'its' : 'their'} own to play ${count === 1 ? 'it' : 'them'} right.`,
+    OPEN_GAME_TITLE: "Some demos won't play on their map version in the open game",
+    OPEN_GAME_MESSAGE:
+      'This batch runs in the game that is already open, which keeps the map versions it has loaded. Close the game first to play every demo on the version it was recorded on.',
+    START_ANYWAY: 'Start anyway',
+  },
   // The game's own config files setting cvars this app reads. Advisory only —
   // nothing in this app writes to a config file.
   CFG: {

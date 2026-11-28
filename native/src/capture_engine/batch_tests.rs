@@ -109,6 +109,7 @@ impl Run {
             None,
             Arc::new(crate::game_handoff::BatchStart::default()),
             Arc::new(AtomicBool::new(false)),
+            Vec::new(),
         );
         let mut events = Vec::new();
         loop {

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
+import { confirmMixedMapBuilds, confirmOpenGameMapBuilds } from './map_build_confirm.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
@@ -1320,6 +1321,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (cancelBtn) cancelBtn.disabled = false;
         return startBatchWithPayload(activePayload, state);
       };
+      // A game plays one version of each map (#1547): map_build_confirm.js.
+      const mapVersionsStop = () => precheck.stop(STRINGS.CAPTURE_PRECHECK.MAP_VERSIONS);
+      const runInFreshGame = async () => ((await confirmMixedMapBuilds(pickedPaths, activePayload.game_path)) ? runBatch() : mapVersionsStop());
 
       if (engineAlreadyRunning) {
         // A Seek Between Clips batch runs in an open game Studio started with
@@ -1330,6 +1334,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           activePayload.hook_runs_batch,
         );
         if (reusePid) {
+          if (!(await confirmOpenGameMapBuilds(pickedPaths, activePayload.game_path))) return mapVersionsStop();
           showToast(STRINGS.CAPTURE.BATCH_IN_OPEN_GAME_TOAST, "info");
           activePayload.reuse_game_pid = reusePid;
           runBatch();
@@ -1338,7 +1343,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // Its window asks what to do and starts the batch itself; Start comes
         // back behind it in case the answer is no.
         precheck.stop(STRINGS.CAPTURE_PRECHECK.GAME_OPEN);
-        requestProcessGuardedLaunch(runBatch, { forBatch: true });
+        requestProcessGuardedLaunch(runInFreshGame, { forBatch: true });
         return;
       }
 
@@ -1348,7 +1353,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         precheck.stop(STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
         return;
       }
-      runBatch();
+      await runInFreshGame();
     };
   }
 
