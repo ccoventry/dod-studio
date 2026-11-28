@@ -16,8 +16,20 @@ import { mapDownloadLine, showBytes, showSliding } from './download_progress.js'
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
-/** Map name -> { mapName, expectedChecksum, state, demos: [names], detail }. */
+/** Problem key -> { mapName, expectedChecksum, state, demos: [names], detail }. */
 let problems = new Map();
+
+/** One problem per map AND wanted build: two demos of a map recorded on
+ *  different builds are different questions, and a demo that is fine must not
+ *  clear the warning for one that is not (#1539). */
+function problemKey(row) {
+  return `${row.mapName}:${row.expectedChecksum ?? 0}`;
+}
+
+/** The problems on the banner, for tests. */
+export function listMapProblems() {
+  return [...problems.values()];
+}
 let dismissed = false;
 
 function bannerEl() {
@@ -39,21 +51,23 @@ export async function refreshMapWarnings(demoPaths, gamePath) {
   if (!Array.isArray(rows)) return;
 
   for (const row of rows) {
-    // `unverifiable` is an HLTV demo, whose header records no build. The map is
-    // present; there is simply nothing to compare. Not a problem to report.
+    // `unverifiable` is a demo that states no build (an HLTV demo states it in
+    // its server info since #1539, so this is a cut-short or unknown one). The
+    // map is present; there is simply nothing to compare. Not a problem to report.
     if (row.state === 'ok' || row.state === 'unverifiable') {
       // A map that has since been fixed should stop being listed.
-      if (row.mapName) problems.delete(row.mapName);
+      if (row.mapName) problems.delete(problemKey(row));
       continue;
     }
     if (row.state === 'unreadableDemo') continue;
 
-    const existing = problems.get(row.mapName);
+    const key = problemKey(row);
+    const existing = problems.get(key);
     if (existing) {
       if (!existing.demos.includes(row.demoName)) existing.demos.push(row.demoName);
       continue;
     }
-    problems.set(row.mapName, {
+    problems.set(key, {
       mapName: row.mapName,
       expectedChecksum: row.expectedChecksum ?? null,
       state: row.state,
@@ -89,7 +103,7 @@ function render() {
     return;
   }
 
-  const entries = [...problems.values()];
+  const entries = [...problems].map(([key, p]) => ({ ...p, key }));
   const demoCount = entries.reduce((n, p) => n + p.demos.length, 0);
 
   el.hidden = false;
@@ -107,7 +121,7 @@ function render() {
             <strong>${p.mapName}</strong>
             <span style="opacity:.75"> — ${label(p.state)}, ${demos}</span>
           </span>
-          <button class="map-download-btn" data-map="${p.mapName}">
+          <button class="map-download-btn" data-key="${p.key}">
             ${STRINGS.MAPS.DOWNLOAD_BUTTON}
           </button>
         </div>`;
@@ -162,7 +176,7 @@ export function initMapWarnings(getGamePath) {
       target.id === 'map-download-all-btn'
         ? [...problems.keys()]
         : target.classList.contains('map-download-btn')
-          ? [target.dataset.map]
+          ? [target.dataset.key]
           : [];
     if (wanted.length === 0) return;
 
@@ -186,14 +200,15 @@ export function initMapWarnings(getGamePath) {
       </div>`
     );
 
-    for (const [i, mapName] of wanted.entries()) {
-      const problem = problems.get(mapName);
+    for (const [i, key] of wanted.entries()) {
+      const problem = problems.get(key);
       if (!problem) continue;
+      const mapName = problem.mapName;
       active = { map: mapName, index: i + 1, count: wanted.length };
       showStep(null);
       try {
         const result = await downloadMap(mapName, problem.expectedChecksum, gamePath);
-        problems.delete(mapName);
+        problems.delete(key);
         showToast(
           result.alreadyCorrect
             ? STRINGS.MAPS.alreadyCorrectToast(mapName)

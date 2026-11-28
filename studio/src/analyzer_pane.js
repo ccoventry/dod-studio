@@ -12,6 +12,7 @@ import { renderDamageBanner } from './analyzer_damage.js';
 import { repairAnalyzedDemo, repairSplitAnalyzedDemo } from './analyzer_repair.js';
 import { repairableStatus } from './repair_status.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
+import { findMapBuildProblem, renderMapBuildBanner } from './analyzer_map_build.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -35,6 +36,10 @@ function setAnalyzerFileIndicator(text) {
 // both analyses running, and only the latest may show its progress or result.
 let analyzerLoadingPath = null;
 let analyzerLoadSeq = 0;
+
+// The hl.exe path as typed now, for the map-build check (#1539); set by
+// `initAnalyzerPane`.
+let readGamePath = () => '';
 
 // ── Init / entry points ──────────────────────────────────────────────────────
 
@@ -62,6 +67,7 @@ function showAnalyzerLoading(p) {
 /** Wires the Analyzer tab. `explorer` holds the settings the Explorer
  *  sidebar reads and writes (analyzer_browser.js's `startAnalyzerBrowser`). */
 export function initAnalyzerPane(explorer = {}) {
+  readGamePath = explorer.getGamePath ?? readGamePath;
   startAnalyzerReport({ getWeaponDisplayNames, loadMapOverview });
 
   const browseBtn = document.querySelector('#analyzer-browse-btn');
@@ -117,6 +123,7 @@ async function loadAnalyzerDemo(path) {
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);
   renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), null);
+  renderMapBuildBanner(document.querySelector('#analyzer-map-build-banner'), null);
   const seq = ++analyzerLoadSeq;
   analyzerLoadingPath = path;
   try {
@@ -127,6 +134,10 @@ async function loadAnalyzerDemo(path) {
     showReport(result);
     renderRepairAndSplitBanners(path, result);
     renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), result);
+    // Beside the report, not before it: the check reads the installed map.
+    findMapBuildProblem(path, readGamePath()).then((row) => {
+      if (seq === analyzerLoadSeq) renderMapBuildBanner(document.querySelector('#analyzer-map-build-banner'), row);
+    });
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

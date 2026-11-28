@@ -2,9 +2,9 @@
 // Whether the demos on screen can actually be played, and on the right map.
 //
 // Kept out of the scan pipeline deliberately. Scanning parses every frame of
-// every demo and is the slow, threaded part of loading a folder; this reads 544
-// bytes per demo and one map file per distinct map, so it runs after a scan
-// without slowing it, and a failure here costs a badge rather than the folder.
+// every demo and is the slow, threaded part of loading a folder; this reads the
+// 544-byte header of each demo (8 KB more when it has no checksum) and one map
+// file per distinct map, so it runs after a scan without slowing it, and a failure here costs a badge rather than the folder.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,9 +19,15 @@ pub struct MapCheckRow {
     pub demo_path: String,
     pub demo_name: String,
     pub map_name: String,
-    /// The build the demo was recorded on. Absent for HLTV demos, which do not
-    /// record one.
+    /// The build the demo was recorded on: the header's, or an HLTV demo's
+    /// from its server info (#1539). Absent when the demo states none, such as
+    /// a local single-player recording.
     pub expected_checksum: Option<u32>,
+    /// The installed map's build, when it is a different one (`wrongBuild`).
+    pub installed_checksum: Option<u32>,
+    /// A `wrongBuild` demo whose server sent a `client.dll` hash: recorded on
+    /// an older release of the game. `false` otherwise.
+    pub older_release: bool,
     /// `ok` | `wrongBuild` | `missing` | `unverifiable` | `unreadableMap` |
     /// `unreadableDemo`
     pub state: String,
@@ -68,6 +74,8 @@ pub async fn check_demo_maps(
                         demo_name,
                         map_name: String::new(),
                         expected_checksum: None,
+                        installed_checksum: None,
+                        older_release: false,
                         state: "unreadableDemo".to_string(),
                         detail: e,
                         playable: false,
@@ -96,9 +104,16 @@ pub async fn check_demo_maps(
                 MapStatus::Unreadable { .. } => "unreadableMap",
             };
 
+            let installed_checksum = match &status {
+                MapStatus::WrongBuild { found, .. } => Some(*found),
+                _ => None,
+            };
             rows.push(MapCheckRow {
                 demo_path: path,
                 demo_name,
+                installed_checksum,
+                older_release: matches!(status, MapStatus::WrongBuild { .. })
+                    && map_check::recorded_on_older_release(&p),
                 detail: status.summary(&reference.map_name),
                 playable: status.is_playable(),
                 map_name: reference.map_name,

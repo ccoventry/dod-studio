@@ -8,8 +8,9 @@
 import { initAnalyzerPane, refreshAnalyzerQuickLinks } from './analyzer_pane.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 
-/** @param {object} app  persist() saves the settings file. */
-export function createDemoFolders({ persist }) {
+/** @param {object} app  persist() saves the settings file; getGamePath() is
+ *  the hl.exe path as typed now (the Demo Analyzer checks maps against it). */
+export function createDemoFolders({ persist, getGamePath }) {
   let pinned = [];
   // Most-recent-first, capped at 10: mirrors dev's `settings.demo_folder_history`
   // (docs/archive/tauri_parity_audit.md Area 3).
@@ -51,6 +52,7 @@ export function createDemoFolders({ persist }) {
   // longer exists is dropped from Recent when clicked, as dev's Quick Links do.
   function startAnalyzerPane() {
     initAnalyzerPane({
+      getGamePath,
       getPinnedFolders: () => pinned,
       pinFolder: async (folder) => {
         if (!pinned.includes(folder)) {

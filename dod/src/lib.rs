@@ -19,6 +19,7 @@ use std::time::Duration;
 pub mod brush_pieces;
 pub mod map_entities;
 pub mod map_sounds;
+pub mod server_info;
 
 #[cfg(test)]
 mod tests;

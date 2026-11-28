@@ -72,8 +72,15 @@ pub const MIGRATIONS: &[Migration] = &[
     // old folders. The steps below still run in tests.
     // No step to 15 either (#1132): who was capping at a kill comes from the
     // demo's ClientAreas messages, which no entry keeps.
+    // No step to 16 (no entry keeps a KTP HLTV demo's post-pause replay).
+    Migration {
+        from: 16,
+        to: 17,
+        upgrade: v16_to_v17,
+    },
 ];
 
+const NO_HEADER_CHECKSUM: &str = "an HLTV demo's map build is in its server info";
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
 const LEFT: &str = "a player with kills left before the demo ended";
 const RECONNECTED: &str = "a player with kills reconnected";
@@ -338,6 +345,37 @@ fn v12_to_v13(analysis: &mut Value) -> Upgrade {
     Upgrade::Done
 }
 
+/// #1539: `demo_info.server_info_map_checksum` is read for a demo whose header
+/// has no map checksum (an HLTV demo), from a message no entry keeps. Every
+/// other entry is what v17 writes, the field being `None` there.
+fn v16_to_v17(analysis: &mut Value) -> Upgrade {
+    match analysis
+        .pointer("/demo_info/map_checksum")
+        .and_then(Value::as_u64)
+    {
+        Some(0) => Upgrade::NeedsReparse(NO_HEADER_CHECKSUM),
+        Some(_) => Upgrade::Done,
+        None => Upgrade::NeedsReparse(MALFORMED),
+    }
+}
+
+/// How much of an entry's start [`needs_full_parse_from_head`] reads: the
+/// stamp, `file_info` (a path) and the first fields of `demo_info`.
+pub const HEAD_PEEK_LEN: usize = 4096;
+
+/// Whether an entry from schema `version` is known, from its first
+/// [`HEAD_PEEK_LEN`] bytes, to need a full parse instead of an upgrade, so an
+/// estimate can price it right without reading megabytes (#1539). Only v16
+/// has such entries: its HLTV ones (`demo_info.map_checksum` 0, written in
+/// `demo_info` before the first 4 KB ends) are re-parsed by [`v16_to_v17`].
+pub fn needs_full_parse_from_head(version: u32, head: &[u8]) -> bool {
+    const ZERO_HEADER_CHECKSUM: &[u8] = b"\"map_checksum\":0,";
+    version == 16
+        && head
+            .windows(ZERO_HEADER_CHECKSUM.len())
+            .any(|w| w == ZERO_HEADER_CHECKSUM)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,12 +459,43 @@ mod tests {
     /// capping at a kill. Nor v16: a v15 entry counts a KTP HLTV demo's
     /// post-pause replay twice, and only the demo's frames tell which of its
     /// kills, chat and captures were the replay's.
+    /// Nor v17 from anything older than v16 (#1539): a step exists only from
+    /// v16, so older entries stay a miss.
     #[test]
-    fn no_entry_older_than_16_upgrades() {
-        assert_eq!(super::super::SCHEMA_VERSION, 16);
+    fn only_a_v16_entry_upgrades_to_17() {
+        assert_eq!(super::super::SCHEMA_VERSION, 17);
         for version in 0..16 {
             assert!(!upgrades_from(version), "v{version}");
         }
+        assert!(upgrades_from(16));
+    }
+
+    #[test]
+    fn a_v16_entrys_head_says_whether_it_is_an_hltv_one() {
+        let head = |checksum: u32| {
+            serde_json::to_string(
+                &json!({"demo_info": {"demo_type": "HLTV", "map_checksum": checksum, "x": 1}}),
+            )
+            .unwrap()
+        };
+        assert!(needs_full_parse_from_head(16, head(0).as_bytes()));
+        assert!(!needs_full_parse_from_head(16, head(7).as_bytes()));
+        assert!(!needs_full_parse_from_head(15, head(0).as_bytes()));
+    }
+
+    #[test]
+    fn a_v16_entry_with_a_header_checksum_upgrades_and_an_hltv_one_is_reparsed() {
+        let mut pov = json!({"demo_info": {"map_checksum": 2_149_000_000u64}});
+        assert_eq!(v16_to_v17(&mut pov), Upgrade::Done);
+
+        let mut hltv = json!({"demo_info": {"map_checksum": 0}});
+        assert_eq!(
+            v16_to_v17(&mut hltv),
+            Upgrade::NeedsReparse(NO_HEADER_CHECKSUM)
+        );
+
+        let mut odd = json!({"state": {}});
+        assert_eq!(v16_to_v17(&mut odd), Upgrade::NeedsReparse(MALFORMED));
     }
 
     /// The chain up to v13, the last schema with a step: what the fixture's
