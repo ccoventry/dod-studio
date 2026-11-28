@@ -306,8 +306,11 @@ fn place_one(addon: &Path, record: &mut Record, want: &MapBuild, session: u64) -
             ));
             return PlaceOutcome::Failed(e.to_string());
         }
-        record.placed.remove(index);
     }
+    // The slot is empty now: whatever the record still says about it (the
+    // build just removed, or one the user deleted by hand) is stale, and an
+    // old session's release must not take this launch's copy for its own.
+    record.placed.retain(|p| p.map_name != want.map_name);
     copy_into_slot(addon, record, want, session, &library_file, &slot)
 }
 
@@ -581,6 +584,24 @@ mod tests {
         assert_eq!(outcomes, vec![PlaceOutcome::Placed]);
         assert_eq!(std::fs::read(slot(&i.addon)).unwrap(), test_map_bytes(2));
         assert_eq!(first.release(), 0);
+        assert_eq!(second.release(), 1);
+    }
+
+    #[test]
+    fn a_slot_the_user_emptied_is_placed_again_and_only_the_new_launch_owns_it() {
+        let i = install("emptied");
+        let (first, _) = place_builds(&i.addon, &[build(1)]);
+        std::fs::remove_file(slot(&i.addon)).unwrap();
+
+        let (second, outcomes) = place_builds(&i.addon, &[build(1)]);
+        assert_eq!(outcomes, vec![PlaceOutcome::Placed]);
+        assert_eq!(
+            placed_sessions(&i.addon).len(),
+            1,
+            "the stale entry is gone"
+        );
+        assert_eq!(first.release(), 0, "the old launch's release leaves it");
+        assert!(slot(&i.addon).exists());
         assert_eq!(second.release(), 1);
     }
 
