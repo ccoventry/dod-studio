@@ -31,7 +31,7 @@ pub mod migrations;
 /// silently deserializing with new fields missing/defaulted. When the new
 /// fields can be worked out from an old entry, add a step to
 /// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
-pub const SCHEMA_VERSION: u32 = 17;
+pub const SCHEMA_VERSION: u32 = 18;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -189,6 +189,28 @@ pub fn has_older_entry(root: &Path, demo_path: &Path) -> bool {
     upgradable_versions().any(|v| starts_with_stamp(&version_dir(root, v).join(&name), stamp))
 }
 
+/// Whether `demo_path`'s older entry is one a step can't upgrade, known from
+/// its first few KB ([`migrations::needs_full_parse_from_head`]). The rescan
+/// estimate counts such a demo as a full parse, not a quick upgrade (#1539).
+fn older_entry_needs_parse(root: &Path, demo_path: &Path) -> bool {
+    use std::io::Read;
+    let (Some(stamp), Some(name)) = (stamp(demo_path), entry_name(demo_path)) else {
+        return false;
+    };
+    upgradable_versions().any(|v| {
+        let path = version_dir(root, v).join(&name);
+        let Ok(file) = std::fs::File::open(path) else {
+            return false;
+        };
+        let mut head = Vec::with_capacity(migrations::HEAD_PEEK_LEN);
+        file.take(migrations::HEAD_PEEK_LEN as u64)
+            .read_to_end(&mut head)
+            .is_ok()
+            && head.starts_with(stamp_prefix(stamp).as_bytes())
+            && migrations::needs_full_parse_from_head(v, &head)
+    })
+}
+
 /// Upgrades `demo_path`'s entry from the newest older folder that has one for
 /// the file as it is now, saves it in the current folder (best-effort, like
 /// [`store`]) and returns it. The older entry stays where it is.
@@ -318,7 +340,9 @@ pub enum CacheState {
     /// A current entry for the file as it is now ([`is_fresh`]).
     Current,
     /// An older entry a step upgrades ([`has_older_entry`]). The upgrade can
-    /// still ask for a re-parse, which only the whole entry shows.
+    /// still ask for a re-parse, which only the whole entry shows, except for
+    /// the cases its first KB gives away (a v16 HLTV entry, or a v16 or v17
+    /// one with frames but no playback time, is `NeedsParse`).
     Upgradable,
     /// Neither, or the demo changed since: a full parse of this many bytes.
     NeedsParse(u64),
@@ -328,7 +352,7 @@ pub fn cache_state(root: &Path, demo_path: &Path) -> Option<CacheState> {
     let size = std::fs::metadata(demo_path).ok()?.len();
     Some(if is_fresh(root, demo_path) {
         CacheState::Current
-    } else if has_older_entry(root, demo_path) {
+    } else if has_older_entry(root, demo_path) && !older_entry_needs_parse(root, demo_path) {
         CacheState::Upgradable
     } else {
         CacheState::NeedsParse(size)
@@ -787,6 +811,49 @@ mod tests {
         assert_eq!(plan.fresh, [false, true]);
         assert_eq!(plan.sizes, [21, 11]);
         assert_eq!(plan.order, [1, 0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_v16_hltv_entry_is_priced_as_a_parse_and_a_pov_one_as_an_upgrade() {
+        // #1539: v16 to v17 re-parses a demo whose header has no map checksum.
+        let dir = scratch("v16_estimate");
+        let root = dir.join("cache");
+        let [pov, hltv] = ["pov", "hltv"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&pov, b"a pov demo").unwrap();
+        std::fs::write(&hltv, b"an hltv demo").unwrap();
+        for (demo, checksum) in [(&pov, 7), (&hltv, 0)] {
+            let analysis = format!(
+                "{{\"demo_info\":{{\"demo_type\":\"X\",\"map_checksum\":{checksum},\"peak\":1}},\"state\":{{}}}}"
+            );
+            write_old(&root, 16, demo, stamp(demo).unwrap(), &analysis);
+        }
+
+        assert_eq!(cache_state(&root, &pov), Some(CacheState::Upgradable));
+        assert_eq!(cache_state(&root, &hltv), Some(CacheState::NeedsParse(12)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_v17_entry_with_no_playback_time_is_priced_as_a_parse() {
+        // #1541: v17 to v18 re-parses a demo whose directory gave no length.
+        let dir = scratch("v17_estimate");
+        let root = dir.join("cache");
+        let [timed, untimed] = ["timed", "untimed"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&timed, b"a timed demo").unwrap();
+        std::fs::write(&untimed, b"an untimed demo").unwrap();
+        for (demo, time) in [(&timed, "1325.6"), (&untimed, "0.0")] {
+            let analysis = format!(
+                "{{\"demo_info\":{{\"playback_time\":{time},\"playback_frames\":46449,\"map_checksum\":7}},\"state\":{{}}}}"
+            );
+            write_old(&root, 17, demo, stamp(demo).unwrap(), &analysis);
+        }
+
+        assert_eq!(cache_state(&root, &timed), Some(CacheState::Upgradable));
+        assert_eq!(
+            cache_state(&root, &untimed),
+            Some(CacheState::NeedsParse(15))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

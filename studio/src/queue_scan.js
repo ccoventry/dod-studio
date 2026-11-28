@@ -260,7 +260,7 @@ export function createQueueScan({
       if (selectedDemoIdx !== null) {
         selectDemoAndRenderDetail(getDemos()[selectedDemoIdx], selectedDemoIdx);
       }
-      // Reads 544 bytes per demo and one map file per distinct map, so it runs
+      // Reads 64 KB per demo and one map file per distinct map, so it runs
       // after the scan rather than inside it. Not awaited: the queue is already
       // usable, and a demo whose map is missing is still worth listing.
       refreshMapWarnings(

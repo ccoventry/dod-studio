@@ -33,6 +33,14 @@ pub struct DemoInfo {
     /// Map checksum / CRC.
     pub map_checksum: u32,
 
+    /// The map's checksum as the first `svc_serverinfo` carries it, unscrambled
+    /// (`dod::server_info`), read only when the header's is 0: an HLTV demo
+    /// zeroes the header's, and this is the build it was recorded on (#1539).
+    /// `None` for a demo whose header has one, one with no readable server
+    /// info, and an analysis cached before it was read.
+    #[serde(default)]
+    pub server_info_map_checksum: Option<u32>,
+
     /// The most entities any one snapshot carries (`svc_packetentities` or
     /// `svc_deltapacketentities`). The pre-Anniversary engine closes to the
     /// desktop at the first snapshot over 256 (#207), so this says before a
@@ -140,6 +148,41 @@ fn last_svc_time(demo: &Demo) -> Option<f32> {
     None
 }
 
+/// The first `svc_serverinfo` in `demo`'s frames, which every demo opens with.
+fn first_server_info(demo: &Demo) -> Option<&dem::types::SvcServerInfo> {
+    demo.directory
+        .entries
+        .iter()
+        .flat_map(|entry| entry.frames.iter())
+        .filter_map(|frame| match &frame.frame_data {
+            FrameData::NetworkMessage(box_type) => match &box_type.1.messages {
+                MessageData::Parsed(msgs) => Some(msgs),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flatten()
+        .find_map(|msg| match msg {
+            NetMessage::EngineMessage(eng_msg) => match &**eng_msg {
+                EngineMessage::SvcServerInfo(info) => Some(info),
+                _ => None,
+            },
+            _ => None,
+        })
+}
+
+/// The build `demo`'s map was recorded on, from its server info, when the
+/// header does not say (`DemoInfo::server_info_map_checksum`).
+fn server_info_map_checksum(demo: &Demo) -> Option<u32> {
+    if demo.header.map_checksum != 0 {
+        return None;
+    }
+    let info = first_server_info(demo)?;
+    let checksum =
+        dod::server_info::unscramble_map_checksum(info.map_checksum as u32, info.player_index);
+    (checksum != 0).then_some(checksum)
+}
+
 /// The most entities in any one snapshot of `demo` (#207).
 fn peak_packet_entities(demo: &Demo) -> u32 {
     let mut peak = 0;
@@ -209,6 +252,7 @@ impl From<&Demo> for DemoInfo {
             game_directory,
             demo_type,
             map_checksum: value.header.map_checksum,
+            server_info_map_checksum: server_info_map_checksum(value),
             peak_packet_entities: Some(peak_packet_entities(value)),
             damage: None,
             no_camera_data: camera_data::camera_frames(value).is_missing(),
@@ -284,13 +328,60 @@ pub(crate) fn is_hltv_message(message: &EngineMessage) -> bool {
 mod tests {
     use super::*;
 
-    fn fixture() -> Demo {
+    fn fixture_demo() -> Demo {
         dem::open_demo_from_bytes(&crate::tests_fixture::fixture()).expect("ci_fixture.dem parses")
     }
 
     #[test]
+    fn a_pov_demo_keeps_its_header_checksum_and_reads_no_server_info_one() {
+        let info = DemoInfo::from(&fixture_demo());
+
+        assert_eq!(info.map_checksum, 0x801b_771f);
+        assert_eq!(info.server_info_map_checksum, None);
+    }
+
+    #[test]
+    fn an_hltv_header_with_no_checksum_takes_the_builds_from_the_server_info() {
+        // The fixture's server info is slot 2, scrambled; its header is the
+        // same build. Zeroing the header makes it an HLTV demo's.
+        let mut demo = fixture_demo();
+        demo.header.map_checksum = 0;
+
+        let info = DemoInfo::from(&demo);
+
+        assert_eq!(info.map_checksum, 0);
+        assert_eq!(info.server_info_map_checksum, Some(0x801b_771f));
+    }
+
+    #[test]
+    fn the_parsed_server_info_and_the_byte_finder_give_the_same_build() {
+        // The analyzer reads the first parsed SvcServerInfo; the map check
+        // (native) finds it by shape in the file's first bytes. One file, one
+        // answer.
+        let bytes = crate::tests_fixture::fixture();
+        let mut demo = fixture_demo();
+        demo.header.map_checksum = 0;
+
+        let parsed = DemoInfo::from(&demo).server_info_map_checksum;
+        let found = dod::server_info::find_server_info(&bytes[..8 * 1024])
+            .map(|stamp| stamp.map_checksum());
+
+        assert_eq!(parsed, found);
+        assert_eq!(parsed, Some(0x801b_771f));
+    }
+
+    #[test]
+    fn a_demo_with_no_server_info_has_no_server_info_checksum() {
+        let mut demo = fixture_demo();
+        demo.header.map_checksum = 0;
+        demo.directory.entries.clear();
+
+        assert_eq!(DemoInfo::from(&demo).server_info_map_checksum, None);
+    }
+
+    #[test]
     fn the_playback_time_is_the_directorys() {
-        let demo = fixture();
+        let demo = fixture_demo();
         let directory: f32 = demo.directory.entries.iter().map(|e| e.track_time).sum();
         assert!(directory > 0.0);
         assert_eq!(playback_time(&demo), directory);
@@ -299,7 +390,7 @@ mod tests {
     #[test]
     fn a_directory_with_no_track_times_takes_the_playback_time_from_the_frames() {
         // As HLAE's demo tools leave a demo (#1541): every track time 0.
-        let mut demo = fixture();
+        let mut demo = fixture_demo();
         let directory: f32 = demo.directory.entries.iter().map(|e| e.track_time).sum();
         for entry in &mut demo.directory.entries {
             entry.track_time = 0.0;
